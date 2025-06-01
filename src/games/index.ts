@@ -208,6 +208,7 @@ import { TessellaGame, ITessellaState } from "./tessella";
 import { GorogoGame, IGorogoState } from "./gorogo";
 import { BiscuitGame, IBiscuitState } from "./biscuit";
 import { QuincunxGame, IQuincunxState } from "./quincunx";
+import { StairsGame, IStairsState } from "./stairs";
 
 export {
     APGamesInformation, GameBase, GameBaseSimultaneous, IAPGameState,
@@ -418,6 +419,7 @@ export {
     GorogoGame, IGorogoState,
     BiscuitGame, IBiscuitState,
     QuincunxGame, IQuincunxState,
+    StairsGame, IStairsState,
 };
 
 const games = new Map<string, typeof AmazonsGame | typeof BlamGame | typeof CannonGame |
@@ -489,7 +491,7 @@ const games = new Map<string, typeof AmazonsGame | typeof BlamGame | typeof Cann
                               typeof AssemblyGame | typeof PaintbucketGame | typeof C1Game |
                               typeof BloqueoGame | typeof StormCGame | typeof PilastriGame |
                               typeof TessellaGame | typeof GorogoGame | typeof StibroGame |
-                              typeof BiscuitGame | typeof QuincunxGame
+                              typeof BiscuitGame | typeof QuincunxGame | typeof StairsGame
                 >();
 // Manually add each game to the following array
 [
@@ -521,7 +523,7 @@ const games = new Map<string, typeof AmazonsGame | typeof BlamGame | typeof Cann
     OwlmanGame, SquaredanceGame, MegGame, YonmoqueGame, ChameleonGame, KachitGame, GyveGame,
     PahTumGame, NakattaGame, OmnyGame, PacruGame, AzacruGame, CifraGame, GygesGame, PonteDDGame,
     SurmountGame, GlissGame, MorphosGame, AssemblyGame, PaintbucketGame, C1Game, BloqueoGame,
-    StormCGame, PilastriGame, TessellaGame, GorogoGame, BiscuitGame, QuincunxGame,
+    StormCGame, PilastriGame, TessellaGame, GorogoGame, BiscuitGame, QuincunxGame, StairsGame,
 ].forEach((g) => {
     if (games.has(g.gameinfo.uid)) {
         throw new Error("Another game with the UID '" + g.gameinfo.uid + "' has already been used. Duplicates are not allowed.");
@@ -948,6 +950,8 @@ export const GameFactory = (game: string, ...args: any[]): GameBase|GameBaseSimu
             return new BiscuitGame(args[0], ...args.slice(1));
         case "quincunx":
             return new QuincunxGame(args[0], ...args.slice(1));
+        case "stairs":
+            return new StairsGame(...args);
     }
     return;
 }
