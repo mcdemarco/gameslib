@@ -4,7 +4,7 @@ import { APRenderRep } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
-import { SquareOrthGraph } from "../common/graphs";
+import { SquareGraph } from "../common/graphs";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
 
@@ -55,12 +55,6 @@ export class StairsGame extends GameBase {
                 group: "board",
                 name: "Size 8 board",
                 description: "Size 8 board"
-            },
-            {
-                uid: "jumpers",
-                group: "rules",
-                name: "High jumpers",
-                description: "A piece must move higher, but pieces that start with nothing beneath them are allowed to land on any other stack."
             }
         ]
     };
@@ -68,7 +62,7 @@ export class StairsGame extends GameBase {
     public numplayers = 2;
     public currplayer: PlayerId = 1;
     public board!: Map<string, PlayerId[]>;
-    public graph?: SquareOrthGraph;
+    public graph?: SquareGraph;
     public gameover = false;
     public winner: PlayerId[] = [];
     public variants: string[] = [];
@@ -137,16 +131,16 @@ export class StairsGame extends GameBase {
         return this;
     }
 
-    private buildGraph(): SquareOrthGraph {
-        this.graph = new SquareOrthGraph(this.boardSize, this.boardSize);
+    private buildGraph(): SquareGraph {
+        this.graph = new SquareGraph(this.boardSize, this.boardSize);
         return this.graph;
     }
 
-    private getGraph(boardSize?: number): SquareOrthGraph {
+    private getGraph(boardSize?: number): SquareGraph {
         if (boardSize === undefined) {
             return (this.graph === undefined) ? this.buildGraph() : this.graph;
         } else {
-            return new SquareOrthGraph(boardSize, boardSize);
+            return new SquareGraph(boardSize, boardSize);
         }
     }
 
@@ -189,21 +183,24 @@ export class StairsGame extends GameBase {
             player = this.currplayer;
         }
 
-        const moves: string[] = [];
+        let moves: string[] = [];
+	let lowest = 100;
         for (const cell of (this.listCells() as string[]).filter(c => this.board.has(c) && this.board.get(c)!.at(-1) === this.currplayer)) {
             const height = this.board.get(cell)!.length;
-            const [x, y] = this.getGraph().algebraic2coords(cell);
-            for (const bearing of ["N","E","S","W"]) {
-                const rayCells = this.getGraph().ray(x, y, bearing as "N"|"E"|"S"|"W");
-                for (const [x0, y0] of rayCells) {
-                    const cell0 = this.getGraph().coords2algebraic(x0, y0);
-                    if (this.board.has(cell0)) {
-                        if ((height === 1 && this.board.get(cell0)!.length === height) ||
-                            ((height > 1 || this.areJumpersAllowed()) && this.board.get(cell0)!.length >= height)) {
-                            moves.push(`${cell}-${cell0}`);
-                        }
-                        break;
-                    }
+	    if (height > lowest)
+		continue;
+            const neighbors = this.getGraph().neighbours(cell);
+            for (const cell0 of neighbors) {
+                if (this.board.has(cell0)) {
+                    if (height === this.board.get(cell0)!.length) {
+			if (height < lowest) {
+			    lowest = height;
+			    //Reset the move array when we find a lower stair.
+			    moves = [`${cell}-${cell0}`];
+			} else {
+			    moves.push(`${cell}-${cell0}`);
+			}
+		    }
                 }
             }
         }
