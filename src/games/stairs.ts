@@ -1,4 +1,4 @@
-import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResult } from "./_base";
+import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
@@ -14,6 +14,7 @@ export interface IMoveState extends IIndividualState {
     currplayer: PlayerId;
     board: Map<string, PlayerId[]>;
     lastmove?: string;
+    tiebreaker?: PlayerId;
 };
 
 export interface IStairsState extends IAPGameState {
@@ -50,6 +51,7 @@ export class StairsGame extends GameBase {
         categories: ["goal>score>eog", "mechanic>move", "board>shape>rect", "board>connect>rect", "components>simple>1per"],
         flags: ["experimental", "automove"],
         variants: [
+	    { uid: "#board", },
             {
                 uid: "size-8",
                 group: "board",
@@ -68,6 +70,7 @@ export class StairsGame extends GameBase {
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
+    private tiebreaker?: PlayerId;
     private boardSize = 0;
     private _points: [number, number][] = [];
     private _highlight: string | undefined;
@@ -94,7 +97,8 @@ export class StairsGame extends GameBase {
                 _results: [],
                 _timestamp: new Date(),
                 currplayer: 1,
-                board
+                board,
+                tiebreaker: undefined,
             };
             this.stack = [fresh];
         } else {
@@ -128,6 +132,7 @@ export class StairsGame extends GameBase {
         this.board = deepclone(state.board) as Map<string, PlayerId[]>;
         this.lastmove = state.lastmove;
         this.results = [...state._results];
+        this.tiebreaker = state.tiebreaker;
         return this;
     }
 
@@ -173,8 +178,57 @@ export class StairsGame extends GameBase {
         return 6;
     }
 
-    private areJumpersAllowed(): boolean {
-        return this.variants !== undefined && this.variants.length > 0 && this.variants.includes("jumpers");
+    private getStacks(p?: PlayerId): number[] {
+        if (p === undefined) {
+            p = this.currplayer;
+        }
+	const stackSizeArray: number[] = [];
+        for (const cell of (this.listCells() as string[]).filter(c => this.board.has(c) && this.board.get(c)!.at(-1) === p)) {
+            const height = this.board.get(cell)!.length;
+	    stackSizeArray.push(height);
+	}
+        return stackSizeArray.sort((a, b) => b - a);
+    }
+
+    private getStackSizes(p?: PlayerId): number[] {
+        if (p === undefined) {
+            p = this.currplayer;
+        }
+        const stacks = this.getStacks(p);
+	const ones = stacks.indexOf(1) > -1 ? stacks.indexOf(1) + 1 : stacks.length;
+        return stacks.slice(0,ones);
+    }
+
+    private getStackCounts(sizeArray: number[]): number {
+	return sizeArray.filter(x => x === sizeArray[0]).length;
+    }
+
+    public getPlayersScores(): IScores[] {
+        const stackSizes1 = this.getStackSizes(1);
+        const stackSizes2 = this.getStackSizes(2);
+        return [
+            { name: i18next.t("apgames:status.STACKSIZES"), scores: [stackSizes1.join(","), stackSizes2.join(",")] },
+        ]
+    }
+
+    public getUpperHand(player?: PlayerId): PlayerId {
+        const stackSizes1 = this.getStackSizes(1);
+        const stackSizes2 = this.getStackSizes(2);
+
+	if (stackSizes1[0] !== stackSizes2[0]) {
+	    console.log("stack tie determined by size");
+	    return (stackSizes1[0] > stackSizes2[0] ? 1 : 2);
+	} else {
+	    const count1 = this.getStackCounts(stackSizes1);
+	    const count2 = this.getStackCounts(stackSizes2);
+	    if (count1 !== count2) {
+		console.log("stack tie determined by count");
+		return (count1 > count2 ? 1 : 2);
+	    } else {
+		//currplayer only evened up the stack score or made an irrelevant play.
+		return (player || 1);
+	    }
+	}
     }
 
     public moves(player?: PlayerId): string[] {
@@ -257,7 +311,6 @@ export class StairsGame extends GameBase {
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
             } else {
                 result.message = i18next.t("apgames:validation.stairs.INVALID_MOVE");
-                if (this.areJumpersAllowed()) result.message = i18next.t("apgames:validation.stairs.INVALID_MOVE_JUMPERS");
             }
             return result;
         }
@@ -302,6 +355,10 @@ export class StairsGame extends GameBase {
             newStack.push(piece);
             this.board.set(cells[1], newStack);
             this.results.push({type: "move", from: cells[0], to: cells[1]});
+	    // update tiebreaker
+console.log("stack tie starts out " + this.tiebreaker);	    
+	    this.tiebreaker = this.getUpperHand(this.tiebreaker);
+console.log("stack tie ends up " + this.tiebreaker);
 
             // update currplayer
             this.lastmove = m;
@@ -359,6 +416,7 @@ export class StairsGame extends GameBase {
             _timestamp: new Date(),
             currplayer: this.currplayer,
             lastmove: this.lastmove,
+            tiebreaker: this.tiebreaker,
 
             board: deepclone(this.board) as Map<string, PlayerId[]>
         };
@@ -438,8 +496,11 @@ export class StairsGame extends GameBase {
         let status = super.status();
 
         if (this.variants !== undefined) {
+console.log(this.variants);
             status += "**Variants**: " + this.variants.join(", ") + "\n\n";
         }
+
+        status += "**Stacks**: " + this.getPlayersScores()[0].scores.join(", ") + "\n\n";
 
         return status;
     }

@@ -2914,6 +2914,7 @@
             "CHAOS": "Chaos",
             "ORDER": "Order"
         },
+        "ESTIMATEDSCORES": "Estimated scores",
         "fnap": "FNAP token",
         "focus": "Controlled",
         "GROUPCOUNT": "Group count",
@@ -2943,8 +2944,8 @@
         },
         "ROUND": "Round",
         "SCORES": "Scores",
+        "STACKSIZES": "Stack heights",
         "tumbleweed": "Score (pieces + influence)",
-       "ESTIMATEDSCORES": "Estimated scores",
         "TOPLACE": "Piece to place",
         "valley": "Moon Tokens"
     },
