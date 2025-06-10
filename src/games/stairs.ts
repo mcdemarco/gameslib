@@ -49,7 +49,7 @@ export class StairsGame extends GameBase {
             },
         ],
         categories: ["goal>score>eog", "mechanic>move", "board>shape>rect", "board>connect>rect", "components>simple>1per"],
-        flags: ["experimental", "automove"],
+        flags: ["experimental", "automove", "autopass"],
         variants: [
 	    { uid: "#board", },
             {
@@ -199,15 +199,32 @@ export class StairsGame extends GameBase {
         return stacks.slice(0,ones);
     }
 
+    private getItemCount(sizeArray: number[], item: number): number {
+	return sizeArray.filter(x => x === item).length;
+    }
+
     private getStackCounts(sizeArray: number[]): number {
-	return sizeArray.filter(x => x === sizeArray[0]).length;
+	return this.getItemCount(sizeArray, sizeArray[0]);
+    }
+
+    private truncateStackCounts(sizeArray: number[]): string {
+	const ones = sizeArray.indexOf(1);
+	const twos = sizeArray.indexOf(2);
+	const trunkIndex = (twos > -1 ? twos : ( ones > -1 ? ones : sizeArray.length));
+	const truncatedStackArray = sizeArray.slice(0,trunkIndex);
+	let truncatedStackCounts = (truncatedStackArray.length > 0 ? truncatedStackArray.join(", ") : "");
+	if (twos > -1)
+	    truncatedStackCounts += (truncatedStackCounts === "" ? "" : ", ") + "2(" + this.getItemCount(sizeArray, 2) + ")";
+	if (ones > -1)
+	    truncatedStackCounts += (truncatedStackCounts === "" ? "" : ", ") + "1(" + this.getItemCount(sizeArray, 1) + ")";
+	return truncatedStackCounts;
     }
 
     public getPlayersScores(): IScores[] {
         const stackSizes1 = this.getStackSizes(1);
         const stackSizes2 = this.getStackSizes(2);
         return [
-            { name: i18next.t("apgames:status.STACKSIZES"), scores: [stackSizes1.join(","), stackSizes2.join(",")] },
+            { name: i18next.t("apgames:status.STACKSIZES"), scores: [this.truncateStackCounts(stackSizes1), this.truncateStackCounts(stackSizes2)] },
         ]
     }
 
@@ -216,13 +233,13 @@ export class StairsGame extends GameBase {
         const stackSizes2 = this.getStackSizes(2);
 
 	if (stackSizes1[0] !== stackSizes2[0]) {
-	    console.log("stack tie determined by size");
+	    //console.log("stack tie determined by size");
 	    return (stackSizes1[0] > stackSizes2[0] ? 1 : 2);
 	} else {
 	    const count1 = this.getStackCounts(stackSizes1);
 	    const count2 = this.getStackCounts(stackSizes2);
 	    if (count1 !== count2) {
-		console.log("stack tie determined by count");
+		//console.log("stack tie determined by count");
 		return (count1 > count2 ? 1 : 2);
 	    } else {
 		//currplayer only evened up the stack score or made an irrelevant play.
@@ -258,6 +275,11 @@ export class StairsGame extends GameBase {
                 }
             }
         }
+
+	if (moves.length === 0) {
+	    moves.push("pass");
+	}
+
         return moves;
     }
 
@@ -356,9 +378,7 @@ export class StairsGame extends GameBase {
             this.board.set(cells[1], newStack);
             this.results.push({type: "move", from: cells[0], to: cells[1]});
 	    // update tiebreaker
-console.log("stack tie starts out " + this.tiebreaker);	    
 	    this.tiebreaker = this.getUpperHand(this.tiebreaker);
-console.log("stack tie ends up " + this.tiebreaker);
 
             // update currplayer
             this.lastmove = m;
@@ -496,7 +516,6 @@ console.log("stack tie ends up " + this.tiebreaker);
         let status = super.status();
 
         if (this.variants !== undefined) {
-console.log(this.variants);
             status += "**Variants**: " + this.variants.join(", ") + "\n\n";
         }
 
