@@ -14,7 +14,7 @@ export interface IMoveState extends IIndividualState {
     currplayer: PlayerId;
     board: Map<string, PlayerId[]>;
     lastmove?: string;
-    tiebreaker?: PlayerId;
+    tiebreaker: PlayerId;
 };
 
 export interface IStairsState extends IAPGameState {
@@ -49,7 +49,7 @@ export class StairsGame extends GameBase {
             },
         ],
         categories: ["goal>score>eog", "mechanic>move", "board>shape>rect", "board>connect>rect", "components>simple>1per"],
-        flags: ["experimental", "automove", "autopass"],
+        flags: ["experimental", "automove", "autopass", "pie"],
         variants: [
 	    { uid: "#board", },
             {
@@ -70,7 +70,7 @@ export class StairsGame extends GameBase {
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
-    private tiebreaker?: PlayerId;
+    private tiebreaker: PlayerId = 1;
     private boardSize = 0;
     private _points: [number, number][] = [];
     private _highlight: string | undefined;
@@ -98,7 +98,7 @@ export class StairsGame extends GameBase {
                 _timestamp: new Date(),
                 currplayer: 1,
                 board,
-                tiebreaker: undefined,
+                tiebreaker: 1,
             };
             this.stack = [fresh];
         } else {
@@ -203,20 +203,17 @@ export class StairsGame extends GameBase {
 	return sizeArray.filter(x => x === item).length;
     }
 
-    private getStackCounts(sizeArray: number[]): number {
+    private getHighCounts(sizeArray: number[]): number {
 	return this.getItemCount(sizeArray, sizeArray[0]);
     }
 
     private truncateStackCounts(sizeArray: number[]): string {
-	const ones = sizeArray.indexOf(1);
-	const twos = sizeArray.indexOf(2);
-	const trunkIndex = (twos > -1 ? twos : ( ones > -1 ? ones : sizeArray.length));
-	const truncatedStackArray = sizeArray.slice(0,trunkIndex);
-	let truncatedStackCounts = (truncatedStackArray.length > 0 ? truncatedStackArray.join(", ") : "");
-	if (twos > -1)
-	    truncatedStackCounts += (truncatedStackCounts === "" ? "" : ", ") + "2(" + this.getItemCount(sizeArray, 2) + ")";
-	if (ones > -1)
-	    truncatedStackCounts += (truncatedStackCounts === "" ? "" : ", ") + "1(" + this.getItemCount(sizeArray, 1) + ")";
+	const uniqueSizeSet = new Set(sizeArray);
+	const uniqueSizeArray = [...uniqueSizeSet].sort((a, b) => b - a);
+	let truncatedStackCounts = "";
+	for (var s = 0; s<uniqueSizeArray.length; s++) {
+	    truncatedStackCounts += (s > 0 ? ", " : "") + uniqueSizeArray[s] + "(" + this.getItemCount(sizeArray,uniqueSizeArray[s])  + ")";
+	}
 	return truncatedStackCounts;
     }
 
@@ -228,24 +225,27 @@ export class StairsGame extends GameBase {
         ]
     }
 
-    public getUpperHand(player?: PlayerId): PlayerId {
+    public getUpperHand(player: PlayerId): PlayerId {
         const stackSizes1 = this.getStackSizes(1);
         const stackSizes2 = this.getStackSizes(2);
+	let hasUpperHand = player;
 
 	if (stackSizes1[0] !== stackSizes2[0]) {
 	    //console.log("stack tie determined by size");
-	    return (stackSizes1[0] > stackSizes2[0] ? 1 : 2);
+	    hasUpperHand = (stackSizes1[0] > stackSizes2[0] ? 1 : 2);
 	} else {
-	    const count1 = this.getStackCounts(stackSizes1);
-	    const count2 = this.getStackCounts(stackSizes2);
+	    const count1 = this.getHighCounts(stackSizes1);
+	    const count2 = this.getHighCounts(stackSizes2);
 	    if (count1 !== count2) {
 		//console.log("stack tie determined by count");
-		return (count1 > count2 ? 1 : 2);
+		hasUpperHand = (count1 > count2 ? 1 : 2);
 	    } else {
 		//currplayer only evened up the stack score or made an irrelevant play.
-		return (player || 1);
+		hasUpperHand = player;
 	    }
 	}
+
+	return hasUpperHand;
     }
 
     public moves(player?: PlayerId): string[] {
@@ -326,7 +326,9 @@ export class StairsGame extends GameBase {
         }
 
         const moves = this.moves();
-        if (!moves.includes(m)) {
+        if (moves.includes("pass")) {
+            result.message = i18next.t("apgames:validation.stairs.MUST_PASS");
+	} else if (!moves.includes(m)) {
             if (this.board.has(m) && moves.filter(move => move.startsWith(m)).length > 0) {
                 result.valid = true;
                 result.canrender = true;
@@ -368,17 +370,22 @@ export class StairsGame extends GameBase {
         this._highlight = undefined;
 
         if (complete) {
-            const cells: string[] = m.split("-");
-            const oldStack = [...this.board.get(cells[0])!];
-            const piece = oldStack.pop()!;
-            if (oldStack.length === 0) this.board.delete(cells[0]);
-            else this.board.set(cells[0], oldStack);
-            const newStack = [...this.board.get(cells[1])!];
-            newStack.push(piece);
-            this.board.set(cells[1], newStack);
-            this.results.push({type: "move", from: cells[0], to: cells[1]});
-	    // update tiebreaker
-	    this.tiebreaker = this.getUpperHand(this.tiebreaker);
+            if (m === "pass") {
+		this.results.push({type: "pass"});
+	    } else {
+		const cells: string[] = m.split("-");
+		const oldStack = [...this.board.get(cells[0])!];
+		const piece = oldStack.pop()!;
+		if (oldStack.length === 0) this.board.delete(cells[0]);
+		else this.board.set(cells[0], oldStack);
+		const newStack = [...this.board.get(cells[1])!];
+		newStack.push(piece);
+		this.board.set(cells[1], newStack);
+		// update tiebreaker
+		const newTiebreaker = this.getUpperHand(this.tiebreaker); 
+		this.results.push({type: "move", from: cells[0], to: cells[1]});
+		this.tiebreaker = newTiebreaker;
+	    }
 
             // update currplayer
             this.lastmove = m;
@@ -405,9 +412,9 @@ export class StairsGame extends GameBase {
     }
 
     protected checkEOG(): StairsGame {
-        if (this.moves().length === 0) {
+        if (this.stack.length > 1 && this.lastmove === "pass" && this.stack[this.stack.length - 1].lastmove === "pass") {
             this.gameover = true;
-            this.winner = [this.getOtherPlayer(this.currplayer)];
+            this.winner = [this.tiebreaker];
         }
         if (this.gameover) {
             this.results.push(
@@ -522,6 +529,25 @@ export class StairsGame extends GameBase {
         status += "**Stacks**: " + this.getPlayersScores()[0].scores.join(", ") + "\n\n";
 
         return status;
+    }
+
+    public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
+        let resolved = false;
+        switch (r.type) {
+            case "move":
+		node.push(i18next.t("apresults:MOVE.complete", { player, from: r.from, to: r.to, what: "piece" }));
+                resolved = true;
+                break;
+            case "pass":
+                node.push(i18next.t("apresults:PASS.forced", { player }));
+                resolved = true;
+                break;
+            case "eog":
+                node.push(i18next.t("apresults:EOG.default"));
+                resolved = true;
+                break;
+        }
+        return resolved;
     }
 
     public clone(): StairsGame {

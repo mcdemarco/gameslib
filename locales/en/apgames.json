@@ -4771,6 +4771,11 @@
             "PARTIAL_DESTINATION": "Select the point where the end stone will end up. You may not cover friendly pieces, and any covered enemy pieces will be captured.",
             "PARTIAL_ENDSTONE": "Select the end stone. This is the stone that will move the furthest."
         },
+        "stairs": {
+            "NORMAL_MOVE": "Choose a piece to move.",
+            "INVALID_MOVE": "You must move a piece to a neighboring stack of the same height. The piece must end one level higher. You must move one of your lowest pieces.",
+            "MUST_PASS": "The only move available to you is to pass."
+        },
         "stibro": {
             "FIRST_PLACEMENT": "The first placement cannot be on the edge.",
             "FREE_GROUPS_AFTER": "You must always have at least one free group: a group that does not touch the edge, and has two spaces between itself and an opponent group that does not touch the edge."
