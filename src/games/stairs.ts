@@ -49,7 +49,7 @@ export class StairsGame extends GameBase {
             },
         ],
         categories: ["goal>score>eog", "mechanic>move", "board>shape>rect", "board>connect>rect", "components>simple>1per"],
-        flags: ["experimental", "pie"],
+        flags: ["experimental", "pie", "autopass"],
         variants: [
             { uid: "#board", },
             {
@@ -226,21 +226,23 @@ export class StairsGame extends GameBase {
     }
 
     public getUpperHand(player: PlayerId): PlayerId {
+	// Check whether the upper hand has passed from the previous holder (player) to currplayer, for tiebreaking.
+	// Necessary because ties are broken by who got there first, not by counts of shorter stacks.
         const stackSizes1 = this.getStackSizes(1);
         const stackSizes2 = this.getStackSizes(2);
         let hasUpperHand = player;
 
-        if (stackSizes1[0] !== stackSizes2[0]) {
-            //console.log("stack tie determined by size");
+	if (stackSizes1[0] !== stackSizes2[0]) {
+            // Stack tie determined by heights.
             hasUpperHand = (stackSizes1[0] > stackSizes2[0] ? 1 : 2);
         } else {
             const count1 = this.getHighCounts(stackSizes1);
             const count2 = this.getHighCounts(stackSizes2);
             if (count1 !== count2) {
-                //console.log("stack tie determined by count");
+                // Stack tie determined by counts.
                 hasUpperHand = (count1 > count2 ? 1 : 2);
             } else {
-                //currplayer only evened up the stack score or made an irrelevant play.
+                // The currplayer only evened up the stack score or made an irrelevant play.
                 hasUpperHand = player;
             }
         }
@@ -384,8 +386,11 @@ export class StairsGame extends GameBase {
                 newStack.push(piece);
                 this.board.set(cells[1], newStack);
                 // update tiebreaker
-                const newTiebreaker = this.getUpperHand(this.tiebreaker); 
                 this.results.push({type: "move", from: cells[0], to: cells[1]});
+                const newTiebreaker = this.getUpperHand(this.tiebreaker); 
+		if (this.tiebreaker !== newTiebreaker) {
+		    this.results.push({type: "lead"});
+		}
                 this.tiebreaker = newTiebreaker;
             }
 
@@ -536,6 +541,10 @@ export class StairsGame extends GameBase {
     public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
         let resolved = false;
         switch (r.type) {
+            case "lead":
+                node.push(i18next.t("apresults:LEAD", { player }));
+                resolved = true;
+                break;
             case "move":
                 node.push(i18next.t("apresults:MOVE.complete", { player, from: r.from, to: r.to, what: "piece" }));
                 resolved = true;
