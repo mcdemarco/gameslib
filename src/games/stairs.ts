@@ -49,9 +49,9 @@ export class StairsGame extends GameBase {
             },
         ],
         categories: ["goal>score>eog", "mechanic>move", "board>shape>rect", "board>connect>rect", "components>simple>1per"],
-        flags: ["experimental", "automove", "autopass", "pie"],
+        flags: ["experimental", "pie"],
         variants: [
-	    { uid: "#board", },
+            { uid: "#board", },
             {
                 uid: "size-8",
                 group: "board",
@@ -182,11 +182,11 @@ export class StairsGame extends GameBase {
         if (p === undefined) {
             p = this.currplayer;
         }
-	const stackSizeArray: number[] = [];
+        const stackSizeArray: number[] = [];
         for (const cell of (this.listCells() as string[]).filter(c => this.board.has(c) && this.board.get(c)!.at(-1) === p)) {
             const height = this.board.get(cell)!.length;
-	    stackSizeArray.push(height);
-	}
+            stackSizeArray.push(height);
+        }
         return stackSizeArray.sort((a, b) => b - a);
     }
 
@@ -195,26 +195,26 @@ export class StairsGame extends GameBase {
             p = this.currplayer;
         }
         const stacks = this.getStacks(p);
-	const ones = stacks.indexOf(1) > -1 ? stacks.indexOf(1) + 1 : stacks.length;
+        const ones = stacks.indexOf(1) > -1 ? stacks.indexOf(1) + 1 : stacks.length;
         return stacks.slice(0,ones);
     }
 
     private getItemCount(sizeArray: number[], item: number): number {
-	return sizeArray.filter(x => x === item).length;
+        return sizeArray.filter(x => x === item).length;
     }
 
     private getHighCounts(sizeArray: number[]): number {
-	return this.getItemCount(sizeArray, sizeArray[0]);
+        return this.getItemCount(sizeArray, sizeArray[0]);
     }
 
     private truncateStackCounts(sizeArray: number[]): string {
-	const uniqueSizeSet = new Set(sizeArray);
-	const uniqueSizeArray = [...uniqueSizeSet].sort((a, b) => b - a);
-	let truncatedStackCounts = "";
-	for (var s = 0; s<uniqueSizeArray.length; s++) {
-	    truncatedStackCounts += (s > 0 ? ", " : "") + uniqueSizeArray[s] + "(" + this.getItemCount(sizeArray,uniqueSizeArray[s])  + ")";
-	}
-	return truncatedStackCounts;
+        const uniqueSizeSet = new Set(sizeArray);
+        const uniqueSizeArray = [...uniqueSizeSet].sort((a, b) => b - a);
+        let truncatedStackCounts = "";
+        for (var s = 0; s<uniqueSizeArray.length; s++) {
+            truncatedStackCounts += (s > 0 ? ", " : "") + uniqueSizeArray[s] + "(" + this.getItemCount(sizeArray,uniqueSizeArray[s])  + ")";
+        }
+        return truncatedStackCounts;
     }
 
     public getPlayersScores(): IScores[] {
@@ -228,24 +228,24 @@ export class StairsGame extends GameBase {
     public getUpperHand(player: PlayerId): PlayerId {
         const stackSizes1 = this.getStackSizes(1);
         const stackSizes2 = this.getStackSizes(2);
-	let hasUpperHand = player;
+        let hasUpperHand = player;
 
-	if (stackSizes1[0] !== stackSizes2[0]) {
-	    //console.log("stack tie determined by size");
-	    hasUpperHand = (stackSizes1[0] > stackSizes2[0] ? 1 : 2);
-	} else {
-	    const count1 = this.getHighCounts(stackSizes1);
-	    const count2 = this.getHighCounts(stackSizes2);
-	    if (count1 !== count2) {
-		//console.log("stack tie determined by count");
-		hasUpperHand = (count1 > count2 ? 1 : 2);
-	    } else {
-		//currplayer only evened up the stack score or made an irrelevant play.
-		hasUpperHand = player;
-	    }
-	}
+        if (stackSizes1[0] !== stackSizes2[0]) {
+            //console.log("stack tie determined by size");
+            hasUpperHand = (stackSizes1[0] > stackSizes2[0] ? 1 : 2);
+        } else {
+            const count1 = this.getHighCounts(stackSizes1);
+            const count2 = this.getHighCounts(stackSizes2);
+            if (count1 !== count2) {
+                //console.log("stack tie determined by count");
+                hasUpperHand = (count1 > count2 ? 1 : 2);
+            } else {
+                //currplayer only evened up the stack score or made an irrelevant play.
+                hasUpperHand = player;
+            }
+        }
 
-	return hasUpperHand;
+        return hasUpperHand;
     }
 
     public moves(player?: PlayerId): string[] {
@@ -255,30 +255,30 @@ export class StairsGame extends GameBase {
         }
 
         let moves: string[] = [];
-	let lowest = 100;
+        let lowest = 100;
         for (const cell of (this.listCells() as string[]).filter(c => this.board.has(c) && this.board.get(c)!.at(-1) === this.currplayer)) {
             const height = this.board.get(cell)!.length;
-	    if (height > lowest)
-		continue;
+            if (height > lowest)
+                continue;
             const neighbors = this.getGraph().neighbours(cell);
             for (const cell0 of neighbors) {
                 if (this.board.has(cell0)) {
                     if (height === this.board.get(cell0)!.length) {
-			if (height < lowest) {
-			    lowest = height;
-			    //Reset the move array when we find a lower stair.
-			    moves = [`${cell}-${cell0}`];
-			} else {
-			    moves.push(`${cell}-${cell0}`);
-			}
-		    }
+                        if (height < lowest) {
+                            lowest = height;
+                            //Reset the move array when we find a lower stair.
+                            moves = [`${cell}-${cell0}`];
+                        } else {
+                            moves.push(`${cell}-${cell0}`);
+                        }
+                    }
                 }
             }
         }
 
-	if (moves.length === 0) {
-	    moves.push("pass");
-	}
+        if (moves.length === 0) {
+            moves.push("pass");
+        }
 
         return moves;
     }
@@ -326,9 +326,11 @@ export class StairsGame extends GameBase {
         }
 
         const moves = this.moves();
-        if (moves.includes("pass")) {
+        if (moves.includes("pass") && m !== "pass") {
+            result.valid = false;
             result.message = i18next.t("apgames:validation.stairs.MUST_PASS");
-	} else if (!moves.includes(m)) {
+            return result;
+        } else if (!moves.includes(m)) {
             if (this.board.has(m) && moves.filter(move => move.startsWith(m)).length > 0) {
                 result.valid = true;
                 result.canrender = true;
@@ -371,21 +373,21 @@ export class StairsGame extends GameBase {
 
         if (complete) {
             if (m === "pass") {
-		this.results.push({type: "pass"});
-	    } else {
-		const cells: string[] = m.split("-");
-		const oldStack = [...this.board.get(cells[0])!];
-		const piece = oldStack.pop()!;
-		if (oldStack.length === 0) this.board.delete(cells[0]);
-		else this.board.set(cells[0], oldStack);
-		const newStack = [...this.board.get(cells[1])!];
-		newStack.push(piece);
-		this.board.set(cells[1], newStack);
-		// update tiebreaker
-		const newTiebreaker = this.getUpperHand(this.tiebreaker); 
-		this.results.push({type: "move", from: cells[0], to: cells[1]});
-		this.tiebreaker = newTiebreaker;
-	    }
+                this.results.push({type: "pass"});
+            } else {
+                const cells: string[] = m.split("-");
+                const oldStack = [...this.board.get(cells[0])!];
+                const piece = oldStack.pop()!;
+                if (oldStack.length === 0) this.board.delete(cells[0]);
+                else this.board.set(cells[0], oldStack);
+                const newStack = [...this.board.get(cells[1])!];
+                newStack.push(piece);
+                this.board.set(cells[1], newStack);
+                // update tiebreaker
+                const newTiebreaker = this.getUpperHand(this.tiebreaker); 
+                this.results.push({type: "move", from: cells[0], to: cells[1]});
+                this.tiebreaker = newTiebreaker;
+            }
 
             // update currplayer
             this.lastmove = m;
@@ -535,7 +537,7 @@ export class StairsGame extends GameBase {
         let resolved = false;
         switch (r.type) {
             case "move":
-		node.push(i18next.t("apresults:MOVE.complete", { player, from: r.from, to: r.to, what: "piece" }));
+                node.push(i18next.t("apresults:MOVE.complete", { player, from: r.from, to: r.to, what: "piece" }));
                 resolved = true;
                 break;
             case "pass":
