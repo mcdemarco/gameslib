@@ -211,7 +211,7 @@ import { QuincunxGame, IQuincunxState } from "./quincunx";
 import { SiegeOfJGame, ISiegeOfJState } from "./siegeofj";
 import { StairsGame, IStairsState } from "./stairs";
 import { EmuGame, IEmuState } from "./emu";
-import { DeckfishGame, IDeckfishState } from "./emu";
+import { DeckfishGame, IDeckfishState } from "./deckfish";
 
 export {
     APGamesInformation, GameBase, GameBaseSimultaneous, IAPGameState,
