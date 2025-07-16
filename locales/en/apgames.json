@@ -62,6 +62,7 @@
         "cubeo": "A boardless, perfect-information dice game where you attempt to promote your dice faster than your opponent or manoeuvre your opponent into a position where they cannot move.",
         "dagnacht": "An n-in-a-row game on a checkered board. You can only place pieces on the dark squares, but you can then move pieces onto the light squares. Win by getting 5 in a row orthogonally (including 3 light squares if you are player 1) or 4 in a row on a light diagonal. Winner of the Abstract Games magazine's 2021 \"Unequal Board Spaces Game Design Competition\".",
         "dameo": "A modern draughts game with linear movement and orthogonal captures.",
+        "deckfish": "A two-player game of map reduction and suit collection where the player with the most of their least collected Decktet suit wins.",
         "diffusion": "Diffusion is a modern mancala-style game where the goal is to empty out your own pits.",
         "dipole": "An anti-race game where you inexorably lose pieces, but you try to be the last one to run out.",
         "dragoneyes": "A variant of checkers with incomplete information, enchanted dragon eye spaces, and played on a hexagonal board.",
