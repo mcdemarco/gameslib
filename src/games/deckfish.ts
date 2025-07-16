@@ -108,13 +108,17 @@ export class DeckfishGame extends GameBase {
 
             // init board
             const board = new Map<string, string>();
-            let cells: string[] = ["a6", "b5", "c4", "d3", "e2", "f1"];
- 
-            for (const cell of cells) {
-                const [card] = deck.draw();
-                board.set(cell, card.uid);
-            }
 
+            for (let x = 0; x < 7; x++) {
+                for (let y = 0; y < 6; y++) {
+                    const cell = DeckfishGame.coords2algebraic(x, y);
+                    if (!board.has(cell)) {
+			const [card] = deck.draw();
+			board.set(cell, card.uid);
+                    }
+                }
+            }
+ 
             // init influence and hands
             const influence: number[] = [];
 
@@ -181,7 +185,7 @@ export class DeckfishGame extends GameBase {
         const districts: IDistrict[] = [];
 
         for (const suit of suits) {
-            const g = new SquareOrthGraph(6, 6);
+            const g = new SquareOrthGraph(6, 7);
             for (const node of g.graph.nodes()) {
                 if (!this.board.has(node) || !this.board.get(node)!.includes(suit.uid)) {
                     g.graph.dropNode(node);
@@ -255,7 +259,7 @@ export class DeckfishGame extends GameBase {
 
     public randomMove(): string {
         if (true) {
-            const g = new SquareOrthGraph(6,6);
+            const g = new SquareOrthGraph(6, 7);
             const empty = shuffle((g.listCells(false) as string[]).filter(c => !this.board.has(c))) as string[];
             if (empty.length > 0) {
                 let move = `${empty[0]}`; //`${card}-${empty[0]}`;
@@ -341,7 +345,7 @@ export class DeckfishGame extends GameBase {
         }
         // otherwise
         else {
-            const g = new SquareOrthGraph(6,6);
+            const g = new SquareOrthGraph(6, 7);
             // valid cell
             if (!(g.listCells(false) as string[]).includes(to)) {
                 result.valid = false;
@@ -477,7 +481,7 @@ export class DeckfishGame extends GameBase {
     }
 
     protected checkEOG(): DeckfishGame {
-        if (this.board.size === 36) {
+        if (false) {
             this.gameover = true;
             const scores: number[] = [];
             for (let p = 1; p <= this.numplayers; p++) {
@@ -542,7 +546,7 @@ export class DeckfishGame extends GameBase {
                 pstr += "\n";
             }
             const pieces: string[] = [];
-            for (let col = 0; col < 6; col++) {
+            for (let col = 0; col < 7; col++) {
                 const cell = DeckfishGame.coords2algebraic(col, row);
                 if (this.board.has(cell)) {
                     pieces.push("c" + this.board.get(cell)!);
@@ -628,7 +632,7 @@ export class DeckfishGame extends GameBase {
         if (remaining.length > 0) {
             areas.push({
                 type: "pieces",
-                label: i18next.t("apgames:validation.deckfish.LABEL_REMAINING") || "Cards in deck",
+                label: i18next.t("apgames:validation.deckfish.LABEL_MARKET") || "Market cards",
                 spacing: 0.25,
                 pieces: remaining,
             });
@@ -638,12 +642,13 @@ export class DeckfishGame extends GameBase {
         const rep: APRenderRep =  {
             board: {
                 style: "squares",
-                width: 6,
+                width: 7,
                 height: 6,
                 tileHeight: 1,
                 tileWidth: 1,
                 tileSpacing: 0.1,
-                strokeOpacity: 0.05,
+                strokeOpacity: 0.5,
+		labelColour: "#888",
                 markers,
             },
             legend,

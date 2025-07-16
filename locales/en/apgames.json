@@ -3717,6 +3717,15 @@
             "INVALID_MOVE": "Remember that capturing is compulsory, as is capturing the maximum number of pieces. Movement can only happen in a forward direction, and captures can only happen orthogonally.",
             "VALID_PARTIAL": "Looks good so far. Select the next empty cell to move to."
         },
+        "deckfish": {
+            "ALREADY_CLAIMED": "The card at {{cell}} has already been claimed.",
+            "ALREADY_OWNED": "The card at {{cell}} is part of a district owned by an opponent.",
+            "INITIAL_INSTRUCTIONS": "Click a pawn to move.",
+            "LABEL_MARKET": "Market cards",
+            "LABEL_STASH": "Player {{playerNum}}'s hand",
+            "NO_CARD": "The card \"{{card}}\" does not appear to be in your hand.",
+            "PARTIAL_PLACEMENT": "Click a card on the board to move your pawn to."
+        },
         "diffusion": {
             "INITIAL_INSTRUCTIONS": "Select any pit to sow."
         },
