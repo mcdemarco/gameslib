@@ -1,11 +1,10 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerOutline, RowCol } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { reviver, shuffle, SquareOrthGraph, UserFacingError } from "../common";
+import { reviver, SquareOrthGraph, UserFacingError } from "../common";
 import i18next from "i18next";
-import { Card, Deck, cardSortAsc, cardSortDesc, cardsBasic, cardsExtended, suits } from "../common/decktet";
-import { connectedComponents } from "graphology-components";
+import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended } from "../common/decktet";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
@@ -13,12 +12,11 @@ const deepclone = require("rfdc/default");
 export type playerid = 1|2;
 export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
 
-
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: Map<string, string>;
-    claimed: Map<string, playerid>;
-    influence: number[];
+    market: string[];
+    occupied: Map<string, playerid>;
     captured: [Suit[], Suit[]];
     lastmove?: string;
 };
@@ -26,18 +24,6 @@ export interface IMoveState extends IIndividualState {
 export interface IDeckfishState extends IAPGameState {
     winner: playerid[];
     stack: Array<IMoveState>;
-};
-
-interface IDistrict {
-    cells: string[];
-    owner?: playerid;
-    suit: string;
-}
-
-type InfluenceParams = {
-    cell: string;
-    ds?: IDistrict[];
-    player?: playerid;
 };
 
 interface ILegendObj {
@@ -86,15 +72,14 @@ export class DeckfishGame extends GameBase {
     public numplayers = 2;
     public currplayer: playerid = 1;
     public board!: Map<string, string>;
-    public claimed!: Map<string, playerid>;
-    public influence!: number[];
+    public market!: string[];
+    public occupied!: Map<string, playerid>;
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
     public captured!: [Suit[], Suit[]];
-    private deck!: Deck;
 
     constructor(state?: IDeckfishState | string) {
         super();
@@ -118,11 +103,15 @@ export class DeckfishGame extends GameBase {
                     }
                 }
             }
- 
-            // init influence and hands
-            const influence: number[] = [];
 
-            const claimed = new Map<string, playerid>();
+	    const market = new Array<string>();
+	    for (let m = 0; m < 3; m++) {
+		const [card] = deck.draw();
+		market.push(card.uid);
+	    }
+ 
+            // init positions
+            const occupied = new Map<string, playerid>();
 
             const fresh: IMoveState = {
                 _version: DeckfishGame.gameinfo.version,
@@ -130,8 +119,8 @@ export class DeckfishGame extends GameBase {
                 _timestamp: new Date(),
                 currplayer: 1,
                 board,
-                claimed,
-                influence,
+		market,
+                occupied,
                 captured: [[],[]],
             };
             this.stack = [fresh];
@@ -162,124 +151,73 @@ export class DeckfishGame extends GameBase {
         this.results = [...state._results];
         this.currplayer = state.currplayer;
         this.board = new Map(state.board);
-        this.claimed = new Map(state.claimed);
-        this.influence = [...state.influence];
+	this.market = [...state.market];
+        this.occupied = new Map(state.occupied);
         this.captured = [[...state.captured[0]], [...state.captured[1]]];
         this.lastmove = state.lastmove;
-
-        // Deck is reset every time you load
-        const cards = [...cardsBasic, ...cardsExtended];
-
-        this.deck = new Deck(cards);
-        // remove cards from the deck that are on the board or in known hands
-        for (const uid of this.board.values()) {
-            this.deck.remove(uid);
-        }
-
-        this.deck.shuffle();
 
         return this;
     }
 
-    public getDistricts(): IDistrict[] {
-        const districts: IDistrict[] = [];
-
-        for (const suit of suits) {
-            const g = new SquareOrthGraph(6, 7);
-            for (const node of g.graph.nodes()) {
-                if (!this.board.has(node) || !this.board.get(node)!.includes(suit.uid)) {
-                    g.graph.dropNode(node);
-                }
-            }
-            const islands = connectedComponents(g.graph);
-            for (const isle of islands) {
-                const claimedCells = isle.filter(c => this.claimed.has(c));
-                if (claimedCells.length === 0) {
-                    districts.push({
-                        cells: isle,
-                        suit: suit.uid,
-                    });
-                }
-                else if (claimedCells.length === 1) {
-                    districts.push({
-                        cells: isle,
-                        suit: suit.uid,
-                        owner: this.claimed.get(claimedCells[0])!,
-                    });
-                }
-                else {
-                    const claimedCards = claimedCells.map(c => Card.deserialize(this.board.get(c)!)!);
-                    claimedCards.sort(cardSortDesc);
-                    const winCard = claimedCards[0];
-                    const cell = [...this.board.entries()].find(([,v]) => v === winCard.uid)![0];
-                    const owner = this.claimed.get(cell)!;
-                    districts.push({
-                        cells: isle,
-                        suit: suit.uid,
-                        owner
-                    });
-                }
-            }
-        }
-
-        return districts;
+    public canPlace(cell: string): boolean {
+	return true;
     }
 
-    public canInfluence({cell, ds, player}: InfluenceParams): boolean {
-        if (this.claimed.has(cell)) {
-            return false;
+    public canSwap(cell: string, market: string): boolean {
+	return true;
+    }
+
+    private get mode(): "place"|"collect" {
+        if (this.occupied.size < 6) {
+            return "place";
         }
-        if (!this.board.has(cell)) {
-            return false;
+        return "collect";
+    }
+
+    public moves(player?: playerid): string[] {
+        if (this.gameover) {
+            return [];
         }
-        const uid = this.board.get(cell)!;
-        const card = Card.deserialize(uid);
-        if (card === undefined) {
-            throw new Error(`Could not deserialize the card ${uid}`);
-        }
-        if (["T", "P", "0"].includes(card.rank.uid)) {
-            return false;
-        }
-        if (ds === undefined) {
-            ds = this.getDistricts();
-        }
-        if (player ===  undefined) {
+
+        if (player === undefined) {
             player = this.currplayer;
         }
-        const contains = ds.filter(d => d.cells.includes(cell));
-        let can = true;
-        for (const d of contains) {
-            if (d.owner !== undefined && d.owner !== player) {
-                can = false;
-                break;
+
+        const moves: string[] = [];
+        // if placing
+        if (this.mode === "place") {
+	    //push all unoccupied aces and crown on the board
+            for (let x = 0; x < 7; x++) {
+                for (let y = 0; y < 6; y++) {
+                    const cell = DeckfishGame.coords2algebraic(x, y);
+		    if (this.board.has(cell)) {
+			const card = Card.deserialize(this.board.get(cell)!)!;
+			//Check occupation.
+			if (! this.occupied.has(cell)) {
+			    //Check rank.
+			    if (card.rank.name === "Ace" || card.rank.name === "Crown") {
+				moves.push(`${cell}`);
+			    }
+			}
+		    }
+                }
             }
+	    console.log(moves);
         }
-        return can;
+        // otherwise collecting
+        else {
+	    //push some moves
+        }
+
+        if (moves.length === 0) {
+            moves.push("pass");
+        }
+        return moves.sort((a,b) => a.localeCompare(b));
     }
 
     public randomMove(): string {
-        if (true) {
-            const g = new SquareOrthGraph(6, 7);
-            const empty = shuffle((g.listCells(false) as string[]).filter(c => !this.board.has(c))) as string[];
-            if (empty.length > 0) {
-                let move = `${empty[0]}`; //`${card}-${empty[0]}`;
-                if (this.influence[this.currplayer - 1] > 0 && Math.random() < 0.5) {
-                    const ds = this.getDistricts();
-                    let poss: string[] = [];
-                    for (const occ of this.board.keys()) {
-                        if (this.canInfluence({cell: occ, ds})) {
-                            poss.push(occ);
-                        }
-                    }
-                    if (poss.length > 0) {
-                        poss = shuffle(poss) as string[];
-                        move += `,${poss[0]}`;
-                    }
-                }
-                return move;
-            }
-        }
-        return "";
+        const moves = this.moves();
+        return moves[Math.floor(Math.random() * moves.length)];
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
@@ -331,10 +269,12 @@ export class DeckfishGame extends GameBase {
             return result;
         }
 
-        const [mv, influence] = m.split(",");
+        const [mv, sw] = m.split(",");
         // eslint-disable-next-line prefer-const
         let [card, to] = mv.split("-");
         card = card.toUpperCase();
+
+        let [swap, market] = sw.split("-");
 
         // if `to` is missing, partial
         if (to === undefined || to.length === 0) {
@@ -372,11 +312,11 @@ export class DeckfishGame extends GameBase {
                 return result;
             }
 
-            // if influence is missing, may or not be complete
-            if (influence === undefined || influence.length === 0) {
+            // if swap is missing, may or not be complete
+            if (swap === undefined || swap.length === 0) {
                 result.valid = true;
                 result.canrender = true;
-                result.complete = this.influence[this.currplayer - 1] > 0 ? 0 : 1;
+                result.complete = 0;
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
                 return result;
             }
@@ -384,44 +324,28 @@ export class DeckfishGame extends GameBase {
             else {
                 const cloned = this.clone();
                 cloned.board.set(to, card);
-                // influence available
-                if (cloned.influence[this.currplayer - 1] === 0) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.deckfish.NO_INFLUENCE");
-                    return result;
-                }
                 // valid cell
                 if (!(g.listCells(false) as string[]).includes(to)) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: influence});
+                    result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: swap});
                     return result;
                 }
                 // card present
-                if (! cloned.board.has(influence)) {
+                if (! cloned.board.has(swap)) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.UNOCCUPIED", {cell: influence});
+                    result.message = i18next.t("apgames:validation._general.UNOCCUPIED", {cell: swap});
                     return result;
                 }
-                // not claimed
-                if (cloned.claimed.has(influence)) {
+                // not occupied
+                if (cloned.occupied.has(swap)) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation.deckfish.ALREADY_CLAIMED", {cell: influence});
-                    return result;
-                }
-                // not an extended card
-                const targetCard = Card.deserialize(cloned.board.get(influence)!);
-                if (targetCard === undefined) {
-                    throw new Error(`Could not find the card with the ID ${cloned.board.get(influence)}`);
-                }
-                if (["0", "P", "T"].includes(targetCard.rank.uid)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.deckfish.BAD_INFLUENCE", {cell: influence});
+                    result.message = i18next.t("apgames:validation.deckfish.ALREADY_OCCUPIED", {cell: swap});
                     return result;
                 }
                 // not owned
-                if (!cloned.canInfluence({cell: influence})) {
+                if (!cloned.canSwap(swap, market)) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation.deckfish.ALREADY_OWNED", {cell: influence});
+                    result.message = i18next.t("apgames:validation.deckfish.ALREADY_OWNED", {cell: swap});
                     return result;
                 }
 
@@ -449,7 +373,7 @@ export class DeckfishGame extends GameBase {
         }
 
         this.results = [];
-        const [mv, influence] = m.split(",");
+        const [mv, swap] = m.split(",");
         // eslint-disable-next-line prefer-const
         let [card, to] = mv.split("-");
         card = card.toUpperCase();
@@ -458,10 +382,9 @@ export class DeckfishGame extends GameBase {
         if (to !== undefined && to.length > 0) {
             this.board.set(to, card);
             this.results.push({type: "place", what: cardObj.plain, where: to});
-            if (influence !== undefined && influence.length > 0) {
-                this.claimed.set(influence, this.currplayer);
-                this.influence[this.currplayer - 1]--;
-                this.results.push({type: "claim", where: influence});
+            if (swap !== undefined && swap.length > 0) {
+                //swap market card
+                this.results.push({type: "claim", where: swap});
             }
         }
 
@@ -532,8 +455,8 @@ export class DeckfishGame extends GameBase {
             currplayer: this.currplayer,
             lastmove: this.lastmove,
             board: new Map(this.board),
-            claimed: new Map(this.claimed),
-            influence: [...this.influence],
+	    market: [...this.market],
+            occupied: new Map(this.occupied),
             captured: [[...this.captured[0]],[...this.captured[1]]],
         };
     }
@@ -557,11 +480,11 @@ export class DeckfishGame extends GameBase {
             pstr += pieces.join(",");
         }
 
-        // build claimed markers
+        // build occupied markers
         let markers: (MarkerOutline|MarkerFlood)[]|undefined;
-        if (this.claimed.size > 0) {
+        if (this.occupied.size > 0) {
             markers = [];
-            for (const [cell, p] of this.claimed.entries()) {
+            for (const [cell, p] of this.occupied.entries()) {
                 const [x,y] = DeckfishGame.algebraic2coords(cell);
                 // find existing marker if present for this player
                 const found = markers.find(m => m.colour === p);
@@ -574,29 +497,6 @@ export class DeckfishGame extends GameBase {
                         type: "outline",
                         colour: p,
                         points: [{row: y, col: x}],
-                    });
-                }
-            }
-        }
-
-        // add flood markers for controlled districts
-        const dsOwned = this.getDistricts().filter(d => d.owner !== undefined);
-        if (dsOwned.length > 0) {
-            if (markers === undefined) {
-                markers = [];
-            }
-            for (let p = 1; p <= this.numplayers; p++) {
-                const owned = dsOwned.filter(d => d.owner === p);
-                if (owned.length > 0) {
-                    const cells = owned.map(d => d.cells).flat();
-                    markers.push({
-                        type: "flood",
-                        colour: p,
-                        opacity: 0.1,
-                        points: cells.map(cell => {
-                            const [col, row] = DeckfishGame.algebraic2coords(cell);
-                            return {col, row};
-                        }) as [RowCol, ...RowCol[]],
                     });
                 }
             }
@@ -679,10 +579,7 @@ export class DeckfishGame extends GameBase {
 
     public getPlayerScore(player: number): number {
         let score = 0;
-        const ds = this.getDistricts();
-        for (const district of ds.filter(d => d.owner === player)) {
-            score += district.cells.length;
-        }
+	//TODO: get min of suits
         return score;
     }
 
@@ -693,7 +590,6 @@ export class DeckfishGame extends GameBase {
         }
         return [
             { name: i18next.t("apgames:status.SCORES"), scores},
-            { name: i18next.t("apgames:status.deckfish"), scores: this.influence},
         ];
     }
 
@@ -709,7 +605,7 @@ export class DeckfishGame extends GameBase {
     public status(): string {
         let status = super.status();
 
-        status += "**Influence**: " + this.influence.join(", ") + "\n\n";
+        //status += "**Influence**: " + this.influence.join(", ") + "\n\n";
 
         status += "**Scores**: " + this.getPlayersScores()[0].scores.join(", ") + "\n\n";
 
