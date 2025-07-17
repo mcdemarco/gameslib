@@ -160,7 +160,18 @@ export class DeckfishGame extends GameBase {
     }
 
     public canPlace(cell: string): boolean {
-	return true;
+	console.log("Can place at " + cell + "?");
+	if (this.occupied.has(cell)) {
+	    return false;
+	}
+	if (this.board.has(cell)) {
+	    const card = Card.deserialize(this.board.get(cell)!)!;
+	    if (card.rank.name === "Ace" || card.rank.name === "Crown") {
+		return true;
+	    } else
+		return false;
+	} else
+	    return false;
     }
 
     public canSwap(cell: string, market: string): boolean {
@@ -223,22 +234,33 @@ export class DeckfishGame extends GameBase {
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             let newmove = "";
-            // clicking on your hand
+            // clicking on the market
             if (row < 0 && col < 0) {
-                newmove = piece!.substring(1);
+		if (! move.includes("-")) {
+		    //it's too early to click on the market.
+		    //TODO: invalid partial result
+		    return {
+			move,
+			valid: false,
+			message: i18next.t("apgames:validation.deckfish.EARLY_TO_MARKET")
+		    }
+		} else {
+		    newmove = `${move},` + piece!.substring(1);
+		}
             }
             // otherwise, on the board
             else {
                 const cell = DeckfishGame.coords2algebraic(col, row);
                 // continuation of placement
-                if (!move.includes("-")) {
+                if (move.includes(",") || (move && ! move.includes("-"))) {
                     newmove = `${move}-${cell}`;
-                }
-                // otherwise, exerting influence
-                else {
-                    newmove = `${move},${cell}`;
+                } else {
+		    //Selecting initial from location or placement location.
+                    newmove = `${cell}`;
                 }
             }
+
+	    console.log("New move is " + newmove);
 
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
@@ -262,19 +284,38 @@ export class DeckfishGame extends GameBase {
         m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
 
+	console.log("Validating move " + m);
+
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            result.message = i18next.t("apgames:validation.deckfish.INITIAL_INSTRUCTIONS")
+	    if (this.mode === "place") {
+		result.message = i18next.t("apgames:validation.deckfish.INITIAL_PLACEMENT_INSTRUCTIONS")
+	    } else {
+		result.message = i18next.t("apgames:validation.deckfish.INITIAL_MOVE_INSTRUCTIONS")
+	    }
             return result;
         }
 
         const [mv, sw] = m.split(",");
         // eslint-disable-next-line prefer-const
-        let [card, to] = mv.split("-");
-        card = card.toUpperCase();
+        let [from, to] = mv.split("-");
+        //card = card.toUpperCase();
 
-        let [swap, market] = sw.split("-");
+	//Testing placements.
+	if (this.mode === "place") {
+	    console.log("Place at " + from);
+
+	    if (this.canPlace(from)) {
+		result.valid = true;
+		result.complete = 1;
+		result.message = i18next.t("apgames:validation.deckfish.VALID_PLACEMENT");
+	    } else {
+		result.valid = false;
+		result.message = i18next.t("apgames:validation.deckfish.INVALID_PLACEMENT");
+	    }
+            return result;
+	}
 
         // if `to` is missing, partial
         if (to === undefined || to.length === 0) {
@@ -283,8 +324,20 @@ export class DeckfishGame extends GameBase {
             result.message = i18next.t("apgames:validation.deckfish.PARTIAL_PLACEMENT");
             return result;
         }
-        // otherwise
-        else {
+
+        // if `sw` is missing, possibly partial
+        if (sw === undefined || sw.length === 0) {
+            result.valid = true;
+            result.complete = -1;
+            result.message = i18next.t("apgames:validation._general.PARTIAL_MOVEMENT", {cell: to});
+            return result;
+ 
+	} else {
+
+	    //otherwise
+            let [swap, market] = sw.split("-");
+
+
             const g = new SquareOrthGraph(6, 7);
             // valid cell
             if (!(g.listCells(false) as string[]).includes(to)) {
@@ -323,7 +376,7 @@ export class DeckfishGame extends GameBase {
             // otherwise
             else {
                 const cloned = this.clone();
-                cloned.board.set(to, card);
+//                cloned.board.set(to, card);
                 // valid cell
                 if (!(g.listCells(false) as string[]).includes(to)) {
                     result.valid = false;
@@ -375,18 +428,21 @@ export class DeckfishGame extends GameBase {
         this.results = [];
         const [mv, swap] = m.split(",");
         // eslint-disable-next-line prefer-const
-        let [card, to] = mv.split("-");
-        card = card.toUpperCase();
-        const cardObj = Card.deserialize(card)!;
+        let [from, to] = mv.split("-");
 
         if (to !== undefined && to.length > 0) {
-            this.board.set(to, card);
-            this.results.push({type: "place", what: cardObj.plain, where: to});
+            //this.board.set(to, card);
+            this.results.push({type: "move", from: from, to: to});
             if (swap !== undefined && swap.length > 0) {
                 //swap market card
-                this.results.push({type: "claim", where: swap});
+                this.results.push({type: "swap", what: "TODO", with: "TODO", where: to});
             }
-        }
+        } else {
+	    if (this.mode === "place") {
+		this.occupied.set(from, this.currplayer);
+		this.results.push({type: "place", where: from});
+	    }
+	}
 
         if (partial) { return this; }
 
@@ -616,11 +672,15 @@ export class DeckfishGame extends GameBase {
         let resolved = false;
         switch (r.type) {
             case "place":
-                node.push(i18next.t("apresults:PLACE.decktet", {player, where: r.where, what: r.what}));
+                node.push(i18next.t("apresults:PLACE.deckfish", {player, where: r.where}));
                 resolved = true;
                 break;
-            case "claim":
-                node.push(i18next.t("apresults:CLAIM.deckfish", {player, where: r.where}));
+            case "move":
+                node.push(i18next.t("apresults:MOVE.deckfish", {player, from: r.from, to: r.to}));
+                resolved = true;
+                break;
+            case "swap":
+                node.push(i18next.t("apresults:SWAP.deckfish", {player, what: r.what, with: r.with, where: r.where}));
                 resolved = true;
                 break;
         }
