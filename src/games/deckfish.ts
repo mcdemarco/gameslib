@@ -4,20 +4,21 @@ import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerOutline } from "@abs
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, SquareOrthGraph, UserFacingError } from "../common";
 import i18next from "i18next";
-import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended } from "../common/decktet";
+import { Card, Deck, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
 
 export type playerid = 1|2;
 export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
+const suitOrder = ["M","S","V","L","Y","K"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: Map<string, string>;
     market: string[];
     occupied: Map<string, playerid>;
-    captured: [Suit[], Suit[]];
+    collected: [Suit[], Suit[]];
     lastmove?: string;
 };
 
@@ -79,7 +80,7 @@ export class DeckfishGame extends GameBase {
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
-    public captured!: [Suit[], Suit[]];
+    public collected!: [Suit[], Suit[]];
 
     constructor(state?: IDeckfishState | string) {
         super();
@@ -121,7 +122,7 @@ export class DeckfishGame extends GameBase {
                 board,
 		market,
                 occupied,
-                captured: [[],[]],
+                collected: [[],[]],
             };
             this.stack = [fresh];
         } else {
@@ -153,10 +154,32 @@ export class DeckfishGame extends GameBase {
         this.board = new Map(state.board);
 	this.market = [...state.market];
         this.occupied = new Map(state.occupied);
-        this.captured = [[...state.captured[0]], [...state.captured[1]]];
+        this.collected = [[...state.collected[0]], [...state.collected[1]]];
         this.lastmove = state.lastmove;
 
         return this;
+    }
+
+    public canMoveFrom(cell: string): boolean {
+	if (this.occupied.has(cell) && this.occupied.get(cell) === this.currplayer) {
+	    return true;
+	} else
+	    return false;
+    }
+
+    public canMoveTo(cell: string): boolean {
+	//This is going to get complicated.
+	//For now just check one thing for a placeholder.
+	if (!this.board.has(cell)) {
+	    //Cannot land in the gaps.
+	    return false;
+	} else {
+	    const card = Card.deserialize(this.board.get(cell)!)!;
+	    //Cannot land on the Excuse.
+	    if (card.rank.name === "Excuse")
+		return false;
+	}
+	return true;
     }
 
     public canPlace(cell: string): boolean {
@@ -180,8 +203,10 @@ export class DeckfishGame extends GameBase {
 
     private get mode(): "place"|"collect" {
         if (this.occupied.size < 6) {
+	    console.log("Mode is place.");
             return "place";
         }
+	console.log("Mode is collect.");
         return "collect";
     }
 
@@ -304,8 +329,6 @@ export class DeckfishGame extends GameBase {
 
 	//Testing placements.
 	if (this.mode === "place") {
-	    console.log("Place at " + from);
-
 	    if (this.canPlace(from)) {
 		result.valid = true;
 		result.complete = 1;
@@ -315,15 +338,36 @@ export class DeckfishGame extends GameBase {
 		result.message = i18next.t("apgames:validation.deckfish.INVALID_PLACEMENT");
 	    }
             return result;
-	}
+	} 
+	//Otherwise, collecting.
 
         // if `to` is missing, partial
         if (to === undefined || to.length === 0) {
-            result.valid = true;
-            result.complete = -1;
-            result.message = i18next.t("apgames:validation.deckfish.PARTIAL_PLACEMENT");
-            return result;
-        }
+	    if (this.canMoveFrom(from)) {
+		result.valid = true;
+		result.complete = -1;
+		result.message = i18next.t("apgames:validation.deckfish.PARTIAL_MOVEMENT");
+		return result;
+            } else {
+		result.valid = false;
+		result.message = i18next.t("apgames:validation.deckfish.INVALID_FROM");
+		return result;
+	    }
+	}
+
+	//Evaluate the move destination.
+	if (this.canMoveTo(to)) {
+		result.valid = true;
+		result.complete = -1;
+		result.message = i18next.t("apgames:validation.deckfish.MAY_SWAP");
+		return result;
+	} else {
+		result.valid = false;
+		result.message = i18next.t("apgames:validation.deckfish.INVALID_TO", {cell: to});
+		return result;
+	}
+
+	//Now, swapping.
 
         // if `sw` is missing, possibly partial
         if (sw === undefined || sw.length === 0) {
@@ -431,7 +475,25 @@ export class DeckfishGame extends GameBase {
         let [from, to] = mv.split("-");
 
         if (to !== undefined && to.length > 0) {
-            //this.board.set(to, card);
+	    //Remove the card.
+            const card = Card.deserialize(this.board.get(from)!)!;
+	    this.board.delete(from);
+
+	    //Move the pawn.
+	    this.occupied.delete(from);
+	    this.occupied.set(to, this.currplayer);
+	    //In the wyrms/bounce case, must also move the other pawn.
+	    //TODO
+
+	    //Score the card.
+	    if (card === undefined)
+		throw new Error(`Could not load the card at ${from}.`);
+
+	    const newSuits = card.suits.map(s => s.uid as Suit);
+	    //console.log(newSuits);
+	    //Keeping this sorted.
+	    this.collected[this.currplayer - 1] = this.collected[this.currplayer - 1].concat(newSuits).sort((a,b) => suitOrder.indexOf(a) - suitOrder.indexOf(b));
+
             this.results.push({type: "move", from: from, to: to});
             if (swap !== undefined && swap.length > 0) {
                 //swap market card
@@ -519,7 +581,7 @@ export class DeckfishGame extends GameBase {
             board: new Map(this.board),
 	    market: [...this.market],
             occupied: new Map(this.occupied),
-            captured: [[...this.captured[0]],[...this.captured[1]]],
+            collected: [[...this.collected[0]],[...this.collected[1]]],
         };
     }
 
@@ -569,35 +631,42 @@ export class DeckfishGame extends GameBase {
 
         const legend: ILegendObj = {};
         for (const card of allcards) {
-            legend["c" + card.uid] = card.toGlyph();
+            legend["c" + card.uid] = card.toGlyph({border: true});
         }
+	for (const suit of suits) {
+            legend[suit.uid] = {
+		name: suit.glyph!,
+		scale: 0.5
+	    }
+	}
 
         // build pieces areas
         const areas: AreaPieces[] = [];
+
+	//market
+	if (this.market.length > 0) {
+	    const marketCards = this.market.map(uid => Card.deserialize(uid)!).map(c => "c" + c.uid) as [string, ...string[]];
+	    console.log(marketCards);
+
+            areas.push({
+		type: "pieces",
+		label: i18next.t("apgames:validation.deckfish.LABEL_MARKET") || "Market cards",
+		spacing: 0.25,
+		pieces: marketCards,
+            });
+	}
+
+	// suits
         for (let p = 1; p <= this.numplayers; p++) {
-            let captives = this.captured[p-1];
+            let captives = this.collected[p-1];
             if (captives.length > 0) {
                 areas.push({
                     type: "pieces",
-                    pieces: captives.map(c => "c" + c) as [string, ...string[]],
-                    label: i18next.t("apgames:validation.deckfish.LABEL_STASH", {playerNum: p}) || "local",
-                    spacing: 0.5,
+                    pieces: captives as [string, ...string[]],
+                    label: i18next.t("apgames:validation.deckfish.LABEL_COLLECTION", {playerNum: p}) || "local",
+                    spacing: -0.25,
                 });
             }
-        }
-        // create an area for all invisible cards (if there are any cards left)
-        const visibleCards = [...this.board.values()].map(uid => Card.deserialize(uid));
-        if (visibleCards.includes(undefined)) {
-            throw new Error(`Could not deserialize one of the cards. This should never happen!`);
-        }
-        const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "c" + c.uid) as [string, ...string[]]
-        if (remaining.length > 0) {
-            areas.push({
-                type: "pieces",
-                label: i18next.t("apgames:validation.deckfish.LABEL_MARKET") || "Market cards",
-                spacing: 0.25,
-                pieces: remaining,
-            });
         }
 
         // Build rep
@@ -609,7 +678,7 @@ export class DeckfishGame extends GameBase {
                 tileHeight: 1,
                 tileWidth: 1,
                 tileSpacing: 0.1,
-                strokeOpacity: 0.5,
+                strokeOpacity: 0.05,
 		labelColour: "#888",
                 markers,
             },

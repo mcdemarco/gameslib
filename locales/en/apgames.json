@@ -3725,11 +3725,12 @@
             "INITIAL_PLACEMENT_INSTRUCTIONS": "Click a card to place your pawn on the board.",
             "INITIAL_MOVE_INSTRUCTIONS": "Click a pawn to move.",
             "LABEL_MARKET": "Market cards",
-            "LABEL_STASH": "Player {{playerNum}}'s hand",
-            "NO_CARD": "The card \"{{card}}\" does not appear to be in your hand.",
+            "LABEL_COLLECTION": "Player {{playerNum}}'s suits",
+            "INVALID_FROM": "You may only move your own pawns.",
             "INVALID_PLACEMENT": "You may only place your pawn on an unoccupied Ace or Crown.",
-            "PARTIAL_MOVEMENT": "Click a card on the board to swap with the market.",
-            "PARTIAL_PLACEMENT": "Click a card on the board to move your pawn to.",
+            "INVALID_TO": "The destinatiion {{cell}} is not legal.",
+            "MAY_SWAP": "You may swap a card from the market with one on the board.",
+            "PARTIAL_MOVEMENT": "Click a card on the board to move your pawn to.",
             "VALID_PLACEMENT": "Looks like a good placement."
         },
         "diffusion": {
