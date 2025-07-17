@@ -333,6 +333,7 @@
         "tiebreaker": "{{player}} passed, winning the tiebreaker."
     },
     "PIE": {
+        "deckfish": "{{player}} moves second.",
         "default": "{{player}} invoked the pie rule.",
         "unlur": "{{player}} has passed to be the Y player."
     },
