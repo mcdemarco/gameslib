@@ -449,6 +449,12 @@ export class DeckfishGame extends GameBase {
         // update currplayer
         this.lastmove = m;
         let newplayer = (this.currplayer as number) + 1;
+
+	if ((to === undefined || to.length === 0) && m !== "pass" && this.mode === "collect") {
+	    //We changed mode after the final placement of the place phase, so do not change player.
+	    newplayer  = this.currplayer;
+	} 
+
         if (newplayer > this.numplayers) {
             newplayer = 1;
         }
