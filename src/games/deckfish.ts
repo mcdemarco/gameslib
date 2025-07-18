@@ -237,14 +237,12 @@ export class DeckfishGame extends GameBase {
             for (let x = 0; x < 7; x++) {
                 for (let y = 0; y < 6; y++) {
                     const cell = DeckfishGame.coords2algebraic(x, y);
-                    if (this.board.has(cell)) {
+                    if (this.board.has(cell) && ! this.occupied.has(cell)) {
+			//There's an unoccupied card.
                         const card = Card.deserialize(this.board.get(cell)!)!;
-                        //Check occupation.
-                        if (! this.occupied.has(cell)) {
-                            //Check rank.
-                            if (card.rank.name === "Ace" || card.rank.name === "Crown") {
-                                moves.push(`${cell}`);
-                            }
+                        //Check rank.
+                        if (card.rank.name === "Ace" || card.rank.name === "Crown") {
+                            moves.push(`${cell}`);
                         }
                     }
                 }
@@ -253,7 +251,29 @@ export class DeckfishGame extends GameBase {
         }
         // otherwise collecting
         else {
-            //push some moves
+	    this.occupied.forEach((value, key) => {
+		if (value === this.currplayer) {
+		    //push all other card cells in row and column
+		    const [sx, sy] = DeckfishGame.algebraic2coords(key);
+		    for (let x = 0; x < 7; x++) {
+			for (let y = 0; y < 6; y++) {
+			    if ((sx === x && sy !== y) || (sy == y && sx !== x)) {
+				const cell = DeckfishGame.coords2algebraic(x, y);
+				if (this.board.has(cell) && ! this.occupied.has(cell)) {
+				    //TODO: Some moves to player-occupied cards are possible.
+
+				    const card = Card.deserialize(this.board.get(cell)!)!;
+				    if (card.rank.name !== "Excuse") {
+					moves.push(`${key}-${cell}`);
+				    }
+				}
+			    } else {
+				//TODO: knot moves
+			    }
+			}
+		    }
+		}
+	    });
         }
 
         if (moves.length === 0) {
@@ -649,6 +669,7 @@ export class DeckfishGame extends GameBase {
                 label: i18next.t("apgames:validation.deckfish.LABEL_MARKET") || "Market cards",
                 spacing: 0.25,
                 pieces: marketCards,
+		width: 3,
             });
         }
 
@@ -659,8 +680,10 @@ export class DeckfishGame extends GameBase {
                 areas.push({
                     type: "pieces",
                     pieces: captives as [string, ...string[]],
-                    label: i18next.t("apgames:validation.deckfish.LABEL_COLLECTION", {playerNum: p}) || "local",
+                    label: i18next.t("apgames:validation.deckfish.LABEL_COLLECTION", {playerNum: p}) || `P${p} suits`,
                     spacing: -0.25,
+		    ownerMark: p,
+		    width: 20,
                 });
             }
         }
@@ -688,13 +711,13 @@ export class DeckfishGame extends GameBase {
             rep.annotations = [];
             for (const move of this.results) {
                 if (move.type === "place") {
-                    // only add if there's not a claim for the same cell
-                    const found = this.results.find(r => r.type === "claim" && r.where === move.where);
-                    if (found === undefined) {
-                        const [x, y] = DeckfishGame.algebraic2coords(move.where!);
-                        rep.annotations.push({type: "enter", occlude: false, targets: [{row: y, col: x}]});
-                    }
-                } else if (move.type === "claim") {
+                    const [x, y] = DeckfishGame.algebraic2coords(move.where!);
+                    rep.annotations.push({type: "enter", occlude: false, targets: [{row: y, col: x}]});
+                } else if (move.type === "move") {
+                    const [fromX, fromY] = DeckfishGame.algebraic2coords(move.from);
+                    const [toX, toY] = DeckfishGame.algebraic2coords(move.to);
+                    rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
+                } else if (move.type === "swap") {
                     const [x, y] = DeckfishGame.algebraic2coords(move.where!);
                     rep.annotations.push({type: "enter", occlude: false, dashed: [4,8], targets: [{row: y, col: x}]});
                 }
