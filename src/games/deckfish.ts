@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { reviver, SquareOrthGraph, UserFacingError } from "../common";
+import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
 import { Card, Deck, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
@@ -317,7 +317,7 @@ export class DeckfishGame extends GameBase {
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
-        m = m.toLowerCase();
+        //m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
 
         console.log("Validating move " + m);
@@ -380,14 +380,14 @@ export class DeckfishGame extends GameBase {
 
         //Evaluate the move destination.
         if (this.canMoveTo(to)) {
-                result.valid = true;
-                result.complete = -1;
-                result.message = i18next.t("apgames:validation.deckfish.MAY_SWAP");
-                return result;
+            result.valid = true;
+            result.complete = -1;
+            result.message = i18next.t("apgames:validation.deckfish.MAY_SWAP");
+            return result;
         } else {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.deckfish.INVALID_TO", {cell: to});
-                return result;
+            result.valid = false;
+            result.message = i18next.t("apgames:validation.deckfish.INVALID_TO", {cell: to});
+            return result;
         }
 
         //Now, swapping.
@@ -402,35 +402,12 @@ export class DeckfishGame extends GameBase {
         } else {
 
             //otherwise
-            let [swap, market] = sw.split("-");
+            let [market, swap] = sw.split("-");
 
-
-            const g = new SquareOrthGraph(6, 7);
-            // valid cell
-            if (!(g.listCells(false) as string[]).includes(to)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: to});
-                return result;
-            }
-            // unoccupied
-            if (this.board.has(to)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.OCCUPIED", {cell: to});
-                return result;
-            }
-            // adjacent to existing card
-            let hasadj = false;
-            for (const n of g.neighbours(to)) {
-                if (this.board.has(n)) {
-                    hasadj = true;
-                    break;
-                }
-            }
-            if (!hasadj) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.deckfish.NOT_ADJ");
-                return result;
-            }
+	    //A successful market choice is always valid, 
+	    //but have to check that it's there.
+	    //TODO
+	    console.log("Market card is " + market);
 
             // if swap is missing, may or not be complete
             if (swap === undefined || swap.length === 0) {
@@ -440,34 +417,16 @@ export class DeckfishGame extends GameBase {
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
                 return result;
             }
-            // otherwise
-            else {
-                const cloned = this.clone();
-//                cloned.board.set(to, card);
-                // valid cell
-                if (!(g.listCells(false) as string[]).includes(to)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: swap});
-                    return result;
-                }
-                // card present
-                if (! cloned.board.has(swap)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.UNOCCUPIED", {cell: swap});
-                    return result;
-                }
-                // not occupied
-                if (cloned.occupied.has(swap)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.deckfish.ALREADY_OCCUPIED", {cell: swap});
-                    return result;
-                }
-                // not owned
-                if (!cloned.canSwap(swap, market)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.deckfish.ALREADY_OWNED", {cell: swap});
-                    return result;
-                }
+            // otherwise the swap location needs testing.
+            else if (! this.board.has(swap)) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.deckfish.NO_SWAP", {cell: swap});
+                return result;
+	    } else if (this.occupied.has(swap)) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation._general.OCCUPIED_SWAP", {cell: swap});
+                return result;
+	    } else {
 
                 // we're good!
                 result.valid = true;
@@ -483,7 +442,7 @@ export class DeckfishGame extends GameBase {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
 
-        m = m.toLowerCase();
+        //m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
         if (! trusted) {
             const result = this.validateMove(m);
@@ -504,7 +463,7 @@ export class DeckfishGame extends GameBase {
             }
         } else {
 
-            const [mv, swap] = m.split(",");
+            const [mv, sw] = m.split(",");
             // eslint-disable-next-line prefer-const
             let [from, to] = mv.split("-");
             
@@ -529,9 +488,15 @@ export class DeckfishGame extends GameBase {
                 this.collected[this.currplayer - 1] = this.collected[this.currplayer - 1].concat(newSuits).sort((a,b) => suitOrder.indexOf(a) - suitOrder.indexOf(b));
                 
                 this.results.push({type: "move", from: from, to: to});
-                if (swap !== undefined && swap.length > 0) {
+
+                if (sw !== undefined && sw.length > 0) {
+		    let [marketCard, swapCell] = sw.split("-");
                     //swap market card
-                    this.results.push({type: "swap", what: "TODO", with: "TODO", where: to});
+		    const swapCard = this.board.get(swapCell);
+		    console.log("swapcard " + swapCard + " marketcard " + marketCard);
+		    this.market[this.market.indexOf(marketCard)] = swapCard!;
+		    this.board.set(swapCell, marketCard);
+                    this.results.push({type: "swap", what: marketCard, with: swapCard, where: swapCell});
                 }
             } else {
                 if (this.mode === "place") {
