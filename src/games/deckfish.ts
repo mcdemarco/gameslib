@@ -727,9 +727,21 @@ export class DeckfishGame extends GameBase {
         return rep;
     }
 
+    private getItemCount(suitArray: string[], item: string): number {
+        return suitArray.filter(x => x === item).length;
+    }
+
+    private getSuitCounts(suitArray: string[]): number[] {
+	return suits.map(s => this.getItemCount(suitArray, s.uid));
+    }
+
     public getPlayerScore(player: number): number {
         let score = 0;
-        //TODO: get min of suits
+        //gets min of suits
+	const collection = this.collected[player - 1];
+	if (collection !== undefined && collection.length !== 0) {
+	    score = this.getSuitCounts(collection).sort()[0];
+	}
         return score;
     }
 
