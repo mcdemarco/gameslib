@@ -21,6 +21,7 @@
     },
     "ANNOUNCE": {
         "biscuit": "The following cards were in opposing hands: {{cards}}.",
+        "deckfish": "{{player}} must pass from now on.",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}."
     },
     "BEAROFF": {
@@ -216,6 +217,7 @@
         "camelot_claim_draw_repetition": "The game has ended because {{player}} has claimed a draw by repetition.",
         "camelot_claim_draw_progression": "The game has ended because {{player}} has claimed a draw by the 50 move rule.",
         "consecutive_passes": "The game has ended because both players passed consecutively.",
+        "deckfish": "The game has ended because the last player was unable to move.",
         "default": "The game has ended.",
         "material": "The game has ended because both players have insufficient material.",
         "repetition_one": "The game has ended because the same position has occurred by the same player.",
@@ -324,6 +326,7 @@
     "PASS": {
         "asli": "{{player}} took an opposing piece from the prison and passed their turn.",
         "assembly": "The production line doesn't move.",
+        "deckfish": "{{player}} was unable to move.",
         "entropy": "{{player}} chose not to move any pieces this turn.",
         "forced": "{{player}} was forced to pass.",
         "pie": "{{player}} accepted the komi offer and will continue playing second.",

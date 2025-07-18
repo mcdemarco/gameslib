@@ -22,6 +22,7 @@ export interface IMoveState extends IIndividualState {
     occupied: Map<string, playerid>;
     collected: [Suit[], Suit[]];
     lastmove?: string;
+    eliminated?: playerid;
 };
 
 export interface IDeckfishState extends IAPGameState {
@@ -63,7 +64,7 @@ export class DeckfishGame extends GameBase {
             },
         ],
         categories: ["goal>score>eog", "mechanic>move", "mechanic>place", "mechanic>random>setup", "mechanic>set", "board>shape>rect", "board>connect>rect", "components>decktet"],
-        flags: ["scores", "random-start", "custom-randomization", "automove", "experimental"],
+        flags: ["scores", "random-start", "custom-randomization", "autopass", "experimental"],
     };
     public static coords2algebraic(x: number, y: number): string {
         return GameBase.coords2algebraic(x, y, 6);
@@ -78,12 +79,13 @@ export class DeckfishGame extends GameBase {
     public board!: Map<string, string>;
     public market!: string[];
     public occupied!: Map<string, playerid>;
+    public collected!: [Suit[], Suit[]];
+    public eliminated?: playerid;
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
-    public collected!: [Suit[], Suit[]];
 
     constructor(state?: IDeckfishState | string) {
         super();
@@ -162,6 +164,7 @@ export class DeckfishGame extends GameBase {
         this.occupied = new Map(state.occupied);
         this.collected = [[...state.collected[0]], [...state.collected[1]]];
         this.lastmove = state.lastmove;
+	this.eliminated = state.eliminated;
 
         return this;
     }
@@ -354,14 +357,29 @@ export class DeckfishGame extends GameBase {
         }
 
         if (m === "pass") {
-            if (this.mode === "place" && this.occupied.size === 6) {
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
-            } else {
-                //The end of collecting pass.
-                //TODO
+            if (this.mode === "place") {
+		if (this.occupied.size === 6) {
+                    result.valid = true;
+                    result.complete = 1;
+                    result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                    return result;
+		} else {
+		    result.valid = false;
+                    result.message = i18next.t("apgames:validation.deckfish.BAD_PASS");
+                    return result;
+		}
+	    } else {
+		if (this.moves().includes(m)) {
+                    //The end of collecting pass.
+                    result.valid = true;
+                    result.complete = 1;
+                    result.message = i18next.t("apgames:validation._general.VAILD_MOVE");
+                    return result;
+                } else {
+		    result.valid = false;
+                    result.message = i18next.t("apgames:validation.deckfish.BAD_PASS");
+                    return result;
+		}
             }
         }
 
@@ -479,8 +497,14 @@ export class DeckfishGame extends GameBase {
                 //change the mode.
                 this.mode = "collect";
             } else {
-                //TODO collect mode pass enaction
-            }
+		this.results.push({type: "pass"});
+		//eliminate the player.
+		if (!this.eliminated) {
+		    this.eliminated = this.currplayer;
+		    this.results.push({type: "announce", payload: []})
+		}
+	    }
+
         } else {
 
             const [mv, sw] = m.split(",");
@@ -543,7 +567,7 @@ export class DeckfishGame extends GameBase {
     }
 
     protected checkEOG(): DeckfishGame {
-        if (false) {
+        if (this.lastmove === "pass" && this.eliminated == this.currplayer) {
             this.gameover = true;
             const scores: number[] = [];
             for (let p = 1; p <= this.numplayers; p++) {
@@ -555,6 +579,8 @@ export class DeckfishGame extends GameBase {
                     this.winner.push(p as playerid);
                 }
             }
+
+	    //TODO: add tiebreaker implementation from source
         }
 
         if (this.gameover) {
@@ -594,6 +620,7 @@ export class DeckfishGame extends GameBase {
             currplayer: this.currplayer,
 	    mode: this.mode,
             lastmove: this.lastmove,
+            eliminated: this.eliminated,
             board: new Map(this.board),
             market: [...this.market],
             occupied: new Map(this.occupied),
@@ -683,7 +710,7 @@ export class DeckfishGame extends GameBase {
                     label: i18next.t("apgames:validation.deckfish.LABEL_COLLECTION", {playerNum: p}) || `P${p} suits`,
                     spacing: -0.25,
 		    ownerMark: p,
-		    width: 20,
+		    width: 16,
                 });
             }
         }
@@ -767,8 +794,6 @@ export class DeckfishGame extends GameBase {
     public status(): string {
         let status = super.status();
 
-        //status += "**Influence**: " + this.influence.join(", ") + "\n\n";
-
         status += "**Scores**: " + this.getPlayersScores()[0].scores.join(", ") + "\n\n";
 
         return status;
@@ -785,16 +810,24 @@ export class DeckfishGame extends GameBase {
                 node.push(i18next.t("apresults:PIE.deckfish", {player}));
                 resolved = true;
                 break;
-            case "pass":
-                node.push(i18next.t("apresults:PASS.forced", {player}));
-                resolved = true;
-                break;
             case "move":
                 node.push(i18next.t("apresults:MOVE.deckfish", {player, from: r.from, to: r.to}));
                 resolved = true;
                 break;
             case "swap":
                 node.push(i18next.t("apresults:SWAP.deckfish", {player, what: r.what, with: r.with, where: r.where}));
+                resolved = true;
+                break;
+            case "pass":
+                node.push(i18next.t("apresults:PASS.forced", {player}));
+                resolved = true;
+                break;
+            case "announce":
+                node.push(i18next.t("apresults:ANNOUNCE.deckfish", {player, payload: r.payload}));
+                resolved = true;
+                break;
+            case "eog":
+                node.push(i18next.t("apresults:EOG.deckfish", {player}));
                 resolved = true;
                 break;
         }
