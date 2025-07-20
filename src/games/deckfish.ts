@@ -674,7 +674,7 @@ export class DeckfishGame extends GameBase {
         ];
         glyph.push({
             name: "ring-13",
-            scale: 0.6,
+            scale: 0.55,
             opacity: opacity === undefined ? 1 : opacity,
             colour: colour, 
             nudge: {
@@ -718,14 +718,6 @@ export class DeckfishGame extends GameBase {
                     glyph: "c" + card.uid,
                     points: [{row: y, col: x}],
                 });
-
-          /*      if (this.occupied.has(cell)) {
-                    markers.push({
-                        type: "outline",
-                        colour: this.occupied.get(cell)!,
-                        points: [{row: y, col: x}],
-                    });
-                }*/
             }
         }
 
@@ -739,9 +731,9 @@ export class DeckfishGame extends GameBase {
             // turn cards into markers in order to fade them?
             if (this.highlights.indexOf(card.uid) > -1) {
 		console.log("highlighting " + card.uid);
-                legend["c" + card.uid] = card.toGlyph({border: false});
+                legend["c" + card.uid] = card.toGlyph({border: true});
             } else
-            legend["c" + card.uid] = card.toGlyph({border: true});
+            legend["c" + card.uid] = card.toGlyph({border: false});
         }
         for (const suit of suits) {
             legend[suit.uid] = {
@@ -755,7 +747,6 @@ export class DeckfishGame extends GameBase {
         legend["AH"] = this.makeMeeple({
             colour: 1,
             adjust: true,
-            opacity: 0.75,
         });
         legend["B"] = this.makeMeeple({
             colour: 2,
@@ -805,7 +796,7 @@ export class DeckfishGame extends GameBase {
                 tileHeight: 1,
                 tileWidth: 1,
                 tileSpacing: 0.25,
-                strokeOpacity: 0.05,
+                strokeOpacity: 0.2,
                 labelColour: "#888",
                 markers,
             },
