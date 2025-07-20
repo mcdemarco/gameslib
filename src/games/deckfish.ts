@@ -86,6 +86,7 @@ export class DeckfishGame extends GameBase {
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
+    private highlights: string[] = [];
 
     constructor(state?: IDeckfishState | string) {
         super();
@@ -158,13 +159,13 @@ export class DeckfishGame extends GameBase {
         const state = this.stack[idx];
         this.results = [...state._results];
         this.currplayer = state.currplayer;
-	this.mode = state.mode;
+        this.mode = state.mode;
         this.board = new Map(state.board);
         this.market = [...state.market];
         this.occupied = new Map(state.occupied);
         this.collected = [[...state.collected[0]], [...state.collected[1]]];
         this.lastmove = state.lastmove;
-	this.eliminated = state.eliminated;
+        this.eliminated = state.eliminated;
 
         return this;
     }
@@ -179,7 +180,7 @@ export class DeckfishGame extends GameBase {
     public canMoveTo(cell: string): boolean {
         //This is going to get complicated.
         //For now just check one thing for a placeholder.
-        if (!this.board.has(cell)) {
+        if (! this.board.has(cell)) {
             //Cannot land in the gaps.
             return false;
         } else {
@@ -210,15 +211,6 @@ export class DeckfishGame extends GameBase {
         return true;
     }
 
-    // private get mode(): 
-    //     if (this.occupied.size < 6) {
-    //      console.log("Mode is place.");
-    //         return "place";
-    //     }
-    //  console.log("Mode is collect.");
-    //     return "collect";
-    // }
-
     public moves(player?: playerid): string[] {
         if (this.gameover) {
             return [];
@@ -241,7 +233,7 @@ export class DeckfishGame extends GameBase {
                 for (let y = 0; y < 6; y++) {
                     const cell = DeckfishGame.coords2algebraic(x, y);
                     if (this.board.has(cell) && ! this.occupied.has(cell)) {
-			//There's an unoccupied card.
+                        //There's an unoccupied card.
                         const card = Card.deserialize(this.board.get(cell)!)!;
                         //Check rank.
                         if (card.rank.name === "Ace" || card.rank.name === "Crown") {
@@ -250,33 +242,32 @@ export class DeckfishGame extends GameBase {
                     }
                 }
             }
-            console.log(moves);
         }
         // otherwise collecting
         else {
-	    this.occupied.forEach((value, key) => {
-		if (value === this.currplayer) {
-		    //push all other card cells in row and column
-		    const [sx, sy] = DeckfishGame.algebraic2coords(key);
-		    for (let x = 0; x < 7; x++) {
-			for (let y = 0; y < 6; y++) {
-			    if ((sx === x && sy !== y) || (sy == y && sx !== x)) {
-				const cell = DeckfishGame.coords2algebraic(x, y);
-				if (this.board.has(cell) && ! this.occupied.has(cell)) {
-				    //TODO: Some moves to player-occupied cards are possible.
+            this.occupied.forEach((value, key) => {
+                if (value === this.currplayer) {
+                    //push all other card cells in row and column
+                    const [sx, sy] = DeckfishGame.algebraic2coords(key);
+                    for (let x = 0; x < 7; x++) {
+                        for (let y = 0; y < 6; y++) {
+                            if ((sx === x && sy !== y) || (sy == y && sx !== x)) {
+                                const cell = DeckfishGame.coords2algebraic(x, y);
+                                if (this.board.has(cell) && ! this.occupied.has(cell)) {
+                                    //TODO: Some moves to player-occupied cards are possible.
 
-				    const card = Card.deserialize(this.board.get(cell)!)!;
-				    if (card.rank.name !== "Excuse") {
-					moves.push(`${key}-${cell}`);
-				    }
-				}
-			    } else {
-				//TODO: knot moves
-			    }
-			}
-		    }
-		}
-	    });
+                                    const card = Card.deserialize(this.board.get(cell)!)!;
+                                    if (card.rank.name !== "Excuse") {
+                                        moves.push(`${key}-${cell}`);
+                                    }
+                                }
+                            } else {
+                                //TODO: knot moves
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         if (moves.length === 0) {
@@ -358,28 +349,29 @@ export class DeckfishGame extends GameBase {
 
         if (m === "pass") {
             if (this.mode === "place") {
-		if (this.occupied.size === 6) {
+                if (this.occupied.size === 6) {
+                    //The "pie"-style pass.
                     result.valid = true;
                     result.complete = 1;
                     result.message = i18next.t("apgames:validation._general.VALID_MOVE");
                     return result;
-		} else {
-		    result.valid = false;
+                } else {
+                    result.valid = false;
                     result.message = i18next.t("apgames:validation.deckfish.BAD_PASS");
                     return result;
-		}
-	    } else {
-		if (this.moves().includes(m)) {
-                    //The end of collecting pass.
+                }
+            } else {
+                if (this.moves().includes(m)) {
+                    //The end of game passes.
                     result.valid = true;
                     result.complete = 1;
                     result.message = i18next.t("apgames:validation._general.VAILD_MOVE");
                     return result;
                 } else {
-		    result.valid = false;
+                    result.valid = false;
                     result.message = i18next.t("apgames:validation.deckfish.BAD_PASS");
                     return result;
-		}
+                }
             }
         }
 
@@ -416,25 +408,27 @@ export class DeckfishGame extends GameBase {
             }
         }
 
-        //Evaluate the move destination.
-        if (this.canMoveTo(to)) {
-            result.valid = true;
-            result.complete = -1;
-            result.message = i18next.t("apgames:validation.deckfish.MAY_SWAP");
-            return result;
-        } else {
+        //Otherwise, evaluate the move destination.
+        if (! this.canMoveTo(to)) {
             result.valid = false;
             result.message = i18next.t("apgames:validation.deckfish.INVALID_TO", {cell: to});
             return result;
         }
+
+ /*           result.message = i18next.t("apgames:validation._general.PARTIAL_MOVEMENT", {cell: to});            result.valid = true;
+            result.complete = 0;
+            result.message = i18next.t("apgames:validation.deckfish.MAY_SWAP");
+            return result;
+        } else {
+ */
 
         //Now, swapping.
 
         // if `sw` is missing, possibly partial
         if (sw === undefined || sw.length === 0) {
             result.valid = true;
-            result.complete = -1;
-            result.message = i18next.t("apgames:validation._general.PARTIAL_MOVEMENT", {cell: to});
+            result.complete = 0;
+            result.message = i18next.t("apgames:validation.deckfish.INITIAL_SWAP_INSTRUCTIONS");
             return result;
  
         } else {
@@ -442,17 +436,17 @@ export class DeckfishGame extends GameBase {
             //otherwise
             let [market, swap] = sw.split("-");
 
-	    //A successful market choice is always valid, 
-	    //but have to check that it's there.
-	    //TODO
-	    console.log("Market card is " + market);
+            //A successful market choice is always valid, 
+            //but have to check that it's there.
+            //TODO?
+            console.log("Market card is " + market);
 
             // if swap is missing, may or not be complete
             if (swap === undefined || swap.length === 0) {
                 result.valid = true;
                 result.canrender = true;
-                result.complete = 0;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                result.complete = -1;
+                result.message = i18next.t("apgames:validation.deckfish.PARTIAL_SWAP", {what: market});
                 return result;
             }
             // otherwise the swap location needs testing.
@@ -460,17 +454,18 @@ export class DeckfishGame extends GameBase {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.deckfish.NO_SWAP", {cell: swap});
                 return result;
-	    } else if (this.occupied.has(swap)) {
+            } else if (this.occupied.has(swap)) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation._general.OCCUPIED_SWAP", {cell: swap});
                 return result;
-	    } else {
+            } else {
 
                 // we're good!
                 result.valid = true;
                 result.complete = 1;
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
                 return result;
+
             }
         }
     }
@@ -490,6 +485,7 @@ export class DeckfishGame extends GameBase {
         }
 
         this.results = [];
+        this.highlights = [];
 
         if (m === "pass") {
             if (this.mode === "place") {
@@ -497,13 +493,13 @@ export class DeckfishGame extends GameBase {
                 //change the mode.
                 this.mode = "collect";
             } else {
-		this.results.push({type: "pass"});
-		//eliminate the player.
-		if (!this.eliminated) {
-		    this.eliminated = this.currplayer;
-		    this.results.push({type: "announce", payload: []})
-		}
-	    }
+                this.results.push({type: "pass"});
+                //eliminate the player.
+                if (!this.eliminated) {
+                    this.eliminated = this.currplayer;
+                    this.results.push({type: "announce", payload: []})
+                }
+            }
 
         } else {
 
@@ -514,17 +510,22 @@ export class DeckfishGame extends GameBase {
             if (to !== undefined && to.length > 0) {
                 //Remove the card.
                 const card = Card.deserialize(this.board.get(from)!)!;
-                this.board.delete(from);
-                
+                if (card === undefined)
+                    throw new Error(`Could not load the card at ${from}.`);
+
+                if (partial)
+                    this.highlights.push(card.uid);
+                else
+                    this.board.delete(from);
+
                 //Move the pawn.
                 this.occupied.delete(from);
-                this.occupied.set(to, this.currplayer);
+                if (!partial)
+                    this.occupied.set(to, this.currplayer);
                 //In the wyrms/bounce case, must also move the other pawn.
                 //TODO
                 
                 //Score the card.
-                if (card === undefined)
-                    throw new Error(`Could not load the card at ${from}.`);
                 
                 const newSuits = card.suits.map(s => s.uid as Suit);
                 //console.log(newSuits);
@@ -534,18 +535,31 @@ export class DeckfishGame extends GameBase {
                 this.results.push({type: "move", from: from, to: to});
 
                 if (sw !== undefined && sw.length > 0) {
-		    let [marketCard, swapCell] = sw.split("-");
-                    //swap market card
-		    const swapCard = this.board.get(swapCell);
-		    console.log("swapcard " + swapCard + " marketcard " + marketCard);
-		    this.market[this.market.indexOf(marketCard)] = swapCard!;
-		    this.board.set(swapCell, marketCard);
-                    this.results.push({type: "swap", what: marketCard, with: swapCard, where: swapCell});
+                    let [marketCard, swapCell] = sw.split("-");
+                    //highlight market card
+                    //if (partial)
+                    this.highlights.push(marketCard);
+
+                    if (swapCell !== undefined && swapCell.length > 0) {
+                        //swap market card
+                        const swapCard = this.board.get(swapCell)!;
+                        this.highlights.push(swapCard);
+                        console.log("swapcard " + swapCard + " marketcard " + marketCard);
+                        this.market[this.market.indexOf(marketCard)] = swapCard!;
+                        this.board.set(swapCell, marketCard);
+                        this.results.push({type: "swap", what: marketCard, with: swapCard, where: swapCell});
+                    } else {
+                        //TODO
+                    }
                 }
             } else {
                 if (this.mode === "place") {
-                    this.occupied.set(from, this.currplayer);
+                    if (!partial)
+                        this.occupied.set(from, this.currplayer);
                     this.results.push({type: "place", where: from});
+                } else {
+                    //Illustrate partial move.
+                    //TODO
                 }
             }   
         }
@@ -573,14 +587,20 @@ export class DeckfishGame extends GameBase {
             for (let p = 1; p <= this.numplayers; p++) {
                 scores.push(this.getPlayerScore(p));
             }
-            const max = Math.max(...scores);
-            for (let p = 1; p <= this.numplayers; p++) {
-                if (scores[p-1] === max) {
-                    this.winner.push(p as playerid);
+            if (scores[0] === scores[1]) {
+                //Evaluate tiebreaker.
+                console.log("tiebroken win");
+                this.winner = this.getTieWinner();
+            } else {
+                //Simple win.
+                console.log("simple win");
+                const max = Math.max(...scores);
+                for (let p = 1; p <= this.numplayers; p++) {
+                    if (scores[p-1] === max) {
+                        this.winner.push(p as playerid);
+                    }
                 }
             }
-
-	    //TODO: add tiebreaker implementation from source
         }
 
         if (this.gameover) {
@@ -618,7 +638,7 @@ export class DeckfishGame extends GameBase {
             _results: [...this.results],
             _timestamp: new Date(),
             currplayer: this.currplayer,
-	    mode: this.mode,
+            mode: this.mode,
             lastmove: this.lastmove,
             eliminated: this.eliminated,
             board: new Map(this.board),
@@ -657,8 +677,8 @@ export class DeckfishGame extends GameBase {
                 const found = markers.find(m => m.colour === p);
                 if (found !== undefined) {
                     found.points.push({row: y, col: x});
-                }
-                // otherwise create new marker
+                } 
+                //otherwise create new marker
                 else {
                     markers.push({
                         type: "outline",
@@ -673,7 +693,13 @@ export class DeckfishGame extends GameBase {
         const allcards = [...cardsBasic, ...cardsExtended];
 
         const legend: ILegendObj = {};
+        console.log("highlight: " + this.highlights);
         for (const card of allcards) {
+            // turn cards into markers in order to fade them?
+            if (this.highlights.indexOf(card.uid) > -1) {
+		console.log("highlighting " + card.uid);
+                legend["c" + card.uid] = card.toGlyph({border: false});
+            } else
             legend["c" + card.uid] = card.toGlyph({border: true});
         }
         for (const suit of suits) {
@@ -689,14 +715,13 @@ export class DeckfishGame extends GameBase {
         //market
         if (this.market.length > 0) {
             const marketCards = this.market.map(uid => Card.deserialize(uid)!).map(c => "c" + c.uid) as [string, ...string[]];
-            console.log(marketCards);
 
             areas.push({
                 type: "pieces",
                 label: i18next.t("apgames:validation.deckfish.LABEL_MARKET") || "Market cards",
                 spacing: 0.25,
                 pieces: marketCards,
-		width: 3,
+                width: 3,
             });
         }
 
@@ -709,8 +734,8 @@ export class DeckfishGame extends GameBase {
                     pieces: captives as [string, ...string[]],
                     label: i18next.t("apgames:validation.deckfish.LABEL_COLLECTION", {playerNum: p}) || `P${p} suits`,
                     spacing: -0.25,
-		    ownerMark: p,
-		    width: 16,
+                    ownerMark: p,
+                    width: 16,
                 });
             }
         }
@@ -736,17 +761,19 @@ export class DeckfishGame extends GameBase {
         // Add annotations
         if (this.results.length > 0) {
             rep.annotations = [];
+                console.log(this.results);
             for (const move of this.results) {
                 if (move.type === "place") {
                     const [x, y] = DeckfishGame.algebraic2coords(move.where!);
-                    rep.annotations.push({type: "enter", occlude: false, targets: [{row: y, col: x}]});
+                    rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
                 } else if (move.type === "move") {
                     const [fromX, fromY] = DeckfishGame.algebraic2coords(move.from);
                     const [toX, toY] = DeckfishGame.algebraic2coords(move.to);
                     rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
+                    rep.annotations.push({type: "enter", occlude: false, dashed: [2,4], targets: [{row: toY, col: toX}]});
                 } else if (move.type === "swap") {
                     const [x, y] = DeckfishGame.algebraic2coords(move.where!);
-                    rep.annotations.push({type: "enter", occlude: false, dashed: [4,8], targets: [{row: y, col: x}]});
+                    rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
                 }
             }
         }
@@ -759,16 +786,35 @@ export class DeckfishGame extends GameBase {
     }
 
     private getSuitCounts(suitArray: string[]): number[] {
-	return suits.map(s => this.getItemCount(suitArray, s.uid));
+        return suits.map(s => this.getItemCount(suitArray, s.uid));
     }
+
+    private getTieWinner(): playerid[] {
+        //Evaluate tiebreaker.
+        let tieWinner: playerid[] = [];
+        const sortedArrays = this.collected.map(collection => this.getSuitCounts(collection.slice()).sort());
+
+        console.log("Sort:" + sortedArrays[0] + "; " + sortedArrays[1]);
+
+        const winArray = sortedArrays[0].map((item, index) => item - (sortedArrays[1])[index]).filter((item) => item !== 0);
+
+        console.log("Subtract:" + winArray);
+
+        if (winArray.length === 0) {
+            tieWinner = [1,2] as playerid[];
+        } else {
+            tieWinner.push((winArray[0] > 0 ? 1 : 2) as playerid);
+        }
+        return tieWinner;
+    } 
 
     public getPlayerScore(player: number): number {
         let score = 0;
         //gets min of suits
-	const collection = this.collected[player - 1];
-	if (collection !== undefined && collection.length !== 0) {
-	    score = this.getSuitCounts(collection).sort()[0];
-	}
+        const collection = this.collected[player - 1].slice();
+        if (collection !== undefined && collection.length !== 0) {
+            score = this.getSuitCounts(collection).sort()[0];
+        }
         return score;
     }
 
@@ -819,7 +865,7 @@ export class DeckfishGame extends GameBase {
                 resolved = true;
                 break;
             case "pass":
-                node.push(i18next.t("apresults:PASS.forced", {player}));
+                node.push(i18next.t("apresults:PASS.simple", {player}));
                 resolved = true;
                 break;
             case "announce":

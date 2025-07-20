@@ -21,7 +21,7 @@
     },
     "ANNOUNCE": {
         "biscuit": "The following cards were in opposing hands: {{cards}}.",
-        "deckfish": "{{player}} must pass from now on.",
+        "deckfish": "{{player}} was unable to move and must pass from now on.",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}."
     },
     "BEAROFF": {
