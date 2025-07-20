@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaPieces, Colourfuncs, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -14,42 +14,6 @@ export type Mode = "place"|"collect";
 export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
 const suitOrder = ["M","S","V","L","Y","K"];
 const crowdedRanks = ["Pawn","Court"];
-/*
-const nwMeeple: [Glyph, ...Glyph[]] = [
-    {
-        name: border ? "piece-square" : "piece-square-borderless",
-        scale: border? 1.1 : 1,
-        colour: fill,
-        opacity: opacity === undefined ? 0 : opacity,
-    },
-];
-nwMeeple.push({
-    name: "meeple",
-    scale: 0.5,
-    colour: "_context_strokes",
-    nudge: {
-        dx: 250,
-        dy: -250,
-    }
-});
-const swMeeple: [Glyph, ...Glyph[]] = [
-    {
-        name: "piece-square",
-        scale: border? 1.1 : 1,
-        colour: fill,
-        opacity: 0,
-    },
-];
-swMeeple.push({
-    name: "meeple",
-    scale: 0.5,
-    colour: "_context_strokes",
-    nudge: {
-        dx: 250,
-        dy: 250,
-    }
-});
-*/
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -685,6 +649,42 @@ export class DeckfishGame extends GameBase {
         };
     }
 
+    private makeMeeple(opts: {colour?: string|number|Colourfuncs, opacity?: number, adjust?: boolean} = {}): [Glyph, ...Glyph[]] {
+        let opacity = 1;
+        if (opts !== undefined && opts.opacity !== undefined) {
+            opacity = opts.opacity;
+        }
+        let colour: string|number|Colourfuncs|undefined;
+        if (opts !== undefined && opts.colour !== undefined) {
+            colour = opts.colour;
+        }
+        let adjust = false;
+        if (opts !== undefined && opts.adjust !== undefined) {
+            adjust = opts.adjust;
+        }
+        const dy: number = adjust ? -280 : 280;
+
+        const glyph: [Glyph, ...Glyph[]] = [
+            {
+                name: "piece-square-borderless",
+                scale: 1,
+                colour: colour,
+                opacity: 0,
+            },
+        ];
+        glyph.push({
+            name: "ring-13",
+            scale: 0.6,
+            opacity: opacity === undefined ? 1 : opacity,
+            colour: colour, 
+            nudge: {
+                dx: 280,
+                dy: dy,
+            }
+        });
+        return glyph;
+    }
+
     public render(): APRenderRep {
         // Build piece string
         let pstr = "";
@@ -719,13 +719,13 @@ export class DeckfishGame extends GameBase {
                     points: [{row: y, col: x}],
                 });
 
-                if (this.occupied.has(cell)) {
+          /*      if (this.occupied.has(cell)) {
                     markers.push({
                         type: "outline",
                         colour: this.occupied.get(cell)!,
                         points: [{row: y, col: x}],
                     });
-                }
+                }*/
             }
         }
 
@@ -749,34 +749,21 @@ export class DeckfishGame extends GameBase {
                 scale: 0.5
             }
         }
-        legend["A"] = {
-            name: "meeple",
+        legend["A"] = this.makeMeeple({
             colour: 1,
-            scale: 0.5,
-            opacity: 0.75,
-            nudge: {dx: 250, dy: 250}
-        };
-        legend["AH"] = {
-            name: "meeple",
+        });
+        legend["AH"] = this.makeMeeple({
             colour: 1,
-            scale: 0.5,
+            adjust: true,
             opacity: 0.75,
-            nudge: {dx: 250, dy: -250}
-        };
-        legend["B"] = {
-            name: "meeple",
+        });
+        legend["B"] = this.makeMeeple({
             colour: 2,
-            scale: 0.5,
-            opacity: 0.75,
-            nudge: {dx: 250, dy: 250}
-        };
-        legend["BH"] = {
-            name: "meeple",
+        });
+        legend["BH"] = this.makeMeeple({
             colour: 2,
-            scale: 0.5,
-            opacity: 0.75,
-            nudge: {dx: 250, dy: -250}
-        };
+            adjust: true,
+        });
 
         // build pieces areas
         const areas: AreaPieces[] = [];
