@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaPieces, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -13,6 +13,43 @@ export type playerid = 1|2;
 export type Mode = "place"|"collect";
 export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
 const suitOrder = ["M","S","V","L","Y","K"];
+const crowdedRanks = ["Pawn","Court"];
+/*
+const nwMeeple: [Glyph, ...Glyph[]] = [
+    {
+        name: border ? "piece-square" : "piece-square-borderless",
+        scale: border? 1.1 : 1,
+        colour: fill,
+        opacity: opacity === undefined ? 0 : opacity,
+    },
+];
+nwMeeple.push({
+    name: "meeple",
+    scale: 0.5,
+    colour: "_context_strokes",
+    nudge: {
+        dx: 250,
+        dy: -250,
+    }
+});
+const swMeeple: [Glyph, ...Glyph[]] = [
+    {
+        name: "piece-square",
+        scale: border? 1.1 : 1,
+        colour: fill,
+        opacity: 0,
+    },
+];
+swMeeple.push({
+    name: "meeple",
+    scale: 0.5,
+    colour: "_context_strokes",
+    nudge: {
+        dx: 250,
+        dy: 250,
+    }
+});
+*/
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -658,31 +695,34 @@ export class DeckfishGame extends GameBase {
             const pieces: string[] = [];
             for (let col = 0; col < 7; col++) {
                 const cell = DeckfishGame.coords2algebraic(col, row);
-                if (this.board.has(cell)) {
-                    pieces.push("c" + this.board.get(cell)!);
+                if (this.occupied.has(cell)) {
+                    const card = Card.deserialize(this.board.get(cell)!)!;
+                    const adjust = crowdedRanks.includes(card.rank.name) ? "H" : "";
+                    pieces.push(this.occupied.get(cell) === 1 ? "A" + adjust : "B" + adjust);
                 } else {
                     pieces.push("-");
                 }
             }
             pstr += pieces.join(",");
         }
-
-        // build occupied markers
-        let markers: (MarkerOutline|MarkerFlood)[]|undefined;
-        if (this.occupied.size > 0) {
-            markers = [];
-            for (const [cell, p] of this.occupied.entries()) {
+        // build card markers
+        let markers: (MarkerOutline|MarkerGlyph)[]|undefined;
+        markers = [];
+        if (this.board.size > 0) {
+            for (const [cell, c] of this.board.entries()) {
                 const [x,y] = DeckfishGame.algebraic2coords(cell);
-                // find existing marker if present for this player
-                const found = markers.find(m => m.colour === p);
-                if (found !== undefined) {
-                    found.points.push({row: y, col: x});
-                } 
-                //otherwise create new marker
-                else {
+                const card = Card.deserialize(c)!;
+
+                markers.push({
+                    type: "glyph",
+                    glyph: "c" + card.uid,
+                    points: [{row: y, col: x}],
+                });
+
+                if (this.occupied.has(cell)) {
                     markers.push({
                         type: "outline",
-                        colour: p,
+                        colour: this.occupied.get(cell)!,
                         points: [{row: y, col: x}],
                     });
                 }
@@ -693,6 +733,7 @@ export class DeckfishGame extends GameBase {
         const allcards = [...cardsBasic, ...cardsExtended];
 
         const legend: ILegendObj = {};
+        
         console.log("highlight: " + this.highlights);
         for (const card of allcards) {
             // turn cards into markers in order to fade them?
@@ -708,6 +749,34 @@ export class DeckfishGame extends GameBase {
                 scale: 0.5
             }
         }
+        legend["A"] = {
+            name: "meeple",
+            colour: 1,
+            scale: 0.5,
+            opacity: 0.75,
+            nudge: {dx: 250, dy: 250}
+        };
+        legend["AH"] = {
+            name: "meeple",
+            colour: 1,
+            scale: 0.5,
+            opacity: 0.75,
+            nudge: {dx: 250, dy: -250}
+        };
+        legend["B"] = {
+            name: "meeple",
+            colour: 2,
+            scale: 0.5,
+            opacity: 0.75,
+            nudge: {dx: 250, dy: 250}
+        };
+        legend["BH"] = {
+            name: "meeple",
+            colour: 2,
+            scale: 0.5,
+            opacity: 0.75,
+            nudge: {dx: 250, dy: -250}
+        };
 
         // build pieces areas
         const areas: AreaPieces[] = [];
@@ -748,7 +817,7 @@ export class DeckfishGame extends GameBase {
                 height: 6,
                 tileHeight: 1,
                 tileWidth: 1,
-                tileSpacing: 0.1,
+                tileSpacing: 0.25,
                 strokeOpacity: 0.05,
                 labelColour: "#888",
                 markers,
