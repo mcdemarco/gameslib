@@ -526,7 +526,6 @@ export class DeckfishGame extends GameBase {
                 //TODO
                 
                 //Score the card.
-                
                 const newSuits = card.suits.map(s => s.uid as Suit);
                 //Keeping this sorted.
                 this.collected[this.currplayer - 1] = this.collected[this.currplayer - 1].concat(newSuits).sort((a,b) => suitOrder.indexOf(a) - suitOrder.indexOf(b));
@@ -552,8 +551,7 @@ export class DeckfishGame extends GameBase {
                 }
             } else {
                 if (this.mode === "place") {
-                    //if (!partial)
-                        this.occupied.set(from, this.currplayer);
+                    this.occupied.set(from, this.currplayer);
                     this.results.push({type: "place", where: from});
                 } else {
                     //Illustrate partial move.
@@ -723,11 +721,15 @@ export class DeckfishGame extends GameBase {
 
         const legend: ILegendObj = {};
         
-        console.log("highlight: " + this.highlights);
+        let lastMarketCard = "";
+        if (this.highlights.length === 0 && this.lastmove  && this.lastmove.length > 0) {
+            const lastMarketCell = this.lastmove!.split(/\W+/).find((elt) => elt[0] == "m");
+            if (lastMarketCell)
+                lastMarketCard = this.market[this.algebraic2coord(lastMarketCell!)];
+        }
+
         for (const card of allcards) {
-            // turn cards into markers in order to fade them?
-            if (this.highlights.indexOf(card.uid) > -1) {
-		console.log("highlighting " + card.uid);
+            if (this.highlights.indexOf(card.uid) > -1 || card.uid == lastMarketCard) {
                 legend["c" + card.uid] = card.toGlyph({border: true});
             } else
             legend["c" + card.uid] = card.toGlyph({border: false});
@@ -805,7 +807,6 @@ export class DeckfishGame extends GameBase {
         // Add annotations
         if (this.results.length > 0) {
             rep.annotations = [];
-                console.log(this.results);
             for (const move of this.results) {
                 if (move.type === "place") {
                     const [x, y] = DeckfishGame.algebraic2coords(move.where!);
