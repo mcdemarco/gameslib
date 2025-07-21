@@ -12,8 +12,12 @@ const deepclone = require("rfdc/default");
 export type playerid = 1|2;
 export type Mode = "place"|"collect";
 export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
+export type location = [number, number];
+
 const suitOrder = ["M","S","V","L","Y","K"];
 const crowdedRanks = ["Pawn","Court"];
+const rows = 6;
+const columns = 7;
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -68,10 +72,16 @@ export class DeckfishGame extends GameBase {
         flags: ["scores", "random-start", "custom-randomization", "autopass", "experimental"],
     };
     public static coords2algebraic(x: number, y: number): string {
-        return GameBase.coords2algebraic(x, y, 6);
+        return GameBase.coords2algebraic(x, y, rows);
     }
     public static algebraic2coords(cell: string): [number, number] {
-        return GameBase.algebraic2coords(cell, 6);
+        return GameBase.algebraic2coords(cell, rows);
+    }
+    public loc2algebraic(loc: location): string {
+        return DeckfishGame.coords2algebraic(loc[0], loc[1]);
+    }
+    public algebraic2loc(cell: string): location {
+        return DeckfishGame.algebraic2coords(cell);
     }
     public coord2algebraic(m: number): string {
         return "m" + (m + 1);
@@ -108,8 +118,8 @@ export class DeckfishGame extends GameBase {
             // init board
             const board = new Map<string, string>();
 
-            for (let x = 0; x < 7; x++) {
-                for (let y = 0; y < 6; y++) {
+            for (let x = 0; x < columns; x++) {
+                for (let y = 0; y < rows; y++) {
                     const cell = DeckfishGame.coords2algebraic(x, y);
                     if (!board.has(cell)) {
                         const [card] = deck.draw();
@@ -223,7 +233,153 @@ export class DeckfishGame extends GameBase {
     /* end helper functions for general gameplay */
 
     /* suit movement logic */
+    private checkLocation(loc: location): boolean {
+        //...is on the board, for movement math.
+        if (loc[0] < 0 || loc[1] < 0 || loc[0] >= rows || loc[1] >= columns)
+            return false;
+        else
+            return true;
+    }
 
+    private isExcuseOrGap(loc: location): boolean {
+        const cell = this.loc2algebraic(loc);
+        if (! this.board.has(cell))
+            return true;
+        const card = Card.deserialize(this.board.get(cell)!)!;
+        if (card.rank.name === "Excuse")
+            return true;
+       
+        return false;
+    }
+
+    private assembleTargets(meepleLoc: location): location[] {
+        let unfilteredTargets = this.collectTargets(meepleLoc);
+        let filteredTargets = this.filterTargets(unfilteredTargets);
+        return filteredTargets;
+    }
+
+    private collectTargets(meepleLoc: location): location[] {
+        const orthoSuits = ["Moons","Waves","Leaves","Wyrms"];
+        const cell = this.loc2algebraic(meepleLoc)!;
+        const card = Card.deserialize(this.board.get(cell)!)!;
+
+        const suits = card.suits.map(s => s.name);
+
+        //get targets
+        let myTargets: location[] = [];
+        if (suits.includes('Suns'))
+            myTargets = myTargets.concat(this.collectSunTargets(meepleLoc));
+        if (suits.includes('Knots'))      
+            myTargets = myTargets.concat(this.collectKnotTargets(meepleLoc));
+        if (suits.filter(s => orthoSuits.indexOf(s) > -1).length > 0)
+            myTargets = myTargets.concat(this.collectOrthogonalTargets(meepleLoc));
+
+        return myTargets;
+    }
+
+    private collectKnotTargets(meepleLoc: location): location[] {
+        console.log("Collecting knot targets...",-3);
+        let meepleRow = meepleLoc[0];
+        let meepleCol = meepleLoc[1];
+        let targets: location[] = [];
+        
+        //Straight lines.
+        if (this.checkLocation([meepleRow,meepleCol - 3]))
+            targets.push([meepleRow,meepleCol - 3]);
+        if (this.checkLocation([meepleRow,meepleCol + 3]))
+            targets.push([meepleRow,meepleCol + 3]);
+        
+        if (this.checkLocation([meepleRow - 3,meepleCol]))
+            targets.push([meepleRow - 3,meepleCol]);
+        if (this.checkLocation([meepleRow + 3,meepleCol]))
+            targets.push([meepleRow + 3,meepleCol]);
+        
+        //Around almost a circle.
+        if (this.checkLocation([meepleRow,meepleCol - 1]))
+            targets.push([meepleRow,meepleCol - 1]);
+        if (this.checkLocation([meepleRow,meepleCol + 1]))
+            targets.push([meepleRow,meepleCol + 1]);
+        
+        if (this.checkLocation([meepleRow - 1,meepleCol]))
+            targets.push([meepleRow - 1,meepleCol]);
+        if (this.checkLocation([meepleRow + 1,meepleCol]))
+            targets.push([meepleRow + 1,meepleCol]);
+        
+        //Zig-zagging.
+        if (this.checkLocation([meepleRow - 1,meepleCol - 2]))
+            targets.push([meepleRow - 1,meepleCol - 2]);
+        if (this.checkLocation([meepleRow + 1,meepleCol - 2]))
+            targets.push([meepleRow + 1,meepleCol - 2]);
+        
+        if (this.checkLocation([meepleRow - 1,meepleCol + 2]))
+            targets.push([meepleRow - 1,meepleCol + 2]);
+        if (this.checkLocation([meepleRow + 1,meepleCol + 2]))
+            targets.push([meepleRow + 1,meepleCol + 2]);
+        
+        if (this.checkLocation([meepleRow - 2,meepleCol - 1]))
+            targets.push([meepleRow - 2,meepleCol - 1]);
+        if (this.checkLocation([meepleRow - 2,meepleCol + 1]))
+            targets.push([meepleRow - 2,meepleCol + 1]);
+        
+        if (this.checkLocation([meepleRow + 2,meepleCol - 1]))
+            targets.push([meepleRow + 2,meepleCol - 1]);
+        if (this.checkLocation([meepleRow + 2,meepleCol + 1]))
+            targets.push([meepleRow + 2,meepleCol + 1]);
+        
+        return targets;
+    }
+
+    private collectOrthogonalTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+        
+        for (let r=0; r < rows; r++) {
+            if (r != meepleLoc[0]) 
+                targets.push([r,meepleLoc[1]]);
+        }
+        
+        for (let c=0; c < columns; c++) {
+            if (c != meepleLoc[1]) 
+                targets.push([meepleLoc[0],c]);
+        }
+        
+        return targets;
+    }
+
+    private collectSunTargets(meepleLoc: location): location[] {
+        let meepleRow = meepleLoc[0];
+        let meepleCol = meepleLoc[1];
+        let targets: location[] = [];
+        
+        //If the first space diagonally is off the board, the second will be, too.
+        if (this.checkLocation([meepleRow - 1,meepleCol - 1])) {
+            targets.push([meepleRow - 1,meepleCol - 1]);
+            if (this.checkLocation([meepleRow - 2,meepleCol - 2])) {
+                targets.push([meepleRow - 2,meepleCol - 2]);
+            }
+        }
+        if (this.checkLocation([meepleRow - 1,meepleCol + 1])) {
+            targets.push([meepleRow - 1,meepleCol + 1]);
+            if (this.checkLocation([meepleRow - 2,meepleCol + 2]))
+                targets.push([meepleRow - 2,meepleCol + 2]);
+        }
+        if (this.checkLocation([meepleRow + 1,meepleCol + 1])) {
+            targets.push([meepleRow + 1,meepleCol + 1]);
+            if (this.checkLocation([meepleRow + 2,meepleCol + 2]))
+                targets.push([meepleRow + 2,meepleCol + 2]);
+        }
+        if (this.checkLocation([meepleRow + 1,meepleCol - 1])) {
+            targets.push([meepleRow + 1,meepleCol - 1]);
+            if (this.checkLocation([meepleRow + 2,meepleCol - 2]))
+                targets.push([meepleRow + 2,meepleCol - 2]);
+        }
+        
+        return targets;
+    }
+
+    private filterTargets(targets:location[]): location[] {
+        let realTargets = targets.filter((target) => !(this.isExcuseOrGap(target)));
+        return realTargets;
+    }
 
 
     /* end suit movement logic */
@@ -246,8 +402,8 @@ export class DeckfishGame extends GameBase {
         // if placing
         if (this.mode === "place") {
             //push all unoccupied aces and crown on the board
-            for (let x = 0; x < 7; x++) {
-                for (let y = 0; y < 6; y++) {
+            for (let x = 0; x < columns; x++) {
+                for (let y = 0; y < rows; y++) {
                     const cell = DeckfishGame.coords2algebraic(x, y);
                     if (this.board.has(cell) && ! this.occupied.has(cell)) {
                         //There's an unoccupied card.
@@ -265,24 +421,13 @@ export class DeckfishGame extends GameBase {
             this.occupied.forEach((value, key) => {
                 if (value === this.currplayer) {
                     //push all other card cells in row and column
-                    const [sx, sy] = DeckfishGame.algebraic2coords(key);
-                    for (let x = 0; x < 7; x++) {
-                        for (let y = 0; y < 6; y++) {
-                            if ((sx === x && sy !== y) || (sy == y && sx !== x)) {
-                                const cell = DeckfishGame.coords2algebraic(x, y);
-                                if (this.board.has(cell) && ! this.occupied.has(cell)) {
-                                    //TODO: Some moves to player-occupied cards are possible.
-
-                                    const card = Card.deserialize(this.board.get(cell)!)!;
-                                    if (card.rank.name !== "Excuse") {
-                                        moves.push(`${key}-${cell}`);
-                                    }
-                                }
-                            } else {
-                                //TODO: knot moves
-                            }
-                        }
-                    }
+                    const meepleLoc = this.algebraic2loc(key);
+                    const targets = this.assembleTargets(meepleLoc);
+                    targets.forEach(t => {
+                        const targetCell = this.loc2algebraic(t);
+                        if (! this.occupied.has(targetCell))
+                            moves.push(key + "-" + targetCell);
+                    });
                 }
             });
         }
@@ -694,12 +839,12 @@ export class DeckfishGame extends GameBase {
     public render(): APRenderRep {
         // Build piece string
         let pstr = "";
-        for (let row = 0; row < 6; row++) {
+        for (let row = 0; row < rows; row++) {
             if (pstr.length > 0) {
                 pstr += "\n";
             }
             const pieces: string[] = [];
-            for (let col = 0; col < 7; col++) {
+            for (let col = 0; col < columns; col++) {
                 const cell = DeckfishGame.coords2algebraic(col, row);
                 if (this.occupied.has(cell)) {
                     const card = Card.deserialize(this.board.get(cell)!)!;
@@ -892,8 +1037,8 @@ export class DeckfishGame extends GameBase {
         const pcs: string[] = [];
         const board = this.stack[0].board;
         const market = this.stack[0].market;
-        for (let x = 0; x < 7; x++) {
-            for (let y = 0; y < 6; y++) {
+        for (let x = 0; x < columns; x++) {
+            for (let y = 0; y < rows; y++) {
                 const cell = DeckfishGame.coords2algebraic(x, y);
                 if (board.has(cell)) {
                     pcs.push(board.get(cell)!);
