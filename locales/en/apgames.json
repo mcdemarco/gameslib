@@ -3732,7 +3732,7 @@
             "LABEL_COLLECTION": "Player {{playerNum}}'s suits",
             "NO_SWAP": "There is no card to swap at {{cell}}.",
             "OCCUPIED_SWAP": "The card at {{cell}} is occupied by a pawn and cannot be swapped.",
-            "PARTIAL_MOVEMENT": "Click a card on the board to move your pawn to.",
+            "PARTIAL_MOVE": "Click a card on the board to move your pawn to.",
             "PARTIAL_SWAP": "Click a card on the board to swap with {{what}}.",
             "VALID_PLACEMENT": "Looks like a good placement."
         },

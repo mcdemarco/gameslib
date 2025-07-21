@@ -470,7 +470,7 @@ export class DeckfishGame extends GameBase {
                 } else if (move.includes(",") || (move && ! move.includes("-"))) {
                     newmove = `${move}-${cell}`;
                 } else {
-                    //Selecting initial from location.
+                    //Selecting initial source location.
                     newmove = `${cell}`;
                 }
             }
@@ -562,7 +562,8 @@ export class DeckfishGame extends GameBase {
             if (this.canMoveFrom(from)) {
                 result.valid = true;
                 result.complete = -1;
-                result.message = i18next.t("apgames:validation.deckfish.PARTIAL_MOVEMENT");
+                result.canrender = true;
+                result.message = i18next.t("apgames:validation.deckfish.PARTIAL_MOVE");
                 return result;
             } else {
                 result.valid = false;
@@ -709,8 +710,7 @@ export class DeckfishGame extends GameBase {
                     this.occupied.set(from, this.currplayer);
                     this.results.push({type: "place", where: from});
                 } else {
-                    //Illustrate partial move.
-                    //TODO
+                    //Partial move already illustrated, though a bit flakily.
                 }
             }   
         }
