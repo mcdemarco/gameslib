@@ -73,6 +73,12 @@ export class DeckfishGame extends GameBase {
     public static algebraic2coords(cell: string): [number, number] {
         return GameBase.algebraic2coords(cell, 6);
     }
+    public coord2algebraic(m: number): string {
+        return "m" + (m + 1);
+    }
+    public algebraic2coord(cell: string): number {
+        return parseInt(cell.substring(1),10) - 1;
+    }
 
     public numplayers = 2;
     public currplayer: playerid = 1;
@@ -296,7 +302,7 @@ export class DeckfishGame extends GameBase {
                         message: i18next.t("apgames:validation.deckfish.EARLY_TO_MARKET")
                     }
                 } else {
-                    newmove = `${move},` + piece!.substring(1);
+                    newmove = `${move},` + this.coord2algebraic(this.market.indexOf(piece!.substring(1)));
                 }
             }
             // otherwise, on the board
@@ -435,11 +441,12 @@ export class DeckfishGame extends GameBase {
         } else {
 
             //otherwise
-            let [market, swap] = sw.split("-");
+            let [mark, swap] = sw.split("-");
 
-            //A successful market choice is always valid, 
-            //but have to check that it's there.
-            //TODO?
+            //A successful market choice is always valid. 
+            //Need to check the click?
+            const market = this.market[this.algebraic2coord(mark)];
+
             console.log("Market card is " + market);
 
             // if swap is missing, may or not be complete
@@ -447,7 +454,7 @@ export class DeckfishGame extends GameBase {
                 result.valid = true;
                 result.canrender = true;
                 result.complete = -1;
-                result.message = i18next.t("apgames:validation.deckfish.PARTIAL_SWAP", {what: market});
+                result.message = i18next.t("apgames:validation.deckfish.PARTIAL_SWAP", {what: mark});
                 return result;
             }
             // otherwise the swap location needs testing.
@@ -536,9 +543,10 @@ export class DeckfishGame extends GameBase {
                 this.results.push({type: "move", from: from, to: to});
 
                 if (sw !== undefined && sw.length > 0) {
-                    let [marketCard, swapCell] = sw.split("-");
+                    let [marketCell, swapCell] = sw.split("-");
                     //highlight market card
                     //if (partial)
+                    const marketCard = this.market[this.algebraic2coord(marketCell)];
                     this.highlights.push(marketCard);
 
                     if (swapCell !== undefined && swapCell.length > 0) {
@@ -817,10 +825,10 @@ export class DeckfishGame extends GameBase {
                     const [fromX, fromY] = DeckfishGame.algebraic2coords(move.from);
                     const [toX, toY] = DeckfishGame.algebraic2coords(move.to);
                     rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
-                    rep.annotations.push({type: "enter", occlude: false, dashed: [2,4], targets: [{row: toY, col: toX}]});
+                    rep.annotations.push({type: "enter", occlude: false, targets: [{row: toY, col: toX}]});
                 } else if (move.type === "swap") {
                     const [x, y] = DeckfishGame.algebraic2coords(move.where!);
-                    rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
+                    rep.annotations.push({type: "enter", occlude: false, dashed: [2,4], targets: [{row: y, col: x}]});
                 }
             }
         }
