@@ -25,7 +25,7 @@ export interface IMoveState extends IIndividualState {
     board: Map<string, string>;
     market: string[];
     occupied: Map<string, playerid>;
-    collected: [Suit[], Suit[]];
+    collected: [number[], number[]];
     lastmove?: string;
     eliminated?: playerid;
 };
@@ -96,7 +96,7 @@ export class DeckfishGame extends GameBase {
     public board!: Map<string, string>;
     public market!: string[];
     public occupied!: Map<string, playerid>;
-    public collected!: [Suit[], Suit[]];
+    public collected!: [number[], number[]];
     public eliminated?: playerid;
     public gameover = false;
     public winner: playerid[] = [];
@@ -147,7 +147,7 @@ export class DeckfishGame extends GameBase {
                 board,
                 market,
                 occupied,
-                collected: [[],[]],
+                collected: [[0,0,0,0,0,0],[0,0,0,0,0,0]],
             };
             this.stack = [fresh];
         } else {
@@ -683,8 +683,9 @@ export class DeckfishGame extends GameBase {
                 
                 //Score the card.
                 const newSuits = card.suits.map(s => s.uid as Suit);
-                //Keeping this sorted.
-                this.collected[this.currplayer - 1] = this.collected[this.currplayer - 1].concat(newSuits).sort((a,b) => suitOrder.indexOf(a) - suitOrder.indexOf(b));
+                newSuits.forEach(s => {
+                    this.collected[this.currplayer - 1][suitOrder.indexOf(s)]++;
+                })
                 
                 this.results.push({type: "move", from: from, to: to, what: card.uid});
 
@@ -929,8 +930,15 @@ export class DeckfishGame extends GameBase {
 
         // suits
         for (let p = 1; p <= this.numplayers; p++) {
-            let captives = this.collected[p-1];
-            if (captives.length > 0) {
+            let captive = this.collected[p-1].reduce((partialSum, a) => partialSum + a, 0);
+            if (captive > 0) {
+                let captives: string[] = [];
+                this.collected[p-1].forEach((cnt,idx) => {
+                    if (cnt > 0) {
+                        for (let c = 0; c<cnt; c++) 
+                            captives.push(suitOrder[idx]);
+                    }
+                });
                 areas.push({
                     type: "pieces",
                     pieces: captives as [string, ...string[]],
@@ -982,20 +990,12 @@ export class DeckfishGame extends GameBase {
         return rep;
     }
 
-    /* scoring support functions */
-
-    private getItemCount(suitArray: string[], item: string): number {
-        return suitArray.filter(x => x === item).length;
-    }
-
-    private getSuitCounts(suitArray: string[]): number[] {
-        return suits.map(s => this.getItemCount(suitArray, s.uid));
-    }
+    /* scoring functions */
 
     private getTieWinner(): playerid[] {
         //Evaluate tiebreaker.
         let tieWinner: playerid[] = [];
-        const sortedArrays = this.collected.map(collection => this.getSuitCounts(collection.slice()).sort());
+        const sortedArrays = this.collected.map(collection => collection.slice().sort());
 
         console.log("Sort:" + sortedArrays[0] + "; " + sortedArrays[1]);
 
@@ -1011,15 +1011,9 @@ export class DeckfishGame extends GameBase {
         return tieWinner;
     } 
 
-    /* end scoring support functions */
-
     public getPlayerScore(player: number): number {
-        let score = 0;
         //gets min of suits
-        const collection = this.collected[player - 1].slice();
-        if (collection !== undefined && collection.length !== 0) {
-            score = this.getSuitCounts(collection).sort()[0];
-        }
+        const score = this.collected[player - 1].slice().sort()[0];
         return score;
     }
 
@@ -1032,6 +1026,8 @@ export class DeckfishGame extends GameBase {
             { name: i18next.t("apgames:status.SCORES"), scores},
         ];
     }
+
+    /* end scoring functions */
 
     public getStartingPosition(): string {
         const pcs: string[] = [];
