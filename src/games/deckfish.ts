@@ -177,6 +177,8 @@ export class DeckfishGame extends GameBase {
         return this;
     }
 
+    /* helper functions for general gameplay */
+
     public canMoveFrom(cell: string): boolean {
         if (this.occupied.has(cell) && this.occupied.get(cell) === this.currplayer) {
             return true;
@@ -217,6 +219,14 @@ export class DeckfishGame extends GameBase {
     public canSwap(cell: string, market: string): boolean {
         return true;
     }
+
+    /* end helper functions for general gameplay */
+
+    /* suit movement logic */
+
+
+
+    /* end suit movement logic */
 
     public moves(player?: playerid): string[] {
         if (this.gameover) {
@@ -645,6 +655,7 @@ export class DeckfishGame extends GameBase {
     }
 
     private makeMeeple(opts: {colour?: string|number|Colourfuncs, opacity?: number, adjust?: boolean} = {}): [Glyph, ...Glyph[]] {
+        //Build the pawns that we're not calling pawns or illustrating with meeples.
         let opacity = 1;
         if (opts !== undefined && opts.opacity !== undefined) {
             opacity = opts.opacity;
@@ -826,6 +837,8 @@ export class DeckfishGame extends GameBase {
         return rep;
     }
 
+    /* scoring support functions */
+
     private getItemCount(suitArray: string[], item: string): number {
         return suitArray.filter(x => x === item).length;
     }
@@ -853,6 +866,8 @@ export class DeckfishGame extends GameBase {
         return tieWinner;
     } 
 
+    /* end scoring support functions */
+
     public getPlayerScore(player: number): number {
         let score = 0;
         //gets min of suits
@@ -876,9 +891,20 @@ export class DeckfishGame extends GameBase {
     public getStartingPosition(): string {
         const pcs: string[] = [];
         const board = this.stack[0].board;
-        for (const [cell, card] of board.entries()) {
-            pcs.push(`${card}-${cell}`);
+        const market = this.stack[0].market;
+        for (let x = 0; x < 7; x++) {
+            for (let y = 0; y < 6; y++) {
+                const cell = DeckfishGame.coords2algebraic(x, y);
+                if (board.has(cell)) {
+                    pcs.push(board.get(cell)!);
+                }
+            }
+            pcs.push("/")
         }
+
+        pcs.push("/");
+        market.map(m => pcs.push(m));
+
         return pcs.join(",");
     }
 
