@@ -280,7 +280,7 @@
         "complete": "{{player}} moved a {{what}} from {{from}} to {{to}}.",
         "complete_one": "{{player}} moved one piece from {{from}} to {{to}}.",
         "complete_other": "{{player}} moved {{count}} pieces from {{from}} to {{to}}.",
-        "deckfish": "{{player}} moved a pawn from {{from}} to {{to}}.",
+        "deckfish": "{{player}} moved a pawn from {{from}} to {{to}}, collecting {{what}}.",
         "entrapment_barrier": "{{player}} moved a barrier from {{from}} to {{to}}.",
         "entrapment_roamer": "{{player}} moved a roamer from {{from}} to {{to}}.",
         "entrapment_roamer_jump": "{{player}} moved a roamer from {{from}} to {{to}}, jumping over {{jumped}}.",

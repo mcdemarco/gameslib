@@ -305,19 +305,20 @@ export class DeckfishGame extends GameBase {
                     newmove = `${move},` + this.coord2algebraic(this.market.indexOf(piece!.substring(1)));
                 }
             }
-            // otherwise, on the board
+            // otherwise, clicked on the board
             else {
                 const cell = DeckfishGame.coords2algebraic(col, row);
                 // continuation of placement
-                if (move.includes(",") || (move && ! move.includes("-"))) {
+                if (this.mode === "place") {
+                    //Selecting initial placement location.
+                    newmove = `${cell}`;
+                } else if (move.includes(",") || (move && ! move.includes("-"))) {
                     newmove = `${move}-${cell}`;
                 } else {
-                    //Selecting initial from location or placement location.
+                    //Selecting initial from location.
                     newmove = `${cell}`;
                 }
             }
-
-            console.log("New move is " + newmove);
 
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
@@ -422,13 +423,6 @@ export class DeckfishGame extends GameBase {
             return result;
         }
 
- /*           result.message = i18next.t("apgames:validation._general.PARTIAL_MOVEMENT", {cell: to});            result.valid = true;
-            result.complete = 0;
-            result.message = i18next.t("apgames:validation.deckfish.MAY_SWAP");
-            return result;
-        } else {
- */
-
         //Now, swapping.
 
         // if `sw` is missing, possibly partial
@@ -445,16 +439,14 @@ export class DeckfishGame extends GameBase {
 
             //A successful market choice is always valid. 
             //Need to check the click?
-            const market = this.market[this.algebraic2coord(mark)];
-
-            console.log("Market card is " + market);
+            const marketCard = this.market[this.algebraic2coord(mark)];
 
             // if swap is missing, may or not be complete
             if (swap === undefined || swap.length === 0) {
                 result.valid = true;
                 result.canrender = true;
                 result.complete = -1;
-                result.message = i18next.t("apgames:validation.deckfish.PARTIAL_SWAP", {what: mark});
+                result.message = i18next.t("apgames:validation.deckfish.PARTIAL_SWAP", {what: marketCard, where: mark});
                 return result;
             }
             // otherwise the swap location needs testing.
@@ -514,38 +506,36 @@ export class DeckfishGame extends GameBase {
             const [mv, sw] = m.split(",");
             // eslint-disable-next-line prefer-const
             let [from, to] = mv.split("-");
-            
+ 
+            const card = Card.deserialize(this.board.get(from)!)!;
+            if (card === undefined)
+                throw new Error(`Could not load the card at ${from}.`);
+            this.highlights.push(card.uid);
+           
             if (to !== undefined && to.length > 0) {
                 //Remove the card.
-                const card = Card.deserialize(this.board.get(from)!)!;
-                if (card === undefined)
-                    throw new Error(`Could not load the card at ${from}.`);
-
-                if (partial)
-                    this.highlights.push(card.uid);
-                else
+ 
+                this.highlights.push(card.uid);
+                if (!partial)
                     this.board.delete(from);
 
                 //Move the pawn.
                 this.occupied.delete(from);
-                if (!partial)
-                    this.occupied.set(to, this.currplayer);
+                this.occupied.set(to, this.currplayer);
                 //In the wyrms/bounce case, must also move the other pawn.
                 //TODO
                 
                 //Score the card.
                 
                 const newSuits = card.suits.map(s => s.uid as Suit);
-                //console.log(newSuits);
                 //Keeping this sorted.
                 this.collected[this.currplayer - 1] = this.collected[this.currplayer - 1].concat(newSuits).sort((a,b) => suitOrder.indexOf(a) - suitOrder.indexOf(b));
                 
-                this.results.push({type: "move", from: from, to: to});
+                this.results.push({type: "move", from: from, to: to, what: card.uid});
 
                 if (sw !== undefined && sw.length > 0) {
                     let [marketCell, swapCell] = sw.split("-");
                     //highlight market card
-                    //if (partial)
                     const marketCard = this.market[this.algebraic2coord(marketCell)];
                     this.highlights.push(marketCard);
 
@@ -553,7 +543,6 @@ export class DeckfishGame extends GameBase {
                         //swap market card
                         const swapCard = this.board.get(swapCell)!;
                         this.highlights.push(swapCard);
-                        console.log("swapcard " + swapCard + " marketcard " + marketCard);
                         this.market[this.market.indexOf(marketCard)] = swapCard!;
                         this.board.set(swapCell, marketCard);
                         this.results.push({type: "swap", what: marketCard, with: swapCard, where: swapCell});
@@ -563,7 +552,7 @@ export class DeckfishGame extends GameBase {
                 }
             } else {
                 if (this.mode === "place") {
-                    if (!partial)
+                    //if (!partial)
                         this.occupied.set(from, this.currplayer);
                     this.results.push({type: "place", where: from});
                 } else {
@@ -912,7 +901,7 @@ export class DeckfishGame extends GameBase {
                 resolved = true;
                 break;
             case "move":
-                node.push(i18next.t("apresults:MOVE.deckfish", {player, from: r.from, to: r.to}));
+                node.push(i18next.t("apresults:MOVE.deckfish", {player, from: r.from, to: r.to, what: r.what}));
                 resolved = true;
                 break;
             case "swap":
