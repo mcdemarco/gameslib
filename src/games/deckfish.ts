@@ -273,29 +273,14 @@ export class DeckfishGame extends GameBase {
             return true;
     }
 
-    private isExcuseOrGap(loc: location): boolean {
-        const cell = this.loc2algebraic(loc);
-        if (! this.board.has(cell))
-            return true;
-        const card = Card.deserialize(this.board.get(cell)!)!;
-        if (card.rank.name === "Excuse")
-            return true;
-       
-        return false;
-    }
-
-    private assembleTargets(meepleLoc: location): location[] {
-        let unfilteredTargets = this.collectTargets(meepleLoc);
-        let filteredTargets = this.filterTargets(unfilteredTargets);
+    private assembleTargets(meepleLoc: location, suits: string[]): location[] {
+        const targets = this.collectTargets(meepleLoc,suits);
+        const filteredTargets = targets.filter(t => this.tableau[t[0]][t[1]] > 0);
         return filteredTargets;
     }
 
-    private collectTargets(meepleLoc: location): location[] {
+    private collectTargets(meepleLoc: location, suits: string[]): location[] {
         const orthoSuits = ["Moons","Waves","Leaves","Wyrms"];
-        const cell = this.loc2algebraic(meepleLoc)!;
-        const card = Card.deserialize(this.board.get(cell)!)!;
-
-        const suits = card.suits.map(s => s.name);
 
         //get targets
         let myTargets: location[] = [];
@@ -408,12 +393,6 @@ export class DeckfishGame extends GameBase {
         return targets;
     }
 
-    private filterTargets(targets:location[]): location[] {
-        let realTargets = targets.filter((target) => !(this.isExcuseOrGap(target)));
-        return realTargets;
-    }
-
-
     /* end suit movement logic */
 
     public moves(player?: playerid): string[] {
@@ -450,15 +429,15 @@ export class DeckfishGame extends GameBase {
         }
         // otherwise collecting
         else {
-            this.occupied.forEach((value, key) => {
+            this.occupied.forEach((value, cell) => {
                 if (value === this.currplayer) {
                     //push all other card cells in row and column
-                    const meepleLoc = this.algebraic2loc(key);
-                    const targets = this.assembleTargets(meepleLoc);
+                    const meepleLoc = this.algebraic2loc(cell);
+                    const card = Card.deserialize(this.board.get(cell)!)!;
+                    const suits = card.suits.map(s => s.name);
+                    const targets = this.assembleTargets(meepleLoc,suits);
                     targets.forEach(t => {
-                        const targetCell = this.loc2algebraic(t);
-                        if (! this.occupied.has(targetCell))
-                            moves.push(key + "-" + targetCell);
+                        moves.push(cell + "-" + this.loc2algebraic(t))
                     });
                 }
             });
