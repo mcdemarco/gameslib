@@ -104,6 +104,8 @@ export class DeckfishGame extends GameBase {
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
     private highlights: string[] = [];
+    private tableau: number[][] = new Array(columns).fill(-1).map(() => 
+        new Array(rows).fill(-1));
 
     constructor(state?: IDeckfishState | string) {
         super();
@@ -184,15 +186,19 @@ export class DeckfishGame extends GameBase {
         this.lastmove = state.lastmove;
         this.eliminated = state.eliminated;
 
+        if (this.mode === "collect")
+            this.populateTableau();
+        console.log(this.tableau);
+
         return this;
     }
 
     /* helper functions for general gameplay */
 
     public canMoveFrom(cell: string): boolean {
-        if (this.occupied.has(cell) && this.occupied.get(cell) === this.currplayer) {
+        if (this.occupied.has(cell) && this.occupied.get(cell) === this.currplayer)
             return true;
-        } else
+        else
             return false;
     }
 
@@ -232,7 +238,33 @@ export class DeckfishGame extends GameBase {
 
     /* end helper functions for general gameplay */
 
-    /* suit movement logic */
+    /* suit-based movement logic */
+
+    private populateTableau(): void {
+        //Abstract the data structure to only what is needed for movement.
+        for (let x = 0; x < columns; x++) {
+            for (let y = 0; y < rows; y++) {
+                //The tableau was initialized to all -1's (gaps).  
+                const cell = DeckfishGame.coords2algebraic(x, y);
+                if (this.board.has(cell)) {
+                    // Revise card spaces: 2 is occupied, 1 is unoccupied, 0 is the Excuse.
+                    if (this.occupied.has(cell)) {
+                        //The card is occupied by a piece.
+                        this.tableau[x][y] = 2;
+                    } else {
+                        //There's an unoccupied card.
+                        const card = Card.deserialize(this.board.get(cell)!)!;
+                        //Check for excuse.
+                        if (card.rank.name === "Excuse")
+                            this.tableau[x][y] = 0;
+                        else
+                            this.tableau[x][y] = 1;
+                    }
+                }
+            }
+        }
+    }
+
     private checkLocation(loc: location): boolean {
         //...is on the board, for movement math.
         if (loc[0] < 0 || loc[1] < 0 || loc[0] >= rows || loc[1] >= columns)
@@ -666,6 +698,7 @@ export class DeckfishGame extends GameBase {
             const card = Card.deserialize(this.board.get(from)!)!;
             if (card === undefined)
                 throw new Error(`Could not load the card at ${from}.`);
+
             this.highlights.push(card.uid);
            
             if (to !== undefined && to.length > 0) {
@@ -675,10 +708,10 @@ export class DeckfishGame extends GameBase {
                 if (!partial)
                     this.board.delete(from);
 
-                //Move the pawn.
+                //Move the piece.
                 this.occupied.delete(from);
                 this.occupied.set(to, this.currplayer);
-                //In the wyrms/bounce case, must also move the other pawn.
+                //In the wyrms/bounce case, must also move the other piece.
                 //TODO
                 
                 //Score the card.
@@ -801,7 +834,8 @@ export class DeckfishGame extends GameBase {
     }
 
     private makeMeeple(opts: {colour?: string|number|Colourfuncs, opacity?: number, adjust?: boolean} = {}): [Glyph, ...Glyph[]] {
-        //Build the pawns that we're not calling pawns or illustrating with meeples.
+        //Build the pieces that we're not calling pawns (because that's a card)
+        //or illustrating with meeples (because they looked too busy).
         let opacity = 1;
         if (opts !== undefined && opts.opacity !== undefined) {
             opacity = opts.opacity;
