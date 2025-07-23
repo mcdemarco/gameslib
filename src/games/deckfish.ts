@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaPieces, Colourfuncs, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { reviver, UserFacingError } from "../common";
+import { diagDirections, Direction, orthDirections, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
 import { Card, Deck, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
@@ -16,8 +16,9 @@ export type location = [number, number];
 
 const suitOrder = ["M","S","V","L","Y","K"];
 const crowdedRanks = ["Pawn","Court"];
-const rows = 6;
 const columns = 7;
+const rows = 6;
+const maxdim = 7;
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -188,7 +189,8 @@ export class DeckfishGame extends GameBase {
 
         if (this.mode === "collect")
             this.populateTableau();
-        console.log(this.tableau);
+
+console.log(this.tableau);
 
         return this;
     }
@@ -202,19 +204,34 @@ export class DeckfishGame extends GameBase {
             return false;
     }
 
-    public canMoveTo(cell: string): boolean {
+    public canMoveTo(fromCell: string, toCell: string): boolean {
         //This is going to get complicated.
-        //For now just check one thing for a placeholder.
-        if (! this.board.has(cell)) {
+
+        //Low-hanging fruit.
+        if (! this.board.has(toCell)) {
             //Cannot land in the gaps.
             return false;
-        } else {
-            const card = Card.deserialize(this.board.get(cell)!)!;
+        } 
+        const card = Card.deserialize(this.board.get(toCell)!)!;
+        if (card.rank.name === "Excuse") {
             //Cannot land on the Excuse.
-            if (card.rank.name === "Excuse")
-                return false;
+            return false;
         }
-        return true;
+        
+        //Need to check the move.
+        
+        const suits = this.getSuits(fromCell);
+
+        const fromLoc = this.algebraic2loc(fromCell);
+        const toLoc = this.algebraic2loc(toCell);
+        console.log("Can move from "+fromCell+ " / " +fromLoc+" to "+toCell+" / "+toLoc+" using suits " + suits + "?");
+        console.log("Tableau values are " + this.getTableau(fromLoc) + " (from) and " + this.getTableau(toLoc) + " (to).");
+
+        const targets = this.assembleTargets(fromLoc, suits)!;
+        console.log(targets);
+        const toTarget = targets.filter(loc => (loc[0] === toLoc[0] && loc[1] === toLoc[1]));
+
+        return (toTarget.length > 0);
     }
 
     public canPlace(cell: string): boolean {
@@ -240,8 +257,47 @@ export class DeckfishGame extends GameBase {
 
     /* suit-based movement logic */
 
+    private getSuits(cell: string): string[] {
+        const card = Card.deserialize(this.board.get(cell)!)!;
+        const suits = card.suits.map(s => s.name);
+        return suits;
+    }
+
     private getTableau(loc: location): number {
         return this.tableau[loc[0]][loc[1]];
+    }
+
+    private getNext(loc: location, dir: Direction): location {
+        //Get the next location in a compass direction, not checked.
+        const nextLoc = loc.slice() as location;
+        switch (dir) {
+            case "N":
+                nextLoc[1]--;
+                break;
+            case "NE":
+                nextLoc[1]--;
+            case "E":
+                nextLoc[0]++;
+                break;
+            case "SE":
+                nextLoc[0]++;
+            case "S":
+                nextLoc[1]++;
+                break;
+            case "SW":
+                nextLoc[1]++;
+            case "W":
+                nextLoc[0]--;
+                break;
+            case "NW":
+                nextLoc[1]--;
+                nextLoc[0]--;
+                break;
+            default:
+                throw new Error(`The direction is invalid: ${dir}.`);
+        }
+        //console.log("next of " + loc + " " + dir + " is "  + nextLoc);
+        return nextLoc!;
     }
 
     private populateTableau(): void {
@@ -269,14 +325,20 @@ export class DeckfishGame extends GameBase {
         }
     }
 
-    private checkLocation(loc: location): boolean {
+    private checkUnoccupied(loc: location): boolean {
         //Check the location is on the board and a legal intermediate/target.
+        console.log("check " +loc+ " is on the board " + this.onBoard(loc) + " and unoccupied " );
         return (this.onBoard(loc) && this.getTableau(loc) === 1);
+    }
+
+    private checkGap(loc: location): boolean {
+        //Check the location is on the board and a gap (for moon jumping).
+        return (this.onBoard(loc) && this.getTableau(loc) === -1);
     }
 
     private onBoard(loc: location): boolean {
         //Check for leaving the board with movement math.
-        if (loc[0] < 0 || loc[1] < 0 || loc[0] >= rows || loc[1] >= columns)
+        if (loc[0] < 0 || loc[1] < 0 || loc[0] >= columns || loc[1] >= rows)
             return false;
         else
             return true;
@@ -289,10 +351,12 @@ export class DeckfishGame extends GameBase {
     }
 
     private collectTargets(meepleLoc: location, suits: string[]): location[] {
-        const orthoSuits = ["Moons","Waves","Leaves","Wyrms"];
+        const orthoSuits = ["Waves","Leaves","Wyrms"];
 
         //get targets
         let myTargets: location[] = [];
+        if (suits.includes('Moons'))
+            myTargets = myTargets.concat(this.collectMoonTargets(meepleLoc));
         if (suits.includes('Suns'))
             myTargets = myTargets.concat(this.collectSunTargets(meepleLoc));
         if (suits.includes('Knots'))      
@@ -305,51 +369,52 @@ export class DeckfishGame extends GameBase {
 
     private collectKnotTargets(meepleLoc: location): location[] {
         console.log("Collecting knot targets...",-3);
+
         let meepleRow = meepleLoc[0];
         let meepleCol = meepleLoc[1];
         let targets: location[] = [];
         
         //Straight lines.
-        if (this.checkLocation([meepleRow,meepleCol - 3]))
+        if (this.checkUnoccupied([meepleRow,meepleCol - 3]))
             targets.push([meepleRow,meepleCol - 3]);
-        if (this.checkLocation([meepleRow,meepleCol + 3]))
+        if (this.checkUnoccupied([meepleRow,meepleCol + 3]))
             targets.push([meepleRow,meepleCol + 3]);
         
-        if (this.checkLocation([meepleRow - 3,meepleCol]))
+        if (this.checkUnoccupied([meepleRow - 3,meepleCol]))
             targets.push([meepleRow - 3,meepleCol]);
-        if (this.checkLocation([meepleRow + 3,meepleCol]))
+        if (this.checkUnoccupied([meepleRow + 3,meepleCol]))
             targets.push([meepleRow + 3,meepleCol]);
         
         //Around almost a circle.
-        if (this.checkLocation([meepleRow,meepleCol - 1]))
+        if (this.checkUnoccupied([meepleRow,meepleCol - 1]))
             targets.push([meepleRow,meepleCol - 1]);
-        if (this.checkLocation([meepleRow,meepleCol + 1]))
+        if (this.checkUnoccupied([meepleRow,meepleCol + 1]))
             targets.push([meepleRow,meepleCol + 1]);
         
-        if (this.checkLocation([meepleRow - 1,meepleCol]))
+        if (this.checkUnoccupied([meepleRow - 1,meepleCol]))
             targets.push([meepleRow - 1,meepleCol]);
-        if (this.checkLocation([meepleRow + 1,meepleCol]))
+        if (this.checkUnoccupied([meepleRow + 1,meepleCol]))
             targets.push([meepleRow + 1,meepleCol]);
         
         //Zig-zagging.
-        if (this.checkLocation([meepleRow - 1,meepleCol - 2]))
+        if (this.checkUnoccupied([meepleRow - 1,meepleCol - 2]))
             targets.push([meepleRow - 1,meepleCol - 2]);
-        if (this.checkLocation([meepleRow + 1,meepleCol - 2]))
+        if (this.checkUnoccupied([meepleRow + 1,meepleCol - 2]))
             targets.push([meepleRow + 1,meepleCol - 2]);
         
-        if (this.checkLocation([meepleRow - 1,meepleCol + 2]))
+        if (this.checkUnoccupied([meepleRow - 1,meepleCol + 2]))
             targets.push([meepleRow - 1,meepleCol + 2]);
-        if (this.checkLocation([meepleRow + 1,meepleCol + 2]))
+        if (this.checkUnoccupied([meepleRow + 1,meepleCol + 2]))
             targets.push([meepleRow + 1,meepleCol + 2]);
         
-        if (this.checkLocation([meepleRow - 2,meepleCol - 1]))
+        if (this.checkUnoccupied([meepleRow - 2,meepleCol - 1]))
             targets.push([meepleRow - 2,meepleCol - 1]);
-        if (this.checkLocation([meepleRow - 2,meepleCol + 1]))
+        if (this.checkUnoccupied([meepleRow - 2,meepleCol + 1]))
             targets.push([meepleRow - 2,meepleCol + 1]);
         
-        if (this.checkLocation([meepleRow + 2,meepleCol - 1]))
+        if (this.checkUnoccupied([meepleRow + 2,meepleCol - 1]))
             targets.push([meepleRow + 2,meepleCol - 1]);
-        if (this.checkLocation([meepleRow + 2,meepleCol + 1]))
+        if (this.checkUnoccupied([meepleRow + 2,meepleCol + 1]))
             targets.push([meepleRow + 2,meepleCol + 1]);
         
         return targets;
@@ -357,48 +422,74 @@ export class DeckfishGame extends GameBase {
 
     private collectOrthogonalTargets(meepleLoc: location): location[] {
         let targets: location[] = [];
-        
-        for (let r=0; r < rows; r++) {
-            if (r != meepleLoc[0]) 
-                targets.push([r,meepleLoc[1]]);
+
+        for (const dir of orthDirections) {
+            let nextLoc = meepleLoc.slice() as location;
+            //Check the next space in the current direction.
+            for (let a = 1; a < maxdim; a++) {
+                nextLoc = this.getNext(nextLoc,dir);
+                if (this.checkUnoccupied(nextLoc)) {
+                    targets.push(nextLoc);
+                } else {
+                    //Otherwise, it's a gap, the excuse, an occupied card, or off the board.
+                    break;
+                }
+            }
         }
-        
-        for (let c=0; c < columns; c++) {
-            if (c != meepleLoc[1]) 
-                targets.push([meepleLoc[0],c]);
+
+        //these are not necessarily legal targets so need filtering.
+        return targets;
+    }
+
+    private collectMoonTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+
+        for (const dir of orthDirections) {
+            let nextLoc = this.getNext(meepleLoc,dir);
+
+            //The first space orthogonally must be a gap.
+            if (this.checkGap(nextLoc)) {
+                //Check the next space in the current direction.
+                for (let a = 2; a < maxdim; a++) {
+                    nextLoc = this.getNext(nextLoc,dir);
+                    if (this.checkGap(nextLoc)) {
+                        continue;
+                    } else if (this.checkUnoccupied(nextLoc)) {
+                        targets.push(nextLoc);
+                        break;
+                    } else {
+                        //The excuse, an occupied card, or off the board.
+                        break;
+                    }
+                }
+            }
         }
-        
+
+        //these are already legal targets and don't need filtering.
         return targets;
     }
 
     private collectSunTargets(meepleLoc: location): location[] {
-        let meepleRow = meepleLoc[0];
-        let meepleCol = meepleLoc[1];
         let targets: location[] = [];
-        
-        //If the first space diagonally is off the board, the second will be, too.
-        if (this.checkLocation([meepleRow - 1,meepleCol - 1])) {
-            targets.push([meepleRow - 1,meepleCol - 1]);
-            if (this.checkLocation([meepleRow - 2,meepleCol - 2])) {
-                targets.push([meepleRow - 2,meepleCol - 2]);
-            }
+        console.log("Collecting sun targets of " + meepleLoc);
+
+        for (const dir of diagDirections) {
+            console.log(dir);
+            const nextLoc = this.getNext(meepleLoc,dir);
+            console.log(nextLoc);
+            if (this.checkUnoccupied(nextLoc)) {
+                targets.push(nextLoc);
+                console.log("Pushed " + nextLoc);
+                const secondLoc = this.getNext(nextLoc,dir);
+                if (this.checkUnoccupied(secondLoc))
+                    targets.push(secondLoc);
+            } //Otherwise: 
+            //if the first space diagonally is off the board, so is the second.
+            //if it's is the Excuse or occupied, we cannot reach the second.
         }
-        if (this.checkLocation([meepleRow - 1,meepleCol + 1])) {
-            targets.push([meepleRow - 1,meepleCol + 1]);
-            if (this.checkLocation([meepleRow - 2,meepleCol + 2]))
-                targets.push([meepleRow - 2,meepleCol + 2]);
-        }
-        if (this.checkLocation([meepleRow + 1,meepleCol + 1])) {
-            targets.push([meepleRow + 1,meepleCol + 1]);
-            if (this.checkLocation([meepleRow + 2,meepleCol + 2]))
-                targets.push([meepleRow + 2,meepleCol + 2]);
-        }
-        if (this.checkLocation([meepleRow + 1,meepleCol - 1])) {
-            targets.push([meepleRow + 1,meepleCol - 1]);
-            if (this.checkLocation([meepleRow + 2,meepleCol - 2]))
-                targets.push([meepleRow + 2,meepleCol - 2]);
-        }
+
         //these are already legal targets and don't need filtering.
+        console.log("sun: " + targets);
         return targets;
     }
 
@@ -442,8 +533,7 @@ export class DeckfishGame extends GameBase {
                 if (value === this.currplayer) {
                     //push all other card cells in row and column
                     const meepleLoc = this.algebraic2loc(cell);
-                    const card = Card.deserialize(this.board.get(cell)!)!;
-                    const suits = card.suits.map(s => s.name);
+                    const suits = this.getSuits(cell);
                     const targets = this.assembleTargets(meepleLoc,suits);
                     targets.forEach(t => {
                         moves.push(cell + "-" + this.loc2algebraic(t))
@@ -455,6 +545,9 @@ export class DeckfishGame extends GameBase {
         if (moves.length === 0) {
             moves.push("pass");
         }
+
+        console.log(moves);
+
         return moves.sort((a,b) => a.localeCompare(b));
     }
 
@@ -560,12 +653,12 @@ export class DeckfishGame extends GameBase {
 
         const [mv, sw] = m.split(",");
         // eslint-disable-next-line prefer-const
-        let [from, to] = mv.split("-");
+        let [frm, to] = mv.split("-");
         //card = card.toUpperCase();
 
         //Testing placements.
         if (this.mode === "place") {
-            if (this.canPlace(from)) {
+            if (this.canPlace(frm)) {
                 result.valid = true;
                 result.complete = 1;
                 result.message = i18next.t("apgames:validation.deckfish.VALID_PLACEMENT");
@@ -579,7 +672,7 @@ export class DeckfishGame extends GameBase {
 
         // if `to` is missing, partial
         if (to === undefined || to.length === 0) {
-            if (this.canMoveFrom(from)) {
+            if (this.canMoveFrom(frm)) {
                 result.valid = true;
                 result.complete = -1;
                 result.canrender = true;
@@ -593,7 +686,7 @@ export class DeckfishGame extends GameBase {
         }
 
         //Otherwise, evaluate the move destination.
-        if (! this.canMoveTo(to)) {
+        if (! this.canMoveTo(frm,to)) {
             result.valid = false;
             result.message = i18next.t("apgames:validation.deckfish.INVALID_TO", {cell: to});
             return result;
@@ -681,11 +774,11 @@ export class DeckfishGame extends GameBase {
 
             const [mv, sw] = m.split(",");
             // eslint-disable-next-line prefer-const
-            let [from, to] = mv.split("-");
+            let [frm, to] = mv.split("-");
  
-            const card = Card.deserialize(this.board.get(from)!)!;
+            const card = Card.deserialize(this.board.get(frm)!)!;
             if (card === undefined)
-                throw new Error(`Could not load the card at ${from}.`);
+                throw new Error(`Could not load the card at ${frm}.`);
 
             this.highlights.push(card.uid);
            
@@ -694,10 +787,10 @@ export class DeckfishGame extends GameBase {
  
                 this.highlights.push(card.uid);
                 if (!partial)
-                    this.board.delete(from);
+                    this.board.delete(frm);
 
                 //Move the piece.
-                this.occupied.delete(from);
+                this.occupied.delete(frm);
                 this.occupied.set(to, this.currplayer);
                 //In the wyrms/bounce case, must also move the other piece.
                 //TODO
@@ -708,7 +801,7 @@ export class DeckfishGame extends GameBase {
                     this.collected[this.currplayer - 1][suitOrder.indexOf(s)]++;
                 })
                 
-                this.results.push({type: "move", from: from, to: to, what: card.uid});
+                this.results.push({type: "move", from: frm, to: to, what: card.uid});
 
                 if (sw !== undefined && sw.length > 0) {
                     let [marketCell, swapCell] = sw.split("-");
@@ -729,8 +822,8 @@ export class DeckfishGame extends GameBase {
                 }
             } else {
                 if (this.mode === "place") {
-                    this.occupied.set(from, this.currplayer);
-                    this.results.push({type: "place", where: from});
+                    this.occupied.set(frm, this.currplayer);
+                    this.results.push({type: "place", where: frm});
                 } else {
                     //Partial move already illustrated, though a bit flakily.
                 }

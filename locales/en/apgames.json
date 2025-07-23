@@ -3726,7 +3726,7 @@
             "INITIAL_SWAP_INSTRUCTIONS": "Click a market card to swap it with one on the board.",
             "INVALID_FROM": "You may only move your own pieces.",
             "INVALID_PLACEMENT": "You may only place your piece on an unoccupied Ace or Crown.",
-            "INVALID_TO": "The destinatiion {{cell}} is not legal.",
+            "INVALID_TO": "The destination {{cell}} is not legal.",
             "LABEL_MARKET": "Market cards",
             "LABEL_COLLECTION": "Player {{playerNum}}'s suits",
             "NO_SWAP": "There is no card to swap at {{cell}}.",
