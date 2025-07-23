@@ -240,6 +240,10 @@ export class DeckfishGame extends GameBase {
 
     /* suit-based movement logic */
 
+    private getTableau(loc: location): number {
+        return this.tableau[loc[0]][loc[1]];
+    }
+
     private populateTableau(): void {
         //Abstract the data structure to only what is needed for movement.
         for (let x = 0; x < columns; x++) {
@@ -266,7 +270,12 @@ export class DeckfishGame extends GameBase {
     }
 
     private checkLocation(loc: location): boolean {
-        //...is on the board, for movement math.
+        //Check the location is on the board and a legal intermediate/target.
+        return (this.onBoard(loc) && this.getTableau(loc) === 1);
+    }
+
+    private onBoard(loc: location): boolean {
+        //Check for leaving the board with movement math.
         if (loc[0] < 0 || loc[1] < 0 || loc[0] >= rows || loc[1] >= columns)
             return false;
         else
@@ -275,7 +284,7 @@ export class DeckfishGame extends GameBase {
 
     private assembleTargets(meepleLoc: location, suits: string[]): location[] {
         const targets = this.collectTargets(meepleLoc,suits);
-        const filteredTargets = targets.filter(t => this.tableau[t[0]][t[1]] > 0);
+        const filteredTargets = targets.filter(t => this.tableau[t[0]][t[1]] === 1);
         return filteredTargets;
     }
 
@@ -389,7 +398,7 @@ export class DeckfishGame extends GameBase {
             if (this.checkLocation([meepleRow + 2,meepleCol - 2]))
                 targets.push([meepleRow + 2,meepleCol - 2]);
         }
-        
+        //these are already legal targets and don't need filtering.
         return targets;
     }
 
