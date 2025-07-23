@@ -327,13 +327,37 @@ console.log(this.tableau);
 
     private checkUnoccupied(loc: location): boolean {
         //Check the location is on the board and a legal intermediate/target.
-        console.log("check " +loc+ " is on the board " + this.onBoard(loc) + " and unoccupied " );
+        //console.log("check " +loc+ " is on the board " + this.onBoard(loc) + " and unoccupied " );
         return (this.onBoard(loc) && this.getTableau(loc) === 1);
+    }
+
+    private checkOccupied(loc: location): boolean {
+        //Check the location is on the board and occupied (for wyrming).
+         return (this.onBoard(loc) && this.getTableau(loc) === 2);
     }
 
     private checkGap(loc: location): boolean {
         //Check the location is on the board and a gap (for moon jumping).
         return (this.onBoard(loc) && this.getTableau(loc) === -1);
+    }
+
+    private isBlockage(loc: location): boolean {
+        //Check for the exact edge of the board.
+        console.log("Is " + loc + " a blockage?");
+        if (loc[0] === -1 || loc[1] === -1 || loc[0] === columns || loc[1] === rows) {
+            console.log("Yes");
+            
+            return true;
+        } else if (this.checkUnoccupied(loc)) {
+            //an unoccupied card is the only non-blockage in the tableau
+            console.log("No");
+            return false;
+        } else {
+            //This is occupied, a gap, or the Excuse.
+            console.log("Yes");
+
+            return true;
+        }
     }
 
     private onBoard(loc: location): boolean {
@@ -351,17 +375,19 @@ console.log(this.tableau);
     }
 
     private collectTargets(meepleLoc: location, suits: string[]): location[] {
-        const orthoSuits = ["Waves","Leaves","Wyrms"];
-
         //get targets
         let myTargets: location[] = [];
         if (suits.includes('Moons'))
             myTargets = myTargets.concat(this.collectMoonTargets(meepleLoc));
         if (suits.includes('Suns'))
             myTargets = myTargets.concat(this.collectSunTargets(meepleLoc));
+        if (suits.includes('Waves'))
+            myTargets = myTargets.concat(this.collectWaveTargets(meepleLoc));
+       if (suits.includes('Wyrms'))
+            myTargets = myTargets.concat(this.collectWyrmTargets(meepleLoc));
         if (suits.includes('Knots'))      
             myTargets = myTargets.concat(this.collectKnotTargets(meepleLoc));
-        if (suits.filter(s => orthoSuits.indexOf(s) > -1).length > 0)
+        if (suits.includes('Leaves'))
             myTargets = myTargets.concat(this.collectOrthogonalTargets(meepleLoc));
 
         return myTargets;
@@ -469,6 +495,61 @@ console.log(this.tableau);
         return targets;
     }
 
+    private collectWaveTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+
+        for (const dir of orthDirections) {
+            let candidateLoc = meepleLoc.slice() as location;
+
+            //Check the next space in the current direction.
+            for (let a = 1; a < maxdim; a++) {
+                candidateLoc = this.getNext(candidateLoc,dir);
+                if (! this.checkUnoccupied(candidateLoc))
+                    break;
+                else {
+                    const stopLoc = this.getNext(candidateLoc,dir);
+                    if (this.isBlockage(stopLoc)) {
+                        targets.push(candidateLoc);
+                        break;
+                    } 
+                }// else continue
+            }
+        }
+
+        console.log("Wave targets of " + meepleLoc + ": " + targets);
+        //these are already legal targets and don't need filtering.
+        return targets;
+    }
+
+    private collectWyrmTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+
+        for (const dir of orthDirections) {
+            let candidateLoc = meepleLoc.slice() as location;
+
+            //Check the next space in the current direction.
+            for (let a = 1; a < maxdim; a++) {
+                candidateLoc = this.getNext(candidateLoc,dir);
+                if (this.checkOccupied(candidateLoc)) {
+                    //Check the rest of the conditions and push or break.
+                    const bounceLoc = this.getNext(candidateLoc,dir);
+                    if (this.checkUnoccupied(bounceLoc)) {
+                        targets.push(candidateLoc);
+                    } 
+                    break;
+                } else if (!this.checkUnoccupied(candidateLoc)) {
+                    //In this case we hit the Excuse, a gap, or the edge.
+                    break;
+                }// else can continue over this card
+            }
+        }
+
+        console.log("Wyrm targets of " + meepleLoc + ": " + targets);
+        //these are already legal targets and don't need filtering.
+        //but note that bouncing needs to be implemented
+        return targets;
+    }
+
     private collectSunTargets(meepleLoc: location): location[] {
         let targets: location[] = [];
         console.log("Collecting sun targets of " + meepleLoc);
@@ -489,7 +570,7 @@ console.log(this.tableau);
         }
 
         //these are already legal targets and don't need filtering.
-        console.log("sun: " + targets);
+        //console.log("sun: " + targets);
         return targets;
     }
 
