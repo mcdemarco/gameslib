@@ -45,8 +45,8 @@ export class DeckfishGame extends GameBase {
         name: "Deckfish",
         uid: "deckfish",
         playercounts: [2],
-        version: "20250715",
-        dateAdded: "2025-07-15",
+        version: "20250724",
+        dateAdded: "2025-07-24",
         // i18next.t("apgames:descriptions.deckfish")
         description: "apgames:descriptions.deckfish",
         // i18next.t("apgames:notes.deckfish")
