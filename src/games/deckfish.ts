@@ -253,6 +253,34 @@ export class DeckfishGame extends GameBase {
 
     /* suit-based movement logic */
 
+    private bounce(fromCell: string, toCell: string): string {
+        //Moves the occupant out of the way when toCell is occupied.
+
+        //We know this.occupied.has(toCell).
+        const bouncePlayer = this.occupied.get(toCell!)!;
+
+        //Convert to locations for easier calculating.
+        const fromLoc = this.algebraic2loc(fromCell);
+        const toLoc = this.algebraic2loc(toCell);
+        let bounceLoc = toLoc.slice() as location;
+
+        if (fromLoc[0] === toLoc[0]) {
+            if (fromLoc[1] > toLoc[1])
+                bounceLoc[1] = toLoc[1] - 1;
+            else
+                bounceLoc[1] = toLoc[1] + 1;
+        } else {//fromLoc[1] === toLoc[1]
+            if (fromLoc[0] > toLoc[0])
+                bounceLoc[0] = toLoc[0] - 1;
+            else
+                bounceLoc[0] = toLoc[0] + 1;
+        }
+        const bounceCell = this.loc2algebraic(bounceLoc);
+        this.occupied.set(bounceCell,bouncePlayer);
+
+        return bounceCell;
+    }
+
     private getSuits(cell: string): string[] {
         const card = Card.deserialize(this.board.get(cell)!)!;
         const suits = card.suits.map(s => s.name);
@@ -879,10 +907,20 @@ export class DeckfishGame extends GameBase {
                 if (!partial)
                     this.board.delete(frm);
 
-                //Move the piece.
+                this.results.push({type: "move", from: frm, to: to, what: card.uid});
+
+                //Move the piece from
                 this.occupied.delete(frm);
+                //In the wyrms case, must also bounce another piece out of the way.
+                if (this.occupied.has(to)) {
+                    const bounceCell = this.bounce(frm, to);
+                    this.results.push({type: "eject", from: to, to: bounceCell});
+                    //TODO: Also get card and highlight it.
+                }
+
+                //Move the piece to
                 this.occupied.set(to, this.currplayer);
-                //In the wyrms/bounce case, must also move the other piece.
+
                 //TODO
                 
                 //Score the card.
@@ -890,8 +928,6 @@ export class DeckfishGame extends GameBase {
                 newSuits.forEach(s => {
                     this.collected[this.currplayer - 1][suitOrder.indexOf(s)]++;
                 })
-                
-                this.results.push({type: "move", from: frm, to: to, what: card.uid});
 
                 if (sw !== undefined && sw.length > 0) {
                     let [marketCell, swapCell] = sw.split("-");
@@ -1077,7 +1113,7 @@ export class DeckfishGame extends GameBase {
                 });
             }
         }
-        if (this.occupied.size > 0) {
+/*        if (this.occupied.size > 0) {
            for (const [cell,p] of this.occupied.entries()) {
                 const [x,y] = DeckfishGame.algebraic2coords(cell);
 
@@ -1089,7 +1125,7 @@ export class DeckfishGame extends GameBase {
                 });
             }
         }
-
+*/
         // build legend of ALL cards
         const allcards = [...cardsBasic, ...cardsExtended];
 
@@ -1287,6 +1323,10 @@ export class DeckfishGame extends GameBase {
                 break;
             case "move":
                 node.push(i18next.t("apresults:MOVE.deckfish", {player, from: r.from, to: r.to, what: r.what}));
+                resolved = true;
+                break;
+            case "eject":
+                node.push(i18next.t("apresults:EJECT.deckfish", {player, from: r.from, to: r.to}));
                 resolved = true;
                 break;
             case "swap":

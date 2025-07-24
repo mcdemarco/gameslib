@@ -208,6 +208,7 @@
     "DRAWAGREED": "Players agreed to a draw.",
     "EJECT": {
         "assembly": "The production line moved forward {{distance}} spaces.",
+        "deckfish": "{{player}} pushed a piece from {{from}} to {{to}}.",
         "penguin_ball": "{{player}} kicked the ball from {{from}} to {{to}}.",
         "penguin_penguin": "A penguin was pushed from {{from}} to {{to}}."
     },
