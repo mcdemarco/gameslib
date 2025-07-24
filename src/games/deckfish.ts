@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, Colourfuncs, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaPieces, Colourfuncs, Glyph, MarkerGlyph } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { diagDirections, Direction, oppositeDirections, orthDirections, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -1077,7 +1077,7 @@ export class DeckfishGame extends GameBase {
             pstr += pieces.join(",");
         }
         // build card markers
-        let markers: (MarkerOutline|MarkerGlyph)[]|undefined;
+        let markers: (MarkerGlyph)[]|undefined;
         markers = [];
         if (this.board.size > 0) {
             for (const [cell, c] of this.board.entries()) {
@@ -1091,19 +1091,21 @@ export class DeckfishGame extends GameBase {
                 });
             }
         }
-/*        if (this.occupied.size > 0) {
+        /*
+        if (this.occupied.size > 0) {
            for (const [cell,p] of this.occupied.entries()) {
                 const [x,y] = DeckfishGame.algebraic2coords(cell);
 
                 markers.push({
                     type: "outline",
                     colour: p,
-                    opacity: 0.5,
+                    opacity: 0.2,
                     points: [{row: y, col: x}],
                 });
             }
         }
-*/
+        */
+
         // build legend of ALL cards
         const allcards = [...cardsBasic, ...cardsExtended];
 
@@ -1115,13 +1117,22 @@ export class DeckfishGame extends GameBase {
             if (lastMarketCell)
                 lastMarketCard = this.market[this.algebraic2coord(lastMarketCell!)];
         }
+        
+        const occupiedCards = new Map<string, playerid>();
+        this.occupied.forEach((player,cell) => {
+            occupiedCards.set(this.board.get(cell)!,player);
+        });
 
         for (const card of allcards) {
-            if (this.highlights.indexOf(card.uid) > -1 || card.uid == lastMarketCard) {
-                legend["c" + card.uid] = card.toGlyph({border: true});
-            } else
-            legend["c" + card.uid] = card.toGlyph({border: false});
+            const border = (this.highlights.indexOf(card.uid) > -1 || card.uid === lastMarketCard);
+            if (occupiedCards.has(card.uid)) {
+                const player = occupiedCards.get(card.uid);
+                legend["c" + card.uid] = card.toGlyph({border: border, fill: player, opacity: 0.2});
+            } else {
+                legend["c" + card.uid] = card.toGlyph({border: border});
+            }
         }
+
         for (const suit of suits) {
             legend[suit.uid] = {
                 name: suit.glyph!,
