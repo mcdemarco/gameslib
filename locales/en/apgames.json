@@ -3734,6 +3734,7 @@
             "OCCUPIED_SWAP": "The card at {{cell}} is occupied by a piece and cannot be swapped.",
             "PARTIAL_MOVE": "Click a card on the board to move your piece to.",
             "PARTIAL_SWAP": "Click a card on the board to swap with {{what}}.",
+            "REVERSED_MARKET": "Please choose the market card to swap first..",
             "VALID_PLACEMENT": "Looks like a good placement."
         },
         "diffusion": {

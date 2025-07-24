@@ -687,11 +687,23 @@ export class DeckfishGame extends GameBase {
                 if (this.mode === "place") {
                     //Selecting initial placement location.
                     newmove = `${cell}`;
-                } else if (move.includes(",") || (move && ! move.includes("-"))) {
-                    newmove = `${move}-${cell}`;
-                } else {
+                } else if (move === "") {
                     //Selecting initial source location.
                     newmove = `${cell}`;
+                } else if (move.includes(",")) {
+                    //Selecting market target location.
+                    newmove = `${move}-${cell}`;
+                } else if (! move.includes("-")) {
+                    //Selecting move target location.
+                    newmove = `${move}-${cell}`;
+                } else { 
+                    // move includes a dash but not a comma, 
+                    // trying to click on the board instead of market first.
+                    return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.deckfish.REVERSED_MARKET")
+                    }
                 }
             }
 
