@@ -210,7 +210,7 @@ export class DeckfishGame extends GameBase {
             //Cannot land in the gaps.
             return false;
         } 
-        const card = Card.deserialize(this.board.get(toCell)!)!;
+        const card = this.getCardFromCell(toCell);
         if (card.rank.name === "Excuse") {
             //Cannot land on the Excuse.
             return false;
@@ -236,7 +236,7 @@ export class DeckfishGame extends GameBase {
             return false;
         }
         if (this.board.has(cell)) {
-            const card = Card.deserialize(this.board.get(cell)!)!;
+            const card = this.getCardFromCell(cell);
             if (card.rank.name === "Ace" || card.rank.name === "Crown") {
                 return true;
             } else
@@ -247,6 +247,23 @@ export class DeckfishGame extends GameBase {
 
     public canSwap(cell: string, market: string): boolean {
         return true;
+    }
+
+    public getCardFromCell(cell: string): Card {
+        if (this.board.has(cell)) {
+            return this.getCardFromUID(this.board.get(cell)!);
+        } else if (cell[0] === "m") {
+            //The market is always fully populated.
+            return this.getCardFromUID(this.market[this.algebraic2coord(cell)]!);
+        } else {
+            //To keep things defined, we return the Excuse.
+            throw new Error(`The cell has no card: ${cell}.`);
+            return this.getCardFromUID("0");
+        }
+    }
+
+    public getCardFromUID(uid: string): Card {
+        return Card.deserialize(uid)!;
     }
 
     /* end helper functions for general gameplay */
@@ -282,7 +299,7 @@ export class DeckfishGame extends GameBase {
     }
 
     private getSuits(cell: string): string[] {
-        const card = Card.deserialize(this.board.get(cell)!)!;
+        const card = this.getCardFromCell(cell);
         const suits = card.suits.map(s => s.name);
         return suits;
     }
@@ -337,7 +354,7 @@ export class DeckfishGame extends GameBase {
                         this.tableau[x][y] = 2;
                     } else {
                         //There's an unoccupied card.
-                        const card = Card.deserialize(this.board.get(cell)!)!;
+                        const card = this.getCardFromCell(cell);
                         //Check for excuse.
                         if (card.rank.name === "Excuse")
                             this.tableau[x][y] = 0;
@@ -636,7 +653,7 @@ export class DeckfishGame extends GameBase {
                     const cell = DeckfishGame.coords2algebraic(x, y);
                     if (this.board.has(cell) && ! this.occupied.has(cell)) {
                         //There's an unoccupied card.
-                        const card = Card.deserialize(this.board.get(cell)!)!;
+                        const card = this.getCardFromCell(cell);
                         //Check rank.
                         if (card.rank.name === "Ace" || card.rank.name === "Crown") {
                             moves.push(`${cell}`);
@@ -894,7 +911,7 @@ export class DeckfishGame extends GameBase {
             // eslint-disable-next-line prefer-const
             let [frm, to] = mv.split("-");
  
-            const card = Card.deserialize(this.board.get(frm)!)!;
+            const card = this.getCardFromCell(frm);
             if (card === undefined)
                 throw new Error(`Could not load the card at ${frm}.`);
 
@@ -915,7 +932,8 @@ export class DeckfishGame extends GameBase {
                 if (this.occupied.has(to)) {
                     const bounceCell = this.bounce(frm, to);
                     this.results.push({type: "eject", from: to, to: bounceCell});
-                    //TODO: Also get card and highlight it.
+                    const bounceCard = this.getCardFromCell(bounceCell);
+                    this.highlights.push(bounceCard.uid);
                 }
 
                 //Move the piece to
@@ -1089,7 +1107,7 @@ export class DeckfishGame extends GameBase {
             for (let col = 0; col < columns; col++) {
                 const cell = DeckfishGame.coords2algebraic(col, row);
                 if (this.occupied.has(cell)) {
-                    const card = Card.deserialize(this.board.get(cell)!)!;
+                    const card = this.getCardFromCell(cell);
                     const adjust = crowdedRanks.includes(card.rank.name) ? "H" : "";
                     pieces.push(this.occupied.get(cell) === 1 ? "A" + adjust : "B" + adjust);
                 } else {
@@ -1104,7 +1122,7 @@ export class DeckfishGame extends GameBase {
         if (this.board.size > 0) {
             for (const [cell, c] of this.board.entries()) {
                 const [x,y] = DeckfishGame.algebraic2coords(cell);
-                const card = Card.deserialize(c)!;
+                const card = this.getCardFromUID(c);
 
                 markers.push({
                     type: "glyph",
