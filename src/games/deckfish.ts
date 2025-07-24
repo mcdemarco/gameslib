@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaPieces, Colourfuncs, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { diagDirections, Direction, orthDirections, reviver, UserFacingError } from "../common";
+import { diagDirections, Direction, oppositeDirections, orthDirections, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
 import { Card, Deck, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
@@ -190,8 +190,6 @@ export class DeckfishGame extends GameBase {
         if (this.mode === "collect")
             this.populateTableau();
 
-console.log(this.tableau);
-
         return this;
     }
 
@@ -225,7 +223,6 @@ console.log(this.tableau);
         const fromLoc = this.algebraic2loc(fromCell);
         const toLoc = this.algebraic2loc(toCell);
         console.log("Can move from "+fromCell+ " / " +fromLoc+" to "+toCell+" / "+toLoc+" using suits " + suits + "?");
-        console.log("Tableau values are " + this.getTableau(fromLoc) + " (from) and " + this.getTableau(toLoc) + " (to).");
 
         const targets = this.assembleTargets(fromLoc, suits)!;
         console.log(targets);
@@ -235,7 +232,6 @@ console.log(this.tableau);
     }
 
     public canPlace(cell: string): boolean {
-        console.log("Can place at " + cell + "?");
         if (this.occupied.has(cell)) {
             return false;
         }
@@ -336,6 +332,28 @@ console.log(this.tableau);
          return (this.onBoard(loc) && this.getTableau(loc) === 2);
     }
 
+    private checkSolitary(loc: location, source: Direction): boolean {
+        //Check the target location is surrounded on all non-source,
+        //onBoard sides by unoccupied cards,
+        //regardless of source and target contents which are checked elsewhere.
+        for (const dir of orthDirections) {
+            if (dir !== source) {
+                const neighbor = this.getNext(loc,dir);
+                if (!this.onBoard(neighbor))
+                    continue;
+                else {
+                    const tabValue = this.getTableau(neighbor);
+                    if (tabValue === 2 || tabValue === 0)
+                        return false;
+                    else 
+                        continue;
+                }
+            }
+        }
+        //If we found no neighbors, the space is solitary.
+        return true;
+    }
+
     private checkGap(loc: location): boolean {
         //Check the location is on the board and a gap (for moon jumping).
         return (this.onBoard(loc) && this.getTableau(loc) === -1);
@@ -343,19 +361,14 @@ console.log(this.tableau);
 
     private isBlockage(loc: location): boolean {
         //Check for the exact edge of the board.
-        console.log("Is " + loc + " a blockage?");
+        
         if (loc[0] === -1 || loc[1] === -1 || loc[0] === columns || loc[1] === rows) {
-            console.log("Yes");
-            
             return true;
         } else if (this.checkUnoccupied(loc)) {
             //an unoccupied card is the only non-blockage in the tableau
-            console.log("No");
             return false;
         } else {
             //This is occupied, a gap, or the Excuse.
-            console.log("Yes");
-
             return true;
         }
     }
@@ -369,12 +382,6 @@ console.log(this.tableau);
     }
 
     private assembleTargets(meepleLoc: location, suits: string[]): location[] {
-        const targets = this.collectTargets(meepleLoc,suits);
-        const filteredTargets = targets.filter(t => this.tableau[t[0]][t[1]] === 1);
-        return filteredTargets;
-    }
-
-    private collectTargets(meepleLoc: location, suits: string[]): location[] {
         //get targets
         let myTargets: location[] = [];
         if (suits.includes('Moons'))
@@ -383,14 +390,143 @@ console.log(this.tableau);
             myTargets = myTargets.concat(this.collectSunTargets(meepleLoc));
         if (suits.includes('Waves'))
             myTargets = myTargets.concat(this.collectWaveTargets(meepleLoc));
-       if (suits.includes('Wyrms'))
+        if (suits.includes('Leaves'))
+            myTargets = myTargets.concat(this.collectLeafTargets(meepleLoc));
+        if (suits.includes('Wyrms'))
             myTargets = myTargets.concat(this.collectWyrmTargets(meepleLoc));
         if (suits.includes('Knots'))      
             myTargets = myTargets.concat(this.collectKnotTargets(meepleLoc));
-        if (suits.includes('Leaves'))
-            myTargets = myTargets.concat(this.collectOrthogonalTargets(meepleLoc));
 
         return myTargets;
+    }
+
+    private collectMoonTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+
+        for (const dir of orthDirections) {
+            let nextLoc = this.getNext(meepleLoc,dir);
+
+            //The first space orthogonally must be a gap.
+            if (this.checkGap(nextLoc)) {
+                //Check the next space in the current direction.
+                for (let a = 2; a < maxdim; a++) {
+                    nextLoc = this.getNext(nextLoc,dir);
+                    if (this.checkGap(nextLoc)) {
+                        continue;
+                    } else if (this.checkUnoccupied(nextLoc)) {
+                        targets.push(nextLoc);
+                        break;
+                    } else {
+                        //The excuse, an occupied card, or off the board.
+                        break;
+                    }
+                }
+            }
+        }
+
+        //these are already legal targets and don't need filtering.
+        return targets;
+    }
+    
+    private collectSunTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+
+        for (const dir of diagDirections) {
+            const nextLoc = this.getNext(meepleLoc,dir);
+            if (this.checkUnoccupied(nextLoc)) {
+                targets.push(nextLoc);
+                const secondLoc = this.getNext(nextLoc,dir);
+                if (this.checkUnoccupied(secondLoc))
+                    targets.push(secondLoc);
+            } //Otherwise: 
+            //if the first space diagonally is off the board, so is the second.
+            //if it's is the Excuse or occupied, we cannot reach the second.
+        }
+
+        //these are already legal targets and don't need filtering.
+        return targets;
+    }
+
+    private collectWaveTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+
+        for (const dir of orthDirections) {
+            let candidateLoc = meepleLoc.slice() as location;
+
+            //Check the next space in the current direction.
+            for (let a = 1; a < maxdim; a++) {
+                candidateLoc = this.getNext(candidateLoc,dir);
+                if (! this.checkUnoccupied(candidateLoc))
+                    break;
+                else {
+                    const stopLoc = this.getNext(candidateLoc,dir);
+                    if (this.isBlockage(stopLoc)) {
+                        targets.push(candidateLoc);
+                        break;
+                    } 
+                }// else continue
+            }
+        }
+
+        console.log("Wave targets of " + meepleLoc + ": " + targets);
+        //these are already legal targets and don't need filtering.
+        return targets;
+    }
+
+    private collectLeafTargets(meepleLoc: location): location[] {
+        //console.log("Collecting leaf targets of " + meepleLoc);
+
+        let targets: location[] = [];
+
+        for (const dir of orthDirections) {
+            let nextLoc = meepleLoc.slice() as location;
+            //Check the next space in the current direction.
+            for (let a = 1; a < maxdim; a++) {
+                nextLoc = this.getNext(nextLoc,dir);
+                if (this.checkUnoccupied(nextLoc)) {
+                    //We don't need to check the space we're coming from.
+                    const source = oppositeDirections.get(dir)!;
+                    if (this.checkSolitary(nextLoc,source)) {
+                        targets.push(nextLoc);
+                    } //Else don't push but continue in this direction.
+                } else {
+                    //Otherwise, it's a gap, the excuse, an occupied card, or off the board.
+                    break;
+                }
+            }
+        }
+
+        // legal targets, don't need filtering.
+        return targets;
+    }
+
+    private collectWyrmTargets(meepleLoc: location): location[] {
+        let targets: location[] = [];
+
+        for (const dir of orthDirections) {
+            let candidateLoc = meepleLoc.slice() as location;
+
+            //Check the next space in the current direction.
+            for (let a = 1; a < maxdim; a++) {
+                candidateLoc = this.getNext(candidateLoc,dir);
+                if (this.checkOccupied(candidateLoc)) {
+                    //Check the rest of the conditions and push or break.
+                    const bounceLoc = this.getNext(candidateLoc,dir);
+                    if (this.checkUnoccupied(bounceLoc)) {
+                        targets.push(candidateLoc);
+                    } 
+                    break;
+                } else if (!this.checkUnoccupied(candidateLoc)) {
+                    //In this case we hit the Excuse, a gap, or the edge.
+                    break;
+                }// else can continue over this card
+            }
+        }
+
+        console.log("Wyrm targets of " + meepleLoc + ": " + targets);
+        //these are already legal targets and don't need filtering.
+        //but note that bouncing needs to be implemented
+        return targets;
     }
 
     private collectKnotTargets(meepleLoc: location): location[] {
@@ -443,137 +579,10 @@ console.log(this.tableau);
         if (this.checkUnoccupied([meepleRow + 2,meepleCol + 1]))
             targets.push([meepleRow + 2,meepleCol + 1]);
         
+        //Not checked.
         return targets;
     }
-
-    private collectOrthogonalTargets(meepleLoc: location): location[] {
-        let targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let nextLoc = meepleLoc.slice() as location;
-            //Check the next space in the current direction.
-            for (let a = 1; a < maxdim; a++) {
-                nextLoc = this.getNext(nextLoc,dir);
-                if (this.checkUnoccupied(nextLoc)) {
-                    targets.push(nextLoc);
-                } else {
-                    //Otherwise, it's a gap, the excuse, an occupied card, or off the board.
-                    break;
-                }
-            }
-        }
-
-        //these are not necessarily legal targets so need filtering.
-        return targets;
-    }
-
-    private collectMoonTargets(meepleLoc: location): location[] {
-        let targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let nextLoc = this.getNext(meepleLoc,dir);
-
-            //The first space orthogonally must be a gap.
-            if (this.checkGap(nextLoc)) {
-                //Check the next space in the current direction.
-                for (let a = 2; a < maxdim; a++) {
-                    nextLoc = this.getNext(nextLoc,dir);
-                    if (this.checkGap(nextLoc)) {
-                        continue;
-                    } else if (this.checkUnoccupied(nextLoc)) {
-                        targets.push(nextLoc);
-                        break;
-                    } else {
-                        //The excuse, an occupied card, or off the board.
-                        break;
-                    }
-                }
-            }
-        }
-
-        //these are already legal targets and don't need filtering.
-        return targets;
-    }
-
-    private collectWaveTargets(meepleLoc: location): location[] {
-        let targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let candidateLoc = meepleLoc.slice() as location;
-
-            //Check the next space in the current direction.
-            for (let a = 1; a < maxdim; a++) {
-                candidateLoc = this.getNext(candidateLoc,dir);
-                if (! this.checkUnoccupied(candidateLoc))
-                    break;
-                else {
-                    const stopLoc = this.getNext(candidateLoc,dir);
-                    if (this.isBlockage(stopLoc)) {
-                        targets.push(candidateLoc);
-                        break;
-                    } 
-                }// else continue
-            }
-        }
-
-        console.log("Wave targets of " + meepleLoc + ": " + targets);
-        //these are already legal targets and don't need filtering.
-        return targets;
-    }
-
-    private collectWyrmTargets(meepleLoc: location): location[] {
-        let targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let candidateLoc = meepleLoc.slice() as location;
-
-            //Check the next space in the current direction.
-            for (let a = 1; a < maxdim; a++) {
-                candidateLoc = this.getNext(candidateLoc,dir);
-                if (this.checkOccupied(candidateLoc)) {
-                    //Check the rest of the conditions and push or break.
-                    const bounceLoc = this.getNext(candidateLoc,dir);
-                    if (this.checkUnoccupied(bounceLoc)) {
-                        targets.push(candidateLoc);
-                    } 
-                    break;
-                } else if (!this.checkUnoccupied(candidateLoc)) {
-                    //In this case we hit the Excuse, a gap, or the edge.
-                    break;
-                }// else can continue over this card
-            }
-        }
-
-        console.log("Wyrm targets of " + meepleLoc + ": " + targets);
-        //these are already legal targets and don't need filtering.
-        //but note that bouncing needs to be implemented
-        return targets;
-    }
-
-    private collectSunTargets(meepleLoc: location): location[] {
-        let targets: location[] = [];
-        console.log("Collecting sun targets of " + meepleLoc);
-
-        for (const dir of diagDirections) {
-            console.log(dir);
-            const nextLoc = this.getNext(meepleLoc,dir);
-            console.log(nextLoc);
-            if (this.checkUnoccupied(nextLoc)) {
-                targets.push(nextLoc);
-                console.log("Pushed " + nextLoc);
-                const secondLoc = this.getNext(nextLoc,dir);
-                if (this.checkUnoccupied(secondLoc))
-                    targets.push(secondLoc);
-            } //Otherwise: 
-            //if the first space diagonally is off the board, so is the second.
-            //if it's is the Excuse or occupied, we cannot reach the second.
-        }
-
-        //these are already legal targets and don't need filtering.
-        //console.log("sun: " + targets);
-        return targets;
-    }
-
+ 
     /* end suit movement logic */
 
     public moves(player?: playerid): string[] {
@@ -1064,6 +1073,18 @@ console.log(this.tableau);
                 markers.push({
                     type: "glyph",
                     glyph: "c" + card.uid,
+                    points: [{row: y, col: x}],
+                });
+            }
+        }
+        if (this.occupied.size > 0) {
+           for (const [cell,p] of this.occupied.entries()) {
+                const [x,y] = DeckfishGame.algebraic2coords(cell);
+
+                markers.push({
+                    type: "outline",
+                    colour: p,
+                    opacity: 0.5,
                     points: [{row: y, col: x}],
                 });
             }
