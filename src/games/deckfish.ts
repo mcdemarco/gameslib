@@ -668,6 +668,14 @@ export class DeckfishGame extends GameBase {
                         valid: false,
                         message: i18next.t("apgames:validation.deckfish.EARLY_TO_MARKET")
                     }
+                } else if (move.includes(",")) {
+                    //it's too late to click on the market.
+                    //TODO: invalid partial result
+                    return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.deckfish.LATE_TO_MARKET")
+                    }
                 } else {
                     newmove = `${move},` + this.coord2algebraic(this.market.indexOf(piece!.substring(1)));
                 }
@@ -689,7 +697,8 @@ export class DeckfishGame extends GameBase {
 
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
-                result.move = "";
+                //Revert latest addition to newmove.
+                result.move = newmove.includes(",") ? newmove.split(",")[0] : (newmove.includes("-") ? newmove.split("-")[0] : ""); 
             } else {
                 result.move = newmove;
             }

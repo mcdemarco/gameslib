@@ -3729,6 +3729,7 @@
             "INVALID_TO": "The destination {{cell}} is not legal.",
             "LABEL_MARKET": "Market cards",
             "LABEL_COLLECTION": "Player {{playerNum}}'s suits",
+            "LATE_TO_MARKET": "You have already selected a market card.",
             "NO_SWAP": "There is no card to swap at {{cell}}.",
             "OCCUPIED_SWAP": "The card at {{cell}} is occupied by a piece and cannot be swapped.",
             "PARTIAL_MOVE": "Click a card on the board to move your piece to.",
