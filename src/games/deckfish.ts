@@ -222,10 +222,8 @@ export class DeckfishGame extends GameBase {
 
         const fromLoc = this.algebraic2loc(fromCell);
         const toLoc = this.algebraic2loc(toCell);
-        console.log("Can move from "+fromCell+ " / " +fromLoc+" to "+toCell+" / "+toLoc+" using suits " + suits + "?");
 
         const targets = this.assembleTargets(fromLoc, suits)!;
-        console.log(targets);
         const toTarget = targets.filter(loc => (loc[0] === toLoc[0] && loc[1] === toLoc[1]));
 
         return (toTarget.length > 0);
@@ -337,7 +335,7 @@ export class DeckfishGame extends GameBase {
             default:
                 throw new Error(`The direction is invalid: ${dir}.`);
         }
-        //console.log("next of " + loc + " " + dir + " is "  + nextLoc);
+
         return nextLoc!;
     }
 
@@ -368,7 +366,6 @@ export class DeckfishGame extends GameBase {
 
     private checkUnoccupied(loc: location): boolean {
         //Check the location is on the board and a legal intermediate/target.
-        //console.log("check " +loc+ " is on the board " + this.onBoard(loc) + " and unoccupied " );
         return (this.onBoard(loc) && this.getTableau(loc) === 1);
     }
 
@@ -513,14 +510,10 @@ export class DeckfishGame extends GameBase {
             }
         }
 
-        console.log("Wave targets of " + meepleLoc + ": " + targets);
-        //these are already legal targets and don't need filtering.
         return targets;
     }
 
     private collectLeafTargets(meepleLoc: location): location[] {
-        //console.log("Collecting leaf targets of " + meepleLoc);
-
         let targets: location[] = [];
 
         for (const dir of orthDirections) {
@@ -568,63 +561,36 @@ export class DeckfishGame extends GameBase {
             }
         }
 
-        console.log("Wyrm targets of " + meepleLoc + ": " + targets);
-        //these are already legal targets and don't need filtering.
-        //but note that bouncing needs to be implemented
         return targets;
     }
 
     private collectKnotTargets(meepleLoc: location): location[] {
-        console.log("Collecting knot targets...",-3);
-
-        let meepleRow = meepleLoc[0];
-        let meepleCol = meepleLoc[1];
         let targets: location[] = [];
         
-        //Straight lines.
-        if (this.checkUnoccupied([meepleRow,meepleCol - 3]))
-            targets.push([meepleRow,meepleCol - 3]);
-        if (this.checkUnoccupied([meepleRow,meepleCol + 3]))
-            targets.push([meepleRow,meepleCol + 3]);
-        
-        if (this.checkUnoccupied([meepleRow - 3,meepleCol]))
-            targets.push([meepleRow - 3,meepleCol]);
-        if (this.checkUnoccupied([meepleRow + 3,meepleCol]))
-            targets.push([meepleRow + 3,meepleCol]);
-        
-        //Around almost a circle.
-        if (this.checkUnoccupied([meepleRow,meepleCol - 1]))
-            targets.push([meepleRow,meepleCol - 1]);
-        if (this.checkUnoccupied([meepleRow,meepleCol + 1]))
-            targets.push([meepleRow,meepleCol + 1]);
-        
-        if (this.checkUnoccupied([meepleRow - 1,meepleCol]))
-            targets.push([meepleRow - 1,meepleCol]);
-        if (this.checkUnoccupied([meepleRow + 1,meepleCol]))
-            targets.push([meepleRow + 1,meepleCol]);
-        
-        //Zig-zagging.
-        if (this.checkUnoccupied([meepleRow - 1,meepleCol - 2]))
-            targets.push([meepleRow - 1,meepleCol - 2]);
-        if (this.checkUnoccupied([meepleRow + 1,meepleCol - 2]))
-            targets.push([meepleRow + 1,meepleCol - 2]);
-        
-        if (this.checkUnoccupied([meepleRow - 1,meepleCol + 2]))
-            targets.push([meepleRow - 1,meepleCol + 2]);
-        if (this.checkUnoccupied([meepleRow + 1,meepleCol + 2]))
-            targets.push([meepleRow + 1,meepleCol + 2]);
-        
-        if (this.checkUnoccupied([meepleRow - 2,meepleCol - 1]))
-            targets.push([meepleRow - 2,meepleCol - 1]);
-        if (this.checkUnoccupied([meepleRow - 2,meepleCol + 1]))
-            targets.push([meepleRow - 2,meepleCol + 1]);
-        
-        if (this.checkUnoccupied([meepleRow + 2,meepleCol - 1]))
-            targets.push([meepleRow + 2,meepleCol - 1]);
-        if (this.checkUnoccupied([meepleRow + 2,meepleCol + 1]))
-            targets.push([meepleRow + 2,meepleCol + 1]);
-        
-        //Not checked.
+        //We take three steps, never backwards.
+        for (const dir1 of orthDirections) {
+            const loc1 = this.getNext(meepleLoc,dir1);
+            if (this.checkUnoccupied(loc1)) {
+                for (const dir2 of orthDirections) {
+                    const source1 = oppositeDirections.get(dir1)!;
+                    if (dir2 !== source1) {
+                        const loc2 = this.getNext(loc1,dir2)
+                        if (this.checkUnoccupied(loc2)) {
+                            for (const dir3 of orthDirections) {
+                                const source2 = oppositeDirections.get(dir2)!;
+                                if (dir3 !== source2) {
+                                    const loc3 = this.getNext(loc2,dir3);
+                                    if (this.checkUnoccupied(loc3))
+                                        targets.push(loc3);
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+
         return targets;
     }
  
@@ -680,8 +646,6 @@ export class DeckfishGame extends GameBase {
         if (moves.length === 0) {
             moves.push("pass");
         }
-
-        console.log(moves);
 
         return moves.sort((a,b) => a.localeCompare(b));
     }
@@ -742,10 +706,8 @@ export class DeckfishGame extends GameBase {
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
-        //m = m.toLowerCase();
+        m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
-
-        console.log("Validating move " + m);
 
         if (m.length === 0) {
             result.valid = true;
@@ -999,11 +961,9 @@ export class DeckfishGame extends GameBase {
             }
             if (scores[0] === scores[1]) {
                 //Evaluate tiebreaker.
-                console.log("tiebroken win");
                 this.winner = this.getTieWinner();
             } else {
                 //Simple win.
-                console.log("simple win");
                 const max = Math.max(...scores);
                 for (let p = 1; p <= this.numplayers; p++) {
                     if (scores[p-1] === max) {
@@ -1266,13 +1226,10 @@ export class DeckfishGame extends GameBase {
     private getTieWinner(): playerid[] {
         //Evaluate tiebreaker.
         let tieWinner: playerid[] = [];
+        //Sort.
         const sortedArrays = this.collected.map(collection => collection.slice().sort());
-
-        console.log("Sort:" + sortedArrays[0] + "; " + sortedArrays[1]);
-
+        //Subtract.
         const winArray = sortedArrays[0].map((item, index) => item - (sortedArrays[1])[index]).filter((item) => item !== 0);
-
-        console.log("Subtract:" + winArray);
 
         if (winArray.length === 0) {
             tieWinner = [1,2] as playerid[];
