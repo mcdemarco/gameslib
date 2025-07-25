@@ -24,4 +24,3 @@ module.exports = {
     libraryTarget: 'var'
   }
 };
-
