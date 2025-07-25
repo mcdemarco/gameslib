@@ -22,8 +22,5 @@ module.exports = {
     path: path.resolve(__dirname, 'dist'),
     library: 'APGames',
     libraryTarget: 'var'
-  },
-	stats: {
-		errorDetails: true
-	}
+  }
 };
