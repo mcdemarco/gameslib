@@ -13,8 +13,10 @@ const clone = require("rfdc/default");
 export type playerid = 1|2|3|4;
 export type Size = 1|2|3;
 export type Colour = "VT"|"OG"|"BN"|"WH";
-export type CellContents = [Colour, Size];
+export type Pyramid = [Colour, Size];
+export type CellContents = [Pyramid, playerid?];
 const allColours: string[] = ["VT", "OG", "BN"];
+const moreColours: string[] = ["VT", "OG", "BN", "WH"];
 
 interface ILegendObj {
     [key: string]: Glyph|[Glyph, ...Glyph[]];
@@ -28,16 +30,17 @@ interface ILocalStash {
 }
 
 interface IOrganizedCaps {
-    triosMono: CellContents[][];
-    partialsMono: CellContents[][];
-    triosMixed: CellContents[][];
-    partialsMixed: CellContents[][];
-    miscellaneous: CellContents[];
+    triosMono: Pyramid[][];
+    partialsMono: Pyramid[][];
+    triosMixed: Pyramid[][];
+    partialsMixed: Pyramid[][];
+    miscellaneous: Pyramid[];
 }
 
 interface IMoveState extends IIndividualState {
     currplayer: playerid;
-    board: Array<Array<CellContents[]>>;
+    board: Map<string, CellContents>;
+    occupied: Map<string, playerid>;
     lastmove?: string;
     scores: number[];
     caps: number[];
@@ -77,7 +80,7 @@ export class StawvsGame extends GameBase {
             },
         ],
         categories: ["goal>score>eog", "mechanic>set", "board>shape>rect", "board>connect>rect", "components>pyramids", "other>2+players"],
-        flags: ["scores"]
+        flags: ["scores", "autopass"]
     };
 
     public static coords2algebraic(x: number, y: number): string {
@@ -89,27 +92,36 @@ export class StawvsGame extends GameBase {
 
     public numplayers!: number;
     public currplayer!: playerid;
-    public board!: Array<Array<CellContents[]>>;
+    public board!: Map<string, CellContents>;
+    public occupied!: Map<string, playerid>;
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
     public scores!: number[];
     public caps!: number[];
     public stashes!: Map<playerid, number[]>;
-    public captured: [CellContents[], CellContents[]] = [[], []];
+    public captured: [Pyramid[], Pyramid[]] = [[], []];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = []
 
-    public static newBoard(): Array<Array<CellContents[]>> {
-        const order: string[] = shuffle([...allColours, ...allColours, ...allColours, ...allColours, ...allColours, "WH"]) as string[];
-        const board: Array<Array<CellContents[]>> = [];
-        for (let row = 0; row < 6; row++) {
-            const node: Array<CellContents[]> = [];
-            for (let col = 0; col < 6; col++) {
-                const colour = order.pop() as Colour;
-                node.push([[colour, 1], [colour, 2], [colour, 3]]);
+    public static newBoard(): Map<string, CellContents> {
+	const emptyCells: string[] = ["a1","a8","h1","h8"];
+        const board = new Map<string, CellContents>([]);
+	let bag: Pyramid[] = [];
+	for (let stash = 0; stash < 5; stash++) {
+	    for (let size = 1; size < 4; size++) {
+		for (let c = 0; c < moreColours.length; c++) {
+		    bag.push([moreColours[c], size] as Pyramid);   
+		}
+	    }
+	}
+	const shuffled = shuffle(bag);
+        for (let x = 0; x < 8; x++) {
+            for (let y = 0; y < 8; y++) {
+		const cell = StawvsGame.coords2algebraic(x, y);
+		if (emptyCells.indexOf(cell) === -1)
+		    board.set(cell, [shuffled.pop()]);
             }
-            board.push(node);
         }
         return board;
     }
@@ -124,8 +136,10 @@ export class StawvsGame extends GameBase {
                 _timestamp: new Date(),
                 currplayer: 1,
                 board: StawvsGame.newBoard(),
+		occupied: new Map<string, playerid>(),
                 scores: [],
                 caps: [],
+		captured: [[], []],
                 stashes: new Map()
             };
             if ( (variants !== undefined) && (variants.length === 1) && (variants[0] === "overloaded") ) {
@@ -163,11 +177,12 @@ export class StawvsGame extends GameBase {
 
         const state = this.stack[idx];
         this.currplayer = state.currplayer;
-        this.board = clone(state.board) as Array<Array<CellContents[]>>;
+        this.board = new Map(state.board);
+	this.occupied = new Map(state.occupied);
         this.stashes = clone(state.stashes) as Map<playerid, number[]>;
         this.lastmove = state.lastmove;
         this.scores = [...state.scores];
-        this.captured = clone(state.captured) as [CellContents[], CellContents[]];
+        this.captured = clone(state.captured) as [Pyramid[], Pyramid[]];
         this.caps = [...state.caps];
         return this;
     }
@@ -375,7 +390,7 @@ export class StawvsGame extends GameBase {
             const grid = new RectGrid(8, 8);
 
             // place the piece
-            this.board.set(cell, [this.currplayer, pip]);
+            this.occupied.set(cell, this.currplayer);
             stash[pip - 1]--;
             this.stashes.set(this.currplayer, stash);
             this.results = [{type: "place", where: cell, what: pip.toString()}]
@@ -385,7 +400,7 @@ export class StawvsGame extends GameBase {
             dirs.forEach((d) => {
                 const adj = RectGrid.move(...coords, d);
                 if (grid.inBounds(...adj)) {
-                    this.push(adj, d);
+     //               this.push(adj, d);
                 }
             });
         }
@@ -403,114 +418,39 @@ export class StawvsGame extends GameBase {
         return this;
     }
 
-    private push(start: [number, number], dir: Direction): void {
-        let scoreDelta = 0;
-        // If there's a piece here, move it, pushing anything it its way
-        if (this.board.has(StawvsGame.coords2algebraic(...start))) {
-            const grid = new RectGrid(8, 8);
-            // Do the recursion, and then when it returns, move the piece
-            const adj = RectGrid.move(...start, dir);
-            if (grid.inBounds(...adj)) {
-                this.push(adj, dir);
-            }
-
-            const cellStart = StawvsGame.coords2algebraic(...start);
-            const piece = this.board.get(cellStart);
-            if (piece === undefined) {
-                throw new Error("Trying to move a nonexistent piece.");
-            }
-            // If the next cell is in bounds, move the piece
-            if (grid.inBounds(...adj)) {
-                this.board.set(StawvsGame.coords2algebraic(...adj), piece);
-                this.results.push({type: "move", from: cellStart, to: StawvsGame.coords2algebraic(...adj), what: piece[1].toString()});
-                this.board.delete(cellStart);
-            // Otherwise it's off the board and is either captured or reclaimed
-            } else {
-                // If the piece belongs to the current player, reclaim it
-                if (piece[0] === this.currplayer) {
-                    const stash = this.stashes.get(this.currplayer);
-                    if ( (stash === undefined) || (stash.length !== 3)) {
-                        throw new Error("Malformed stash.");
-                    }
-                    stash[piece[1] - 1]++;
-                    this.stashes.set(this.currplayer, stash);
-                    this.results.push({type: "reclaim", what: piece[1].toString()});
-                // Otherwise, capture it (add it to the current player's score)
-                } else {
-                    let score = this.scores[(this.currplayer as number) - 1];
-                    if (score === undefined) {
-                        throw new Error("Malformed score.");
-                    }
-                    let caps = this.caps[(this.currplayer as number) - 1];
-                    if (caps === undefined) {
-                        throw new Error("Malformed caps.");
-                    }
-                    caps++;
-                    this.caps[(this.currplayer as number) - 1] = caps;
-                    this.results.push({type: "capture", what: piece[1].toString()});
-                    score += piece[1];
-                    scoreDelta += piece[1];
-                    this.scores[(this.currplayer as number) - 1] = score;
-                }
-                this.board.delete(cellStart);
-            }
-        }
-        if (scoreDelta > 0) {
-            this.results.push({type: "deltaScore", delta: scoreDelta});
-        }
-    }
-
     protected checkEOG(): StawvsGame {
-        for (let n = 1; n <= this.numplayers; n++) {
-            const stash = this.stashes.get(n as playerid);
-            if ( (stash === undefined) || (stash.length !== 3) ) {
-                throw new Error("Malformed stash.");
+	if ( (this.lastmove === "pass") && (this.stack.length >= this.numplayers) ) {
+	    const lastmoves = new Set<string>();
+            lastmoves.add("pass");
+            for (let p = 2; p <= this.numplayers; p++) {
+                const state = this.stack[this.stack.length - (p - 1)];
+                lastmoves.add(state.lastmove!);
             }
-            const sum = stash.reduce((a, b) => {return a + b;});
-            if (sum > 0) {
-                return this;
-            }
-        }
-        // If we get here, then the game is truly over
-        this.gameover = true;
-        this.results.push({type: "eog"});
-        // Find the maximum score
-        const maxscore = Math.max(...this.scores);
-        // If the maxscore is unique, then we've found our winner
-        const map: Map<number, number> = this.scores.reduce((acc, e) => acc.set(e, (acc.get(e) || 0) + 1), new Map<number, number>());
-        if (map.size === this.scores.length) {
-            const n = this.scores.indexOf(maxscore);
-            this.winner = [(n + 1) as playerid];
-        } else {
-            const nTied: playerid[] = [];
-            for (let i = 0; i < this.scores.length; i++) {
-                if (this.scores[i] === maxscore) {
-                    nTied.push((i + 1) as playerid);
-                }
-            }
-            const caps: number[] = [];
-            for (const n of nTied) {
-                caps.push(this.caps[n - 1])
-            }
-            const maxcaps = Math.max(...caps);
-            const capmap: Map<number, number> = caps.reduce((acc, e) => acc.set(e, (acc.get(e) || 0) + 1), new Map<number, number>());
-            if (capmap.size === nTied.length) {
-                const n = this.caps.indexOf(maxcaps);
-                this.winner = [(n + 1) as playerid];
-            } else {
-                this.winner = [...nTied];
+            if (lastmoves.size === 1) {
+                this.gameover = true;
+		const scores = this.getPlayersScores()[0].scores as number[];
+		const max = Math.max(...scores);
+		for (let p = 1; p <= this.numplayers; p++) {
+                    if (scores[p-1] === max) {
+			this.winner.push(p as playerid);
+                    }
+		}
             }
         }
-        this.results.push({type: "winners", players: [...this.winner]});
 
-        if (this.winner === undefined) {
-            throw new Error("A winner could not be determined.");
+        if (this.gameover) {
+            this.results.push(
+                {type: "eog"},
+                {type: "winners", players: [...this.winner]}
+            );
         }
 
         return this;
     }
 
     public getPlayerScore(indata: number | IOrganizedCaps): number {
+	//Strangely complex scoring algorithm from mega-volcano.
+	//TODO: simplify.
         let org: IOrganizedCaps;
         if (typeof indata === "number") {
             org = this.organizeCaps(indata as playerid);
@@ -530,8 +470,8 @@ export class StawvsGame extends GameBase {
         return score;
     }
 
-    public organizeCaps(indata: playerid | CellContents[] = 1): IOrganizedCaps {
-        let pile: CellContents[];
+    public organizeCaps(indata: playerid | Pyramid[] = 1): IOrganizedCaps {
+        let pile: Pyramid[];
         if (Array.isArray(indata)) {
             pile = [...indata];
         } else {
@@ -545,7 +485,7 @@ export class StawvsGame extends GameBase {
             partialsMixed: [],
             miscellaneous: []
         };
-        const stacks: CellContents[][] = [];
+        const stacks: Pyramid[][] = [];
 
         const whites = pile.filter(x => x[0] === "WH");
         const lgs = pile.filter(x => x[1] === 3 && x[0] !== "WH");
@@ -554,7 +494,7 @@ export class StawvsGame extends GameBase {
         // Put each large in a stack and then look for a matching medium and small
         // This will find all monochrome trios
         while (lgs.length > 0) {
-            const stack: CellContents[] = [];
+            const stack: Pyramid[] = [];
             const next = lgs.pop();
             stack.push(next!);
             const mdIdx = mds.findIndex(x => x[0] === next![0]);
@@ -591,7 +531,7 @@ export class StawvsGame extends GameBase {
         }
         // All remaining mediums now form the basis of their own stack and see if there is a matching small
         while (mds.length > 0) {
-            const stack: CellContents[] = [];
+            const stack: Pyramid[] = [];
             const next = mds.pop();
             stack.push(next!);
             const smIdx = sms.findIndex(x => x[0] === next![0]);
@@ -618,7 +558,7 @@ export class StawvsGame extends GameBase {
         stacks.push(...whites.map(x => [x]));
 
         // // Validate that all the pieces in the original pile are now found in the stack structure
-        // const pieces: CellContents[] = stacks.reduce((accumulator, value) => accumulator.concat(value), []);
+        // const pieces: Pyramid[] = stacks.reduce((accumulator, value) => accumulator.concat(value), []);
         // if (pieces.length !== pile.length) {
         //     throw new Error("Stack lengths don't match. This should never happen.");
         // }
@@ -627,18 +567,18 @@ export class StawvsGame extends GameBase {
         for (const stack of stacks) {
             if (stack.length === 3) {
                 if ((new Set(stack.map(c => c[0]))).size === 1) {
-                    org.triosMono.push(clone(stack) as CellContents[]);
+                    org.triosMono.push(clone(stack) as Pyramid[]);
                 } else {
-                    org.triosMixed.push(clone(stack) as CellContents[]);
+                    org.triosMixed.push(clone(stack) as Pyramid[]);
                 }
             } else if (stack.length === 2) {
                 if ((new Set(stack.map(c => c[0]))).size === 1) {
-                    org.partialsMono.push(clone(stack) as CellContents[]);
+                    org.partialsMono.push(clone(stack) as Pyramid[]);
                 } else {
-                    org.partialsMixed.push(clone(stack) as CellContents[]);
+                    org.partialsMixed.push(clone(stack) as Pyramid[]);
                 }
             } else {
-                org.miscellaneous.push(...clone(stack) as CellContents[]);
+                org.miscellaneous.push(...clone(stack) as Pyramid[]);
             }
         }
 
@@ -652,7 +592,7 @@ export class StawvsGame extends GameBase {
             const replacements = [...new CartesianProduct(...colourSet)];
             const sizes = whites.map(w => w[1]);
             for (const r of replacements) {
-                const newpieces: CellContents[] = [];
+                const newpieces: Pyramid[] = [];
                 for (let i = 0; i < r.length; i++) {
                     newpieces.push([r[i] as Colour, sizes[i]])
                 }
@@ -717,14 +657,15 @@ export class StawvsGame extends GameBase {
             _timestamp: new Date(),
             currplayer: this.currplayer,
             lastmove: this.lastmove,
-            board: clone(this.board) as Array<Array<CellContents[]>>,
+            board: new Map(this.board),
+            occupied: new Map(this.occupied),
             scores: [...this.scores],
             caps: [...this.caps],
             stashes: clone(this.stashes) as Map<playerid, number[]>
         };
     }
 
-    private renderStashHelper(s: CellContents[]): string[] {
+    private renderStashHelper(s: Pyramid[]): string[] {
         const ret: string[] = [];
         for (let i = 0; i < s.length; i++) {
             for (let j = i; j < s[s.length - i - 1][1] - i - 1; j++)
@@ -736,45 +677,54 @@ export class StawvsGame extends GameBase {
     }
 
     public render(): APRenderRep {
+	// Arrays of pieces in the style of Tritium.
+	// Flat pyramids in the style of Blam!
         // Build piece string
-        let pstr = "";
+        let pstr: string[][][] = [];
         for (let row = 0; row < 8; row++) {
-            if (pstr.length > 0) {
-                pstr += "\n";
-            }
-            const pieces: string[] = [];
+	    const pieces: string[][] = [];
             for (let col = 0; col < 8; col++) {
+                const piece: string[] = [];
                 const cell = StawvsGame.coords2algebraic(col, row);
                 if (this.board.has(cell)) {
                     const contents = this.board.get(cell);
                     if (contents === undefined) {
                         throw new Error("Malformed cell contents.");
                     }
-                    pieces.push("P" + contents[0].toString() + contents[1].toString());
-                } else {
-                    pieces.push("-");
+		    const pyramid = contents[0];
+		    piece.push(pyramid[0].toString() + pyramid[1].toString());
+		    if (contents.length > 1)
+			piece.push("P" + contents[1]!.toString());
                 }
+                pieces.push(piece);
             }
-            pstr += pieces.join(",");
+            pstr.push(pieces);
         }
-        pstr = pstr.replace(/-{8}/g, "_");
 
-        // build legend based on number of players
+        // build legend 
         const myLegend: ILegendObj = {};
-        for (let n = 1; n <= this.numplayers; n++) {
-            myLegend["P" + n.toString() + "1"] = {
+        for (let c = 0; c < moreColours.length; c++) {
+	    let color = c + 3;
+            myLegend[moreColours[c] as String + "1"] = {
                 name: "pyramid-up-small-upscaled",
-                colour: n
+                colour: color
             };
-            myLegend["P" + n.toString() + "2"] = {
+            myLegend[moreColours[c].toString() + "2"] = {
                 name: "pyramid-up-medium-upscaled",
-                colour: n
+                colour: color
             };
-            myLegend["P" + n.toString() + "3"] = {
+            myLegend[moreColours[c].toString() + "3"] = {
                 name: "pyramid-up-large-upscaled",
-                colour: n
+                colour: color
             };
         }
+	for (let p = 0; p < this.numplayers; p++) {
+	    let color = p + 1;
+            myLegend["P" + color] = {
+                name: "ring-23",
+                colour: color
+            };
+	}
 
         // Build rep
         const rep: APRenderRep =  {
@@ -784,7 +734,7 @@ export class StawvsGame extends GameBase {
                 height: 8
             },
             legend: myLegend,
-            pieces: pstr
+            pieces: pstr as [string[][], ...string[][][]],
         };
 
 	const areas = [];
