@@ -106,6 +106,7 @@ export class StawvsGame extends GameBase {
 
     public static newBoard(): Map<string, CellContents> {
 	const emptyCells: string[] = ["a1","a8","h1","h8"];
+	const testCells: string[] = ["a2","a3","b5","e8"];
         const board = new Map<string, CellContents>([]);
 	let bag: Pyramid[] = [];
 	for (let stash = 0; stash < 5; stash++) {
@@ -119,8 +120,12 @@ export class StawvsGame extends GameBase {
         for (let x = 0; x < 8; x++) {
             for (let y = 0; y < 8; y++) {
 		const cell = StawvsGame.coords2algebraic(x, y);
-		if (emptyCells.indexOf(cell) === -1)
-		    board.set(cell, [shuffled.pop()]);
+		if (emptyCells.indexOf(cell) === -1) {
+		    if (testCells.indexOf(cell) > -1)
+			board.set(cell, [shuffled.pop(), 1]);
+		    else
+			board.set(cell, [shuffled.pop()]);
+		}
             }
         }
         return board;
@@ -704,7 +709,7 @@ export class StawvsGame extends GameBase {
         // build legend 
         const myLegend: ILegendObj = {};
         for (let c = 0; c < moreColours.length; c++) {
-	    let color = c + 3;
+	    let color = c + 8;
             myLegend[moreColours[c] as String + "1"] = {
                 name: "pyramid-up-small-upscaled",
                 colour: color
@@ -721,8 +726,9 @@ export class StawvsGame extends GameBase {
 	for (let p = 0; p < this.numplayers; p++) {
 	    let color = p + 1;
             myLegend["P" + color] = {
-                name: "ring-23",
-                colour: color
+                name: "piece",
+		scale: 0.3,
+                colour: color,
             };
 	}
 
