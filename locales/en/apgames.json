@@ -4962,7 +4962,11 @@
         },
         "stawvs": {
             "BADSYNTAX": "Invalid syntax: {{move}}. It should be a single cell for placement or three comma-separated cells for a move (e.g., h7, or e4,c2,c5).",
+            "BAD_CLAIM": "You must claim a pyramid in a straight, unobntructed line from your new position.",
+            "BAD_MOVE": "You must move to a pyramid in a straight, unobntructed line from your old position.",
+            "BAD_START": "You must choose one of your own pieces to move.",
             "BAD_PLACEMENT": "You must place your cap on an unoccupied pyramid, not on an occupied one or an empty cell.",
+            "EXTRA_CLAIMS": "You may only claim one pyramid on your turn.",
             "INITIAL_PLACEMENT_INSTRUCTIONS": "Click a pyramid to place your piece on the board.",
             "INITIAL_MOVE_INSTRUCTIONS": "Click a piece to move.",
             "PLACE_NOPASS": "You cannot pass while you have pieces to place.",

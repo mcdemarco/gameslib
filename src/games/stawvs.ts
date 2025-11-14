@@ -194,6 +194,15 @@ export class StawvsGame extends GameBase {
         return this;
     }
 
+    public canFish(cellA: string, cellB: string): boolean {
+	//The unobstructed straight line test for moves and claims.
+	//Named for Hey, That's My Fish!
+	if (cellA === cellB)
+	    return false;
+	//TODO
+        return true;
+    }
+
     public canPlace(cell: string): boolean {
         if (! this.board.has(cell)) {
             return false;
@@ -239,6 +248,15 @@ export class StawvsGame extends GameBase {
         } else {
 	    return undefined;
 	}
+    }
+
+    public disown(cell: string) : void {
+        if (! this.board.has(cell)) {
+	    throw new Error("Illicit cell clearance.");
+        }
+	const contents = this.board.get(cell);
+	this.board.set(cell,[contents![0]]);
+	return;
     }
 
     public place(cell: string, owner: playerid): void {
@@ -290,48 +308,34 @@ export class StawvsGame extends GameBase {
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
+	console.log("In handleClick with move " + move);
         try {
-            const cell = StawvsGame.coords2algebraic(col, row);
             let newmove = "";
+            const cell = StawvsGame.coords2algebraic(col, row);
 
-	    /*
-            //If you click on an occupied cell, clear the entry
-            if (this.board.has(cell)) {
-                return {move: "", message: ""} as IClickResult;
-            }
-            let smallest: number|undefined;
-            for (let i = 0; i < 3; i++) {
-//                if (stash[i] > 0) {
-                    smallest = i + 1;
-                    break;
- //               }
-            }
-
-            if (move === '') {
-                if (smallest === undefined) {
-                    return {
-                        move: "",
-                        valid: false,
-                        message: i18next.t("apgames:validation.stawvs.SIZEFIRST"),
-                    } as IClickResult;
-                } else {
-                    move = smallest.toString();
-                }
-            }
-
-            newmove = `${move}${cell}`
-	    */
-	    if (this.mode === "place")
+	    if (this.mode === "place" || move === "")
 		newmove = cell;
+	    else if (move.indexOf(",") > -1) {
+               //No more clicking, please
+                return {
+                    move,
+                    valid: false,
+                    message: i18next.t("apgames:validation.stawvs.EXTRA_CLAIMS")
+                }
+	    } else if (move.indexOf("-") > -1)
+		newmove = `${move},${cell}`;
+	    else
+		newmove = `${move}-${cell}`;
 
-	    //TODO: collect moves.
-	    
             const result = this.validateMove(newmove) as IClickResult;
+	    console.log("Result: ",result.valid,result );
             if (! result.valid) {
-                result.move = "";
+		//Revert latest addition to newmove.
+                result.move = newmove.includes(",") ? newmove.split(",")[0] : (newmove.includes("-") ? newmove.split("-")[0] : "");
             } else {
                 result.move = newmove;
             }
+	    console.log("Revised result: ",result.valid,result );
             return result;
         } catch (e) {
             return {
@@ -389,41 +393,46 @@ export class StawvsGame extends GameBase {
 	//The second must be in a straight (incl. diagonal), legal line from there.
 	//The third must be in a straight legal line from the second.
 
+	const cells = m.split("-");
+	const cell0 = cells[0];
+	if (!this.hasOwner(cell0) || this.getOwner(cell0) !== this.currplayer) {
+	    result.valid = false;
+	    result.message = i18next.t("apgames:validation.stawvs.BAD_START", {m});
+	    return result;
+	}
+
+	if (cells.length === 1) { 
+	    result.valid = true;
+	    result.complete = -1;
+	    result.message = i18next.t("apgames:validation.stawvs.PARTIAL_MOVE");
+	    return result;
+	}
+
+	const [cell1,cell2] = cells[1].split(",");
 	
+	if (! this.canFish(cell0,cell1) ) {
+	    result.valid = false;
+	    result.message = i18next.t("apgames:validation.stawvs.BAD_MOVE");
+	    return result;
+	}
 
-	/*
-            result.message = i18next.t("apgames:validation.stawvs.BADSYNTAX", {move: m});
-            return result;
-        }
-        const size = parseInt(match[1], 10);
-        const cell = match[2];
-        // cell exists
-        try {
-            StawvsGame.algebraic2coords(cell)
-        } catch {
-            result.valid = false;
-            result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell})
-            return result;
-        }
-        // have piece to place
-        if (this.mode === "place") {
-            result.valid = false;
-            result.message = i18next.t("apgames:validation.stawvs.NOPIECE", {size});
-            return result;
-        }
-        // space is empty
-        if (this.board.has(cell)) {
-            result.valid = false;
-            result.message = i18next.t("apgames:validation._general.OCCUPIED", {where: cell});
-            return result;
-        }
-	*/
+	if (! cell2) { 
+	    result.valid = true;
+	    result.complete = -1;
+	    result.message = i18next.t("apgames:validation.stawvs.PARTIAL_CLAIM");
+	    return result;
+	}
 
-        // Looks good
-        result.valid = true;
-        result.complete = 1;
-        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-        return result;
+	if (! this.canFish(cell1,cell2) ) {
+	    result.valid = false;
+	    result.message = i18next.t("apgames:validation.stawvs.BAD_CLAIM", {m});
+	    return result;
+	} else {
+	    result.valid = true;
+	    result.complete = 1;
+	    result.message = i18next.t("apgames:validation.stawvs.VALID_PLAY");
+	    return result;
+	}
     }
 
     public move(m: string, {trusted = false} = {}): StawvsGame {
@@ -446,7 +455,7 @@ export class StawvsGame extends GameBase {
         if (m.toLowerCase() === "pass") {
             this.results = [{type: "pass"}];
         } else {
-            // validate move
+            // enact move
 	    if (this.mode === "place") {
 		const cell = m;
 		if (this.canPlace(cell)) {
@@ -454,7 +463,18 @@ export class StawvsGame extends GameBase {
 		    this.place(cell, this.currplayer); //board.set(cell, this.board.get(cell)!.push(this.currplayer));
 		    this.results = [{type: "place", where: cell, who: this.currplayer}]
 		}
-            }
+            } else {
+		const cells = m.split("-");
+		const cell0 = cells[0];
+		const [cell1,cell2] = cells[1].split(",");
+		//1. Move piece
+		this.disown(cell0);
+		this.place(cell1,this.currplayer);
+		//2. Claim target.
+		//TODO
+		//3. Remove target.
+		this.board.delete(cell2);
+	    }
         }
 
 	// update mode if all pieces are placed.
