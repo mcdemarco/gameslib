@@ -18,6 +18,10 @@ export type Pyramid = [Colour, Size];
 export type CellContents = [Pyramid, playerid?];
 const allColours: string[] = ["VT", "OG", "BN"];
 const moreColours: string[] = ["VT", "OG", "BN", "WH"];
+const pieceCount = 3; /* there's a variant of 2 for 4p */
+const boardDim = 8; /* there's a pyramid-poor variant of 7 */
+const triosPerColor = 5; /* in the pyramid-poor variant it's 4 */
+const numberOfColors = 4; /* there's a stash-poor variant of 5 */
 
 interface ILegendObj {
     [key: string]: Glyph|[Glyph, ...Glyph[]];
@@ -85,10 +89,10 @@ export class StawvsGame extends GameBase {
     };
 
     public static coords2algebraic(x: number, y: number): string {
-        return GameBase.coords2algebraic(x, y, 8);
+        return GameBase.coords2algebraic(x, y, boardDim);
     }
     public static algebraic2coords(cell: string): [number, number] {
-        return GameBase.algebraic2coords(cell, 8);
+        return GameBase.algebraic2coords(cell, boardDim);
     }
 
     public numplayers!: number;
@@ -110,16 +114,16 @@ export class StawvsGame extends GameBase {
         const testCells: string[] = []; //["a2","a3","b5","e8"]; 
         const board = new Map<string, CellContents>([]);
         let bag: Pyramid[] = [];
-        for (let stash = 0; stash < 5; stash++) {
-            for (let size = 1; size < 4; size++) {
+        for (let stash = 0; stash < triosPerColor; stash++) {
+            for (let size = 1; size < numberOfColors; size++) {
                 for (let c = 0; c < moreColours.length; c++) {
                     bag.push([moreColours[c], size] as Pyramid);   
                 }
             }
         }
         const shuffled = shuffle(bag);
-        for (let x = 0; x < 8; x++) {
-            for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < boardDim; x++) {
+            for (let y = 0; y < boardDim; y++) {
                 const cell = StawvsGame.coords2algebraic(x, y);
                 if (emptyCells.indexOf(cell) === -1) {
                     if (testCells.indexOf(cell) > -1)
@@ -160,7 +164,7 @@ export class StawvsGame extends GameBase {
                 state = JSON.parse(state, reviver) as IStawvsState;
             }
             if (state.game !== StawvsGame.gameinfo.uid) {
-                throw new Error(`The Stawvs! game code cannot process a game of '${state.game}'.`);
+                throw new Error(`The Stawvs game code cannot process a game of '${state.game}'.`);
             }
             this.numplayers = state.numplayers;
             this.variants = state.variants;
@@ -207,6 +211,36 @@ export class StawvsGame extends GameBase {
         return true;
     }
 
+    public hasOwner(cell: string): boolean {
+        if (! this.board.has(cell)) {
+            return false;
+        }
+
+        const contents = this.board.get(cell);
+        if (contents === undefined) {
+            throw new Error("Malformed cell contents.");
+        }
+
+        if (contents.length > 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public getOwner(cell: string): playerid | undefined {
+        if (! this.board.has(cell)) {
+            return undefined;
+        }
+
+        const contents = this.board.get(cell);
+	if (contents!.length > 1) {
+            return contents![1];
+        } else {
+	    return undefined;
+	}
+    }
+
     public place(cell: string, owner: playerid): void {
         if (! this.board.has(cell)) {
 	    throw new Error("Illegal cell placement.");
@@ -236,8 +270,8 @@ export class StawvsGame extends GameBase {
 	const moves: string[] = [];
         if (this.mode === "place") {
             // If the player is placing pieces, enumerate the available pyramids.
-            for (let row = 0; row < 8; row++) {
-                for (let col = 0; col < 8; col++) {
+            for (let row = 0; row < boardDim; row++) {
+                for (let col = 0; col < boardDim; col++) {
                     const cell = StawvsGame.coords2algebraic(col, row);
                     if (this.canPlace(cell)) {
                         moves.push(cell);
@@ -328,8 +362,8 @@ export class StawvsGame extends GameBase {
                 result.message = i18next.t("apgames:validation.stawvs.PLACE_NOPASS")
                 return result;
             } else {
-		//TODO
-                result.valid = false;
+		//TODO, pass checking, or just autopass?
+                result.valid = true;
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
                 return result;
             }
@@ -337,15 +371,25 @@ export class StawvsGame extends GameBase {
 
 	//TODO: after place moves need more parsing.
 
-	if (! this.canPlace(m)) {
-            result.valid = false;
-            result.message = i18next.t("apgames:validation.stawvs.NOPIECE", {m});
-            return result;
-        } else {
-            result.valid = true;
-            result.message = i18next.t("apgames:validation.general.VALID_PLACEMENT");
-            return result;
-        }
+	if (this.mode === "place") {
+	    if (! this.canPlace(m)) {
+		result.valid = false;
+		result.message = i18next.t("apgames:validation.stawvs.BAD_PLACEMENT", {m});
+		return result;
+            } else {
+		result.valid = true;
+		result.complete = 1;
+		result.message = i18next.t("apgames:validation.general.VALID_PLACEMENT");
+		return result;
+            }
+	} //else
+
+	//Parse the move into three cells.
+	//The first must be occupied by currplayer.
+	//The second must be in a straight (incl. diagonal), legal line from there.
+	//The third must be in a straight legal line from the second.
+
+	
 
 	/*
             result.message = i18next.t("apgames:validation.stawvs.BADSYNTAX", {move: m});
@@ -413,6 +457,11 @@ export class StawvsGame extends GameBase {
             }
         }
 
+	// update mode if all pieces are placed.
+	if (this.mode === "place" && this.checkPlaced()) {
+	    this.mode = "collect";
+	}
+	
         // update currplayer
         this.lastmove = m;
         let newplayer = (this.currplayer as number) + 1;
@@ -476,6 +525,24 @@ export class StawvsGame extends GameBase {
         }
         score += org.miscellaneous.length;
         return score;
+    }
+
+    public checkPlaced(): boolean {
+	let placements: number[] = Array(this.numplayers).fill(0);
+        for (let row = 0; row < boardDim; row++) {
+            for (let col = 0; col < boardDim; col++) {
+                const cell = StawvsGame.coords2algebraic(col, row);
+		const owner = this.getOwner(cell);
+                if (owner) {
+		    placements[owner as number - 1]++;
+                }
+            }
+	}
+	const total = Math.min(...placements);
+	if (total > pieceCount) {
+	    throw new Error("Too many pieces have been placed.");
+	}
+	return (total === pieceCount);
     }
 
     public organizeCaps(indata: playerid | Pyramid[] = 1): IOrganizedCaps {
@@ -689,9 +756,9 @@ export class StawvsGame extends GameBase {
         // Flat pyramids in the style of Blam!
         // Build piece string
         let pstr: string[][][] = [];
-        for (let row = 0; row < 8; row++) {
+        for (let row = 0; row < boardDim; row++) {
             const pieces: string[][] = [];
-            for (let col = 0; col < 8; col++) {
+            for (let col = 0; col < boardDim; col++) {
                 const piece: string[] = [];
                 const cell = StawvsGame.coords2algebraic(col, row);
                 if (this.board.has(cell)) {
@@ -740,8 +807,8 @@ export class StawvsGame extends GameBase {
         const rep: APRenderRep =  {
             board: {
                 style: "squares-checkered",
-                width: 8,
-                height: 8
+                width: boardDim,
+                height: boardDim
             },
             legend: myLegend,
             pieces: pstr as [string[][], ...string[][][]],
