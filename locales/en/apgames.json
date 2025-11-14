@@ -2131,6 +2131,20 @@
                 "name": "5x5 board"
             }
         },
+        "stawvs": {
+            "#setup": {
+              "description": "In the default setup, the corners of the board are empty.",
+              "name": "Default setup (empty corners)"
+            },
+            "hole": {
+                "description": "Set up the board with four empty squares in the center.",
+                "name": "Center hole"
+            },
+            "random": {
+                "description": "Set up the board with four random empty squares.",
+                "name": "Random gaps"
+            }
+        },
         "stibro": {
             "size-5": {
                 "name": "Size 5 board"

@@ -84,6 +84,10 @@ export class StawvsGame extends GameBase {
                 apid: "4bd8317d-fb04-435f-89e0-2557c3f2e66c",
             },
         ],
+	variants: [
+            {uid: "hole", group: "setup"},
+            {uid: "random", group: "setup"},
+        ],
         categories: ["goal>score>eog", "mechanic>set", "board>shape>rect", "board>connect>rect", "components>pyramids", "other>2+players"],
         flags: ["scores", "autopass"]
     };
@@ -108,52 +112,52 @@ export class StawvsGame extends GameBase {
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = []
 
-    public static newBoard(): Map<string, CellContents> {
-        const emptyCells: string[] = ["a1","a8","h1","h8"];
-	//TODO: remove test code
-        const testCells: string[] = []; //["a2","a3","b5","e8"]; 
-        const board = new Map<string, CellContents>([]);
-        let bag: Pyramid[] = [];
-        for (let stash = 0; stash < triosPerColor; stash++) {
-            for (let size = 1; size < numberOfColors; size++) {
-                for (let c = 0; c < moreColours.length; c++) {
-                    bag.push([moreColours[c], size] as Pyramid);   
-                }
-            }
-        }
-        const shuffled = shuffle(bag);
-        for (let x = 0; x < boardDim; x++) {
-            for (let y = 0; y < boardDim; y++) {
-                const cell = StawvsGame.coords2algebraic(x, y);
-                if (emptyCells.indexOf(cell) === -1) {
-                    if (testCells.indexOf(cell) > -1)
-                        board.set(cell, [shuffled.pop(), 1]);
-                    else
-                        board.set(cell, [shuffled.pop()]);
-                }
-            }
-        }
-        return board;
-    }
 
     constructor(state: number | IStawvsState | string, variants?: string[]) {
         super();
         if (typeof state === "number") {
             this.numplayers = state;
+	    if (variants !== undefined) {
+                this.variants = [...variants];
+            }
+
+	    //Init board
+            let emptyCells: string[] = ["a1","a8","h1","h8"];
+	    if (this.variants.includes("hole"))
+		emptyCells = ["d4","e4","d5","e5"];
+	    else if (this.variants.includes("random"))
+		emptyCells = this.getFourRandomCells();
+
+            const board = new Map<string, CellContents>([]);
+            let bag: Pyramid[] = [];
+            for (let stash = 0; stash < triosPerColor; stash++) {
+		for (let size = 1; size < numberOfColors; size++) {
+                    for (let c = 0; c < moreColours.length; c++) {
+			bag.push([moreColours[c], size] as Pyramid);   
+                    }
+		}
+            }
+            const shuffled = shuffle(bag);
+            for (let x = 0; x < boardDim; x++) {
+		for (let y = 0; y < boardDim; y++) {
+                    const cell = StawvsGame.coords2algebraic(x, y);
+                    if (emptyCells.indexOf(cell) === -1) {
+			board.set(cell, [shuffled.pop()]);
+                    }
+		}
+            }
+	    
             const fresh: IMoveState = {
                 _version: StawvsGame.gameinfo.version,
                 _results: [],
                 _timestamp: new Date(),
                 currplayer: 1,
                 mode: "place",
-                board: StawvsGame.newBoard(),
+                board: board,
                 scores: [],
                 caps: [],
                 captured: [[], []],
             };
-            if ( (variants !== undefined) && (variants.length === 1) && (variants[0] === "overloaded") ) {
-                this.variants = ["overloaded"];
-            }
             for (let pid = 1; pid <= state; pid++) {
                 fresh.scores.push(0);
                 fresh.caps.push(0);
@@ -192,6 +196,23 @@ export class StawvsGame extends GameBase {
         this.captured = clone(state.captured) as [Pyramid[], Pyramid[]];
         this.caps = [...state.caps];
         return this;
+    }
+
+    public getFourRandomCells(): string[] {
+	const cells: string[] = [];
+	cells.push(this.getOneRandomCell());
+	while (cells.length < 4) {
+	    const newcell = this.getOneRandomCell();
+	    if (cells.indexOf(newcell) < 0)
+		cells.push(newcell);
+	}
+	return cells;
+    }
+
+    public getOneRandomCell(): string {
+	const randx: number = Math.floor(Math.random() * boardDim);
+	const randy: number = Math.floor(Math.random() * boardDim);
+	return StawvsGame.coords2algebraic(randx,randy);
     }
 
     public canFish(cellA: string, cellB: string): boolean {
@@ -237,6 +258,20 @@ export class StawvsGame extends GameBase {
         return false;
     }
 
+    public getOwnCells(player: playerid): string[] {
+	const mycells: string[] = [];
+	for (let row = 0; row < boardDim; row++) {
+            for (let col = 0; col < boardDim; col++) {
+		const cell = StawvsGame.coords2algebraic(col, row);
+		if (this.hasOwner(cell) && this.getOwner(cell) === player) {
+                    mycells.push(cell);
+		}
+            }
+	}
+	console.log(player + "'s cells: " + mycells);
+	return mycells;
+    }
+
     public getOwner(cell: string): playerid | undefined {
         if (! this.board.has(cell)) {
             return undefined;
@@ -261,7 +296,7 @@ export class StawvsGame extends GameBase {
 
     public place(cell: string, owner: playerid): void {
         if (! this.board.has(cell)) {
-	    throw new Error("Illegal cell placement.");
+	    throw new Error("Attempt to play to empty cell.");
         }
 
         const contents = this.board.get(cell);
@@ -296,9 +331,24 @@ export class StawvsGame extends GameBase {
                     }
                 }
             }
-        }
-
-	//TODO: moves for collect mode.
+        } else {
+	    //TODO: better moves for collect mode.
+	    const starts = this.getOwnCells(this.currplayer);
+	    for (let s = 0; s < starts.length; s++) {
+		const start = starts[s];
+		for (let row = 0; row < boardDim; row++) {
+                    for (let col = 0; col < boardDim; col++) {
+			const cell = StawvsGame.coords2algebraic(col, row);
+			if (this.canFish(start,cell)) {
+                            moves.push(start + "-" + cell + "," + start);
+			}
+                    }
+		}
+	    }
+	    if (moves.length === 0)
+		moves.push("pass");
+	}
+	console.log(player + "'s moves: " + moves);
         return moves;
     }
 
@@ -404,6 +454,7 @@ export class StawvsGame extends GameBase {
 	if (cells.length === 1) { 
 	    result.valid = true;
 	    result.complete = -1;
+	    result.canrender = true;
 	    result.message = i18next.t("apgames:validation.stawvs.PARTIAL_MOVE");
 	    return result;
 	}
@@ -419,6 +470,7 @@ export class StawvsGame extends GameBase {
 	if (! cell2) { 
 	    result.valid = true;
 	    result.complete = -1;
+	    result.canrender = true;
 	    result.message = i18next.t("apgames:validation.stawvs.PARTIAL_CLAIM");
 	    return result;
 	}
@@ -446,10 +498,10 @@ export class StawvsGame extends GameBase {
             const result = this.validateMove(m);
             if (! result.valid) {
                 throw new UserFacingError("VALIDATION_GENERAL", result.message)
-            }
+            }/*
             if (! this.moves().includes(m)) {
                 throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}))
-            }
+            }*/
         }
 
         if (m.toLowerCase() === "pass") {
@@ -880,6 +932,10 @@ export class StawvsGame extends GameBase {
 
     public status(): string {
         let status = super.status();
+
+        if (this.variants !== undefined) {
+            status += "**Variants**: " + this.variants.join(", ") + "\n\n";
+        }
 
         status += "**Scores**\n\n";
         for (let n = 1; n <= this.numplayers; n++) {

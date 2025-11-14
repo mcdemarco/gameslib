@@ -977,7 +977,7 @@ export const GameFactory = (game: string, ...args: any[]): GameBase|GameBaseSimu
         case "sunspot":
             return new SunspotGame(...args);
         case "stawvs":
-            return new StawvsGame(args[0], ...args);
+            return new StawvsGame(args[0], ...args.slice(1));
     }
     return;
 }
