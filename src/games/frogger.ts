@@ -1,11 +1,10 @@
-import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
+import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerOutline, RowCol } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerGlyph, RowCol} from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, SquareOrthGraph, UserFacingError } from "../common";
 import i18next from "i18next";
-import { Card, Deck, cardSortAsc, cardSortDesc, cardsBasic, cardsExtended, suits } from "../common/decktet";
-import { connectedComponents } from "graphology-components";
+import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended } from "../common/decktet"; //pending suits
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
@@ -15,8 +14,6 @@ export type playerid = 1|2|3|4|5;
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: Map<string, string>;
-    claimed: Map<string, playerid>;
-    influence: number[];
     hands: string[][];
     lastmove?: string;
 };
@@ -24,18 +21,6 @@ export interface IMoveState extends IIndividualState {
 export interface IFroggerState extends IAPGameState {
     winner: playerid[];
     stack: Array<IMoveState>;
-};
-
-interface IDistrict {
-    cells: string[];
-    owner?: playerid;
-    suit: string;
-}
-
-type InfluenceParams = {
-    cell: string;
-    ds?: IDistrict[];
-    player?: playerid;
 };
 
 interface ILegendObj {
@@ -82,26 +67,24 @@ export class FroggerGame extends GameBase {
         categories: ["goal>evacuate", "mechanic>move", "mechanic>bearoff", "mechanic>block", "mechanic>random>setup", "mechanic>random>play", "board>shape>rect", "board>connect>rect", "components>decktet", "other>2+players"],
         flags: ["random-start", "custom-randomization"],
     };
-    public static coords2algebraic(x: number, y: number): string {
-        return GameBase.coords2algebraic(x, y, 6);
+    public coords2algebraic(x: number, y: number): string {
+        return GameBase.coords2algebraic(x, y, this.rows);
     }
-    public static algebraic2coords(cell: string): [number, number] {
-        return GameBase.algebraic2coords(cell, 6);
+    public algebraic2coords(cell: string): [number, number] {
+        return GameBase.algebraic2coords(cell, this.rows);
     }
 
     public numplayers = 2;
     public currplayer: playerid = 1;
     public board!: Map<string, string>;
-    public claimed!: Map<string, playerid>;
-    public influence!: number[];
     public hands: string[][] = [];
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
+    private rows: number = 3;
     private deck!: Deck;
-    private emulated = false;
 
     constructor(state: number | IFroggerState | string, variants?: string[]) {
         super();
@@ -122,27 +105,24 @@ export class FroggerGame extends GameBase {
 	    boardDeck.shuffle();
 
             // init board
+	    this.rows = Math.max(3, this.numplayers) + 1;
             const board = new Map<string, string>();
-            let cells: string[] = ["a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1", "i1", "j1", "k1", "l1", "m1"];
-
+            const cellCols: string[] = ["b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"];
+	    const topRow = this.rows;
+	    const cells = cellCols.map(col => col + topRow);
+	    
             for (const cell of cells) {
-		if (cell === "a1") {
-		    //The track begins with the Excuse.
-		    board.set(cell, "0");
-		} else {
-                    const [card] = boardDeck.draw();
-                    board.set(cell, card.uid);
-		}
+                const [card] = boardDeck.draw();
+                board.set(cell, card.uid);
             }
 
-            // init influence and hands
-            const influence: number[] = [];
+	    console.log(board);
+	    
+            // init market and hands
             const hands: string[][] = [];
             for (let i = 0; i < this.numplayers; i++) {
-                influence.push(4);
                 hands.push([...deck.draw(4).map(c => c.uid)]);
             }
-            const claimed = new Map<string, playerid>();
 
             const fresh: IMoveState = {
                 _version: FroggerGame.gameinfo.version,
@@ -150,8 +130,6 @@ export class FroggerGame extends GameBase {
                 _timestamp: new Date(),
                 currplayer: 1,
                 board,
-                claimed,
-                influence,
                 hands,
             };
             this.stack = [fresh];
@@ -167,6 +145,7 @@ export class FroggerGame extends GameBase {
             this.winner = [...state.winner];
             this.variants = state.variants;
             this.stack = [...state.stack];
+
         }
         this.load();
     }
@@ -183,15 +162,15 @@ export class FroggerGame extends GameBase {
         this.results = [...state._results];
         this.currplayer = state.currplayer;
         this.board = new Map(state.board);
-        this.claimed = new Map(state.claimed);
-        this.influence = [...state.influence];
         this.hands = state.hands.map(h => [...h]);
         this.lastmove = state.lastmove;
+
+	this.rows = Math.max(3, this.numplayers) + 1;
 
         // Deck is reset every time you load
         const cards = [...cardsBasic];
 	//Some board cards, for removal.
-	cards.push(...cardsExtended.filter(c => c.rank.uid === "0" || c.rank.uid === "P"));
+	cards.push(...cardsExtended.filter(c => c.rank.uid === "P"));
 	
         this.deck = new Deck(cards);
         // remove cards from the deck that are on the board or in known hands
@@ -208,82 +187,6 @@ export class FroggerGame extends GameBase {
         return this;
     }
 
-    public getDistricts(): IDistrict[] {
-        const districts: IDistrict[] = [];
-
-        for (const suit of suits) {
-            const g = new SquareOrthGraph(6,6);
-            for (const node of g.graph.nodes()) {
-                if (!this.board.has(node) || !this.board.get(node)!.includes(suit.uid)) {
-                    g.graph.dropNode(node);
-                }
-            }
-            const islands = connectedComponents(g.graph);
-            for (const isle of islands) {
-                const claimedCells = isle.filter(c => this.claimed.has(c));
-                if (claimedCells.length === 0) {
-                    districts.push({
-                        cells: isle,
-                        suit: suit.uid,
-                    });
-                }
-                else if (claimedCells.length === 1) {
-                    districts.push({
-                        cells: isle,
-                        suit: suit.uid,
-                        owner: this.claimed.get(claimedCells[0])!,
-                    });
-                }
-                else {
-                    const claimedCards = claimedCells.map(c => Card.deserialize(this.board.get(c)!)!);
-                    claimedCards.sort(cardSortDesc);
-                    const winCard = claimedCards[0];
-                    const cell = [...this.board.entries()].find(([,v]) => v === winCard.uid)![0];
-                    const owner = this.claimed.get(cell)!;
-                    districts.push({
-                        cells: isle,
-                        suit: suit.uid,
-                        owner
-                    });
-                }
-            }
-        }
-
-        return districts;
-    }
-
-    public canInfluence({cell, ds, player}: InfluenceParams): boolean {
-        if (this.claimed.has(cell)) {
-            return false;
-        }
-        if (!this.board.has(cell)) {
-            return false;
-        }
-        const uid = this.board.get(cell)!;
-        const card = Card.deserialize(uid);
-        if (card === undefined) {
-            throw new Error(`Could not deserialize the card ${uid}`);
-        }
-        if (["T", "P", "0"].includes(card.rank.uid)) {
-            return false;
-        }
-        if (ds === undefined) {
-            ds = this.getDistricts();
-        }
-        if (player ===  undefined) {
-            player = this.currplayer;
-        }
-        const contains = ds.filter(d => d.cells.includes(cell));
-        let can = true;
-        for (const d of contains) {
-            if (d.owner !== undefined && d.owner !== player) {
-                can = false;
-                break;
-            }
-        }
-        return can;
-    }
-
     public randomMove(): string {
         if (this.hands[this.currplayer - 1].length > 0) {
             const g = new SquareOrthGraph(6,6);
@@ -291,21 +194,8 @@ export class FroggerGame extends GameBase {
             const card = shuffled[0];
             const empty = shuffle((g.listCells(false) as string[]).filter(c => !this.board.has(c))) as string[];
             if (empty.length > 0) {
-                let move = `${card}-${empty[0]}`;
-                if (this.influence[this.currplayer - 1] > 0 && Math.random() < 0.5) {
-                    const ds = this.getDistricts();
-                    let poss: string[] = [];
-                    for (const occ of this.board.keys()) {
-                        if (this.canInfluence({cell: occ, ds})) {
-                            poss.push(occ);
-                        }
-                    }
-                    if (poss.length > 0) {
-                        poss = shuffle(poss) as string[];
-                        move += `,${poss[0]}`;
-                    }
-                }
-                return move;
+                const move = `${card}-${empty[0]}`;
+		return move;
             }
         }
         return "";
@@ -320,7 +210,7 @@ export class FroggerGame extends GameBase {
             }
             // otherwise, on the board
             else {
-                const cell = FroggerGame.coords2algebraic(col, row);
+                const cell = this.coords2algebraic(col, row);
                 // continuation of placement
                 if (!move.includes("-")) {
                     newmove = `${move}-${cell}`;
@@ -412,7 +302,7 @@ export class FroggerGame extends GameBase {
             if (influence === undefined || influence.length === 0) {
                 result.valid = true;
                 result.canrender = true;
-                result.complete = this.influence[this.currplayer - 1] > 0 ? 0 : 1;
+                result.complete = 0;
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
                 return result;
             }
@@ -421,7 +311,7 @@ export class FroggerGame extends GameBase {
                 const cloned = this.clone();
                 cloned.board.set(to, card);
                 // influence available
-                if (cloned.influence[this.currplayer - 1] === 0) {
+                if (false) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.NO_INFLUENCE");
                     return result;
@@ -439,7 +329,7 @@ export class FroggerGame extends GameBase {
                     return result;
                 }
                 // not claimed
-                if (cloned.claimed.has(influence)) {
+                if (false) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.ALREADY_CLAIMED", {cell: influence});
                     return result;
@@ -455,7 +345,7 @@ export class FroggerGame extends GameBase {
                     return result;
                 }
                 // not owned
-                if (!cloned.canInfluence({cell: influence})) {
+                if (false) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.ALREADY_OWNED", {cell: influence});
                     return result;
@@ -470,7 +360,7 @@ export class FroggerGame extends GameBase {
         }
     }
 
-    public move(m: string, {trusted = false, partial = false, emulation = false} = {}): FroggerGame {
+    public move(m: string, {trusted = false, partial = false} = {}): FroggerGame {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
@@ -485,7 +375,6 @@ export class FroggerGame extends GameBase {
         }
 
         this.results = [];
-        this.emulated = emulation;
         const [mv, influence] = m.split(",");
         // eslint-disable-next-line prefer-const
         let [card, to] = mv.split("-");
@@ -493,18 +382,13 @@ export class FroggerGame extends GameBase {
         const cardObj = Card.deserialize(card)!;
 
         const idx = this.hands[this.currplayer - 1].findIndex(c => c === card);
-        if (idx < 0) {
+        if (idx < 0 || influence) {
             throw new Error(`Could not find the card "${card}" in the player's hand. This should never happen.`);
         }
         this.hands[this.currplayer - 1].splice(idx, 1);
         if (to !== undefined && to.length > 0) {
             this.board.set(to, card);
             this.results.push({type: "place", what: cardObj.plain, where: to});
-            if (influence !== undefined && influence.length > 0) {
-                this.claimed.set(influence, this.currplayer);
-                this.influence[this.currplayer - 1]--;
-                this.results.push({type: "claim", where: influence});
-            }
         }
 
         if (partial) { return this; }
@@ -531,16 +415,7 @@ export class FroggerGame extends GameBase {
     protected checkEOG(): FroggerGame {
         if (this.board.size === 36) {
             this.gameover = true;
-            const scores: number[] = [];
-            for (let p = 1; p <= this.numplayers; p++) {
-                scores.push(this.getPlayerScore(p));
-            }
-            const max = Math.max(...scores);
-            for (let p = 1; p <= this.numplayers; p++) {
-                if (scores[p-1] === max) {
-                    this.winner.push(p as playerid);
-                }
-            }
+            this.winner.push(this.currplayer);
         }
 
         if (this.gameover) {
@@ -581,37 +456,38 @@ export class FroggerGame extends GameBase {
             currplayer: this.currplayer,
             lastmove: this.lastmove,
             board: new Map(this.board),
-            claimed: new Map(this.claimed),
-            influence: [...this.influence],
             hands: this.hands.map(h => [...h]),
         };
     }
 
     public render(): APRenderRep {
-        const prevplayer = this.currplayer === 1 ? 2 : 1;
+	//Taken from the decktet sheet.
+//	const suitColors = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
+	
         // Build piece string
         let pstr = "";
-        for (let row = 0; row < this.numplayers + 1; row++) {
+        for (let row = 0; row < this.rows; row++) {
             if (pstr.length > 0) {
                 pstr += "\n";
             }
             const pieces: string[] = [];
             for (let col = 0; col < 14; col++) {
-                const cell = FroggerGame.coords2algebraic(col, row);
+                const cell = this.coords2algebraic(col, row);
+		console.log(col,row,cell);
                 if (this.board.has(cell)) {
                     pieces.push("c" + this.board.get(cell)!);
                 } else {
                     pieces.push("-");
                 }
             }
+	    
             pstr += pieces.join(",");
         }
 
         // build claimed markers
-        let markers: (MarkerOutline|MarkerFlood)[]|undefined;
-        if (this.claimed.size > 0) {
-            markers = [];
-            for (const [cell, p] of this.claimed.entries()) {
+        const markers: (MarkerFlood|MarkerGlyph)[] = [];
+	
+        /*    for (const [cell, p] of this.claimed.entries()) {
                 const [x,y] = FroggerGame.algebraic2coords(cell);
                 // find existing marker if present for this player
                 const found = markers.find(m => m.colour === p);
@@ -626,55 +502,63 @@ export class FroggerGame extends GameBase {
                         points: [{row: y, col: x}],
                     });
                 }
-            }
-        }
+	  }
+	
+        }*/
+        markers.push({
+            type: "glyph",
+            glyph: "start",
+            points: [{row: 0, col: 0}],
+        });
+        markers.push({
+            type: "glyph",
+            glyph: "home",
+            points: [{row: 0, col: 13}],
+        });
 
-        // add flood markers for controlled districts
-        const dsOwned = this.getDistricts().filter(d => d.owner !== undefined);
-        if (dsOwned.length > 0) {
-            if (markers === undefined) {
-                markers = [];
-            }
-            for (let p = 1; p <= this.numplayers; p++) {
-                const owned = dsOwned.filter(d => d.owner === p);
-                if (owned.length > 0) {
-                    const cells = owned.map(d => d.cells).flat();
-                    markers.push({
-                        type: "flood",
-                        colour: p,
-                        opacity: 0.1,
-                        points: cells.map(cell => {
-                            const [col, row] = FroggerGame.algebraic2coords(cell);
-                            return {col, row};
-                        }) as [RowCol, ...RowCol[]],
-                    });
-                }
-            }
-        }
+        // add flood markers for the bottom row
+	const points = [];
+        for (let r = 0; r < this.numplayers; r++) {
+	    const row = this.rows - 2 - r;
+	    console.log(row);
+	    points.push({col: 0, row: row} as RowCol);
+	    points.push({col: 13, row: row} as RowCol);
+	}
+        markers.push({
+            type: "flood",
+            colour: "#888",
+            opacity: 0.1,
+            points: points as [RowCol, ...RowCol[]],
+        });
 
         // build legend of ALL cards
         const allcards = [...cardsBasic];
-	allcards.push(...cardsExtended.filter(c => c.rank.uid === "0" || c.rank.uid === "P"));
+	allcards.push(...cardsExtended.filter(c => c.rank.uid === "P"));
 
         const legend: ILegendObj = {};
         for (const card of allcards) {
             legend["c" + card.uid] = card.toGlyph();
         }
+	
+	const excuses = [...cardsExtended.filter(c => c.rank.uid === "0")];
+	legend["start"] = excuses[0].toGlyph();
+
+        legend["home"] = {
+            name: "streetcar-house",
+            scale: 0.75
+	};
 
         // build pieces areas
         const areas: AreaPieces[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
-            let hand = this.hands[p-1];
-            // if emulated and current player, drop the right-most card
-            if (this.emulated && p === prevplayer) {
-                hand = hand.slice(0, -1);
-            }
+            const hand = this.hands[p-1];
             if (hand.length > 0) {
                 areas.push({
                     type: "pieces",
                     pieces: hand.map(c => "c" + c) as [string, ...string[]],
                     label: i18next.t("apgames:validation.frogger.LABEL_STASH", {playerNum: p}) || "local",
                     spacing: 0.5,
+		    ownerMark: p
                 });
             }
         }
@@ -696,20 +580,23 @@ export class FroggerGame extends GameBase {
 
         // Build rep
         const rep: APRenderRep =  {
+	    options: ["hide-labels"],
             board: {
                 style: "squares",
                 width: 14,
-                height: this.numplayers + 1,
+                height: this.rows,
                 tileHeight: 1,
                 tileWidth: 1,
                 tileSpacing: 0.1,
-                strokeOpacity: 0.05,
+                strokeOpacity: 0,
                 markers,
             },
             legend,
             pieces: pstr,
             areas,
         };
+
+	//console.log(rep);
 
         // Add annotations
         if (this.results.length > 0) {
@@ -719,37 +606,17 @@ export class FroggerGame extends GameBase {
                     // only add if there's not a claim for the same cell
                     const found = this.results.find(r => r.type === "claim" && r.where === move.where);
                     if (found === undefined) {
-                        const [x, y] = FroggerGame.algebraic2coords(move.where!);
+                        const [x, y] = this.algebraic2coords(move.where!);
                         rep.annotations.push({type: "enter", occlude: false, targets: [{row: y, col: x}]});
                     }
                 } else if (move.type === "claim") {
-                    const [x, y] = FroggerGame.algebraic2coords(move.where!);
+                    const [x, y] = this.algebraic2coords(move.where!);
                     rep.annotations.push({type: "enter", occlude: false, dashed: [4,8], targets: [{row: y, col: x}]});
                 }
             }
         }
 
         return rep;
-    }
-
-    public getPlayerScore(player: number): number {
-        let score = 0;
-        const ds = this.getDistricts();
-        for (const district of ds.filter(d => d.owner === player)) {
-            score += district.cells.length;
-        }
-        return score;
-    }
-
-    public getPlayersScores(): IScores[] {
-        const scores: number[] = [];
-        for (let p = 1; p <= this.numplayers; p++) {
-            scores.push(this.getPlayerScore(p));
-        }
-        return [
-            { name: i18next.t("apgames:status.SCORES"), scores},
-            { name: i18next.t("apgames:status.frogger"), scores: this.influence},
-        ];
     }
 
     public getStartingPosition(): string {
@@ -767,10 +634,6 @@ export class FroggerGame extends GameBase {
         if (this.variants !== undefined) {
             status += "**Variants**: " + this.variants.join(", ") + "\n\n";
         }
-
-        status += "**Influence**: " + this.influence.join(", ") + "\n\n";
-
-        status += "**Scores**: " + this.getPlayersScores()[0].scores.join(", ") + "\n\n";
 
         return status;
     }
