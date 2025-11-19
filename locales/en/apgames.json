@@ -82,6 +82,7 @@
         "four": "A game in which four shapes in four colours are placed in a virtual grid according to four constraints. Be the last player able to place.",
         "fourinarow": "A simple game of getting four (or more) in a row with the twist: there is gravity.",
         "frames": "A simple \"get into the head of your opponent\" game where both players simultaneously select an empty cell on a Go board. The placements define a rectangle. The player with the most stones within that rectangle gets a point. Play to a certain number of points.",
+        "frogger": "A racing game for the Decktet inspired by the eponymous videogame and the classic boardgame Cartagena.  Move your frogs along a dangerous path to reach home first.",
         "furl": "Either furl up a row of your discs, or unfurl a stack. If you have a disc in your end row at the start of your turn, you win.",
         "garden": "Two wizards share a garden plot and try to harvest valuable reagents. Both are sharing the same pool of seeds. Planting a seed changes the plants around it. Form four in a row to harvest. Most harvests wins!",
         "gess": "In Gess, the 'pieces' are 3x3 patterns stones. A player can use any 3×3 portion of the board that contains at least one of their stones and none of their opponent's stones. If a 3x3 piece moves in such a way that it overlaps one or more stones (of either player), all stones that the piece moves onto are captured. Each player must maintain one piece that is a ring of eight stones around an empty square at all times. If one player is in a position where they no longer have such a ring anywhere on the board for any reason, they lose.",
@@ -1148,6 +1149,16 @@
             "swap-5": {
                 "description": "For the first five pieces on the board, after placement, the next player has the option to swap colours.",
                 "name": "Swap-5 opening"
+            }
+        },
+        "frogger": {
+            "crocodiles": {
+		"description": "Add hungry crocodiles to the pawns.  This variant is intended to liven up the two-player game, but you may add crocodiles to any player count.",
+                "name": "Crocodiles"
+            },
+            "basic": {
+		"description": "A rumored basic ruleset perhaps only documented in the Decktet Book under Xing.",
+                "name": "Basic rules"
             }
         },
         "gliss": {
