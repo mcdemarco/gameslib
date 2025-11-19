@@ -113,23 +113,26 @@ export class FroggerGame extends GameBase {
 
             // init deck
             const cards = [...cardsBasic];
-            if (this.variants.includes("extended")) {
-                cards.push(...cardsExtended);
-            }
             const deck = new Deck(cards);
-            deck.shuffle();
+	    deck.shuffle();
+	    
+	    //const boardCard = [...cardsExtended.filter(c=> c.rank.uid === "0")];
+	    const boardDeckCards = [...cardsExtended.filter(c => c.rank.uid === "P")].concat(deck.draw(8));
+	    const boardDeck = new Deck(boardDeckCards);
+	    boardDeck.shuffle();
 
             // init board
             const board = new Map<string, string>();
-            let cells: string[] = ["a6", "b5", "c4", "d3", "e2", "f1"];
-            if (this.variants.includes("towers")) {
-                cells = ["b5", "b2", "e2", "e5"];
-            } else if (this.variants.includes("oldcity")) {
-                cells = ["c6", "e5", "f3", "d1", "b2", "a4"];
-            }
+            let cells: string[] = ["a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1", "i1", "j1", "k1", "l1", "m1"];
+
             for (const cell of cells) {
-                const [card] = deck.draw();
-                board.set(cell, card.uid);
+		if (cell === "a1") {
+		    //The track begins with the Excuse.
+		    board.set(cell, "0");
+		} else {
+                    const [card] = boardDeck.draw();
+                    board.set(cell, card.uid);
+		}
             }
 
             // init influence and hands
@@ -137,7 +140,7 @@ export class FroggerGame extends GameBase {
             const hands: string[][] = [];
             for (let i = 0; i < this.numplayers; i++) {
                 influence.push(4);
-                hands.push([...deck.draw(3).map(c => c.uid)]);
+                hands.push([...deck.draw(4).map(c => c.uid)]);
             }
             const claimed = new Map<string, playerid>();
 
@@ -187,13 +190,13 @@ export class FroggerGame extends GameBase {
 
         // Deck is reset every time you load
         const cards = [...cardsBasic];
-        if (this.variants.includes("extended")) {
-            cards.push(...cardsExtended);
-        }
+	//Some board cards, for removal.
+	cards.push(...cardsExtended.filter(c => c.rank.uid === "0" || c.rank.uid === "P"));
+	
         this.deck = new Deck(cards);
         // remove cards from the deck that are on the board or in known hands
         for (const uid of this.board.values()) {
-            this.deck.remove(uid);
+	    this.deck.remove(uid);
         }
         for (const hand of this.hands) {
             for (const uid of hand) {
@@ -209,7 +212,7 @@ export class FroggerGame extends GameBase {
         const districts: IDistrict[] = [];
 
         for (const suit of suits) {
-            const g = new SquareOrthGraph(6, 6);
+            const g = new SquareOrthGraph(6,6);
             for (const node of g.graph.nodes()) {
                 if (!this.board.has(node) || !this.board.get(node)!.includes(suit.uid)) {
                     g.graph.dropNode(node);
@@ -588,12 +591,12 @@ export class FroggerGame extends GameBase {
         const prevplayer = this.currplayer === 1 ? 2 : 1;
         // Build piece string
         let pstr = "";
-        for (let row = 0; row < 6; row++) {
+        for (let row = 0; row < this.numplayers + 1; row++) {
             if (pstr.length > 0) {
                 pstr += "\n";
             }
             const pieces: string[] = [];
-            for (let col = 0; col < 6; col++) {
+            for (let col = 0; col < 14; col++) {
                 const cell = FroggerGame.coords2algebraic(col, row);
                 if (this.board.has(cell)) {
                     pieces.push("c" + this.board.get(cell)!);
@@ -651,9 +654,8 @@ export class FroggerGame extends GameBase {
 
         // build legend of ALL cards
         const allcards = [...cardsBasic];
-        if (this.variants.includes("extended")) {
-            allcards.push(...cardsExtended);
-        }
+	allcards.push(...cardsExtended.filter(c => c.rank.uid === "0" || c.rank.uid === "P"));
+
         const legend: ILegendObj = {};
         for (const card of allcards) {
             legend["c" + card.uid] = card.toGlyph();
@@ -696,8 +698,8 @@ export class FroggerGame extends GameBase {
         const rep: APRenderRep =  {
             board: {
                 style: "squares",
-                width: 6,
-                height: 6,
+                width: 14,
+                height: this.numplayers + 1,
                 tileHeight: 1,
                 tileWidth: 1,
                 tileSpacing: 0.1,

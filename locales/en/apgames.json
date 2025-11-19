@@ -4033,6 +4033,19 @@
         "frames": {
             "INITIAL_INSTRUCTIONS": "Click an empty cell to add a piece to the board."
         },
+	"frogger": {
+            "ALREADY_CLAIMED": "The card at {{cell}} has already been claimed.",
+            "ALREADY_OWNED": "The card at {{cell}} is part of a district owned by an opponent.",
+            "BAD_INFLUENCE": "You may not exert influence on the card at {{cell}}. The Excuse, pawns, and courts may not be directly influenced.",
+            "INITIAL_INSTRUCTIONS": "Click a card in your hand to place on the board.",
+            "LABEL_REMAINING": "Cards in deck",
+            "LABEL_STASH": "Player {{playerNum}}'s hand",
+            "NO_CARD": "The card \"{{card}}\" does not appear to be in your hand.",
+            "NO_INFLUENCE": "You don't have any influence left.",
+            "NOT_ADJ": "New cards must be placed adjacent to at least one existing card.",
+            "PARTIAL_PLACEMENT": "Click an empty space on the board to place your card."
+        },
+
         "furl": {
             "CAPTURE4UNFURL": "You signalled a capture unfurl move, but {{to}} not is occupied by the opponent. Use \">\" to denote non-capture unfurl.",
             "FURL4UNFURL": "You signalled a furl move with \"<\", but the selected stack has a height of {{size}}, which is greater than 1.",
