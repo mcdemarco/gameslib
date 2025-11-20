@@ -108,16 +108,22 @@ export class FroggerGame extends GameBase {
 
             // init board
 	    this.rows = Math.max(3, this.numplayers) + 1;
+
             const board = new Map<string, string>();
-            //const cells: string[] = ["b1", "c1", "d1", "e1", "f1", "g1", "h1", "i1", "j1", "k1", "l1", "m1"];
-	    for (let col = 1; col < 14; col++) {
-		const cell = this.coords2algebraic(col, 0);
+
+            //add cards
+	    for (let col = 1; col < 13; col++) {
                 const [card] = boardDeck.draw();
+		const cell = this.coords2algebraic(col, 0);
                 board.set(cell, card.uid);
             }
 
-	    console.log(board);
-	    
+	    //add players
+	    for (let row = 1; row <= this.numplayers; row++) {
+		const cell = this.coords2algebraic(0, row);
+		board.set(cell, "P" + row.toString() + "-6");
+	    }
+
             // init market and hands
             const hands: string[][] = [];
             for (let i = 0; i < this.numplayers; i++) {
@@ -174,9 +180,9 @@ export class FroggerGame extends GameBase {
 	
         this.deck = new Deck(cards);
         // remove cards from the deck that are on the board or in known hands
-        for (const uid of this.board.values()) {
-	    this.deck.remove(uid);
-        }
+	this.getBoardCards().forEach( uid => 
+	    this.deck.remove(uid)
+	);
         for (const hand of this.hands) {
             for (const uid of hand) {
                 this.deck.remove(uid);
@@ -185,6 +191,16 @@ export class FroggerGame extends GameBase {
         this.deck.shuffle();
 
         return this;
+    }
+
+    public getBoardCards(): string[] {
+	const cards: string[] = [];
+	for (let col = 1; col < 13; col++) {
+	    const cell = this.coords2algebraic(col, 0);
+	    const uid = this.board.get(cell)!;
+	    cards.push(uid);
+        }
+ 	return cards;
     }
 
     public randomMove(): string {
@@ -473,12 +489,16 @@ export class FroggerGame extends GameBase {
             const pieces: string[] = [];
             for (let col = 0; col < 14; col++) {
                 const cell = this.coords2algebraic(col, row);
-		//console.log(col,row,cell);
+
                 if (this.board.has(cell)) {
-                    pieces.push("c" + this.board.get(cell)!);
+		    if (row === 0)
+			pieces.push("c" + this.board.get(cell)!);
+		    else
+			pieces.push(this.board.get(cell)!);
                 } else {
                     pieces.push("-");
                 }
+
             }
 	    
             pstr += pieces.join(",");
@@ -534,16 +554,15 @@ export class FroggerGame extends GameBase {
         const allcards = [...cardsBasic];
 	allcards.push(...cardsExtended.filter(c => c.rank.uid === "P"));
 
-	console.log(this.board);
+	/*console.log(this.board);
 	console.log(suitOrder,suitColors);
-	
+	*/
 	//add flood and suit markers for the active spaces
 	for (let col = 1; col < 13; col++) {
-	    let row = 0;
-	    const cell = this.coords2algebraic(col,row);
-	    console.log(col,row,cell,this.board.has(cell),this.board.get(cell));
+	    const cell = this.coords2algebraic(col,0);
 	    const cardObj = Card.deserialize(this.board.get(cell)!);
 	    const suits = cardObj!.suits;
+
 	    let shadeRow = 1;
 	    suits.forEach(suit => {
 		const color = suitColors[suitOrder.indexOf(suit.uid)];
@@ -561,7 +580,7 @@ export class FroggerGame extends GameBase {
 		shadeRow++;
 	    });
 	}
-	console.log(markers);
+	//console.log(markers);
 	
         // build legend of ALL cards
         const legend: ILegendObj = {};
@@ -572,11 +591,39 @@ export class FroggerGame extends GameBase {
 	const excuses = [...cardsExtended.filter(c => c.rank.uid === "0")];
 	legend["start"] = excuses[0].toGlyph();
 
+	//Home symbol for the last column.
         legend["home"] = {
             name: "streetcar-house",
             scale: 0.75
 	};
 
+	//Player pieces.
+	for (let player = 1; player <= this.numplayers; player++) {
+	    
+	    legend["P" + player] = {
+		name: "piece",
+		colour: player,
+		scale: 0.75
+	    }
+
+	    //The P1 token is used in the first and last rows.
+	    for (let count = 1; count <= 6; count++) {
+		legend["P" + player + "-" + count] = [
+		    {
+			name: "piece",
+			colour: player,
+			scale: 0.75
+		    },
+		    {
+			text: count.toString(),
+			colour: "_context_strokes",
+			scale: 0.66
+		    }
+		]
+	    }
+	}
+
+	//Suit glyphs.
 	for (const suit of suits) {
             legend[suit.uid] = {
 		name: suit.glyph,
@@ -601,7 +648,7 @@ export class FroggerGame extends GameBase {
         }
         // create an area for all invisible cards (if there are any cards left)
         const hands = this.hands.map(h => [...h]);
-        const visibleCards = [...this.board.values(), ...hands.flat()].map(uid => Card.deserialize(uid));
+        const visibleCards = [...this.getBoardCards(), ...hands.flat()].map(uid => Card.deserialize(uid));
         if (visibleCards.includes(undefined)) {
             throw new Error(`Could not deserialize one of the cards. This should never happen!`);
         }
