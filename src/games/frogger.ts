@@ -4,7 +4,7 @@ import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerGlyph, RowCol} from 
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, SquareOrthGraph, UserFacingError } from "../common";
 import i18next from "i18next";
-import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended } from "../common/decktet"; //pending suits
+import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
@@ -553,10 +553,16 @@ export class FroggerGame extends GameBase {
 		    opacity: 0.33,
 		    points: [{row: shadeRow, col: col}],
 		});
+		markers.push({
+		    type: "glyph",
+		    glyph: suit.uid,
+		    points: [{row: shadeRow, col: col}],
+		});
 		shadeRow++;
 	    });
 	}
-
+	console.log(markers);
+	
         // build legend of ALL cards
         const legend: ILegendObj = {};
         for (const card of allcards) {
@@ -569,6 +575,14 @@ export class FroggerGame extends GameBase {
         legend["home"] = {
             name: "streetcar-house",
             scale: 0.75
+	};
+
+	for (const suit of suits) {
+            legend[suit.uid] = {
+		name: suit.glyph,
+		scale: 1,
+		opacity: 0.33
+	    }
 	};
 
         // build pieces areas
