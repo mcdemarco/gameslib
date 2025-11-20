@@ -17,6 +17,7 @@ export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: Map<string, string>;
     hands: string[][];
+    market: string[];
     lastmove?: string;
 };
 
@@ -80,6 +81,7 @@ export class FroggerGame extends GameBase {
     public currplayer: playerid = 1;
     public board!: Map<string, string>;
     public hands: string[][] = [];
+    public market: string[] = [];
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
@@ -118,10 +120,10 @@ export class FroggerGame extends GameBase {
                 board.set(cell, card.uid);
             }
 
-	    //add players
+	    //add players, who are Xs to not conflict with Pawns
 	    for (let row = 1; row <= this.numplayers; row++) {
 		const cell = this.coords2algebraic(0, row);
-		board.set(cell, "P" + row.toString() + "-6");
+		board.set(cell, "X" + row.toString() + "-6");
 	    }
 
             // init market and hands
@@ -129,6 +131,7 @@ export class FroggerGame extends GameBase {
             for (let i = 0; i < this.numplayers; i++) {
                 hands.push([...deck.draw(4).map(c => c.uid)]);
             }
+            const market: string[] = [...deck.draw(6).map(c => c.uid)];
 
             const fresh: IMoveState = {
                 _version: FroggerGame.gameinfo.version,
@@ -137,6 +140,7 @@ export class FroggerGame extends GameBase {
                 currplayer: 1,
                 board,
                 hands,
+		market,
             };
             this.stack = [fresh];
         } else {
@@ -169,6 +173,7 @@ export class FroggerGame extends GameBase {
         this.currplayer = state.currplayer;
         this.board = new Map(state.board);
         this.hands = state.hands.map(h => [...h]);
+        this.market = [...state.market];
         this.lastmove = state.lastmove;
 
 	this.rows = Math.max(3, this.numplayers) + 1;
@@ -179,7 +184,8 @@ export class FroggerGame extends GameBase {
 	cards.push(...cardsExtended.filter(c => c.rank.uid === "P"));
 	
         this.deck = new Deck(cards);
-        // remove cards from the deck that are on the board or in known hands
+	
+        // remove cards from the deck that are on the board, in the market, or in known hands
 	this.getBoardCards().forEach( uid => 
 	    this.deck.remove(uid)
 	);
@@ -188,12 +194,16 @@ export class FroggerGame extends GameBase {
                 this.deck.remove(uid);
             }
         }
-        this.deck.shuffle();
+        for (const uid of this.market) {
+            this.deck.remove(uid);
+        }
+
+	this.deck.shuffle();
 
         return this;
     }
 
-    public getBoardCards(): string[] {
+    private getBoardCards(): string[] {
 	const cards: string[] = [];
 	for (let col = 1; col < 13; col++) {
 	    const cell = this.coords2algebraic(col, 0);
@@ -201,6 +211,12 @@ export class FroggerGame extends GameBase {
 	    cards.push(uid);
         }
  	return cards;
+    }
+
+    private getSuits(cardId: string): string[] {
+	const card = Card.deserialize(cardId)!;
+        const suits = card.suits.map(s => s.uid);
+        return suits;
     }
 
     public randomMove(): string {
@@ -220,23 +236,25 @@ export class FroggerGame extends GameBase {
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             let newmove = "";
-            // clicking on your hand
             if (row < 0 && col < 0) {
-                newmove = piece!.substring(1);
-            }
-            // otherwise, on the board
-            else {
+		//When clicking in the areas, add the colon.
+		if (move) {
+		    // clicking on a market card to draw it
+		    newmove = `${move}:${piece!.substring(1)}`;
+		} else {
+		    // clicking on a hand card to spend it
+                    newmove = `${piece!.substring(1)}:`;
+		}
+            } else {
+		//Clicking on the board.
                 const cell = this.coords2algebraic(col, row);
-                // continuation of placement
+                newmove = `${move}${cell}`;
                 if (!move.includes("-")) {
-                    newmove = `${move}-${cell}`;
-                }
-                // otherwise, exerting influence
-                else {
-                    newmove = `${move},${cell}`;
-                }
+                    //picked the piece.
+                    newmove += "-";
+                 } //else picked the target
             }
-
+	    
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
                 result.move = "";
@@ -259,6 +277,14 @@ export class FroggerGame extends GameBase {
         m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
 
+/*	console.log(m);
+	//for testing
+        result.valid = true;
+        result.complete = -1;
+        result.message = i18next.t("apgames:validation.frogger.INITIAL_INSTRUCTIONS")
+        return result;
+*/	
+
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
@@ -266,6 +292,42 @@ export class FroggerGame extends GameBase {
             return result;
         }
 
+	const submoves: string[] = m.split("/");
+
+	if (submoves.length > 3) {
+            result.valid = false;
+            result.message = i18next.t("apgames:validation.frogger.TOO_HOPPY");
+            return result;
+	}
+
+	for (let s = 0; s < submoves.length; s++) {
+	    let submove = submoves[s];
+	    let [a, b] = submove.split(":");
+	    console.log(a, b);
+
+	    a = a.toUpperCase();
+
+	    if (a.charAt(0) === "X") {
+		//Moving backwards.
+
+	    } else {
+		//Using a card.
+		if (this.hands[this.currplayer -1].indexOf(a) > -1) {
+		    //can play card, so...
+		    //Check suits.
+
+		} else {
+		    //clicked market
+		    //TODO: complex emergency card drawing case. (s === 0 and no moves available)
+		    //TODO: check and instruct if hand size is 0.
+		    result.valid = false;
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_CARD", {a});
+                    return result;
+		}
+	    }
+	    
+	}
+    
         const [mv, influence] = m.split(",");
         // eslint-disable-next-line prefer-const
         let [card, to] = mv.split("-");
@@ -355,7 +417,7 @@ export class FroggerGame extends GameBase {
                 if (targetCard === undefined) {
                     throw new Error(`Could not find the card with the ID ${cloned.board.get(influence)}`);
                 }
-                if (["0", "P", "T"].includes(targetCard.rank.uid)) {
+                if (["0", "P", "T"].includes(targetCard!.rank.uid)) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.BAD_INFLUENCE", {cell: influence});
                     return result;
@@ -473,6 +535,7 @@ export class FroggerGame extends GameBase {
             lastmove: this.lastmove,
             board: new Map(this.board),
             hands: this.hands.map(h => [...h]),
+	    market: [...this.market],
         };
     }
 
@@ -600,7 +663,7 @@ export class FroggerGame extends GameBase {
 	//Player pieces.
 	for (let player = 1; player <= this.numplayers; player++) {
 	    
-	    legend["P" + player] = {
+	    legend["X" + player] = {
 		name: "piece",
 		colour: player,
 		scale: 0.75
@@ -608,7 +671,7 @@ export class FroggerGame extends GameBase {
 
 	    //The P1 token is used in the first and last rows.
 	    for (let count = 1; count <= 6; count++) {
-		legend["P" + player + "-" + count] = [
+		legend["X" + player + "-" + count] = [
 		    {
 			name: "piece",
 			colour: player,
@@ -646,9 +709,16 @@ export class FroggerGame extends GameBase {
                 });
             }
         }
+        areas.push({
+            type: "pieces",
+            pieces: this.market.map(c => "c" + c) as [string, ...string[]],
+            label: i18next.t("apgames:validation.frogger.LABEL_MARKET") || "local",
+            spacing: 0.375,
+        });
+	
         // create an area for all invisible cards (if there are any cards left)
         const hands = this.hands.map(h => [...h]);
-        const visibleCards = [...this.getBoardCards(), ...hands.flat()].map(uid => Card.deserialize(uid));
+        const visibleCards = [...this.getBoardCards(), ...hands.flat(), ...this.market].map(uid => Card.deserialize(uid));
         if (visibleCards.includes(undefined)) {
             throw new Error(`Could not deserialize one of the cards. This should never happen!`);
         }

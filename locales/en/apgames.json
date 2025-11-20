@@ -4037,13 +4037,16 @@
             "ALREADY_CLAIMED": "The card at {{cell}} has already been claimed.",
             "ALREADY_OWNED": "The card at {{cell}} is part of a district owned by an opponent.",
             "BAD_INFLUENCE": "You may not exert influence on the card at {{cell}}. The Excuse, pawns, and courts may not be directly influenced.",
-            "INITIAL_INSTRUCTIONS": "Click a card in your hand to place on the board.",
+            "INITIAL_INSTRUCTIONS": "Click a card in your hand to use to move forward, or a place on the board to move back.",
+            "INVALID_CARD": "Click a card in your hand to move forward.  The card \"{{card}}\" does not appear to be in your hand.",
+            "LABEL_MARKET": "Market cards",
             "LABEL_REMAINING": "Cards in deck",
             "LABEL_STASH": "Player {{playerNum}}'s hand",
             "NO_CARD": "The card \"{{card}}\" does not appear to be in your hand.",
             "NO_INFLUENCE": "You don't have any influence left.",
             "NOT_ADJ": "New cards must be placed adjacent to at least one existing card.",
-            "PARTIAL_PLACEMENT": "Click an empty space on the board to place your card."
+            "PARTIAL_PLACEMENT": "Click an empty space on the board to place your card.",
+	    "TOO_HOPPY": "You may not make more than three moves on your turn."
         },
 
         "furl": {
