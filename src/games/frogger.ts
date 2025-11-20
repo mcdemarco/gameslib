@@ -10,6 +10,8 @@ import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended } from "../common/de
 const deepclone = require("rfdc/default");
 
 export type playerid = 1|2|3|4|5;
+export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
+const suitOrder = ["M","S","V","L","Y","K"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -107,11 +109,9 @@ export class FroggerGame extends GameBase {
             // init board
 	    this.rows = Math.max(3, this.numplayers) + 1;
             const board = new Map<string, string>();
-            const cellCols: string[] = ["b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"];
-	    const topRow = this.rows;
-	    const cells = cellCols.map(col => col + topRow);
-	    
-            for (const cell of cells) {
+            //const cells: string[] = ["b1", "c1", "d1", "e1", "f1", "g1", "h1", "i1", "j1", "k1", "l1", "m1"];
+	    for (let col = 1; col < 14; col++) {
+		const cell = this.coords2algebraic(col, 0);
                 const [card] = boardDeck.draw();
                 board.set(cell, card.uid);
             }
@@ -462,7 +462,7 @@ export class FroggerGame extends GameBase {
 
     public render(): APRenderRep {
 	//Taken from the decktet sheet.
-//	const suitColors = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
+	const suitColors = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
 	
         // Build piece string
         let pstr = "";
@@ -473,7 +473,7 @@ export class FroggerGame extends GameBase {
             const pieces: string[] = [];
             for (let col = 0; col < 14; col++) {
                 const cell = this.coords2algebraic(col, row);
-		console.log(col,row,cell);
+		//console.log(col,row,cell);
                 if (this.board.has(cell)) {
                     pieces.push("c" + this.board.get(cell)!);
                 } else {
@@ -516,25 +516,48 @@ export class FroggerGame extends GameBase {
             points: [{row: 0, col: 13}],
         });
 
-        // add flood markers for the bottom row
+        // add flood markers for the end column
 	const points = [];
         for (let r = 0; r < this.numplayers; r++) {
 	    const row = this.rows - 2 - r;
-	    console.log(row);
 	    points.push({col: 0, row: row} as RowCol);
 	    points.push({col: 13, row: row} as RowCol);
 	}
         markers.push({
             type: "flood",
             colour: "#888",
-            opacity: 0.1,
+            opacity: 0.03,
             points: points as [RowCol, ...RowCol[]],
         });
 
-        // build legend of ALL cards
+	//Need card info on all cards.
         const allcards = [...cardsBasic];
 	allcards.push(...cardsExtended.filter(c => c.rank.uid === "P"));
 
+	console.log(this.board);
+	console.log(suitOrder,suitColors);
+	
+	//add flood and suit markers for the active spaces
+	for (let col = 1; col < 13; col++) {
+	    let row = 0;
+	    const cell = this.coords2algebraic(col,row);
+	    console.log(col,row,cell,this.board.has(cell),this.board.get(cell));
+	    const cardObj = Card.deserialize(this.board.get(cell)!);
+	    const suits = cardObj!.suits;
+	    let shadeRow = 1;
+	    suits.forEach(suit => {
+		const color = suitColors[suitOrder.indexOf(suit.uid)];
+		markers.push({
+		    type: "flood",
+		    colour: color,
+		    opacity: 0.33,
+		    points: [{row: shadeRow, col: col}],
+		});
+		shadeRow++;
+	    });
+	}
+
+        // build legend of ALL cards
         const legend: ILegendObj = {};
         for (const card of allcards) {
             legend["c" + card.uid] = card.toGlyph();
