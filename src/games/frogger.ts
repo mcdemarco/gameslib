@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResu
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerGlyph, RowCol} from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { reviver, shuffle, SquareOrthGraph, UserFacingError } from "../common";
+import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
 import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
@@ -18,6 +18,8 @@ export interface IMoveState extends IIndividualState {
     board: Map<string, string>;
     hands: string[][];
     market: string[];
+    discards: string[];
+    nummoves: number;
     lastmove?: string;
 };
 
@@ -82,6 +84,8 @@ export class FroggerGame extends GameBase {
     public board!: Map<string, string>;
     public hands: string[][] = [];
     public market: string[] = [];
+    public discards: string[] = [];
+    public nummoves = 3;
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
@@ -89,6 +93,7 @@ export class FroggerGame extends GameBase {
     public results: Array<APMoveResult> = [];
     private rows: number = 3;
     private deck!: Deck;
+    private unboard: string[] = [];
 
     constructor(state: number | IFroggerState | string, variants?: string[]) {
         super();
@@ -141,6 +146,8 @@ export class FroggerGame extends GameBase {
                 board,
                 hands,
                 market,
+		discards: [],
+		nummoves: 3
             };
             this.stack = [fresh];
         } else {
@@ -174,9 +181,12 @@ export class FroggerGame extends GameBase {
         this.board = new Map(state.board);
         this.hands = state.hands.map(h => [...h]);
         this.market = [...state.market];
+        this.discards = [...state.discards];
+        this.nummoves = state.nummoves;
         this.lastmove = state.lastmove;
 
         this.rows = Math.max(3, this.numplayers) + 1;
+	this.unboard = this.getUnusedCells();
 
         // Deck is reset every time you load
         const cards = [...cardsBasic];
@@ -197,10 +207,23 @@ export class FroggerGame extends GameBase {
         for (const uid of this.market) {
             this.deck.remove(uid);
         }
+        for (const uid of this.discards) {
+            this.deck.remove(uid);
+        }
 
         this.deck.shuffle();
 
         return this;
+    }
+
+    private checkNextBack(fromX: number, toX: number, toY: number): boolean {
+	console.log(fromX, toX, toY);
+	return true;
+    }
+
+    private checkNextSuit(fromX: number, toX: number, toY: number, card: string): boolean {
+	console.log(fromX, toX, toY, card);
+	return true;
     }
 
     private getBoardCards(): string[] {
@@ -212,14 +235,35 @@ export class FroggerGame extends GameBase {
         }
         return cards;
     }
-/*
+
     private getSuits(cardId: string): string[] {
         const card = Card.deserialize(cardId)!;
         const suits = card.suits.map(s => s.uid);
         return suits;
     }
-*/
-    public randomMove(): string {
+
+    private getUnusedCells(): string[] {
+        const cards = this.getBoardCards();
+	const badcells: string[] = [];
+        for (let col = 1; col < 13; col++) {
+            const suits = this.getSuits(cards[col - 1]);
+	    for (let s = suits.length + 1; s < this.rows; s++) {
+		const badcell = this.coords2algebraic(col, s);
+		badcells.push(badcell);
+	    }
+	}
+        return badcells;
+    }
+
+    private popMarket(card: string): void {
+	//Remove the drawn card.
+	this.removeCard(card, this.market);
+	//If the market is empty, we draw a new market.
+	//TODO: this requires ending the move sequence
+	//      and passing the other players to move again.
+    }
+/*
+    private randomMove(): string {
         if (this.hands[this.currplayer - 1].length > 0) {
             const g = new SquareOrthGraph(6,6);
             const shuffled = shuffle(this.hands[this.currplayer - 1]) as string[];
@@ -232,22 +276,46 @@ export class FroggerGame extends GameBase {
         }
         return "";
     }
+*/
+    private removeCard(card: string, arr: string[]): void {
+	const index = arr.indexOf(card);
+	if (index > -1) {
+	    arr.splice(index, 1);
+	} else {
+	    throw new Error(`Could not find the card "${card}" in the given array. This should never happen.`);
+	}
+	return;
+    }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
+	//The move format is one of:
+	// handcard:from-to      a regular move forward
+	// from-to,marketcard    a productive move backward
+	// from-to               a move backward but no available market card
+	// marketcard://          the whole turn blocked option
         try {
             let newmove = "";
-            const lastchar = move ? move.slice(-1) : "/";
-            
+            const lastchar = move ? move.slice(-1) : "";
+	    const moves =  move.split("/");
+            const currmove = moves.length > 1 ? moves.slice(-1) : "";
+
+	    if (moves.length > this.nummoves) {
+                return {
+                    move,
+                    valid: false,
+                    message: i18next.t("apgames:validation.frogger.TOO_HOPPY")
+                }
+	    }
+	    
             if (row < 0 && col < 0) {
                 //clicking on a hand or market card
                 if (lastchar === "/") {
-                    if (move) {
-                        // starting  another move.
-                        newmove = `${move}/${piece!.substring(1)}:`;
-                    } else {
-                        // starting the first move
-                        newmove = `${piece!.substring(1)}:`;
-                    }
+                    // starting another move (forward).
+                    newmove = `${move}${piece!.substring(1)}:`;
+                } else if (lastchar === "") {
+                    // starting the first move (forward) or possibly the blocked option
+                    //TODO: the blocked case (spending your entire turn to draw a market card)
+                    newmove = `${piece!.substring(1)}:`;
                 } else if (lastchar === "-") {
                     return {
                         move,
@@ -255,36 +323,53 @@ export class FroggerGame extends GameBase {
                         message: i18next.t("apgames:validation.frogger.PLACE_NEXT")
                     }
                 } else if (lastchar === ":") {
-                    //TODO: a case for spending your entire turn to draw a market card.
                     return {
                         move,
                         valid: false,
                         message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
                     }
-                }
-            } else {
-                //Clicking on the board.
-                if (!move) {
-                    return {
-                        move,
-                        valid: false,
-                        message: i18next.t("apgames:validation.frogger.CARD_FIRST")
-                    }
-                } //else
-                
-                const cell = this.coords2algebraic(col, row);
-                if (lastchar === ":") {
-                    //picked the piece.
-                    newmove += `${move}${cell}-`;
-                } else if (lastchar === "-") {
-                    //picked the target
-                    newmove = `${move}${cell}`;
-                } else {
-                    //WAT?
+                } else if ( moves.length < this.nummoves ) {
+		    //The last char is text.
+		    newmove = `${move},${piece!.substring(1)}/`;
+		} else {
                    return {
                         move,
                         valid: false,
-                        message: i18next.t("apgames:validation.frogger.CARD_FIRST")
+                        message: i18next.t("apgames:validation.frogger.TOO_HOPPY")
+                    }
+                }
+            } else {
+                //Clicking on the board.
+
+                const cell = this.coords2algebraic(col, row);
+		if (this.unboard.indexOf(cell) > -1) {
+                    return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.frogger.OFF_BOARD")
+		    }
+		}
+
+                if ( lastchar === ":" || lastchar === "/" ) {
+                    //picked the piece.
+                    newmove += `${move}${cell}-`;
+                } else if ( lastchar === "" ) {
+                    //picked the piece for moving back.
+                    newmove += `${cell}-`;
+                } else if ( lastchar === "-" && currmove.indexOf(":") > -1) {
+                    //picked the target and finished the move.
+                    newmove = `${move}${cell}/`;
+                } else if ( lastchar === "-" ) {
+                    //picked the target but not a market card.
+                    newmove = `${move}${cell}`;
+                } else if ( move.split("/").length < this.nummoves ) {
+		    //The last char is text and we need to start a new move if legal.
+		    newmove = `${move}/${cell}`;
+		} else {
+                   return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.frogger.TOO_HOPPY")
                     }
                 }
             }
@@ -311,14 +396,6 @@ export class FroggerGame extends GameBase {
         //m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
 
-/*      console.log(m);
-        //for testing
-        result.valid = true;
-        result.complete = -1;
-        result.message = i18next.t("apgames:validation.frogger.INITIAL_INSTRUCTIONS")
-        return result;
-*/
-
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
@@ -328,20 +405,20 @@ export class FroggerGame extends GameBase {
 
         const submoves: string[] = m.split("/");
 
-        if (submoves.length > 3) {
+        if (submoves.length > this.nummoves) {
             result.valid = false;
             result.message = i18next.t("apgames:validation.frogger.TOO_HOPPY");
             return result;
         }
 
         for (let s = 0; s < submoves.length; s++) {
-            let submove = submoves[s];
-            let [ca, mv] = submove.split(":");
+            const submove = submoves[s];
+            const [ca, mv] = submove.split(":");
 
             if (this.hands[this.currplayer - 1].indexOf(ca) < 0 && this.market.indexOf(ca) < 0) {
                 //Bad card.
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.INVALID_CARD", {ca});
+                result.message = i18next.t("apgames:validation.frogger.INVALID_CARD", {card: ca});
                 return result;
             } //else...
 
@@ -371,8 +448,6 @@ export class FroggerGame extends GameBase {
                 return result;
             }
 
-            console.log(fromX);
-
             if (!to) {
                 result.valid = true;
                 result.complete = -1;
@@ -380,153 +455,61 @@ export class FroggerGame extends GameBase {
                 return result;
             }
 
-
-        }
-        
-    
-/*          
-            if (this.hands[this.currplayer - 1].indexOf(ca) > -1) {
-                //Moving forwards.
-            } else {//this.market.indexOf(ca) > -1)
-                
-
-                if (a.charAt(1) !== this.currplayer.toString()) {
-                    //But it's not you!
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.INVALID_FROG");
-                    return result;
-                } else {
-
-                }
-
-            } else if (
-                //Moving backwards.
-                if (this.hands[this.currplayer -1].indexOf(a) > -1) {
-                    //can play card, so...
-                    //Check suits.
-
-                } else {
-                    //clicked market
-                    //TODO: complex emergency card drawing case. (s === 0 and no moves available)
-                    //TODO: check and instruct if hand size is 0.
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.INVALID_CARD", {a});
-                    return result;
-                }
-            } else {
-                
-                
-            }
-            
-        }
-    
-        const [mv, influence] = m.split(",");
-        // eslint-disable-next-line prefer-const
-        let [card, to] = mv.split("-");
-        card = card.toUpperCase();
-
-        // card is in your hand
-        if (!this.hands[this.currplayer - 1].includes(card)) {
-            result.valid = false;
-            result.message = i18next.t("apgames:validation.frogger.NO_CARD", {card});
-            return result;
-        }
-
-        // if `to` is missing, partial
-        if (to === undefined || to.length === 0) {
-            result.valid = true;
-            result.complete = -1;
-            result.message = i18next.t("apgames:validation.frogger.PARTIAL_PLACEMENT");
-            return result;
-        }
-        // otherwise
-        else {
-            const g = new SquareOrthGraph(6,6);
-            // valid cell
-            if (!(g.listCells(false) as string[]).includes(to)) {
+	    //Target location.
+	    if (this.unboard.indexOf(to) > -1) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: to});
+                result.message = i18next.t("apgames:validation.frogger.OFF_BOARD");
                 return result;
-            }
-            // unoccupied
-            if (this.board.has(to)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation._general.OCCUPIED", {cell: to});
-                return result;
-            }
-            // adjacent to existing card
-            let hasadj = false;
-            for (const n of g.neighbours(to)) {
-                if (this.board.has(n)) {
-                    hasadj = true;
-                    break;
-                }
-            }
-            if (!hasadj) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.NOT_ADJ");
-                return result;
-            }
+	    }
+	    //The source location was tested for frogs so must have been on the board.
+	    
+            const [toX, toY] = this.algebraic2coords(to);
 
-            // if influence is missing, may or not be complete
-            if (influence === undefined || influence.length === 0) {
-                result.valid = true;
-                result.canrender = true;
-                result.complete = 0;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+	    //It's my interpretation of the rules that you must change cards on a move,
+	    // not just change space, but I'm not 100% sure about that.
+	    if (fromX === toX) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.MUST_MOVE");
+                return result;	
+	    }
+
+	    //Now we need to know what kind of card was selected.
+	    const fromHand = (this.hands[this.currplayer - 1].indexOf(ca) > -1);
+	    if (fromHand && toX < fromX) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.MUST_HOP_FORWARD");
                 return result;
-            }
-            // otherwise
-            else {
-                const cloned = this.clone();
-                cloned.board.set(to, card);
-                // influence available
-                if (false) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.NO_INFLUENCE");
-                    return result;
-                }
-                // valid cell
-                if (!(g.listCells(false) as string[]).includes(to)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.INVALIDCELL", {cell: influence});
-                    return result;
-                }
-                // card present
-                if (! cloned.board.has(influence)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.UNOCCUPIED", {cell: influence});
-                    return result;
-                }
-                // not claimed
-                if (false) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.ALREADY_CLAIMED", {cell: influence});
-                    return result;
-                }
-                // not an extended card
-                const targetCard = Card.deserialize(cloned.board.get(influence)!);
-                if (targetCard === undefined) {
-                    throw new Error(`Could not find the card with the ID ${cloned.board.get(influence)}`);
-                }
-                if (["0", "P", "T"].includes(targetCard!.rank.uid)) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.BAD_INFLUENCE", {cell: influence});
-                    return result;
-                }
-                // not owned
-                if (false) {
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.ALREADY_OWNED", {cell: influence});
-                    return result;
-                }
-*/
-                // we're good!
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+	    } else if (!fromHand && toX > fromX) {
+		result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.MUST_HOP_BACKWARD");
                 return result;
- 
+	    }
+
+	    //Moving back is the simpler case.
+	    if (!fromHand && !this.checkNextBack(fromX, toX, toY)) {
+		result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
+                return result;
+	    } else if (fromHand && !this.checkNextSuit(fromX, toX, toY, ca)) {
+		result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
+                return result;
+	    }
+
+	    //Passed all tests so make the submove.
+	    if (s < 2) {
+		result.valid = true;
+		result.complete = 0;
+		result.message = i18next.t("apgames:validation.frogger.ADDITIONAL_INSTRUCTIONS");
+		return result;
+	    } //else...
+	}
+
+	//Really really done.
+        result.valid = true;
+        result.complete = 1;
+        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+        return result;
     }
 
     public move(m: string, {trusted = false, partial = false} = {}): FroggerGame {
@@ -534,7 +517,7 @@ export class FroggerGame extends GameBase {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
 
-        m = m.toLowerCase();
+        //m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
         if (! trusted) {
             const result = this.validateMove(m);
@@ -543,8 +526,31 @@ export class FroggerGame extends GameBase {
             }
         }
 
+        const moves = m.split("/");
+
         this.results = [];
-        const [mv, influence] = m.split(",");
+        for (const move of moves) {
+            const [card, mv] = move.split(":");
+            const [from,to] = mv.split("-");
+
+	    //pause for degenerate draw.
+	    if (to === undefined) {
+		this.hands[this.currplayer - 1].push(card);
+		this.popMarket(card);
+		
+	    }
+
+	    
+       //     const [toX, toY] = this.algebraic2coords(to);
+	    
+            if ( (from === undefined) || (to === undefined) || (to.length !== 2) || (from.length < 2) || (from.length > 3) ) {
+                throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}))
+            }
+
+
+	}
+/*
+	    const [mv, influence] = m.split(",");
         // eslint-disable-next-line prefer-const
         let [card, to] = mv.split("-");
         card = card.toUpperCase();
@@ -567,7 +573,7 @@ export class FroggerGame extends GameBase {
         if (drawn !== undefined) {
             this.hands[this.currplayer - 1].push(drawn.uid);
         }
-
+*/
         // update currplayer
         this.lastmove = m;
         let newplayer = (this.currplayer as number) + 1;
@@ -627,6 +633,8 @@ export class FroggerGame extends GameBase {
             board: new Map(this.board),
             hands: this.hands.map(h => [...h]),
             market: [...this.market],
+            discards: [...this.discards],
+            nummoves: this.nummoves,
         };
     }
 
@@ -708,9 +716,6 @@ export class FroggerGame extends GameBase {
         const allcards = [...cardsBasic];
         allcards.push(...cardsExtended.filter(c => c.rank.uid === "P"));
 
-        /*console.log(this.board);
-        console.log(suitOrder,suitColors);
-        */
         //add flood and suit markers for the active spaces
         for (let col = 1; col < 13; col++) {
             const cell = this.coords2algebraic(col,0);
@@ -734,7 +739,6 @@ export class FroggerGame extends GameBase {
                 shadeRow++;
             });
         }
-        //console.log(markers);
         
         // build legend of ALL cards
         const legend: ILegendObj = {};
@@ -825,7 +829,7 @@ export class FroggerGame extends GameBase {
 
         // Build rep
         const rep: APRenderRep =  {
-            options: ["hide-labels"],
+            options: ["hide-labels-half"],
             board: {
                 style: "squares",
                 width: 14,
