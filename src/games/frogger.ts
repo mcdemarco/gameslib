@@ -70,7 +70,7 @@ export class FroggerGame extends GameBase {
             },
         ],
         categories: ["goal>evacuate", "mechanic>move", "mechanic>bearoff", "mechanic>block", "mechanic>random>setup", "mechanic>random>play", "board>shape>rect", "board>connect>rect", "components>decktet", "other>2+players"],
-        flags: ["random-start", "custom-randomization"],
+        flags: ["random-start", "custom-randomization", "experimental"],
     };
     public coords2algebraic(x: number, y: number): string {
         return GameBase.coords2algebraic(x, y, this.rows);
@@ -370,7 +370,8 @@ export class FroggerGame extends GameBase {
 	const toX = this.algebraic2coords(to)[0];
 	
         if (fromX > 0 && toX < 13) {
-            this.board.set(to, this.board.get(from)!);
+	    const frog = this.board.get(from)!;
+            this.board.set(to, frog);
             this.board.delete(from);
         } else {
 	    
@@ -898,6 +899,8 @@ export class FroggerGame extends GameBase {
             } else {
                 //Raw card must be a blocked move or a partial.
                 ca = submove;
+		if (!partial)
+		    this.results.push({type: "claim", what: ca});
             }
 
             if ( mv ) 
@@ -914,10 +917,16 @@ export class FroggerGame extends GameBase {
             //Possible card adjustments.
             if (handcard) {
                 this.removeCard(ca!, this.hands[this.currplayer - 1]);
+		this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "forward"});
             } else if (ca) {
                 this.popMarket(ca);
                 this.hands[this.currplayer - 1].push(ca);
-            }
+		if (from) {
+		    this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "back"});
+		}
+            } else {
+		    this.results.push({type: "move", from: from!, to: to!, what: "no card", how: "back"});
+	    }
 
             if (from && to) {
 		this.moveFrog(from,to);
@@ -1264,12 +1273,22 @@ export class FroggerGame extends GameBase {
     public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
         let resolved = false;
         switch (r.type) {
-            case "place":
-                node.push(i18next.t("apresults:PLACE.decktet", {player, where: r.where, what: r.what}));
+            case "claim":                
+                node.push(i18next.t("apresults:CLAIM.frogger", {player, card: r.what}));
                 resolved = true;
-                break;
-            case "claim":
-                node.push(i18next.t("apresults:CLAIM.frogger", {player, where: r.where}));
+		break;
+            case "move":
+                if (r.how === "forward") {
+                    node.push(i18next.t("apresults:MOVE.frogger_forward", {player, from: r.from, to: r.to, card: r.what}));
+		} else if (r.how === "back") {
+                    node.push(i18next.t("apresults:MOVE.frogger_back", {player, from: r.from, to: r.to, card: r.what}));
+		} else {
+                    node.push(i18next.t("apresults:MOVE.frogger_blocked", {player, card: r.what}));
+		}
+		resolved = true;
+		break;
+            case "eog":                
+                node.push(i18next.t("apresults:EOG.frogger", {player}));
                 resolved = true;
                 break;
         }
