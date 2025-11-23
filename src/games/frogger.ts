@@ -146,8 +146,8 @@ export class FroggerGame extends GameBase {
                 board,
                 hands,
                 market,
-		discards: [],
-		nummoves: 3
+                discards: [],
+                nummoves: 3
             };
             this.stack = [fresh];
         } else {
@@ -186,7 +186,7 @@ export class FroggerGame extends GameBase {
         this.lastmove = state.lastmove;
 
         this.rows = Math.max(3, this.numplayers) + 1;
-	this.unboard = this.getUnusedCells();
+        this.unboard = this.getUnusedCells();
 
         // Deck is reset every time you load
         const cards = [...cardsBasic];
@@ -216,14 +216,23 @@ export class FroggerGame extends GameBase {
         return this;
     }
 
+    private checkBlocked(): boolean {
+        //A player is blocked if their hand is empty and all frogs are already at the Excuse or home.
+        if (this.hands[this.currplayer - 1].length > 0)
+            return false;
+        if (this.getStartFrogs() + this.getHomeFrogs() > 6)
+            return false;
+        return true;
+    }
+
     private checkNextBack(fromX: number, toX: number, toY: number): boolean {
-	console.log(fromX, toX, toY);
-	return true;
+        console.log(fromX, toX, toY);
+        return true;
     }
 
     private checkNextSuit(fromX: number, toX: number, toY: number, card: string): boolean {
-	console.log(fromX, toX, toY, card);
-	return true;
+        console.log(fromX, toX, toY, card);
+        return true;
     }
 
     private getBoardCards(): string[] {
@@ -236,6 +245,29 @@ export class FroggerGame extends GameBase {
         return cards;
     }
 
+    private getColumnFrogs(col: number): number {
+        if (col !== 0 && col !== 13)
+            throw new Error(`The request for frog count was malformed. This should never happen.`);
+        
+        const cell = this.coords2algebraic(col, this.currplayer as number);
+        if (!this.board.has(cell))
+            return 0;
+        const piece = this.board.get(cell)!;
+        const parts = piece.split("-");
+        if (parts.length < 2)
+            throw new Error(`The piece at "${cell}" was malformed. This should never happen.`);
+        else
+            return parseInt(parts[1],10);
+    }
+
+    private getHomeFrogs(): number {
+        return this.getColumnFrogs(13);
+    }
+
+    private getStartFrogs(): number {
+        return this.getColumnFrogs(0);
+    }
+
     private getSuits(cardId: string): string[] {
         const card = Card.deserialize(cardId)!;
         const suits = card.suits.map(s => s.uid);
@@ -244,23 +276,27 @@ export class FroggerGame extends GameBase {
 
     private getUnusedCells(): string[] {
         const cards = this.getBoardCards();
-	const badcells: string[] = [];
+        const badcells: string[] = [];
         for (let col = 1; col < 13; col++) {
             const suits = this.getSuits(cards[col - 1]);
-	    for (let s = suits.length + 1; s < this.rows; s++) {
-		const badcell = this.coords2algebraic(col, s);
-		badcells.push(badcell);
-	    }
-	}
+            for (let s = suits.length + 1; s < this.rows; s++) {
+                const badcell = this.coords2algebraic(col, s);
+                badcells.push(badcell);
+            }
+        }
         return badcells;
     }
-
+/*
+    private moveFrog(from: string, to: string): void {
+        //TODO.
+    }
+*/
     private popMarket(card: string): void {
-	//Remove the drawn card.
-	this.removeCard(card, this.market);
-	//If the market is empty, we draw a new market.
-	//TODO: this requires ending the move sequence
-	//      and passing the other players to move again.
+        //Remove the drawn card.
+        this.removeCard(card, this.market);
+        //If the market is empty, we draw a new market.
+        //TODO: this requires ending the move sequence
+        //      and passing the other players to move again.
     }
 /*
     private randomMove(): string {
@@ -278,35 +314,37 @@ export class FroggerGame extends GameBase {
     }
 */
     private removeCard(card: string, arr: string[]): void {
-	const index = arr.indexOf(card);
-	if (index > -1) {
-	    arr.splice(index, 1);
-	} else {
-	    throw new Error(`Could not find the card "${card}" in the given array. This should never happen.`);
-	}
-	return;
+        const index = arr.indexOf(card);
+        if (index > -1) {
+            arr.splice(index, 1);
+        } else {
+            throw new Error(`Could not find the card "${card}" in the given array. This should never happen.`);
+        }
+        return;
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
-	//The move format is one of:
-	// handcard:from-to      a regular move forward
-	// from-to,marketcard    a productive move backward
-	// from-to               a move backward but no available market card
-	// marketcard://          the whole turn blocked option
+        //The move format is one of:
+        // handcard:from-to      a regular move forward
+        // from-to,marketcard    a productive move backward
+        // from-to               a move backward but no available market card
+        // marketcard://          the whole turn blocked option
         try {
             let newmove = "";
             const lastchar = move ? move.slice(-1) : "";
-	    const moves =  move.split("/");
-            const currmove = moves.length > 1 ? moves.slice(-1) : "";
+            const moves =  move.split("/");
+            const currmove = moves.length > 0 ? moves[moves.length - 1] : "";
 
-	    if (moves.length > this.nummoves) {
+            console.log("lastchar: ", lastchar, "currmove: ", currmove);
+            
+            if (moves.length > this.nummoves) {
                 return {
                     move,
                     valid: false,
                     message: i18next.t("apgames:validation.frogger.TOO_HOPPY")
                 }
-	    }
-	    
+            }
+            
             if (row < 0 && col < 0) {
                 //clicking on a hand or market card
                 if (lastchar === "/") {
@@ -314,8 +352,12 @@ export class FroggerGame extends GameBase {
                     newmove = `${move}${piece!.substring(1)}:`;
                 } else if (lastchar === "") {
                     // starting the first move (forward) or possibly the blocked option
-                    //TODO: the blocked case (spending your entire turn to draw a market card)
-                    newmove = `${piece!.substring(1)}:`;
+                    if (this.checkBlocked()) {
+                        //The blocked case (spending your entire turn to draw a market card)
+                        newmove = `${piece!.substring(1)}//`;
+                    } else {
+                        newmove = `${piece!.substring(1)}:`;
+                    }
                 } else if (lastchar === "-") {
                     return {
                         move,
@@ -329,9 +371,9 @@ export class FroggerGame extends GameBase {
                         message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
                     }
                 } else if ( moves.length < this.nummoves ) {
-		    //The last char is text.
-		    newmove = `${move},${piece!.substring(1)}/`;
-		} else {
+                    //The last char is text.
+                    newmove = `${move},${piece!.substring(1)}/`;
+                } else {
                    return {
                         move,
                         valid: false,
@@ -341,20 +383,36 @@ export class FroggerGame extends GameBase {
             } else {
                 //Clicking on the board.
 
+                if (row === 0) {
+                    //The top row is not allowed.
+                    return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.frogger.OFFSIDES")
+                    }
+                }
+
                 const cell = this.coords2algebraic(col, row);
-		if (this.unboard.indexOf(cell) > -1) {
+                if (this.unboard.indexOf(cell) > -1) {
                     return {
                         move,
                         valid: false,
                         message: i18next.t("apgames:validation.frogger.OFF_BOARD")
-		    }
-		}
+                    }
+                }
 
-                if ( lastchar === ":" || lastchar === "/" ) {
+                if (( lastchar === ":" || lastchar === "/" || lastchar === "" ) && ( piece === undefined || piece === "" ) ) {
+                    //Piece picking cases, so need a piece.
+                    return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
+                    }
+                } else if ( lastchar === ":" || lastchar === "/" ) {
                     //picked the piece.
                     newmove += `${move}${cell}-`;
                 } else if ( lastchar === "" ) {
-                    //picked the piece for moving back.
+                    //picked a piece for moving back.
                     newmove += `${cell}-`;
                 } else if ( lastchar === "-" && currmove.indexOf(":") > -1) {
                     //picked the target and finished the move.
@@ -363,9 +421,9 @@ export class FroggerGame extends GameBase {
                     //picked the target but not a market card.
                     newmove = `${move}${cell}`;
                 } else if ( move.split("/").length < this.nummoves ) {
-		    //The last char is text and we need to start a new move if legal.
-		    newmove = `${move}/${cell}`;
-		} else {
+                    //The last char is text and we need to start a new move if legal.
+                    newmove = `${move}/${cell}`;
+                } else {
                    return {
                         move,
                         valid: false,
@@ -399,40 +457,134 @@ export class FroggerGame extends GameBase {
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            result.message = i18next.t("apgames:validation.frogger.INITIAL_INSTRUCTIONS")
+            if ( this.stack.length > this.numplayers )
+                result.message = i18next.t("apgames:validation.frogger.LATER_INSTRUCTIONS")
+            else
+                result.message = i18next.t("apgames:validation.frogger.INITIAL_INSTRUCTIONS")
             return result;
         }
 
-        const submoves: string[] = m.split("/");
+        const cloned: FroggerGame = Object.assign(new FroggerGame(this.numplayers, [...this.variants]), deepclone(this) as FroggerGame);
 
-        if (submoves.length > this.nummoves) {
-            result.valid = false;
-            result.message = i18next.t("apgames:validation.frogger.TOO_HOPPY");
-            return result;
+        const moves: string[] = m.split("/");
+
+        if ( moves.length > this.nummoves ) {
+            if (moves.length > this.nummoves + 1 || moves[this.nummoves] !== "") {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.TOO_HOPPY");
+                return result;
+            } //else extra empty move is a placeholder to show the final move is complete.
         }
 
-        for (let s = 0; s < submoves.length; s++) {
-            const submove = submoves[s];
-            const [ca, mv] = submove.split(":");
+        let allcomplete = false;
 
-            if (this.hands[this.currplayer - 1].indexOf(ca) < 0 && this.market.indexOf(ca) < 0) {
+        for (let s = 0; s < moves.length; s++) {
+            const submove = moves[s];
+
+            if ( s === moves.length - 1 && submove === "" ) {
+                //Just a dummy move to signify the previous one was complete.
+                //TODO: Might need to do final wrapup here.
+                continue;
+            }
+            
+            let mv, from, to, ca;
+            let handcard = false;
+            let complete = false;
+            let nocard = false;
+
+
+
+
+            if (s < moves.length - 1)
+                complete = true;
+//          console.log("loop ", s, "complete?", complete, "moves?", m, moves);
+            
+            if (submove.indexOf(":") > -1) {
+                //Card followed by move is a hand card.
+                [ca, mv] = submove.split(":");
+                handcard = true;
+            } else if (submove.indexOf(",") > -1) {
+                //Move followed by card is a backwards move.
+                [mv, ca] = submove.split(",");
+            } else if (submove.indexOf("-") > -1) {
+                //Raw move is a unproductive or partial backwards move.
+                [from, to] = submove.split("-");
+                nocard = true;
+            } else {
+                //Raw card must be a blocked move or a partial.
+                if (complete) {
+                    if (s > 0 || moves.length > 1) {
+                        //Bad blocked move (in presence of other moves.
+                        result.valid = false;
+                        result.message = s > 0 ? i18next.t("apgames:validation.frogger.TOO_LATE_FOR_BLOCKED") : i18next.t("apgames:validation.frogger.NO_MOVE_BLOCKED");
+                        return result;
+                    } else if (s === 0) {
+                        //Blocked move on its own.
+                        ca = submove; //TODO: No extra punctuation?
+                        //We don't need to check the clone here
+                        //because no other changes have been made,
+                        //and none are allowed on a blocked move.
+                        const blocked = this.checkBlocked();                    
+                        if (!blocked) {
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.frogger.NOT_BLOCKED");
+                            return result;
+                        }
+                        if (this.market.indexOf(ca) > -1) {
+                            result.valid = true;
+                            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                            result.complete = 1;
+                            return result;
+                        }
+                    }
+                } else {
+                    result.valid = true;
+                    if (cloned.market.indexOf(ca!) > -1)
+                        result.message = i18next.t("apgames:validation.frogger.SUBMIT_BLOCKED");
+                    else
+                        result.message = i18next.t("apgames:validation.frogger.PIECE_NEXT"); 
+                    result.complete = 0;
+                    return result;
+                }
+            }
+
+            //Next: check cards.
+            //There is a case remaining with no cards.
+            if (handcard && cloned.hands[cloned.currplayer - 1].indexOf(ca!) < 0 ) {
+                //Bad hand card.
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.INVALID_HAND_CARD", {card: ca});
+                return result;
+            } else if (!handcard && !nocard && cloned.market.indexOf(ca!) < 0) {
                 //Bad card.
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.INVALID_CARD", {card: ca});
+                result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD", {card: ca});
                 return result;
-            } //else...
+            }
 
-            if (!mv) {
-                result.valid = true;
-                result.complete = -1; //TODO: one card no move case.
-                result.message = i18next.t("apgames:validation.frogger.PIECE_NEXT");
-                return result;
-            } //else...
+            //Parse unparsed moves.
+            //There is no case remaining without moves, except partials.
+            if ( mv ) {
+                [from, to] = mv!.split("-");
+            }
 
-            const [from,to] = mv.split("-");
+            if ( !from ) {
+                if (!complete) {
+                    result.valid = true;
+                    result.complete = -1;
+                    result.message = i18next.t("apgames:validation.frogger.PIECE_NEXT");
+                    return result;
+                } else {
+                    //malformed
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE");
+                    return result;
+                }
+            }
 
-            const frog = this.board.get(from);
-            if (!frog || frog.charAt(1)! !== this.currplayer.toString() ) {
+            //Once we have a move from, we have a frog.
+            const frog = cloned.board.get(from!);
+            if (!frog || frog!.charAt(1)! !== cloned.currplayer.toString() ) {
                 //Bad frog.
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.INVALID_FROG");
@@ -448,6 +600,20 @@ export class FroggerGame extends GameBase {
                 return result;
             }
 
+            if ( !to ) {
+                if (!complete) {
+                    result.valid = true;
+                    result.complete = -1;
+                    result.message = i18next.t("apgames:validation.frogger.PLACE_NEXT");
+                    return result;
+                } else {
+                    //malformed
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE");
+                    return result;
+                }
+            }
+            
             if (!to) {
                 result.valid = true;
                 result.complete = -1;
@@ -455,59 +621,83 @@ export class FroggerGame extends GameBase {
                 return result;
             }
 
-	    //Target location.
-	    if (this.unboard.indexOf(to) > -1) {
+            //Check target location is on the board.
+            if (cloned.unboard.indexOf(to) > -1) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.OFF_BOARD");
                 return result;
-	    }
-	    //The source location was tested for frogs so must have been on the board.
-	    
+            }
+            //The source location was tested for frogs so must have been on the board.
+
+            //On to to testing.
             const [toX, toY] = this.algebraic2coords(to);
 
-	    //It's my interpretation of the rules that you must change cards on a move,
-	    // not just change space, but I'm not 100% sure about that.
-	    if (fromX === toX) {
+            //It's my interpretation of the rules that you must change cards on a move,
+            // not just change space, but I'm not 100% sure about that.
+            if (fromX === toX) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.MUST_MOVE");
-                return result;	
-	    }
+                return result;  
+            }
 
-	    //Now we need to know what kind of card was selected.
-	    const fromHand = (this.hands[this.currplayer - 1].indexOf(ca) > -1);
-	    if (fromHand && toX < fromX) {
+            //Test the move direction against what kind of card was selected.
+            if (handcard && toX < fromX) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.MUST_HOP_FORWARD");
                 return result;
-	    } else if (!fromHand && toX > fromX) {
-		result.valid = false;
+            } else if (!handcard && toX > fromX) {
+                result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.MUST_HOP_BACKWARD");
                 return result;
-	    }
+            }
 
-	    //Moving back is the simpler case.
-	    if (!fromHand && !this.checkNextBack(fromX, toX, toY)) {
-		result.valid = false;
+            //Moving back is the simpler case.
+            if (!handcard && !this.checkNextBack(fromX, toX, toY)) {
+                result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
                 return result;
-	    } else if (fromHand && !this.checkNextSuit(fromX, toX, toY, ca)) {
-		result.valid = false;
+            } else if (handcard && !cloned.checkNextSuit(fromX, toX, toY, ca!)) {
+                result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
                 return result;
-	    }
+            }
 
-	    //Passed all tests so make the submove.
-	    if (s < 2) {
-		result.valid = true;
-		result.complete = 0;
-		result.message = i18next.t("apgames:validation.frogger.ADDITIONAL_INSTRUCTIONS");
-		return result;
-	    } //else...
-	}
+            if (s < moves.length - 1) {
+                //Passed all tests so make the submove for validating the rest.
+                //Card adjustments.
+                if (handcard) {
+                    cloned.removeCard(ca!, cloned.hands[cloned.currplayer - 1]);
+                } else if (ca) {
+                    cloned.popMarket(ca);
+                    cloned.hands[cloned.currplayer - 1].push(ca);
+                }
 
-	//Really really done.
+                if (from && to) {
+                    //Frog adjustments, complicated by frog piles.
+                    if (fromX > 0) {
+                        cloned.board.set(to, cloned.board.get(from!)!);
+                        cloned.board.delete(from);
+                    } else {
+                        const oldfrogs = cloned.board.get(from)!.split("-");
+                        cloned.board.set(to, oldfrogs[0]);
+                        if (oldfrogs[1] === "1") {
+                            cloned.board.delete(from);
+                        } else {
+                            const newfrogs = oldfrogs[0] + "-" + (parseInt(oldfrogs[1],10 - 1)).toString();
+                            cloned.board.set(from, newfrogs);
+                        }       
+                    }
+                }
+                
+            } else if ( s === moves.length - 1 ) {
+                //Pass completion status to outside.
+                allcomplete = complete;
+            }
+        }
+
+        //Really really done.
         result.valid = true;
-        result.complete = 1;
+        result.complete = allcomplete ? 1 : 0;
         result.message = i18next.t("apgames:validation._general.VALID_MOVE");
         return result;
     }
@@ -527,36 +717,78 @@ export class FroggerGame extends GameBase {
         }
 
         const moves = m.split("/");
-
+        
         this.results = [];
-        for (const move of moves) {
-            const [card, mv] = move.split(":");
-            const [from,to] = mv.split("-");
 
-	    //pause for degenerate draw.
-	    if (to === undefined) {
-		this.hands[this.currplayer - 1].push(card);
-		this.popMarket(card);
-		
-	    }
+        for (let s = 0; s < moves.length; s++) {
+            const submove = moves[s];
+            if ( submove === "" )
+                continue;
+            
+            let mv, from, to, ca, fromX;
+            let handcard = false;
+//          let complete = false;
+//          let nocard = false;
 
-	    
-       //     const [toX, toY] = this.algebraic2coords(to);
-	    
+//          if (s < moves.length - 1)
+//              complete = true;
+
+            if (submove.indexOf(":") > -1) {
+                //Card followed by move is a hand card.
+                [ca, mv] = submove.split(":");
+                handcard = true;
+            } else if (submove.indexOf(",") > -1) {
+                //Move followed by card is a backwards move.
+                [mv, ca] = submove.split(",");
+            } else if (submove.indexOf("-") > -1) {
+                //Raw move is a unproductive or partial backwards move.
+                [from, to] = submove.split("-");
+//              nocard = true;
+            } else {
+                //Raw card must be a blocked move or a partial.
+                ca = submove;
+            }
+
+            if ( mv ) 
+                [from, to] = mv!.split("-");
+            if ( from )
+                fromX = this.algebraic2coords(from)[0];
+
+       /*
+            
             if ( (from === undefined) || (to === undefined) || (to.length !== 2) || (from.length < 2) || (from.length > 3) ) {
                 throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", {move: m}))
             }
+*/
 
+            //Make the submove.
+            //Possible card adjustments.
+            if (handcard) {
+                this.removeCard(ca!, this.hands[this.currplayer - 1]);
+            } else if (ca) {
+                this.popMarket(ca);
+                this.hands[this.currplayer - 1].push(ca);
+            }
 
-	}
+            if (from && to) {
+                //Make frog adjustments, complicated by frog piles.
+                if (fromX! > 0) {
+                    this.board.set(to, this.board.get(from!)!);
+                    this.board.delete(from);
+                } else {
+                    const oldfrogs = this.board.get(from)!.split("-");
+                    this.board.set(to, oldfrogs[0]);
+                    if (oldfrogs[1] === "1") {
+                        this.board.delete(from);
+                    } else {
+                        const newfrogs = oldfrogs[0] + "-" + (parseInt(oldfrogs[1],10 - 1)).toString();
+                        this.board.set(from, newfrogs);
+                    }
+                    
+                }
+            }
+        }
 /*
-	    const [mv, influence] = m.split(",");
-        // eslint-disable-next-line prefer-const
-        let [card, to] = mv.split("-");
-        card = card.toUpperCase();
-        const cardObj = Card.deserialize(card)!;
-
-        const idx = this.hands[this.currplayer - 1].findIndex(c => c === card);
         if (idx < 0 || influence) {
             throw new Error(`Could not find the card "${card}" in the player's hand. This should never happen.`);
         }
@@ -565,15 +797,22 @@ export class FroggerGame extends GameBase {
             this.board.set(to, card);
             this.results.push({type: "place", what: cardObj.plain, where: to});
         }
-
+*/
         if (partial) { return this; }
-
+/*
         // draw new card
         const [drawn] = this.deck.draw();
         if (drawn !== undefined) {
             this.hands[this.currplayer - 1].push(drawn.uid);
-        }
+            }
+
 */
+        //update market if necessary
+        //TODO
+
+        //update crocodiles if croccy
+        //TODO
+
         // update currplayer
         this.lastmove = m;
         let newplayer = (this.currplayer as number) + 1;
