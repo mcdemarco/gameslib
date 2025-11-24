@@ -63,11 +63,14 @@ export class FroggerGame extends GameBase {
         ],
         variants: [
             {
-                uid: "crocodiles"
-            },
-            {
                 uid: "basic",
                 experimental: true
+            },
+            {
+                uid: "continuous",
+            },
+            {
+                uid: "crocodiles"
             },
         ],
         categories: ["goal>evacuate", "mechanic>move", "mechanic>bearoff", "mechanic>block", "mechanic>random>setup", "mechanic>random>play", "board>shape>rect", "board>connect>rect", "components>decktet", "other>2+players"],
@@ -94,6 +97,7 @@ export class FroggerGame extends GameBase {
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
     private rows: number = 3;
+    private marketsize: number = 6;
     private deck!: Deck;
     private suitboard!: Map<string, string>;
 
@@ -117,6 +121,8 @@ export class FroggerGame extends GameBase {
 
             // init board
             this.rows = Math.max(3, this.numplayers) + 1;
+            if (this.variants.includes("continuous"))
+		this.marketsize = 3;
 
             const board = new Map<string, string>();
             const suitboard = new Map<string, string>();
@@ -145,7 +151,7 @@ export class FroggerGame extends GameBase {
             for (let i = 0; i < this.numplayers; i++) {
                 hands.push([...deck.draw(4).map(c => c.uid)]);
             }
-            const market: string[] = [...deck.draw(6).map(c => c.uid)];
+            const market: string[] = [...deck.draw(this.marketsize).map(c => c.uid)];
 
             const fresh: IMoveState = {
                 _version: FroggerGame.gameinfo.version,
@@ -196,6 +202,8 @@ export class FroggerGame extends GameBase {
         this.lastmove = state.lastmove;
 
         this.rows = Math.max(3, this.numplayers) + 1;
+        if (this.variants.includes("continuous"))
+	    this.marketsize = 3;
         
         this.suitboard = this.setSuitedCells();
 
@@ -503,10 +511,19 @@ export class FroggerGame extends GameBase {
         return array[index];
     }
 
-    private refillMarket(): void {
-        const toDraw = Math.min(6, this.deck.size);
+    private refillMarket(): boolean {
+	//Fills the market regardless of current size.
+	
+	//But if it's already full (in the variant), return.
+	if (this.market.length === this.marketsize)
+	    return false;
+	
+	//First, draw from the deck.
+        const toDraw = Math.min(this.marketsize, this.deck.size);
         this.market = [...this.deck.draw(toDraw).map(c => c.uid)];
-        if (toDraw < 6) {
+
+	//If we didn't fill the market, shuffle the discards.
+        if (this.market.length < this.marketsize) {
             //Return the discards to the deck and shuffle.
             this.discards.forEach( card => {
                 this.deck.add(card);
@@ -515,11 +532,12 @@ export class FroggerGame extends GameBase {
             this.deck.shuffle;
             
             //Draw the rest.
-            for (let n = toDraw; n < 6; n++) {
+            for (let n = this.market.length; n < this.marketsize; n++) {
                 const [card] = this.deck.draw();
                 this.market.push(card.uid);
             }
-        }       
+        }
+	return true;
     }
 
     private removeCard(card: string, arr: string[]): void {
@@ -1088,8 +1106,10 @@ export class FroggerGame extends GameBase {
         if (partial) { return this; }
 
         //update market if necessary
-        if (marketEmpty) {
-            this.refillMarket();
+        if (marketEmpty || this.variants.includes("continuous")) {
+            const refilled = this.refillMarket();
+	    if (refilled)
+		this.results.push({type: "deckDraw"});
         }
 
         //update crocodiles if croccy
@@ -1333,9 +1353,16 @@ export class FroggerGame extends GameBase {
             spacing: 0.375,
         });
         
+        areas.push({
+            type: "pieces",
+            pieces: this.discards.map(c => "c" + c) as [string, ...string[]],
+            label: i18next.t("apgames:validation.frogger.LABEL_DISCARDS") || "local",
+            spacing: 0.375,
+        });
+        
         // create an area for all invisible cards (if there are any cards left)
         const hands = this.hands.map(h => [...h]);
-        const visibleCards = [...this.getBoardCards(), ...hands.flat(), ...this.market].map(uid => Card.deserialize(uid));
+        const visibleCards = [...this.getBoardCards(), ...hands.flat(), ...this.market, ...this.discards].map(uid => Card.deserialize(uid));
         if (visibleCards.includes(undefined)) {
             throw new Error(`Could not deserialize one of the cards. This should never happen!`);
         }
@@ -1417,6 +1444,10 @@ export class FroggerGame extends GameBase {
         switch (r.type) {
             case "claim":                
                 node.push(i18next.t("apresults:CLAIM.frogger", {player, card: r.what}));
+                resolved = true;
+                break;
+           case "deckDraw":                
+                node.push(i18next.t("apresults:DECKDRAW.frogger"));
                 resolved = true;
                 break;
             case "eject":                

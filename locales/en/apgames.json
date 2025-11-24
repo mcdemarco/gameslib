@@ -1152,13 +1152,17 @@
             }
         },
         "frogger": {
-            "crocodiles": {
-		"description": "Add hungry crocodiles to the pawns.  This variant is intended to liven up the two-player game, but you may add crocodiles to any player count.",
-                "name": "Crocodiles"
-            },
             "basic": {
 		"description": "A rumored basic ruleset perhaps only documented in the Decktet Book under Xing.",
                 "name": "Basic rules"
+            },
+            "continuous": {
+		"description": "The market is smaller but refills after each turn, so split turns for refilling the market are not necessary.",
+                "name": "Continuous market"
+            },
+            "crocodiles": {
+		"description": "Add hungry crocodiles to the pawn cards.  Crocodiles advance at the end of each round, sending any frog on their new space back to the Excuse.  This variant is intended to liven up the two-player game, but you may add crocodiles at any player count.",
+                "name": "Crocodiles"
             }
         },
         "gliss": {
@@ -4045,6 +4049,7 @@
             "INVALID_MOVE": "Unless you're blocked, you must move a frog on each of your moves.",
             "LABEL_MARKET": "Market cards",
             "LABEL_REMAINING": "Cards in deck",
+            "LABEL_DISCARDS": "Discard pile",
             "LABEL_STASH": "Player {{playerNum}}'s hand",
             "MUST_HOP_FORWARD": "When using a hand card, your frog must hop forward.",
             "MUST_HOP_BACKWARD": "When claiming a market card, your frog must hop back.",

@@ -166,6 +166,7 @@
         "biscuit": "The next player was unable to play any cards in their hand, so they drew a card.",
         "emu_deck": "{{player}} drew a face-down card from the deck.",
         "emu_discard": "{{player}} drew the {{what}} from the top of the discard pile.",
+        "frogger": "The market was refilled.",
         "quincunx_one": "{{player}} drew {{count}} card.",
         "quincunx_other": "{{player}} drew {{count}} cards."
     },
