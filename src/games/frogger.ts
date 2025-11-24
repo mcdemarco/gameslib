@@ -95,7 +95,6 @@ export class FroggerGame extends GameBase {
     public results: Array<APMoveResult> = [];
     private rows: number = 3;
     private deck!: Deck;
-    private unboard: string[] = [];
     private suitboard!: Map<string, string>;
 
     constructor(state: number | IFroggerState | string, variants?: string[]) {
@@ -120,19 +119,19 @@ export class FroggerGame extends GameBase {
             this.rows = Math.max(3, this.numplayers) + 1;
 
             const board = new Map<string, string>();
-	    const suitboard = new Map<string, string>();
+            const suitboard = new Map<string, string>();
 
             //add cards
             for (let col = 1; col < 13; col++) {
                 const [card] = boardDeck.draw();
                 const cell = this.coords2algebraic(col, 0);
                 board.set(cell, card.uid);
-		//also set suits
-		const suits = card.suits.map(s => s.uid);
-		for (let s = 0; s < suits.length; s++) {
+                //also set suits
+                const suits = card.suits.map(s => s.uid);
+                for (let s = 0; s < suits.length; s++) {
                     const cell = this.coords2algebraic(col, s + 1);
                     suitboard.set(cell,suits[s]);
-		}
+                }
             }
 
             //add players, who are Xs to not conflict with Pawns
@@ -188,7 +187,7 @@ export class FroggerGame extends GameBase {
         const state = this.stack[idx];
         this.results = [...state._results];
         this.currplayer = state.currplayer;
-	this.skipto = state.skipto;
+        this.skipto = state.skipto;
         this.board = new Map(state.board);
         this.hands = state.hands.map(h => [...h]);
         this.market = [...state.market];
@@ -197,9 +196,7 @@ export class FroggerGame extends GameBase {
         this.lastmove = state.lastmove;
 
         this.rows = Math.max(3, this.numplayers) + 1;
-	
-	//TODO: remove unboard and use suitboard for those tests.
-        this.unboard = this.getUnusedCells();
+        
         this.suitboard = this.setSuitedCells();
 
         // Deck is reset every time you load
@@ -240,24 +237,24 @@ export class FroggerGame extends GameBase {
     }
 
     private checkMarket(card: string, suit: string): boolean {
-	const suits = this.getSuits(card);
-	return (suits.indexOf(suit) < 0);
+        const suits = this.getSuits(card);
+        return (suits.indexOf(suit) < 0);
     }
 
     private checkNextBack(from: string, to: string): boolean {
-	const correctBacks: string[] = this.getNextBack(from);
-	return (correctBacks.indexOf(to) > -1);
+        const correctBacks: string[] = this.getNextBack(from);
+        return (correctBacks.indexOf(to) > -1);
     }
 
     private checkNextForward(from: string, to: string, card: string): boolean {
-	const suits = this.getSuits(card);
-	    
-	for (let s = 0; s < suits.length; s++) {
-	    const suitto = this.getNextForward(from, suits[s]);
-	    if (to === suitto)
-		return true;
-	}
-	
+        const suits = this.getSuits(card);
+            
+        for (let s = 0; s < suits.length; s++) {
+            const suitto = this.getNextForward(from, suits[s]);
+            if (to === suitto)
+                return true;
+        }
+        
         return false;
     }
 
@@ -287,83 +284,83 @@ export class FroggerGame extends GameBase {
     }
 
     private getFrogs(forBack: boolean): string[] {
-	//These are frogs that can move, so skip the home row.
-	const frarray = [];
+        //These are frogs that can move, so skip the home row.
+        const frarray = [];
         for (let row = 1; row < this.rows; row++) {
             for (let col = 0; col < 13; col++) {
-		if ( col === 0 && forBack )
-		    continue;
+                if ( col === 0 && forBack )
+                    continue;
                 const cell = this.coords2algebraic(col, row);
                 if (this.board.has(cell)) {
-		    const frog = this.board.get(cell)!;
-		    if ( frog.charAt(1) === this.currplayer.toString() )
-			frarray.push(cell);
-		}
-	    }
-	}
-	return frarray;
+                    const frog = this.board.get(cell)!;
+                    if ( frog.charAt(1) === this.currplayer.toString() )
+                        frarray.push(cell);
+                }
+            }
+        }
+        return frarray;
     }
 
     private getNextBack(from: string): string[] {
-	//Walk back through the board until we find a free column.
-	//Return an array of all available cells in the column.
-	const fromX = this.algebraic2coords(from)[0];
+        //Walk back through the board until we find a free column.
+        //Return an array of all available cells in the column.
+        const fromX = this.algebraic2coords(from)[0];
 
-	if ( fromX === 0 ) {
-	    throw new Error(`Could not back up from the Excuse. This should never happen.`);
-	}
+        if ( fromX === 0 ) {
+            throw new Error(`Could not back up from the Excuse. This should never happen.`);
+        }
 
-	for (let c = fromX - 1; c > 0; c--) {
-	    const cells = [];
-	    for (let r = 1; r < this.rows; r++) {
-		const cell = this.coords2algebraic(c, r);
-		if (!this.board.has(cell) && this.unboard.indexOf(cell) < 0)
-		    cells.push(cell);
-	    }
-	    if (cells.length > 0)
-		return cells;
-	}
-	const startCell = this.coords2algebraic(0, this.currplayer);
-	return [startCell];
+        for (let c = fromX - 1; c > 0; c--) {
+            const cells = [];
+            for (let r = 1; r < this.rows; r++) {
+                const cell = this.coords2algebraic(c, r);
+                if ( !this.board.has(cell) && this.suitboard.has(cell) )
+                    cells.push(cell);
+            }
+            if (cells.length > 0)
+                return cells;
+        }
+        const startCell = this.coords2algebraic(0, this.currplayer);
+        return [startCell];
     }
 
     private getMarketCards(suit: string): string[] {
-	//Filter the market by the forbidden suit.
-	//Return an array of all legal cards in the market (for random moves).
-	const whiteMarket: string[] = [];
+        //Filter the market by the forbidden suit.
+        //Return an array of all legal cards in the market (for random moves).
+        const whiteMarket: string[] = [];
 
-	this.market.forEach(card => {
-	    const suits = this.getSuits(card);
-	    if (suits.indexOf(suit) < 0)
-		whiteMarket.push(card);
-	});
+        this.market.forEach(card => {
+            const suits = this.getSuits(card);
+            if (suits.indexOf(suit) < 0)
+                whiteMarket.push(card);
+        });
 
-	return whiteMarket;
+        return whiteMarket;
     }
     
     private getNextForward(from: string, suit: string): string {
-	//Get the next available cell by suit.
-	const homecell = this.coords2algebraic(13, this.currplayer);
+        //Get the next available cell by suit.
+        const homecell = this.coords2algebraic(13, this.currplayer);
 
-	const fromX = this.algebraic2coords(from)[0];
+        const fromX = this.algebraic2coords(from)[0];
 
-	if ( fromX === 13 ) {
-	    throw new Error(`Could not go forward from home. This should never happen.`);
-	}
+        if ( fromX === 13 ) {
+            throw new Error(`Could not go forward from home. This should never happen.`);
+        }
 
-	for (let c = fromX + 1; c < 14; c++) {
-	    if (c === 13) {
-		return homecell;
-	    }
-	    for (let r = 1; r < this.rows; r++) {
-		const cell = this.coords2algebraic(c, r);
-		if ( !this.board.has(cell) && this.suitboard.has(cell) && this.suitboard.get(cell) === suit )
-		    return cell;
-	    }
-	}
+        for (let c = fromX + 1; c < 14; c++) {
+            if (c === 13) {
+                return homecell;
+            }
+            for (let r = 1; r < this.rows; r++) {
+                const cell = this.coords2algebraic(c, r);
+                if ( !this.board.has(cell) && this.suitboard.has(cell) && this.suitboard.get(cell) === suit )
+                    return cell;
+            }
+        }
 
-	//You shouldn't be here!
-	throw new Error(`Something went wrong looking for the next suited cell.`);
+        //You shouldn't be here!
+        throw new Error(`Something went wrong looking for the next suited cell.`);
     }
 
     private countHomeFrogs(): number {
@@ -380,122 +377,121 @@ export class FroggerGame extends GameBase {
         return suits;
     }
 
-    private getUnusedCells(): string[] {
-        const cards = this.getBoardCards();
-        const badcells: string[] = [];
-        for (let col = 1; col < 13; col++) {
-            const suits = this.getSuits(cards[col - 1]);
-            for (let s = suits.length + 1; s < this.rows; s++) {
-                const badcell = this.coords2algebraic(col, s);
-                badcells.push(badcell);
-            }
+    private getUnsuitedCells(): string[] {
+        //Return those board cells that aren't on suitboard but are playable.
+        const uncells: string[] = [];
+        for (let row = 1; row <= this.numplayers; row++) {
+            const startcell = this.coords2algebraic(0, row);
+            const homecell = this.coords2algebraic(13, row);
+            uncells.push(startcell);
+            uncells.push(homecell);
         }
-        return badcells;
+        return uncells;
     }
 
     private isCracy(cardId: string): boolean {
-	const card = Card.deserialize(cardId)!;
+        const card = Card.deserialize(cardId)!;
         const rank = card.rank.name;
-	return ( rank === "Crown" || rank === "Ace" );
+        return ( rank === "Crown" || rank === "Ace" );
     }
     
     private modifyFrogStack(cell: string, increment: boolean): void {
-	//It's the responsibility of the caller to validate the arguments.
-	const [cellX, cellY] =  this.algebraic2coords(cell);
+        //It's the responsibility of the caller to validate the arguments.
+        const [cellX, cellY] =  this.algebraic2coords(cell);
 
-	if (! this.board.has(cell) ) {
-	    if ( (cellX === 13 || cellX === 0) && increment ) {
-		//The special case of the first frog home,
-		// or the first frog returning to the empty Excuse.
-		this.board.set(cell, "X" + cellY + "-1");
-	    } else {
-		throw new Error(`Stack not found at "${cell}" in modifyFrogStack.`);
-	    }
-	    return;
-	} 
-	    
-	const oldFrog = this.board.get(cell)!;
-	const player = oldFrog.charAt(1);
-	const oldFrogCount = parseInt(oldFrog.split("-")[1], 10);
-	const newFrogCount = increment ? oldFrogCount + 1 : oldFrogCount - 1 ;
+        if (! this.board.has(cell) ) {
+            if ( (cellX === 13 || cellX === 0) && increment ) {
+                //The special case of the first frog home,
+                // or the first frog returning to the empty Excuse.
+                this.board.set(cell, "X" + cellY + "-1");
+            } else {
+                throw new Error(`Stack not found at "${cell}" in modifyFrogStack.`);
+            }
+            return;
+        } 
+            
+        const oldFrog = this.board.get(cell)!;
+        const player = oldFrog.charAt(1);
+        const oldFrogCount = parseInt(oldFrog.split("-")[1], 10);
+        const newFrogCount = increment ? oldFrogCount + 1 : oldFrogCount - 1 ;
 
-	if (newFrogCount === 0) {
+        if (newFrogCount === 0) {
             this.board.delete(cell);
-	} else {
+        } else {
             const newFrogStack = "X" + player + "-" + newFrogCount.toString();
             this.board.set(cell, newFrogStack);
-	}
-	
+        }
+        
     }
 
     private moveFrog(from: string, to: string): void {
         //Frog adjustments are complicated by frog piles.
-	const frog = this.board.get(from)!;
-	const fromX = this.algebraic2coords(from)[0];
-	const toX = this.algebraic2coords(to)[0];
-	const singleFrog = "X" + frog.charAt(1);
-	
+        const frog = this.board.get(from)!;
+        const fromX = this.algebraic2coords(from)[0];
+        const toX = this.algebraic2coords(to)[0];
+        const singleFrog = "X" + frog.charAt(1);
+        
         if (fromX > 0 && toX > 0 && toX < 13) {
             this.board.set(to, singleFrog);
             this.board.delete(from);
         } else {
-	    //Unsetting the old:
-	    if (fromX === 0) {
-		this.modifyFrogStack(from, false);
-	    } else {
-		//Normal delete.
-		this.board.delete(from);
-	    }
+            //Unsetting the old:
+            if (fromX === 0) {
+                this.modifyFrogStack(from, false);
+            } else {
+                //Normal delete.
+                this.board.delete(from);
+            }
 
-	    //Setting the new:
-	    if ( toX === 0 || toX === 13 ) {
-		this.modifyFrogStack(to, true);
-	    } else {
-		this.board.set(to, singleFrog);
-	    }
+            //Setting the new:
+            if ( toX === 0 || toX === 13 ) {
+                this.modifyFrogStack(to, true);
+            } else {
+                this.board.set(to, singleFrog);
+            }
         }
     }
 
     private moveFrogToExcuse(from: string): string {
-	//Wrapper to determine Excuse row.
-	const frog = this.board.get(from)!;
-	const row = parseInt(frog.charAt(1),10);
-	const to = this.coords2algebraic(0, row);
-	this.moveFrog(from, to);
-	return to;
+        //Wrapper to determine Excuse row.
+        const frog = this.board.get(from)!;
+        const row = parseInt(frog.charAt(1),10);
+        const to = this.coords2algebraic(0, row);
+        this.moveFrog(from, to);
+        return to;
     }
 
     private moveNeighbors(cell: string): string[][] {
-	//Move other frogs off your lily pad.  Track who.
-	const bounced: string[][] = [];
-	const col = this.algebraic2coords(cell)[0];
-	if (col === 0) {
-	    throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
-	} else if (col === 13) {
-	    //Can't bounce here.
-	    return bounced;
-	}
-	for (let row = 1; row < this.rows; row++) {
-	    const from = this.coords2algebraic(col, row);
-	    if ( from !== cell && this.board.has(from) ) {
-		const to = this.moveFrogToExcuse(from)!;
-		bounced.push([from, to]);
-	    }
-	}
-	return bounced;
+        //Move other frogs off your lily pad.  Track who.
+        const bounced: string[][] = [];
+        const col = this.algebraic2coords(cell)[0];
+        if (col === 0) {
+            throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
+        } else if (col === 13) {
+            //Can't bounce here.
+            return bounced;
+        }
+        for (let row = 1; row < this.rows; row++) {
+            const from = this.coords2algebraic(col, row);
+            if ( from !== cell && this.board.has(from) ) {
+                const to = this.moveFrogToExcuse(from)!;
+                bounced.push([from, to]);
+            }
+        }
+        return bounced;
     }
 
     private popHand(card: string): void {
-	this.removeCard(card, this.hands[this.currplayer - 1]);
-	this.discards.push(card);
+        this.removeCard(card, this.hands[this.currplayer - 1]);
+        this.discards.push(card);
     }
 
     private popMarket(card: string): boolean {
         //Remove the drawn card.
         this.removeCard(card, this.market);
-	this.hands[this.currplayer - 1].push(card);
+        this.hands[this.currplayer - 1].push(card);
 
-	return (this.market.length === 0);
+        return (this.market.length === 0);
 
         //If the market is empty, we need to draw a new market.
         //TODO: this requires ending the move sequence
@@ -503,27 +499,27 @@ export class FroggerGame extends GameBase {
     }
 
     private randomElement(array: string[]): string {
-	const index = Math.floor(Math.random() * array.length);
-	return array[index];
+        const index = Math.floor(Math.random() * array.length);
+        return array[index];
     }
 
     private refillMarket(): void {
-	const toDraw = Math.min(6, this.deck.size);
-	this.market = [...this.deck.draw(toDraw).map(c => c.uid)];
-	if (toDraw < 6) {
-	    //Return the discards to the deck and shuffle.
-	    this.discards.forEach( card => {
-		this.deck.add(card);
-	    });
-	    this.discards = [];
-	    this.deck.shuffle;
-	    
-	    //Draw the rest.
-	    for (let n = toDraw; n < 6; n++) {
-		const [card] = this.deck.draw();
-		this.market.push(card.uid);
-	    }
-	}	
+        const toDraw = Math.min(6, this.deck.size);
+        this.market = [...this.deck.draw(toDraw).map(c => c.uid)];
+        if (toDraw < 6) {
+            //Return the discards to the deck and shuffle.
+            this.discards.forEach( card => {
+                this.deck.add(card);
+            });
+            this.discards = [];
+            this.deck.shuffle;
+            
+            //Draw the rest.
+            for (let n = toDraw; n < 6; n++) {
+                const [card] = this.deck.draw();
+                this.market.push(card.uid);
+            }
+        }       
     }
 
     private removeCard(card: string, arr: string[]): void {
@@ -537,7 +533,7 @@ export class FroggerGame extends GameBase {
     }
 
     private setSuitedCells(): Map<string, string> {
-	const suitboard = new Map<string, string>();
+        const suitboard = new Map<string, string>();
         const cards = this.getBoardCards();
         for (let col = 1; col < 13; col++) {
             const suits = this.getSuits(cards[col - 1]);
@@ -558,64 +554,64 @@ export class FroggerGame extends GameBase {
             player = this.currplayer;
         }
 
-	if (this.skipto !== undefined && this.skipto !== this.currplayer ) {
-	    //Passing for market hiding.
+        if (this.skipto !== undefined && this.skipto !== this.currplayer ) {
+            //Passing for market hiding.
             return ["pass"];
         }
 
-	return [this.randomMove()];
+        return [this.randomMove()];
     }
     
     public randomMove(): string {
-	//We return only one, legal move, for testing purposes.
-	if (this.checkBlocked()) {
-	    const marketCard = this.randomElement(this.market);
-	    return marketCard + "/";
-	}
+        //We return only one, legal move, for testing purposes.
+        if (this.checkBlocked()) {
+            const marketCard = this.randomElement(this.market);
+            return marketCard + "/";
+        }
 
-	//Flip a coin about what to do (if there's an option).
-	let handcard = ( Math.random() < 0.66 );
-	//But...
+        //Flip a coin about what to do (if there's an option).
+        let handcard = ( Math.random() < 0.66 );
+        //But...
         if ( this.hands[this.currplayer - 1].length === 0 )
-	    handcard = false;
-	if ( this.countStartFrogs() + this.countHomeFrogs() === 6 )
+            handcard = false;
+        if ( this.countStartFrogs() + this.countHomeFrogs() === 6 )
             handcard = true;
-	
-	//Pick a frog at random.
-	const from = this.randomElement(this.getFrogs(!handcard));
-	
-	if ( handcard ) {
-	    //hop forward
-	    const card = this.randomElement(this.hands[this.currplayer - 1]);
+        
+        //Pick a frog at random.
+        const from = this.randomElement(this.getFrogs(!handcard));
+        
+        if ( handcard ) {
+            //hop forward
+            const card = this.randomElement(this.hands[this.currplayer - 1]);
             const suits = this.getSuits(card);
-	    const suit = this.randomElement(suits);
-	    
-	    const to = this.getNextForward(from, suit);
+            const suit = this.randomElement(suits);
+            
+            const to = this.getNextForward(from, suit);
 
-	    return `${card}:${from}-${to}`;
-	    
+            return `${card}:${from}-${to}`;
+            
         } else {
-	    //fall back.
+            //fall back.
 
-	    const toArray = this.getNextBack(from);
-	    const to = this.randomElement(toArray);
-	    const toX = this.algebraic2coords(to)[0];
-	    let card;
-	    if (toX === 0) {
-		//Can choose any market card.
-		card = this.randomElement(this.market);
-	    } else {
-		const suit = this.suitboard.get(to);
-		const whiteMarket = this.getMarketCards(suit!);
-		if (whiteMarket.length > 0)
-		    card = this.randomElement(whiteMarket);
-	    }
+            const toArray = this.getNextBack(from);
+            const to = this.randomElement(toArray);
+            const toX = this.algebraic2coords(to)[0];
+            let card;
+            if (toX === 0) {
+                //Can choose any market card.
+                card = this.randomElement(this.market);
+            } else {
+                const suit = this.suitboard.get(to);
+                const whiteMarket = this.getMarketCards(suit!);
+                if (whiteMarket.length > 0)
+                    card = this.randomElement(whiteMarket);
+            }
 
-	    if ( card )
-		return `${from}-${to},${card}`;
-	    else
-		return `${from}-${to}`;
-	}
+            if ( card )
+                return `${from}-${to},${card}`;
+            else
+                return `${from}-${to}`;
+        }
 
     }
 
@@ -689,7 +685,7 @@ export class FroggerGame extends GameBase {
                 }
 
                 const cell = this.coords2algebraic(col, row);
-                if (this.unboard.indexOf(cell) > -1) {
+                if ( !this.suitboard.has(cell) && this.getUnsuitedCells().indexOf(cell) < 0 ) {
                     return {
                         move,
                         valid: false,
@@ -749,7 +745,7 @@ export class FroggerGame extends GameBase {
 
         //m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
-	//TODO: remove double slashes.
+        //TODO: remove double slashes.
 
         if (m.length === 0) {
             result.valid = true;
@@ -774,7 +770,7 @@ export class FroggerGame extends GameBase {
         }
 
         let allcomplete = false;
-	let marketEmpty = false;
+        let marketEmpty = false;
 
         for (let s = 0; s < moves.length; s++) {
             const submove = moves[s];
@@ -816,9 +812,9 @@ export class FroggerGame extends GameBase {
                         result.valid = false;
                         result.message = i18next.t("apgames:validation.frogger.TOO_LATE_FOR_BLOCKED");
                         return result;
-		    } else if (moves.length > 1 && moves[1] !== "") {
-			//Bad blocked move (in presence of other moves)
-			//TODO: obviate this case by fixing the move stack.
+                    } else if (moves.length > 1 && moves[1] !== "") {
+                        //Bad blocked move (in presence of other moves)
+                        //TODO: obviate this case by fixing the move stack.
                         result.valid = false;
                         result.message = i18next.t("apgames:validation.frogger.NO_MOVE_BLOCKED");
                         return result;
@@ -926,7 +922,7 @@ export class FroggerGame extends GameBase {
             }
 
             //Check target location is on the board.
-            if (cloned.unboard.indexOf(to) > -1) {
+            if ( !cloned.suitboard.has(to) && cloned.getUnsuitedCells().indexOf(to) < 0 ) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.OFF_BOARD");
                 return result;
@@ -957,23 +953,23 @@ export class FroggerGame extends GameBase {
 
             //Moving back tests.
             if (!handcard) {
-		if ( !this.checkNextBack(from, to)) {
+                if ( !this.checkNextBack(from, to)) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
                     return result;
-		}
-		if (toX > 0 && ca) {
-		    const suit = this.suitboard.get(to)!;
-		    if (! this.checkMarket(ca, suit) ) {
-			result.valid = false;
-			result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD");
-			return result;
-		    }
-		} // When backing up to start you can pick any market card.
+                }
+                if (toX > 0 && ca) {
+                    const suit = this.suitboard.get(to)!;
+                    if (! this.checkMarket(ca, suit) ) {
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD");
+                        return result;
+                    }
+                } // When backing up to start you can pick any market card.
             }
 
-	    //Moving forward tests.
-	    if (handcard && !cloned.checkNextForward(from, to, ca!)) {
+            //Moving forward tests.
+            if (handcard && !cloned.checkNextForward(from, to, ca!)) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
                 return result;
@@ -984,14 +980,14 @@ export class FroggerGame extends GameBase {
                 //Card adjustments.
                 if (handcard) {
                     cloned.popHand(ca!);
-		    //Also pop other frogs if it's a crown or ace.
-		    if ( cloned.isCracy(ca!) ) {
-			// eslint-disable-next-line @typescript-eslint/no-unused-vars
-			//const bounced =
-			cloned.moveNeighbors(to);
-		    }
+                    //Also pop other frogs if it's a crown or ace.
+                    if ( cloned.isCracy(ca!) ) {
+                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                        //const bounced =
+                        cloned.moveNeighbors(to);
+                    }
                 } else if (ca) {
-		    marketEmpty = cloned.popMarket(ca);
+                    marketEmpty = cloned.popMarket(ca);
                 }
 
                 if (from && to) {
@@ -1005,8 +1001,8 @@ export class FroggerGame extends GameBase {
             }
         }
 
-	console.log(marketEmpty);
-	
+        console.log(marketEmpty);
+        
         //Really really done.
         result.valid = true;
         result.complete = allcomplete ? 1 : 0;
@@ -1031,7 +1027,7 @@ export class FroggerGame extends GameBase {
         const moves = m.split("/");
         
         this.results = [];
-	let marketEmpty = false;
+        let marketEmpty = false;
 
         for (let s = 0; s < moves.length; s++) {
             const submove = moves[s];
@@ -1055,8 +1051,8 @@ export class FroggerGame extends GameBase {
             } else {
                 //Raw card must be a blocked move or a partial.
                 ca = submove;
-		if (!partial)
-		    this.results.push({type: "claim", what: ca});
+                if (!partial)
+                    this.results.push({type: "claim", what: ca});
             }
 
             if ( mv ) 
@@ -1066,35 +1062,35 @@ export class FroggerGame extends GameBase {
             //Possible card adjustments.
             if (handcard) {
                 this.popHand(ca!);
-		this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "forward"});
-		if ( this.isCracy(ca!) ) {
-		    const bounced = this.moveNeighbors(to!);
-//		    for (let b = 0; b < bounced.length; b?
-		    bounced.forEach( ([from, to]) => {
-			this.results.push({type: "eject", from: from, to: to});
-		    });
-		}
+                this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "forward"});
+                if ( this.isCracy(ca!) ) {
+                    const bounced = this.moveNeighbors(to!);
+//                  for (let b = 0; b < bounced.length; b?
+                    bounced.forEach( ([from, to]) => {
+                        this.results.push({type: "eject", from: from, to: to});
+                    });
+                }
             } else if (ca) {
                 marketEmpty = this.popMarket(ca);
-		if (from) {
-		    this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "back"});
-		    
-		}
+                if (from) {
+                    this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "back"});
+                    
+                }
             } else {
-		    this.results.push({type: "move", from: from!, to: to!, what: "no card", how: "back"});
-	    }
+                    this.results.push({type: "move", from: from!, to: to!, what: "no card", how: "back"});
+            }
 
             if (from && to) {
-		this.moveFrog(from,to);
+                this.moveFrog(from,to);
             }
         }
 
         if (partial) { return this; }
 
-	//update market if necessary
-	if (marketEmpty) {
-	    this.refillMarket();
-	}
+        //update market if necessary
+        if (marketEmpty) {
+            this.refillMarket();
+        }
 
         //update crocodiles if croccy
         //TODO
@@ -1154,7 +1150,7 @@ export class FroggerGame extends GameBase {
             _results: [...this.results],
             _timestamp: new Date(),
             currplayer: this.currplayer,
-	    skipto: this.skipto,
+            skipto: this.skipto,
             lastmove: this.lastmove,
             board: new Map(this.board),
             hands: this.hands.map(h => [...h]),
@@ -1380,17 +1376,17 @@ export class FroggerGame extends GameBase {
                 if (move.type === "move") {
                     const [fromX, fromY] = this.algebraic2coords(move.from!);
                     const [toX, toY] = this.algebraic2coords(move.to!);
-		    if (move.how === "back")
-			rep.annotations.push({type: "move",  style: "dashed", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
-		    else
-			rep.annotations.push({type: "move",  targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
+                    if (move.how === "back")
+                        rep.annotations.push({type: "move",  style: "dashed", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
+                    else
+                        rep.annotations.push({type: "move",  targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
                 } else if (move.type === "claim") {
                     //TODO: Uncover the market card?
                 } else if (move.type === "eject") {
                     const [fromX, fromY] = this.algebraic2coords(move.from!);
                     const [toX, toY] = this.algebraic2coords(move.to!);
-		    rep.annotations.push({type: "eject", targets: [{row: fromY, col: fromX},{row: toY, col: toX}]});
-		}
+                    rep.annotations.push({type: "eject", targets: [{row: fromY, col: fromX},{row: toY, col: toX}]});
+                }
             }
         }
 
@@ -1422,21 +1418,21 @@ export class FroggerGame extends GameBase {
             case "claim":                
                 node.push(i18next.t("apresults:CLAIM.frogger", {player, card: r.what}));
                 resolved = true;
-		break;
+                break;
             case "eject":                
                 node.push(i18next.t("apresults:EJECT.frogger", {player, from: r.from, to: r.to}));
                 resolved = true;
-		break;
+                break;
             case "move":
                 if (r.how === "forward") {
                     node.push(i18next.t("apresults:MOVE.frogger_forward", {player, from: r.from, to: r.to, card: r.what}));
-		} else if (r.how === "back") {
+                } else if (r.how === "back") {
                     node.push(i18next.t("apresults:MOVE.frogger_back", {player, from: r.from, to: r.to, card: r.what}));
-		} else {
+                } else {
                     node.push(i18next.t("apresults:MOVE.frogger_blocked", {player, card: r.what}));
-		}
-		resolved = true;
-		break;
+                }
+                resolved = true;
+                break;
             case "eog":                
                 node.push(i18next.t("apresults:EOG.frogger", {player}));
                 resolved = true;
