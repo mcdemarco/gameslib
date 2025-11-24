@@ -15,6 +15,7 @@ const suitOrder = ["M","S","V","L","Y","K"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
+    skipto?: playerid;
     board: Map<string, string>;
     hands: string[][];
     market: string[];
@@ -70,7 +71,7 @@ export class FroggerGame extends GameBase {
             },
         ],
         categories: ["goal>evacuate", "mechanic>move", "mechanic>bearoff", "mechanic>block", "mechanic>random>setup", "mechanic>random>play", "board>shape>rect", "board>connect>rect", "components>decktet", "other>2+players"],
-        flags: ["random-start", "custom-randomization", "experimental"],
+        flags: ["autopass", "random-start", "custom-randomization", "experimental"],
     };
     public coords2algebraic(x: number, y: number): string {
         return GameBase.coords2algebraic(x, y, this.rows);
@@ -81,6 +82,7 @@ export class FroggerGame extends GameBase {
 
     public numplayers = 2;
     public currplayer: playerid = 1;
+    public skipto?: playerid|undefined;
     public board!: Map<string, string>;
     public hands: string[][] = [];
     public market: string[] = [];
@@ -186,6 +188,7 @@ export class FroggerGame extends GameBase {
         const state = this.stack[idx];
         this.results = [...state._results];
         this.currplayer = state.currplayer;
+	this.skipto = state.skipto;
         this.board = new Map(state.board);
         this.hands = state.hands.map(h => [...h]);
         this.market = [...state.market];
@@ -233,6 +236,11 @@ export class FroggerGame extends GameBase {
             return false;
         if (this.countStartFrogs() + this.countHomeFrogs() < 6)
             return false;
+        return true;
+    }
+
+    private checkMarket(card: string, suit: string): boolean {
+        console.log(card, suit);
         return true;
     }
 
@@ -312,9 +320,23 @@ export class FroggerGame extends GameBase {
 	return [startCell];
     }
 
+    private getMarketCards(suit: string): string[] {
+	//Filter the market by the forbidden suit.
+	//Return an array of all legal cards in the market (for random moves).
+	const whiteMarket: string[] = [];
+
+	this.market.forEach(card => {
+	    const suits = this.getSuits(card);
+	    if (suits.indexOf(suit) < 0)
+		whiteMarket.push(card);
+	});
+
+	return whiteMarket;
+    }
+    
     private getNextForward(from: string, suit: string): string {
 	//Get the next available cell by suit.
-	let homecell = this.coords2algebraic(13, this.currplayer);
+	const homecell = this.coords2algebraic(13, this.currplayer);
 
 	const fromX = this.algebraic2coords(from)[0];
 
@@ -364,27 +386,36 @@ export class FroggerGame extends GameBase {
         return badcells;
     }
 
+    private isCracy(cardId: string): boolean {
+	const card = Card.deserialize(cardId)!;
+        const rank = card.rank.name;
+	return ( rank === "Crown" || rank === "Ace" );
+    }
+    
     private modifyFrogStack(cell: string, increment: boolean): void {
 	//It's the responsibility of the caller to validate the arguments.
+	const [cellX, cellY] =  this.algebraic2coords(cell);
+
 	if (! this.board.has(cell) ) {
-	    //This is probably this special case:
-	    if ( this.algebraic2coords(cell)[0] === 13 && increment ) {
-		this.board.set(cell, "X" + this.currplayer + "-1");
+	    if ( (cellX === 13 || cellX === 0) && increment ) {
+		//The special case of the first frog home,
+		// or the first frog returning to the empty Excuse.
+		this.board.set(cell, "X" + cellY + "-1");
 	    } else {
 		throw new Error(`Stack not found at "${cell}" in modifyFrogStack.`);
 	    }
 	    return;
-	}
-
-	const oldFrogCount = parseInt(this.board.get(cell)!.split("-")[1], 10);
+	} 
+	    
+	const oldFrog = this.board.get(cell)!;
+	const player = oldFrog.charAt(1);
+	const oldFrogCount = parseInt(oldFrog.split("-")[1], 10);
 	const newFrogCount = increment ? oldFrogCount + 1 : oldFrogCount - 1 ;
 
-	//console.log(cell, oldFrogCount, newFrogCount);
-	
 	if (newFrogCount === 0) {
             this.board.delete(cell);
 	} else {
-            const newFrogStack = "X" + this.currplayer + "-" + newFrogCount.toString();
+            const newFrogStack = "X" + player + "-" + newFrogCount.toString();
             this.board.set(cell, newFrogStack);
 	}
 	
@@ -392,9 +423,10 @@ export class FroggerGame extends GameBase {
 
     private moveFrog(from: string, to: string): void {
         //Frog adjustments are complicated by frog piles.
+	const frog = this.board.get(from)!;
 	const fromX = this.algebraic2coords(from)[0];
 	const toX = this.algebraic2coords(to)[0];
-	const singleFrog = "X" + this.currplayer;
+	const singleFrog = "X" + frog.charAt(1);
 	
         if (fromX > 0 && toX > 0 && toX < 13) {
             this.board.set(to, singleFrog);
@@ -417,17 +449,48 @@ export class FroggerGame extends GameBase {
         }
     }
 
+    private moveFrogToExcuse(from: string): string {
+	//Wrapper to determine Excuse row.
+	const frog = this.board.get(from)!;
+	const row = parseInt(frog.charAt(1),10);
+	const to = this.coords2algebraic(0, row);
+	this.moveFrog(from, to);
+	return to;
+    }
+
+    private moveNeighbors(cell: string): string[][] {
+	//Move other frogs off your lily pad.  Track who.
+	const bounced: string[][] = [];
+	const col = this.algebraic2coords(cell)[0];
+	if (col === 0) {
+	    throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
+	} else if (col === 13) {
+	    //Can't bounce here.
+	    return bounced;
+	}
+	for (let row = 1; row < this.rows; row++) {
+	    const from = this.coords2algebraic(col, row);
+	    if ( from !== cell && this.board.has(from) ) {
+		const to = this.moveFrogToExcuse(from)!;
+		bounced.push([from, to]);
+	    }
+	}
+	return bounced;
+    }
+
     private popHand(card: string): void {
 	this.removeCard(card, this.hands[this.currplayer - 1]);
 	this.discards.push(card);
     }
 
-    private popMarket(card: string): void {
+    private popMarket(card: string): boolean {
         //Remove the drawn card.
         this.removeCard(card, this.market);
 	this.hands[this.currplayer - 1].push(card);
 
-        //If the market is empty, we draw a new market.
+	return (this.market.length === 0);
+
+        //If the market is empty, we need to draw a new market.
         //TODO: this requires ending the move sequence
         //      and passing the other players to move again.
     }
@@ -435,6 +498,25 @@ export class FroggerGame extends GameBase {
     private randomElement(array: string[]): string {
 	const index = Math.floor(Math.random() * array.length);
 	return array[index];
+    }
+
+    private refillMarket(): void {
+	const toDraw = Math.min(6, this.deck.size);
+	this.market = [...this.deck.draw(toDraw).map(c => c.uid)];
+	if (toDraw < 6) {
+	    //Return the discards to the deck and shuffle.
+	    this.discards.forEach( card => {
+		this.deck.add(card);
+	    });
+	    this.discards = [];
+	    this.deck.shuffle;
+	    
+	    //Draw the rest.
+	    for (let n = toDraw; n < 6; n++) {
+		const [card] = this.deck.draw();
+		this.market.push(card.uid);
+	    }
+	}	
     }
 
     private removeCard(card: string, arr: string[]): void {
@@ -460,6 +542,23 @@ export class FroggerGame extends GameBase {
         return suitboard;
     }
     
+    public moves(player?: playerid): string[] {
+        if (this.gameover) {
+            return [];
+        }
+
+        if (player === undefined) {
+            player = this.currplayer;
+        }
+
+	if (this.skipto !== undefined && this.skipto !== this.currplayer ) {
+	    //Passing for market hiding.
+            return ["pass"];
+        }
+
+	return [this.randomMove()];
+    }
+    
     public randomMove(): string {
 	//We return only one, legal move, for testing purposes.
 	if (this.checkBlocked()) {
@@ -468,11 +567,11 @@ export class FroggerGame extends GameBase {
 	}
 
 	//Flip a coin about what to do (if there's an option).
-	let handcard = ( Math.random() < 0.5 );
+	let handcard = ( Math.random() < 0.66 );
 	//But...
         if ( this.hands[this.currplayer - 1].length === 0 )
 	    handcard = false;
-	if (this.countStartFrogs() + this.countHomeFrogs() === 6)
+	if ( this.countStartFrogs() + this.countHomeFrogs() === 6 )
             handcard = true;
 	
 	//Pick a frog at random.
@@ -480,25 +579,35 @@ export class FroggerGame extends GameBase {
 	
 	if ( handcard ) {
 	    //hop forward
-	    const cardId = this.randomElement(this.hands[this.currplayer - 1]);
-	    const card = Card.deserialize(cardId)!;
-            const suits = card.suits.map(s => s.uid);
+	    const card = this.randomElement(this.hands[this.currplayer - 1]);
+            const suits = this.getSuits(card);
 	    const suit = this.randomElement(suits);
 	    
 	    const to = this.getNextForward(from, suit);
 
-	    return `${cardId}:${from}-${to}`;
+	    return `${card}:${from}-${to}`;
 	    
         } else {
 	    //fall back.
 
 	    const toArray = this.getNextBack(from);
 	    const to = this.randomElement(toArray);
+	    const toX = this.algebraic2coords(to)[0];
+	    let card;
+	    if (toX === 0) {
+		//Can choose any market card.
+		card = this.randomElement(this.market);
+	    } else {
+		const suit = this.suitboard.get(to);
+		const whiteMarket = this.getMarketCards(suit!);
+		if (whiteMarket.length > 0)
+		    card = this.randomElement(whiteMarket);
+	    }
 
-	    //TODO: get and check market card.
-	    
-	    return `${from}-${to}`;
-	    
+	    if ( card )
+		return `${from}-${to},${card}`;
+	    else
+		return `${from}-${to}`;
 	}
 
     }
@@ -658,6 +767,7 @@ export class FroggerGame extends GameBase {
         }
 
         let allcomplete = false;
+	let marketEmpty = false;
 
         for (let s = 0; s < moves.length; s++) {
             const submove = moves[s];
@@ -740,12 +850,12 @@ export class FroggerGame extends GameBase {
             if (handcard && cloned.hands[cloned.currplayer - 1].indexOf(ca!) < 0 ) {
                 //Bad hand card.
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.INVALID_HAND_CARD", {card: ca});
+                result.message = i18next.t("apgames:validation.frogger.NO_SUCH_HAND_CARD", {card: ca});
                 return result;
-            } else if (!handcard && !nocard && cloned.market.indexOf(ca!) < 0) {
+            } else if (!handcard && !nocard && cloned.market.indexOf(ca!) < 0 ) {
                 //Bad card.
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD", {card: ca});
+                result.message = i18next.t("apgames:validation.frogger.NO_SUCH_MARKET_CARD", {card: ca});
                 return result;
             }
 
@@ -838,12 +948,25 @@ export class FroggerGame extends GameBase {
                 return result;
             }
 
-            //Moving back is the simpler case.
-            if (!handcard && !this.checkNextBack(fromX, toX, toY)) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
-                return result;
-            } else if (handcard && !cloned.checkNextForward(fromX, toX, toY, ca!)) {
+            //Moving back tests.
+            if (!handcard) {
+		if ( !this.checkNextBack(fromX, toX, toY)) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
+                    return result;
+		}
+		if (toX > 0 && ca) {
+		    const suit = this.suitboard.get(to)!;
+		    if (! this.checkMarket(ca, suit) ) {
+			result.valid = false;
+			result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD");
+			return result;
+		    }
+		} // When backing up to start you can pick any market card.
+            }
+
+	    //Moving forward tests.
+	    if (handcard && !cloned.checkNextForward(fromX, toX, toY, ca!)) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
                 return result;
@@ -854,8 +977,14 @@ export class FroggerGame extends GameBase {
                 //Card adjustments.
                 if (handcard) {
                     cloned.popHand(ca!);
+		    //Also pop other frogs if it's a crown or ace.
+		    if ( cloned.isCracy(ca!) ) {
+			// eslint-disable-next-line @typescript-eslint/no-unused-vars
+			//const bounced =
+			cloned.moveNeighbors(to);
+		    }
                 } else if (ca) {
-                    cloned.popMarket(ca);
+		    marketEmpty = cloned.popMarket(ca);
                 }
 
                 if (from && to) {
@@ -869,6 +998,8 @@ export class FroggerGame extends GameBase {
             }
         }
 
+	console.log(marketEmpty);
+	
         //Really really done.
         result.valid = true;
         result.complete = allcomplete ? 1 : 0;
@@ -893,6 +1024,7 @@ export class FroggerGame extends GameBase {
         const moves = m.split("/");
         
         this.results = [];
+	let marketEmpty = false;
 
         for (let s = 0; s < moves.length; s++) {
             const submove = moves[s];
@@ -901,11 +1033,6 @@ export class FroggerGame extends GameBase {
             
             let mv, from, to, ca;
             let handcard = false;
-//          let complete = false;
-//          let nocard = false;
-
-//          if (s < moves.length - 1)
-//              complete = true;
 
             if (submove.indexOf(":") > -1) {
                 //Card followed by move is a hand card.
@@ -931,12 +1058,20 @@ export class FroggerGame extends GameBase {
             //Make the submove.
             //Possible card adjustments.
             if (handcard) {
-                this.removeCard(ca!, this.hands[this.currplayer - 1]);
+                this.popHand(ca!);
 		this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "forward"});
+		if ( this.isCracy(ca!) ) {
+		    const bounced = this.moveNeighbors(to!);
+//		    for (let b = 0; b < bounced.length; b?
+		    bounced.forEach( ([from, to]) => {
+			this.results.push({type: "eject", from: from, to: to});
+		    });
+		}
             } else if (ca) {
-                this.popMarket(ca);
+                marketEmpty = this.popMarket(ca);
 		if (from) {
 		    this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "back"});
+		    
 		}
             } else {
 		    this.results.push({type: "move", from: from!, to: to!, what: "no card", how: "back"});
@@ -950,7 +1085,9 @@ export class FroggerGame extends GameBase {
         if (partial) { return this; }
 
 	//update market if necessary
-        //TODO
+	if (marketEmpty) {
+	    this.refillMarket();
+	}
 
         //update crocodiles if croccy
         //TODO
@@ -969,7 +1106,7 @@ export class FroggerGame extends GameBase {
     }
 
     protected checkEOG(): FroggerGame {
-        if (this.board.size === 36) {
+        if ( this.countHomeFrogs() === 6 ) {
             this.gameover = true;
             this.winner.push(this.currplayer);
         }
@@ -1010,6 +1147,7 @@ export class FroggerGame extends GameBase {
             _results: [...this.results],
             _timestamp: new Date(),
             currplayer: this.currplayer,
+	    skipto: this.skipto,
             lastmove: this.lastmove,
             board: new Map(this.board),
             hands: this.hands.map(h => [...h]),
@@ -1241,7 +1379,11 @@ export class FroggerGame extends GameBase {
 			rep.annotations.push({type: "move",  targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
                 } else if (move.type === "claim") {
                     //TODO: Uncover the market card?
-                }
+                } else if (move.type === "eject") {
+                    const [fromX, fromY] = this.algebraic2coords(move.from!);
+                    const [toX, toY] = this.algebraic2coords(move.to!);
+		    rep.annotations.push({type: "eject", targets: [{row: fromY, col: fromX},{row: toY, col: toX}]});
+		}
             }
         }
 
@@ -1272,6 +1414,10 @@ export class FroggerGame extends GameBase {
         switch (r.type) {
             case "claim":                
                 node.push(i18next.t("apresults:CLAIM.frogger", {player, card: r.what}));
+                resolved = true;
+		break;
+            case "eject":                
+                node.push(i18next.t("apresults:EJECT.frogger", {player, from: r.from, to: r.to}));
                 resolved = true;
 		break;
             case "move":
