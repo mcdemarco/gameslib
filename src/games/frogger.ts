@@ -240,18 +240,25 @@ export class FroggerGame extends GameBase {
     }
 
     private checkMarket(card: string, suit: string): boolean {
-        console.log(card, suit);
-        return true;
+	const suits = this.getSuits(card);
+	return (suits.indexOf(suit) < 0);
     }
 
-    private checkNextBack(fromX: number, toX: number, toY: number): boolean {
-        console.log(fromX, toX, toY);
-        return true;
+    private checkNextBack(from: string, to: string): boolean {
+	const correctBacks: string[] = this.getNextBack(from);
+	return (correctBacks.indexOf(to) > -1);
     }
 
-    private checkNextForward(fromX: number, toX: number, toY: number, card: string): boolean {
-        console.log(fromX, toX, toY, card);
-        return true;
+    private checkNextForward(from: string, to: string, card: string): boolean {
+	const suits = this.getSuits(card);
+	    
+	for (let s = 0; s < suits.length; s++) {
+	    const suitto = this.getNextForward(from, suits[s]);
+	    if (to === suitto)
+		return true;
+	}
+	
+        return false;
     }
 
     private countColumnFrogs(col: number): number {
@@ -927,7 +934,7 @@ export class FroggerGame extends GameBase {
             //The source location was tested for frogs so must have been on the board.
 
             //On to to testing.
-            const [toX, toY] = this.algebraic2coords(to);
+            const toX = this.algebraic2coords(to)[0];
 
             //It's my interpretation of the rules that you must change cards on a move,
             // not just change space, but I'm not 100% sure about that.
@@ -950,7 +957,7 @@ export class FroggerGame extends GameBase {
 
             //Moving back tests.
             if (!handcard) {
-		if ( !this.checkNextBack(fromX, toX, toY)) {
+		if ( !this.checkNextBack(from, to)) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
                     return result;
@@ -966,7 +973,7 @@ export class FroggerGame extends GameBase {
             }
 
 	    //Moving forward tests.
-	    if (handcard && !cloned.checkNextForward(fromX, toX, toY, ca!)) {
+	    if (handcard && !cloned.checkNextForward(from, to, ca!)) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
                 return result;
