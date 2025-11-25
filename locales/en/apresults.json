@@ -173,6 +173,7 @@
     "DECLARE": {
         "biscuit": "{{player}} has gone out!",
         "emu": "Year {{year}} has ended.",
+        "frogger": "The crocodiles advance.",
         "mchess": "{{player}} has \"called the clock.\" If no capture is made in the next seven turns, the game will end and be scored.",
         "renju": "{{player}} has declared {{count}} tentative fifths."
     },
@@ -214,7 +215,8 @@
     "EJECT": {
         "assembly": "The production line moved forward {{distance}} spaces.",
         "deckfish": "{{player}} pushed a piece from {{from}} to {{to}}.",
-        "frogger": "{{player}} played an Ace or Crown and returned a frog from {{from}} to {{to}}.",
+        "frogger_card": "{{player}} played an Ace or Crown and returned a frog from {{from}} to {{to}}.",
+        "frogger_croc": "The frog at {{from}} was eaten by crocodiles (and returned to {{to}}).",
         "penguin_ball": "{{player}} kicked the ball from {{from}} to {{to}}.",
         "penguin_penguin": "A penguin was pushed from {{from}} to {{to}}."
     },

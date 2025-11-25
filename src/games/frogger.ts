@@ -62,16 +62,11 @@ export class FroggerGame extends GameBase {
             },
         ],
         variants: [
-            {
-                uid: "basic",
-                experimental: true
-            },
-            {
-                uid: "continuous",
-            },
-            {
-                uid: "crocodiles"
-            },
+            { uid: "basic", experimental: true },
+            { uid: "crocodiles" },
+            { uid: "#market" },
+            { uid: "continuous", group: "market" },
+            { uid: "norefills", group: "market" }
         ],
         categories: ["goal>evacuate", "mechanic>move", "mechanic>bearoff", "mechanic>block", "mechanic>random>setup", "mechanic>random>play", "board>shape>rect", "board>connect>rect", "components>decktet", "other>2+players"],
         flags: ["autopass", "random-start", "custom-randomization", "experimental"],
@@ -122,7 +117,7 @@ export class FroggerGame extends GameBase {
             // init board
             this.rows = Math.max(3, this.numplayers) + 1;
             if (this.variants.includes("continuous"))
-		this.marketsize = 3;
+                this.marketsize = 3;
 
             const board = new Map<string, string>();
             const suitboard = new Map<string, string>();
@@ -132,11 +127,20 @@ export class FroggerGame extends GameBase {
                 const [card] = boardDeck.draw();
                 const cell = this.coords2algebraic(col, 0);
                 board.set(cell, card.uid);
-                //also set suits
+                
+                //Set suits.
                 const suits = card.suits.map(s => s.uid);
                 for (let s = 0; s < suits.length; s++) {
                     const cell = this.coords2algebraic(col, s + 1);
                     suitboard.set(cell,suits[s]);
+                }
+                
+                //Add crocodiles.  Crocodiles are player 0.
+                if (this.variants.includes("crocodiles")) {
+                    if (card.rank.uid === "P") {
+                        const cell = this.coords2algebraic(col, 1);
+                        board.set(cell, "X0");
+                    }
                 }
             }
 
@@ -145,6 +149,8 @@ export class FroggerGame extends GameBase {
                 const cell = this.coords2algebraic(0, row);
                 board.set(cell, "X" + row.toString() + "-6");
             }
+
+            //TODO: implement advancing of crocodiles.
 
             // init market and hands
             const hands: string[][] = [];
@@ -203,7 +209,7 @@ export class FroggerGame extends GameBase {
 
         this.rows = Math.max(3, this.numplayers) + 1;
         if (this.variants.includes("continuous"))
-	    this.marketsize = 3;
+            this.marketsize = 3;
         
         this.suitboard = this.setSuitedCells();
 
@@ -353,7 +359,7 @@ export class FroggerGame extends GameBase {
         const fromX = this.algebraic2coords(from)[0];
 
         if ( fromX === 13 ) {
-            throw new Error(`Could not go forward from home. This should never happen.`);
+            throw new Error("Could not go forward from home. This should never happen.");
         }
 
         for (let c = fromX + 1; c < 14; c++) {
@@ -377,6 +383,17 @@ export class FroggerGame extends GameBase {
 
     private countStartFrogs(): number {
         return this.countColumnFrogs(0);
+    }
+
+    private getCrocRowFromColumn(col: number): number {
+        for (let row = 1; row < 4; row++) {
+            const croc = this.coords2algebraic(col, row);
+            if (this.board.has(croc) && this.board.get(croc) === "X0") {
+                return row;
+            }
+        }
+        throw new Error("Could not find row for crocodile column.");
+        return 0;
     }
 
     private getSuits(cardId: string): string[] {
@@ -433,7 +450,7 @@ export class FroggerGame extends GameBase {
     }
 
     private moveFrog(from: string, to: string): void {
-        //Frog adjustments are complicated by frog piles.
+        //Frog adjustments are complicated by frog piles and crocodiles.
         const frog = this.board.get(from)!;
         const fromX = this.algebraic2coords(from)[0];
         const toX = this.algebraic2coords(to)[0];
@@ -473,20 +490,44 @@ export class FroggerGame extends GameBase {
         //Move other frogs off your lily pad.  Track who.
         const bounced: string[][] = [];
         const col = this.algebraic2coords(cell)[0];
+        
         if (col === 0) {
             throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
         } else if (col === 13) {
             //Can't bounce here.
             return bounced;
         }
+        
         for (let row = 1; row < this.rows; row++) {
-            const from = this.coords2algebraic(col, row);
-            if ( from !== cell && this.board.has(from) ) {
-                const to = this.moveFrogToExcuse(from)!;
-                bounced.push([from, to]);
+            const bouncee = this.coords2algebraic(col, row);
+            //Don't bounce self or crocodiles.
+            if ( bouncee !== cell && this.board.has(bouncee) && this.board.get(bouncee) !== "X0" ) {
+                const to = this.moveFrogToExcuse(bouncee)!;
+                bounced.push([bouncee, to]);
             }
         }
         return bounced;
+    }
+
+    private popCrocs(): string[][] {
+        const victims: string[][] = [];
+        for (let col = 1; col < 13; col++) {
+            // check for pawn column using the suit board
+            if ( this.suitboard.has(this.coords2algebraic(col, 3)) ) {
+                // we have a croc's column; get its row.
+                const crocRow = this.getCrocRowFromColumn(col);
+                const victimRow = (crocRow % 3) + 1;
+                const crocFrom = this.coords2algebraic(col, crocRow);
+                const victimFrom = this.coords2algebraic(col, victimRow);
+                if ( this.board.has(victimFrom) ) {
+                    const victimTo = this.moveFrogToExcuse(victimFrom);
+                    victims.push([victimFrom, victimTo]);
+                }
+                // regardless of squashed frogs, we move the crocodile
+                this.moveFrog(crocFrom, victimFrom);
+            }
+        }
+        return victims;
     }
 
     private popHand(card: string): void {
@@ -512,24 +553,24 @@ export class FroggerGame extends GameBase {
     }
 
     private refillMarket(): boolean {
-	//Fills the market regardless of current size.
-	
-	//But if it's already full (in the variant), return.
-	if (this.market.length === this.marketsize)
-	    return false;
-	
-	//First, draw from the deck.
+        //Fills the market regardless of current size.
+        
+        //But if it's already full (in the variant), return.
+        if (this.market.length === this.marketsize)
+            return false;
+        
+        //First, draw from the deck.
         const toDraw = Math.min(this.marketsize, this.deck.size);
         this.market = [...this.deck.draw(toDraw).map(c => c.uid)];
 
-	//If we didn't fill the market, shuffle the discards.
+        //If we didn't fill the market, shuffle the discards.
         if (this.market.length < this.marketsize) {
             //Return the discards to the deck and shuffle.
             this.discards.forEach( card => {
                 this.deck.add(card);
             });
             this.discards = [];
-            this.deck.shuffle;
+            this.deck.shuffle();
             
             //Draw the rest.
             for (let n = this.market.length; n < this.marketsize; n++) {
@@ -537,7 +578,7 @@ export class FroggerGame extends GameBase {
                 this.market.push(card.uid);
             }
         }
-	return true;
+        return true;
     }
 
     private removeCard(card: string, arr: string[]): void {
@@ -1000,8 +1041,6 @@ export class FroggerGame extends GameBase {
                     cloned.popHand(ca!);
                     //Also pop other frogs if it's a crown or ace.
                     if ( cloned.isCracy(ca!) ) {
-                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                        //const bounced =
                         cloned.moveNeighbors(to);
                     }
                 } else if (ca) {
@@ -1020,7 +1059,7 @@ export class FroggerGame extends GameBase {
         }
 
         console.log(marketEmpty);
-        
+
         //Really really done.
         result.valid = true;
         result.complete = allcomplete ? 1 : 0;
@@ -1083,9 +1122,8 @@ export class FroggerGame extends GameBase {
                 this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "forward"});
                 if ( this.isCracy(ca!) ) {
                     const bounced = this.moveNeighbors(to!);
-//                  for (let b = 0; b < bounced.length; b?
                     bounced.forEach( ([from, to]) => {
-                        this.results.push({type: "eject", from: from, to: to});
+                        this.results.push({type: "eject", from: from, to: to, what: "a Crown or Ace"});
                     });
                 }
             } else if (ca) {
@@ -1108,8 +1146,18 @@ export class FroggerGame extends GameBase {
         //update market if necessary
         if (marketEmpty || this.variants.includes("continuous")) {
             const refilled = this.refillMarket();
-	    if (refilled)
-		this.results.push({type: "deckDraw"});
+            if (refilled)
+                this.results.push({type: "deckDraw"});
+        }
+
+        if (this.variants.includes("crocodiles") && this.currplayer as number === this.numplayers) {
+            this.results.push({type: "declare"});
+            //Advance the crocodiles.
+            const victims = this.popCrocs();
+            //Memorialize any victims.
+            victims.forEach( ([from, to]) => {
+                this.results.push({type: "eject", from: from, to: to, what: "crocodiles"});
+            });
         }
 
         //update crocodiles if croccy
@@ -1184,7 +1232,7 @@ export class FroggerGame extends GameBase {
         //Taken from the decktet sheet.
         const suitColors = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
         
-        // Build piece string
+        // Build piece string. 
         let pstr = "";
         for (let row = 0; row < this.rows; row++) {
             if (pstr.length > 0) {
@@ -1195,7 +1243,7 @@ export class FroggerGame extends GameBase {
                 const cell = this.coords2algebraic(col, row);
 
                 if (this.board.has(cell)) {
-                    if (row === 0)
+                    if (row === 0) 
                         pieces.push("c" + this.board.get(cell)!);
                     else
                         pieces.push(this.board.get(cell)!);
@@ -1206,6 +1254,22 @@ export class FroggerGame extends GameBase {
             }
             
             pstr += pieces.join(",");
+        }
+
+        //Also build blocked sting.
+        const blocked = [];
+        for (let row = 0; row < this.rows; row++) {
+            for (let col = 0; col < 14; col++) {
+                const cell = this.coords2algebraic(col, row);
+                if (row === 0) {
+                    blocked.push({col: col, row: row} as RowCol);
+                } else if (col === 0 || col === 13) {
+                    if (row > this.numplayers)
+                        blocked.push({col: col, row: row} as RowCol);
+                } else if (! this.suitboard.has(cell) ) {
+                    blocked.push({col: col, row: row} as RowCol);
+                }
+            }
         }
 
         // build claimed markers
@@ -1323,6 +1387,14 @@ export class FroggerGame extends GameBase {
             }
         }
 
+        if (this.variants.includes("crocodiles")) {
+           legend["X0"] = {
+                name: "piece",
+               colour: "_context_strokes",
+                scale: 0.75
+            }
+        }
+
         //Suit glyphs.
         for (const suit of suits) {
             legend[suit.uid] = {
@@ -1346,19 +1418,24 @@ export class FroggerGame extends GameBase {
                 });
             }
         }
-        areas.push({
-            type: "pieces",
-            pieces: this.market.map(c => "c" + c) as [string, ...string[]],
-            label: i18next.t("apgames:validation.frogger.LABEL_MARKET") || "local",
-            spacing: 0.375,
-        });
-        
-        areas.push({
-            type: "pieces",
-            pieces: this.discards.map(c => "c" + c) as [string, ...string[]],
-            label: i18next.t("apgames:validation.frogger.LABEL_DISCARDS") || "local",
-            spacing: 0.375,
-        });
+
+        if (this.market.length > 0) {
+            areas.push({
+                type: "pieces",
+                pieces: this.market.map(c => "c" + c) as [string, ...string[]],
+                label: i18next.t("apgames:validation.frogger.LABEL_MARKET") || "local",
+                spacing: 0.375,
+            });
+        }
+
+        if (this.discards.length > 0) {
+            areas.push({
+                type: "pieces",
+                pieces: this.discards.map(c => "c" + c) as [string, ...string[]],
+                label: i18next.t("apgames:validation.frogger.LABEL_DISCARDS") || "local",
+                spacing: 0.375,
+            });
+        }
         
         // create an area for all invisible cards (if there are any cards left)
         const hands = this.hands.map(h => [...h]);
@@ -1387,6 +1464,7 @@ export class FroggerGame extends GameBase {
                 tileWidth: 1,
                 tileSpacing: 0.1,
                 strokeOpacity: 0,
+                blocked: blocked as [RowCol, ...RowCol[]],
                 markers,
             },
             legend,
@@ -1412,21 +1490,18 @@ export class FroggerGame extends GameBase {
                 } else if (move.type === "eject") {
                     const [fromX, fromY] = this.algebraic2coords(move.from!);
                     const [toX, toY] = this.algebraic2coords(move.to!);
-                    rep.annotations.push({type: "eject", targets: [{row: fromY, col: fromX},{row: toY, col: toX}]});
+                    if (move.what = "crocodiles") {
+                        rep.annotations.push({type: "eject", targets: [{row: fromY, col: fromX},{row: toY, col: toX}], opacity: 0.9, colour: "#FE019A"});//"#780606"});
+                        rep.annotations.push({type: "exit", targets: [{row: fromY, col: fromX}], occlude: false, colour: "#FE019A"});
+                    } else {
+                        rep.annotations.push({type: "eject", targets: [{row: fromY, col: fromX},{row: toY, col: toX}]});
+                        rep.annotations.push({type: "exit", targets: [{row: fromY, col: fromX}]});
+                    }
                 }
             }
         }
 
         return rep;
-    }
-
-    public getStartingPosition(): string {
-        const pcs: string[] = [];
-        const board = this.stack[0].board;
-        for (const [cell, card] of board.entries()) {
-            pcs.push(`${card}-${cell}`);
-        }
-        return pcs.join(",");
     }
 
     public status(): string {
@@ -1450,8 +1525,16 @@ export class FroggerGame extends GameBase {
                 node.push(i18next.t("apresults:DECKDRAW.frogger"));
                 resolved = true;
                 break;
+           case "declare":                
+                node.push(i18next.t("apresults:DECLARE.frogger"));
+                resolved = true;
+                break;
             case "eject":                
-                node.push(i18next.t("apresults:EJECT.frogger", {player, from: r.from, to: r.to}));
+                if (r.what === "crocodiles") {
+                    node.push(i18next.t("apresults:EJECT.frogger_croc", {player, from: r.from, to: r.to}));
+                } else {
+                    node.push(i18next.t("apresults:EJECT.frogger_card", {player, from: r.from, to: r.to}));
+                }
                 resolved = true;
                 break;
             case "move":
