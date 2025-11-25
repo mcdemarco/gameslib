@@ -1153,25 +1153,25 @@
             }
         },
         "frogger": {
+            "#market": {
+		"description": "The market does not refill until the next player's turn.",
+                "name": "No refills"
+            },
             "basic": {
 		"description": "A rumored basic ruleset perhaps only documented in the Decktet Book under Xing.",
                 "name": "Basic rules"
             },
             "continuous": {
-		"description": "The market is smaller but refills after each turn, so split turns are not necessary.",
+		"description": "The market is smaller but refills after each turn.",
                 "name": "Continuous market"
             },
             "crocodiles": {
-		"description": "Add hungry crocodiles to the pawn cards.  Crocodiles advance at the end of each round, sending any frog on their new space back to the Excuse.  This variant is intended to liven up the two-player game, but you may add crocodiles at any player count.",
+		"description": "Add hungry crocodiles to the pawn cards.  Crocodiles advance at the end of each round, sending any frog on their new space back to the Excuse.  This variant is intended for a two-player game, but you may add crocodiles at any player count.",
                 "name": "Crocodiles"
             },
-            "#market": {
-		"description": "By default, the market may be refilled during a player's turn, by splitting their actions over two turns.",
+            "refills": {
+		"description": "The market may be refilled during a player's turn, by splitting their actions over two turns.",
                 "name": "Refills"
-            },
-            "norefills": {
-		"description": "The market does not refill until the next player's turn.",
-                "name": "No refills"
             }
         },
         "gliss": {

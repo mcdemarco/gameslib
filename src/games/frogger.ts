@@ -64,12 +64,12 @@ export class FroggerGame extends GameBase {
         variants: [
             { uid: "basic", experimental: true },
             { uid: "crocodiles" },
-            { uid: "#market" },
+            { uid: "#market" }, //i.e., no refills
+            { uid: "refills", group: "market" }, //the official rule
             { uid: "continuous", group: "market" },
-            { uid: "norefills", group: "market" }
         ],
         categories: ["goal>evacuate", "mechanic>move", "mechanic>bearoff", "mechanic>block", "mechanic>random>setup", "mechanic>random>play", "board>shape>rect", "board>connect>rect", "components>decktet", "other>2+players"],
-        flags: ["autopass", "random-start", "custom-randomization", "experimental"],
+        flags: ["autopass", "custom-buttons", "custom-randomization", "random-start", "experimental"],
     };
     public coords2algebraic(x: number, y: number): string {
         return GameBase.coords2algebraic(x, y, this.rows);
@@ -116,6 +116,7 @@ export class FroggerGame extends GameBase {
 
             // init board
             this.rows = Math.max(3, this.numplayers) + 1;
+
             if (this.variants.includes("continuous"))
                 this.marketsize = 3;
 
@@ -1309,7 +1310,7 @@ export class FroggerGame extends GameBase {
         }
         markers.push({
             type: "flood",
-            colour: "#888",
+            colour: "_context_fill_",
             opacity: 0.03,
             points: points as [RowCol, ...RowCol[]],
         });
@@ -1398,6 +1399,15 @@ export class FroggerGame extends GameBase {
 	    ]
         }
 
+         if (this.variants.includes("refills")) {
+            legend["refill"] = [
+		{
+		    text: "\u{1F504}",
+                    scale: 1.25
+		}
+	    ]
+        }
+
         //Suit glyphs.
         for (const suit of suits) {
             legend[suit.uid] = {
@@ -1415,7 +1425,7 @@ export class FroggerGame extends GameBase {
                 areas.push({
                     type: "pieces",
                     pieces: hand.map(c => "c" + c) as [string, ...string[]],
-                    label: i18next.t("apgames:validation.frogger.LABEL_STASH", {playerNum: p}) || "local",
+                    label: i18next.t("apgames:validation.frogger.LABEL_STASH", {playerNum: p}) || `P${p} Hand`,
                     spacing: 0.5,
                     ownerMark: p
                 });
@@ -1426,16 +1436,23 @@ export class FroggerGame extends GameBase {
             areas.push({
                 type: "pieces",
                 pieces: this.market.map(c => "c" + c) as [string, ...string[]],
-                label: i18next.t("apgames:validation.frogger.LABEL_MARKET") || "local",
+                label: i18next.t("apgames:validation.frogger.LABEL_MARKET") || "Market",
                 spacing: 0.375,
             });
-        }
+        } else if ( this.variants.includes("refills") ) {
+            areas.push({
+                type: "pieces",
+                pieces: ["refill"],
+                label: i18next.t("apgames:validation.frogger.LABEL_MARKET") || "Market",
+                spacing: 0.375,
+            });
+	}
 
         if (this.discards.length > 0) {
             areas.push({
                 type: "pieces",
                 pieces: this.discards.map(c => "c" + c) as [string, ...string[]],
-                label: i18next.t("apgames:validation.frogger.LABEL_DISCARDS") || "local",
+                label: i18next.t("apgames:validation.frogger.LABEL_DISCARDS") || "Discards",
                 spacing: 0.375,
             });
         }
