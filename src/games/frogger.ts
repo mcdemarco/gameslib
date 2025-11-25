@@ -150,8 +150,6 @@ export class FroggerGame extends GameBase {
                 board.set(cell, "X" + row.toString() + "-6");
             }
 
-            //TODO: implement advancing of crocodiles.
-
             // init market and hands
             const hands: string[][] = [];
             for (let i = 0; i < this.numplayers; i++) {
@@ -1130,7 +1128,7 @@ export class FroggerGame extends GameBase {
                 marketEmpty = this.popMarket(ca);
                 if (from) {
                     this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "back"});
-                    
+                    //TODO: midstream market
                 }
             } else {
                     this.results.push({type: "move", from: from!, to: to!, what: "no card", how: "back"});
@@ -1150,6 +1148,7 @@ export class FroggerGame extends GameBase {
                 this.results.push({type: "deckDraw"});
         }
 
+        //update crocodiles if croccy
         if (this.variants.includes("crocodiles") && this.currplayer as number === this.numplayers) {
             this.results.push({type: "declare"});
             //Advance the crocodiles.
@@ -1159,9 +1158,6 @@ export class FroggerGame extends GameBase {
                 this.results.push({type: "eject", from: from, to: to, what: "crocodiles"});
             });
         }
-
-        //update crocodiles if croccy
-        //TODO
 
         // update currplayer
         this.lastmove = m;
@@ -1388,11 +1384,18 @@ export class FroggerGame extends GameBase {
         }
 
         if (this.variants.includes("crocodiles")) {
-           legend["X0"] = {
-                name: "piece",
-               colour: "_context_strokes",
-                scale: 0.75
-            }
+            legend["X0"] = [
+		{
+		    name: "piece-borderless",
+		    colour: "_context_background",
+                    scale: 0.85,
+		    opacity: 0.55
+		},
+		{
+		    text: "\u{1F40A}",
+                    scale: 0.85
+		}
+	    ]
         }
 
         //Suit glyphs.
