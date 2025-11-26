@@ -1157,10 +1157,6 @@
 		"description": "The market does not refill until the next player's turn.",
                 "name": "No refills"
             },
-            "basic": {
-		"description": "A rumored basic ruleset perhaps only documented in the Decktet Book under Xing.",
-                "name": "Basic rules"
-            },
             "continuous": {
 		"description": "The market is smaller but refills after each turn.",
                 "name": "Continuous market"
@@ -4060,13 +4056,16 @@
             "LABEL_REMAINING": "Cards in deck",
             "LABEL_DISCARDS": "Discard pile",
             "LABEL_STASH": "Player {{playerNum}}'s hand",
+            "LATE_REFILL": "Please request a refill before you move a frog backward.",
             "MUST_HOP_FORWARD": "When using a hand card, your frog must hop forward.",
             "MUST_HOP_BACKWARD": "When claiming a market card, your frog must hop back.",
             "MUST_MOVE": "Your frog must move to a different card/column.",
+            "MUST_PASS": "You must pass to allow another player to complete their turn.",
             "NO_MOVE_BLOCKED": "You cannot move after claiming a card for being blocked.",
+            "NO_PASSING": "There is no passing as such in Frogger.  If you are blocked, you must draw a single card from the market.",
+            "NO_RETURN": "Frogs may not leave home once they've reached it.",
             "NO_SUCH_HAND_CARD": "The card \"{{card}}\" does not appear to be in your hand.",
             "NO_SUCH_MARKET_CARD": "The card \"{{card}}\" does not appear to be in the market.",
-            "NO_RETURN": "Frogs may not leave home once they've reached it.",
             "NOT_BLOCKED": "You're not blocked, so you must move back before claiming a market card.",
             "OCCUPIED": "Only one frog per suit space.",
             "OFF_BOARD": "Frogs must be placed on locations with suits, at home, or at the Excuse.",
@@ -4074,8 +4073,9 @@
             "PIECE_NEXT": "Click on a frog to move it forward or backwards.",
             "PLACE_NEXT": "Click on a new location for your frog.",
             "PARTIAL_PLACEMENT": "Click an empty space on the board to place your card.",
-	    "TOO_HOPPY": "You may not make more than three moves on your turn.",
-	    "TOO_LATE_FOR_BLOCKED": "You do not count as blocked if you've already moved on this turn."
+	    "TOO_HOPPY": "You may not make more than {{count}} moves on your turn.",
+	    "TOO_LATE_FOR_BLOCKED": "You do not count as blocked if you've already moved on this turn.",
+            "TOO_LATE_FOR_REFILL": "There is no need to force a market refill after your third move.  It will refill automatically after your turn."
         },
 
         "furl": {

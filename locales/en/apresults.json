@@ -22,6 +22,7 @@
     "ANNOUNCE": {
         "biscuit": "The following cards were in opposing hands: {{cards}}.",
         "deckfish": "{{player}} was unable to move and must pass from now on.",
+        "frogger": "{{player}} chose to refill the market.  Other players must pass so he can take his {{moves}} remaining move(s).",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}.",
         "stawvs": "{{player}} was unable to move and must pass from now on.  Their pieces remain on the following pyramids: {{pyramids}}."
     },
@@ -132,7 +133,7 @@
         "fnap_col": "{{player}} claimed column {{where}}.",
         "fnap_fnap": "{{player}} has claimed the FNAP token.",
         "fnap_row": "{{player}} claimed row {{where}}.",
-	"frogger": "{{player}} was blocked and drew {{card}} from the market.",
+        "frogger": "{{player}} was blocked and drew {{card}} from the market.",
         "jacynth": "{{player}} exerted influence at {{where}}.",
         "logger": "{{player}} claimed a protestor from the tree felled at {{where}}.",
         "majorities_line": "{{player}} claimed the line {{where}}.",
@@ -299,7 +300,7 @@
         "fightopia_4": "{{player}} moved their giant from {{from}} to {{to}}.",
         "fightopia_pivot": "{{player}} pivoted a tank from {{from}} to {{to}}.",
         "frogger_back": "{{player}} moved a frog back from {{from}} to {{to}}, and drew {{card}} from the market.",
-	"frogger_forward": "{{player}} used {{card}} to move a frog forward from {{from}} to {{to}}.",
+        "frogger_forward": "{{player}} used {{card}} to move a frog forward from {{from}} to {{to}}.",
         "gess_one": "{{player}} moved a 3x3 piece containing {{count}} stone from {{from}} to {{to}}.",
         "gess_other": "{{player}} moved a 3x3 piece containing {{count}} stones from {{from}} to {{to}}.",
         "hexentafl_king": "{{player}} moved the king from {{from}} to {{to}}.",
@@ -342,6 +343,7 @@
         "deckfish": "{{player}} was unable to move.",
         "entropy": "{{player}} chose not to move any pieces this turn.",
         "forced": "{{player}} was forced to pass.",
+        "frogger": "{{player}} passed to permit a market refill.",
         "pie": "{{player}} accepted the komi offer and will continue playing second.",
         "pigs": "{{player}} idles.",
         "simple": "{{player}} passed.",
