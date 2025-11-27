@@ -4056,7 +4056,7 @@
             "LABEL_REMAINING": "Cards in deck",
             "LABEL_DISCARDS": "Discard pile",
             "LABEL_STASH": "Player {{playerNum}}'s hand",
-            "LATE_REFILL": "Please request a refill before you move a frog backward.",
+            "MISPLACED_REFILL": "Please request a refill before you move a frog backward.",
             "MUST_HOP_FORWARD": "When using a hand card, your frog must hop forward.",
             "MUST_HOP_BACKWARD": "When claiming a market card, your frog must hop back.",
             "MUST_MOVE": "Your frog must move to a different card/column.",

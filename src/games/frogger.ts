@@ -740,22 +740,35 @@ export class FroggerGame extends GameBase {
                         valid: false,
                         message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
                     }
-                } else if ( moves.length < this.nummoves ) {
-                    //The last char is text.
-                    if (this.variants.includes("refills") && piece === "refill") {
+                } else {
+                    //The last char was text (the end of a board move), so probably picking a market card.
+                    if ( moves.length <= this.nummoves ) {
+                        
+                        if (this.variants.includes("refills") && piece === "refill") {
+                            //This is not an appropriate time to click the refill button.
+                            if ( moves.length === this.nummoves) {
+                                return {
+                                    move,
+                                    valid: false,
+                                    message: i18next.t("apgames:validation.frogger.TOO_LATE_FOR_REFILL")
+                                }
+                            } else {
+                                return {
+                                    move,
+                                    valid: false,
+                                    message: i18next.t("apgames:validation.frogger.MISPLACED_REFILL")
+                                }
+                            }
+                        } else {
+                            newmove = `${move},${piece!.substring(1)}/`;
+                        }
+                        
+                    } else {
                         return {
                             move,
                             valid: false,
-                            message: i18next.t("apgames:validation.frogger.LATE_REFILL")
+                            message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
                         }
-                    } else {
-                        newmove = `${move},${piece!.substring(1)}/`;
-                    }
-                } else {
-                    return {
-                        move,
-                        valid: false,
-                        message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
                     }
                 }
             } else {
@@ -771,6 +784,9 @@ export class FroggerGame extends GameBase {
                 }
 
                 const cell = this.coords2algebraic(col, row);
+                /*
+                //Don't need to check for these onclick because they're blocked by the renderer.
+                //Do check on validation.
                 if ( !this.suitboard.has(cell) && this.getUnsuitedCells().indexOf(cell) < 0 ) {
                     return {
                         move,
@@ -778,6 +794,7 @@ export class FroggerGame extends GameBase {
                         message: i18next.t("apgames:validation.frogger.OFF_BOARD")
                     }
                 }
+                */
 
                 if (( lastchar === ":" || lastchar === "/" || lastchar === "" ) && ( piece === undefined || piece === "" ) ) {
                     //Piece picking cases, so need a piece.
@@ -1354,6 +1371,8 @@ export class FroggerGame extends GameBase {
                 }
             }
         }
+        //TODO: blocking not working on top row, because pieces?
+        //console.log(blocked);
 
         // build claimed markers
         const markers: (MarkerFlood|MarkerGlyph)[] = [];
