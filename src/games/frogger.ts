@@ -111,14 +111,14 @@ export class FroggerGame extends GameBase {
 
             if (this.variants.includes("courtpawns")) {
                 this.pawnrank = "T";
-		this.courtrank = "P";
-	    }
-	    
+                this.courtrank = "P";
+            }
+
             // init deck
             const cards = [...cardsBasic];
             const deck = new Deck(cards);
             deck.shuffle();
-            
+
             if (this.variants.includes("advanced"))
                 this.columns = 12; //10 cards plus two end columns
 
@@ -141,14 +141,14 @@ export class FroggerGame extends GameBase {
                 const [card] = boardDeck.draw();
                 const cell = this.coords2algebraic(col, 0);
                 board.set(cell, card.uid);
-                
+
                 //Set suits.
                 const suits = card.suits.map(s => s.uid);
                 for (let s = 0; s < suits.length; s++) {
                     const cell = this.coords2algebraic(col, s + 1);
                     suitboard.set(cell,suits[s]);
                 }
-                
+
                 //Add crocodiles.  Crocodiles are player 0.
                 if (this.variants.includes("crocodiles")) {
                     if (card.rank.uid === this.pawnrank) {
@@ -164,12 +164,12 @@ export class FroggerGame extends GameBase {
                 board.set(cell, "X" + row.toString() + "-6");
             }
 
-	    if (this.variants.includes("courts")) {
-		const courtDeckCards = [...cardsExtended.filter(c => c.rank.uid === this.courtrank)];
-		// note that .add() autoshuffles.
-		courtDeckCards.forEach( card => deck.add(card.uid) );
-	    }
-	    
+            if (this.variants.includes("courts")) {
+                const courtDeckCards = [...cardsExtended.filter(c => c.rank.uid === this.courtrank)];
+                // note that .add() autoshuffles.
+                courtDeckCards.forEach( card => deck.add(card.uid) );
+            }
+
             // init market and hands
             const hands: string[][] = [];
             for (let i = 0; i < this.numplayers; i++) {
@@ -229,28 +229,28 @@ export class FroggerGame extends GameBase {
             this.columns = 12;
         if (this.variants.includes("courtpawns")) {
             this.pawnrank = "T";
-	    this.courtrank = "P";
-	}
+            this.courtrank = "P";
+        }
 
         this.rows = Math.max(3, this.numplayers) + 1;
 
         if (this.variants.includes("continuous"))
             this.marketsize = 3;
-        
+
         this.suitboard = this.setSuitedCells();
 
         // Deck is reset every time you load
-	const cards = [...cardsBasic];
-	if (this.variants.includes("courts")) {
-	    cards.push(...cardsExtended.filter(c => c.rank.uid === this.courtrank));
-	}
+        const cards = [...cardsBasic];
+        if (this.variants.includes("courts")) {
+            cards.push(...cardsExtended.filter(c => c.rank.uid === this.courtrank));
+        }
         //Some board cards, for removal.
         cards.push(...cardsExtended.filter(c => c.rank.uid === this.pawnrank));
-        
+
         this.deck = new Deck(cards);
-        
-        // remove cards from the deck that are on the board, in the market, or in known hands
-        this.getBoardCards().forEach( uid => 
+
+	// remove cards from the deck that are on the board, in the market, or in known hands
+        this.getBoardCards().forEach( uid =>
             this.deck.remove(uid)
         );
         for (const hand of this.hands) {
@@ -269,7 +269,7 @@ export class FroggerGame extends GameBase {
 
         return this;
     }
-    
+
     private checkBlocked(): boolean {
         //A player is blocked if their hand is empty and all frogs are already at the Excuse or home.
         if (this.hands[this.currplayer - 1].length > 0)
@@ -291,20 +291,20 @@ export class FroggerGame extends GameBase {
 
     private checkNextForward(from: string, to: string, card: string): boolean {
         const suits = this.getSuits(card);
-            
+
         for (let s = 0; s < suits.length; s++) {
             const suitto = this.getNextForward(from, suits[s]);
             if (to === suitto)
                 return true;
         }
-        
+
         return false;
     }
 
     private countColumnFrogs(col: number): number {
         if (col !== 0 && col !== this.columns - 1)
             throw new Error(`The request for frog count was malformed. This should never happen.`);
-        
+
         const cell = this.coords2algebraic(col, this.currplayer as number);
         if (!this.board.has(cell))
             return 0;
@@ -456,8 +456,8 @@ export class FroggerGame extends GameBase {
                 throw new Error(`Stack not found at "${cell}" in modifyFrogStack.`);
             }
             return;
-        } 
-            
+        }
+
         const oldFrog = this.board.get(cell)!;
         const player = oldFrog.charAt(1);
         const oldFrogCount = parseInt(oldFrog.split("-")[1], 10);
@@ -512,31 +512,31 @@ export class FroggerGame extends GameBase {
     private moveNeighbors(cell: string, cardId: string): string[][] {
         //Move other frogs off your lily pad.  Track who, if anyone, was bounced.
         const bounced: string[][] = [];
-	
-	//Bouncing occurs when an Ace or Crown was played, not a number card or a Court.
+        
+        //Bouncing occurs when an Ace or Crown was played, not a number card or a Court.
         const card = Card.deserialize(cardId)!;
         const rank = card.rank.name;
-	if ( rank === "Crown" || rank === "Ace" ) {
+        if ( rank === "Crown" || rank === "Ace" ) {
 
-	    //The bounce process.
+            //The bounce process.
             const col = this.algebraic2coords(cell)[0];
             
             if (col === 0) {
-		throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
+                throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
             } else if (col === this.columns - 1) {
-		//Can't bounce here.
-		return bounced;
+                //Can't bounce here.
+                return bounced;
             }
             
             for (let row = 1; row < this.rows; row++) {
-		const bouncee = this.coords2algebraic(col, row);
-		//Don't bounce self or crocodiles.
-		if ( bouncee !== cell && this.board.has(bouncee) && this.board.get(bouncee) !== "X0" ) {
+                const bouncee = this.coords2algebraic(col, row);
+                //Don't bounce self or crocodiles.
+                if ( bouncee !== cell && this.board.has(bouncee) && this.board.get(bouncee) !== "X0" ) {
                     const to = this.moveFrogToExcuse(bouncee)!;
                     bounced.push([bouncee, to]);
-		}
+                }
             }
-	}
+        }
         return bounced;
     }
 
@@ -1450,6 +1450,9 @@ export class FroggerGame extends GameBase {
         //Need card info on all cards.
         const allcards = [...cardsBasic];
         allcards.push(...cardsExtended.filter(c => c.rank.uid === this.pawnrank));
+        if (this.variants.includes("courts"))
+            allcards.push(...cardsExtended.filter(c => c.rank.uid === this.courtrank));
+            
 
         //add flood and suit markers for the active spaces
         for (let col = 1; col < this.columns - 1; col++) {
@@ -1586,6 +1589,7 @@ export class FroggerGame extends GameBase {
                 pieces: this.discards.map(c => "c" + c) as [string, ...string[]],
                 label: i18next.t("apgames:validation.frogger.LABEL_DISCARDS") || "Discards",
                 spacing: 0.375,
+                width: this.columns - 1,
             });
         }
         
@@ -1601,6 +1605,7 @@ export class FroggerGame extends GameBase {
                 type: "pieces",
                 label: i18next.t("apgames:validation.frogger.LABEL_REMAINING") || "Cards in deck",
                 spacing: 0.25,
+                width: this.columns - 1,
                 pieces: remaining,
             });
         }
