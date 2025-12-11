@@ -158,7 +158,7 @@ export class FroggerGame extends GameBase {
                 }
             }
 
-            //add players, who are Xs to not conflict with Pawns
+            //add player pieces, which are Xs to not conflict with Pawns
             for (let row = 1; row <= this.numplayers; row++) {
                 const cell = this.coords2algebraic(0, row);
                 board.set(cell, "X" + row.toString() + "-6");
@@ -249,7 +249,7 @@ export class FroggerGame extends GameBase {
 
         this.deck = new Deck(cards);
 
-	// remove cards from the deck that are on the board, in the market, or in known hands
+        // remove cards from the deck that are on the board, in the market, or in known hands
         this.getBoardCards().forEach( uid =>
             this.deck.remove(uid)
         );
@@ -290,6 +290,11 @@ export class FroggerGame extends GameBase {
     }
 
     private checkNextForward(from: string, to: string, card: string): boolean {
+        //The advanced case is handled inside this function this time.
+        if (this.variants.includes("advanced") && this.getRank(card) !== this.courtrank) {
+            return this.checkNextForwardAdvanced(from, to, card);
+        }
+        
         const suits = this.getSuits(card);
 
         for (let s = 0; s < suits.length; s++) {
@@ -299,6 +304,13 @@ export class FroggerGame extends GameBase {
         }
 
         return false;
+    }
+
+    private checkNextForwardAdvanced(from: string, to: string, card: string): boolean {
+        //Same restrictions on use as getNextForwardAdvanced.
+        const suits = this.getSuits(card);
+        const options = this.getNextForwardAdvanced(from, suits);
+        return (options.indexOf(to) > -1);
     }
 
     private countColumnFrogs(col: number): number {
@@ -406,6 +418,27 @@ export class FroggerGame extends GameBase {
         throw new Error(`Something went wrong looking for the next suited cell.`);
     }
 
+    private getNextForwardAdvanced(from: string, suits: string[]): string[] {
+        //Get the next available cell under the advanced game movement restriction.
+        //Assumes you are not passing in a Court, but handles Aces and Crowns.
+
+        const to1 = this.getNextForward(from, suits[0]); 
+        if (suits.length === 1)
+            return [to1];
+
+        const to2 = this.getNextForward(from, suits[1]); 
+
+        const col1 = this.algebraic2coords(to1)[0];
+        const col2 = this.algebraic2coords(to2)[0];
+
+        if (col1 === col2)
+            return [to1,to2];
+        else if (col1 < col2)
+            return [to1];
+        else
+            return [to2];
+    }
+
     private countHomeFrogs(): number {
         return this.countColumnFrogs(this.columns - 1);
     }
@@ -429,6 +462,11 @@ export class FroggerGame extends GameBase {
         const card = Card.deserialize(cardId)!;
         const suits = card.suits.map(s => s.uid);
         return suits;
+    }
+
+    private getRank(cardId: string): string {
+        const card = Card.deserialize(cardId)!;
+        return card.rank.uid;
     }
 
     private getUnsuitedCells(): string[] {
@@ -652,11 +690,12 @@ export class FroggerGame extends GameBase {
     }
     
     public randomMove(): string {
+        //We return only one, legal move, for testing purposes.
+
         //Refill/skipto case.
         if ( this.variants.includes("refills") && this.skipto && this.skipto !== this.currplayer )
             return "pass";
         
-        //We return only one, legal move, for testing purposes.
         if (this.checkBlocked()) {
             const marketCard = this.randomElement(this.market);
             return marketCard + "/";
@@ -678,8 +717,14 @@ export class FroggerGame extends GameBase {
             const card = this.randomElement(this.hands[this.currplayer - 1]);
             const suits = this.getSuits(card);
             const suit = this.randomElement(suits);
-            
-            const to = this.getNextForward(from, suit);
+
+            let to;
+            if (this.variants.includes("advanced") && this.getRank(card) !== this.courtrank) {
+                //Courts next forward normally in the advanced game.
+                //Aces and Crowns do, too, but this function handles them.
+                to = this.randomElement(this.getNextForwardAdvanced(from, suits));
+            } else
+                to = this.getNextForward(from, suit);
 
             return `${card}:${from}-${to}`;
             
@@ -1135,7 +1180,10 @@ export class FroggerGame extends GameBase {
             //Moving forward tests.
             if (handcard && !cloned.checkNextForward(from, to, ca!)) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
+                if (this.variants.includes("advanced"))
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD_ADVANCED");
+                else
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
                 return result;
             }
 

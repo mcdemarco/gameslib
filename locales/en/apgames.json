@@ -4062,6 +4062,7 @@
             "INVALID_MARKET_CARD": "Your chosen market card must not include the suit your frog landed on.",
             "INVALID_FROG": "You may only move your own frogs.",
             "INVALID_HOP_FORWARD": "When advancing, your frog must land on the first available spot of a given suit.",
+            "INVALID_HOP_FORWARD_ADVANCED": "Under the advanced rules, when playing a two-suited card from your hand, your frog must land on the first available spot of either suit (not your choice).  If both suits are present on the same board card (that is, in the same column), you may choose either spot.",
             "INVALID_HOP_BACKWARD": "When hopping back, your frog must land on the nearest available card/spot.",
             "INVALID_MOVE": "Unless you're blocked, you must move a frog on each of your moves.",
             "LABEL_MARKET": "Market cards",
