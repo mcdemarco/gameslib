@@ -443,12 +443,6 @@ export class FroggerGame extends GameBase {
         return uncells;
     }
 
-    private isCracy(cardId: string): boolean {
-        const card = Card.deserialize(cardId)!;
-        const rank = card.rank.name;
-        return ( rank === "Crown" || rank === "Ace" );
-    }
-    
     private modifyFrogStack(cell: string, increment: boolean): void {
         //It's the responsibility of the caller to validate the arguments.
         const [cellX, cellY] =  this.algebraic2coords(cell);
@@ -515,26 +509,34 @@ export class FroggerGame extends GameBase {
         return to;
     }
 
-    private moveNeighbors(cell: string): string[][] {
-        //Move other frogs off your lily pad.  Track who.
+    private moveNeighbors(cell: string, cardId: string): string[][] {
+        //Move other frogs off your lily pad.  Track who, if anyone, was bounced.
         const bounced: string[][] = [];
-        const col = this.algebraic2coords(cell)[0];
-        
-        if (col === 0) {
-            throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
-        } else if (col === this.columns - 1) {
-            //Can't bounce here.
-            return bounced;
-        }
-        
-        for (let row = 1; row < this.rows; row++) {
-            const bouncee = this.coords2algebraic(col, row);
-            //Don't bounce self or crocodiles.
-            if ( bouncee !== cell && this.board.has(bouncee) && this.board.get(bouncee) !== "X0" ) {
-                const to = this.moveFrogToExcuse(bouncee)!;
-                bounced.push([bouncee, to]);
+	
+	//Bouncing occurs when an Ace or Crown was played, not a number card or a Court.
+        const card = Card.deserialize(cardId)!;
+        const rank = card.rank.name;
+	if ( rank === "Crown" || rank === "Ace" ) {
+
+	    //The bounce process.
+            const col = this.algebraic2coords(cell)[0];
+            
+            if (col === 0) {
+		throw new Error("Trying to bounce frogs off the Excuse. This should never happen!");
+            } else if (col === this.columns - 1) {
+		//Can't bounce here.
+		return bounced;
             }
-        }
+            
+            for (let row = 1; row < this.rows; row++) {
+		const bouncee = this.coords2algebraic(col, row);
+		//Don't bounce self or crocodiles.
+		if ( bouncee !== cell && this.board.has(bouncee) && this.board.get(bouncee) !== "X0" ) {
+                    const to = this.moveFrogToExcuse(bouncee)!;
+                    bounced.push([bouncee, to]);
+		}
+            }
+	}
         return bounced;
     }
 
@@ -572,8 +574,7 @@ export class FroggerGame extends GameBase {
         return (this.market.length === 0);
 
         //If the market is empty, we need to draw a new market.
-        //TODO: this requires ending the move sequence
-        //      and passing the other players to move again.
+        //TODO: test the passing/refilling variant.
     }
 
     private randomElement(array: string[]): string {
@@ -1144,10 +1145,8 @@ export class FroggerGame extends GameBase {
                 if (handcard) {
                     cloned.popHand(ca!);
                     //Also pop other frogs if it's a crown or ace.
-                    if ( cloned.isCracy(ca!) ) {
-                        cloned.moveNeighbors(to);
-                    }
-                } else if (ca) {
+                    cloned.moveNeighbors(to,ca!);
+                 } else if (ca) {
                     marketEmpty = cloned.popMarket(ca);
                 }
 
@@ -1235,12 +1234,10 @@ export class FroggerGame extends GameBase {
                 if (handcard) {
                     this.popHand(ca!);
                     this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "forward"});
-                    if ( this.isCracy(ca!) ) {
-                        const bounced = this.moveNeighbors(to!);
-                        bounced.forEach( ([from, to]) => {
-                            this.results.push({type: "eject", from: from, to: to, what: "a Crown or Ace"});
-                        });
-                    }
+                    const bounced = this.moveNeighbors(to!,ca!);
+                    bounced.forEach( ([from, to]) => {
+                        this.results.push({type: "eject", from: from, to: to, what: "a Crown or Ace"});
+                    });
                 } else if (ca) {
                     marketEmpty = this.popMarket(ca);
                     if (from) {
