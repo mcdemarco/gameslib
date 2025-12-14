@@ -174,7 +174,7 @@
     "DECLARE": {
         "biscuit": "{{player}} has gone out!",
         "emu": "Year {{year}} has ended.",
-        "frogger": "The crocodiles advance.",
+        "frogger": "The crocodiles advanced.",
         "mchess": "{{player}} has \"called the clock.\" If no capture is made in the next seven turns, the game will end and be scored.",
         "renju": "{{player}} has declared {{count}} tentative fifths."
     },

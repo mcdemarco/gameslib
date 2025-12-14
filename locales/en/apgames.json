@@ -4056,14 +4056,16 @@
         },
 	"frogger": {
             "ADDITIONAL_INSTRUCTIONS": "You may make up to three moves.  Choose another card or frog to start another move, or press the complete move button to finish your turn.",
-            "CARD_FIRST": "Please select a card before moving a frog.",
+            "CARD_FIRST": "Please select a hand card before moving a frog forward.",
+            "CARD_NEXT": "You may click on a market card to add it to your hand, or submit your move.",
+            "CARD_NEXT_OR": "You may click on a market card to add it to your hand, or start another move.",
             "INITIAL_INSTRUCTIONS": "Click a card in your hand to use to move a frog forward.",
             "LATER_INSTRUCTIONS": "Click a card in your hand to use to move a frog forward, or click a frog to move it back (and possibly draw a market card).",
             "INVALID_MARKET_CARD": "Your chosen market card must not include the suit your frog landed on.",
             "INVALID_FROG": "You may only move your own frogs.",
             "INVALID_HOP_FORWARD": "When advancing, your frog must land on the first available spot of a given suit.",
             "INVALID_HOP_FORWARD_ADVANCED": "Under the advanced rules, when playing a two-suited card from your hand, your frog must land on the first available spot of either suit (not your choice).  If both suits are present on the same board card (that is, in the same column), you may choose either spot.",
-            "INVALID_HOP_BACKWARD": "When hopping back, your frog must land on the nearest available card/spot.",
+            "INVALID_HOP_BACKWARD": "When hopping back, your frog must land on the nearest available card.  If there is more than one spot available in that column, you may choose any one of them.",
             "INVALID_MOVE": "Unless you're blocked, you must move a frog on each of your moves.",
             "LABEL_MARKET": "Market cards",
             "LABEL_REMAINING": "Cards in deck",
@@ -4071,7 +4073,6 @@
             "LABEL_STASH": "Player {{playerNum}}'s hand",
             "MISPLACED_REFILL": "Please request a refill before you move a frog backward.",
             "MUST_HOP_FORWARD": "When using a hand card, your frog must hop forward.",
-            "MUST_HOP_BACKWARD": "When claiming a market card, your frog must hop back.",
             "MUST_MOVE": "Your frog must move to a different card/column.",
             "MUST_PASS": "You must pass to allow another player to complete their turn.",
             "NO_MOVE_BLOCKED": "You cannot move after claiming a card for being blocked.",
@@ -4085,8 +4086,8 @@
             "OFFSIDES": "Please click on your desired suit space, not the informational icons on the top row.",
             "PIECE_NEXT": "Click on a frog to move it forward or backwards.",
             "PLACE_NEXT": "Click on a new location for your frog.",
-            "PARTIAL_PLACEMENT": "Click an empty space on the board to place your card.",
 	    "TOO_HOPPY": "You may not make more than {{count}} moves on your turn.",
+            "TOO_EARLY_FOR_REFILL": "Please submit your refill request before making your remaining moves.",
 	    "TOO_LATE_FOR_BLOCKED": "You do not count as blocked if you've already moved on this turn.",
             "TOO_LATE_FOR_REFILL": "There is no need to force a market refill after your third move.  It will refill automatically after your turn."
         },
@@ -5468,7 +5469,7 @@
         }
     },
     "INITIAL_UNDO": "You can't undo the initial starting position of the game.",
-    "MOVES_GAMEOVER": "You cannot make moves in concluded games",
+    "MOVES_GAMEOVER": "You cannot make moves in concluded games.",
     "MOVES_INVALID": "The move '{{move}}' is invalid. Please check the rules and try again.",
     "MOVES_SIMULTANEOUS_PARTIAL": "In simultaneous games, both players' moves must be submitted at the same time."
 }

@@ -33,6 +33,15 @@ interface ILegendObj {
     [key: string]: Glyph|[Glyph, ...Glyph[]];
 }
 
+interface IFrogMove {
+    complete: number;
+    forward: boolean;
+    card?: string;
+    from?: string;
+    to?: string;
+    refill: boolean;
+}
+
 export class FroggerGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
         name: "Frogger",
@@ -237,9 +246,18 @@ export class FroggerGame extends GameBase {
         if (this.variants.includes("continuous"))
             this.marketsize = 3;
 
-        this.suitboard = this.setSuitedCells();
+        //Separate model of the suited part of the board.
+        this.suitboard = new Map<string, string>();
+        const scards = this.getBoardCards();
+        for (let col = 1; col < this.columns - 1; col++) {
+            const suits = this.getSuits(scards[col - 1]);
+            for (let s = 1; s < suits.length + 1; s++) {
+                const cell = this.coords2algebraic(col, s);
+                this.suitboard.set(cell,suits[s-1]);
+            }
+        }
 
-        // Deck is reset every time you load
+        //The deck is reset every time you load
         const cards = [...cardsBasic];
         if (this.variants.includes("courts")) {
             cards.push(...cardsExtended.filter(c => c.rank.uid === this.courtrank));
@@ -249,7 +267,8 @@ export class FroggerGame extends GameBase {
 
         this.deck = new Deck(cards);
 
-        // remove cards from the deck that are on the board, in the market, or in known hands
+        //Remove cards from the deck that are on the board, in the market, or in known hands.
+        //TODO: write and/or test hand revelation.
         this.getBoardCards().forEach( uid =>
             this.deck.remove(uid)
         );
@@ -271,52 +290,71 @@ export class FroggerGame extends GameBase {
     }
 
     private checkBlocked(): boolean {
-        //A player is blocked if their hand is empty and all frogs are already at the Excuse or home.
+        //A player is blocked if their hand is empty, all frogs are already at the Excuse or home,
+        // and it's the beginning of their turn.
+        
+        //This function checks the hand and frog conditions;
+        // it's the responsibility of the caller to check the turn condition.
         if (this.hands[this.currplayer - 1].length > 0)
             return false;
-        if (this.countStartFrogs() + this.countHomeFrogs() < 6)
+        if (this.countColumnFrogs() + this.countColumnFrogs(true) < 6)
             return false;
         return true;
     }
 
-    private checkMarket(card: string, suit: string): boolean {
-        const suits = this.getSuits(card);
-        return (suits.indexOf(suit) < 0);
-    }
-
     private checkNextBack(from: string, to: string): boolean {
+        //Checks a frog has backed up to the correct spot
+        //  by checking its spot against the array of all allowed spots
+        // (using a function also used in random moves).
         const correctBacks: string[] = this.getNextBack(from);
         return (correctBacks.indexOf(to) > -1);
     }
 
     private checkNextForward(from: string, to: string, card: string): boolean {
-        //The advanced case is handled inside this function this time.
-        if (this.variants.includes("advanced") && this.getRank(card) !== this.courtrank) {
+        //Checks a frog has moved forward to the correct spot
+        //  by checking its against the allowed spot,
+        //  using the function for generating random moves.
+        
+        //The advanced case is handled inside this function, unlike in getNextForward.
+        const cardObj = Card.deserialize(card)!;
+        
+        if (this.variants.includes("advanced") && cardObj.rank.uid !== this.courtrank) {
+            //In the advanced game, courts still function like regular game cards,
+            // but number cards do not.
+            // (Crowns and aces are a degenerate case that can use either function.)
             return this.checkNextForwardAdvanced(from, to, card);
         }
-        
+
         const suits = this.getSuits(card);
 
         for (let s = 0; s < suits.length; s++) {
+            //In the base game, you can use any suit off the card,
+            // so we return true if we find a good one.
             const suitto = this.getNextForward(from, suits[s]);
             if (to === suitto)
                 return true;
         }
-
+        
+        //Otherwise, the move didn't land on any of the legal next spots.
         return false;
     }
 
     private checkNextForwardAdvanced(from: string, to: string, card: string): boolean {
-        //Same restrictions on use as getNextForwardAdvanced.
+        //Checks that {to} is the next available cell under the advanced game movement restriction.
+        //Assumes you are not passing in a Court, but handles Aces and Crowns.
+
+        //Uses getNextForwardAdvanced to get the array of legal values for {to}.
         const suits = this.getSuits(card);
         const options = this.getNextForwardAdvanced(from, suits);
         return (options.indexOf(to) > -1);
     }
 
-    private countColumnFrogs(col: number): number {
-        if (col !== 0 && col !== this.columns - 1)
-            throw new Error(`The request for frog count was malformed. This should never happen.`);
-
+    private countColumnFrogs(home?: boolean): number {
+        //Returns number of currplayer's frogs in the start (false/undefined) or home (true) column.
+        let col = 0;
+        if (home)
+            col = this.columns - 1;
+        
         const cell = this.coords2algebraic(col, this.currplayer as number);
         if (!this.board.has(cell))
             return 0;
@@ -329,6 +367,7 @@ export class FroggerGame extends GameBase {
     }
 
     private getBoardCards(): string[] {
+        //Returns the top row of cards for various purposes.
         const cards: string[] = [];
         for (let col = 1; col < this.columns - 1; col++) {
             const cell = this.coords2algebraic(col, 0);
@@ -338,31 +377,14 @@ export class FroggerGame extends GameBase {
         return cards;
     }
 
-    private getFrogs(forBack: boolean): string[] {
-        //These are frogs that can move, so skip the home row.
-        const frarray = [];
-        for (let row = 1; row < this.rows; row++) {
-            for (let col = 0; col < this.columns - 1; col++) {
-                if ( col === 0 && forBack )
-                    continue;
-                const cell = this.coords2algebraic(col, row);
-                if (this.board.has(cell)) {
-                    const frog = this.board.get(cell)!;
-                    if ( frog.charAt(1) === this.currplayer.toString() )
-                        frarray.push(cell);
-                }
-            }
-        }
-        return frarray;
-    }
-
     private getNextBack(from: string): string[] {
         //Walk back through the board until we find a free column.
-        //Return an array of all available cells in the column.
+        //Return an array of all available cells in that column.
+        //Used in random move generation and move validation.
         const fromX = this.algebraic2coords(from)[0];
 
         if ( fromX === 0 ) {
-            throw new Error(`Could not back up from the Excuse. This should never happen.`);
+            throw new Error("Could not back up from the Excuse. This should never happen.");
         }
 
         for (let c = fromX - 1; c > 0; c--) {
@@ -379,22 +401,9 @@ export class FroggerGame extends GameBase {
         return [startCell];
     }
 
-    private getMarketCards(suit: string): string[] {
-        //Filter the market by the forbidden suit.
-        //Return an array of all legal cards in the market (for random moves).
-        const whiteMarket: string[] = [];
-
-        this.market.forEach(card => {
-            const suits = this.getSuits(card);
-            if (suits.indexOf(suit) < 0)
-                whiteMarket.push(card);
-        });
-
-        return whiteMarket;
-    }
-    
     private getNextForward(from: string, suit: string): string {
         //Get the next available cell by suit.
+        //Used in random move generation and move validation.
         const homecell = this.coords2algebraic(this.columns - 1, this.currplayer);
 
         const fromX = this.algebraic2coords(from)[0];
@@ -421,6 +430,8 @@ export class FroggerGame extends GameBase {
     private getNextForwardAdvanced(from: string, suits: string[]): string[] {
         //Get the next available cell under the advanced game movement restriction.
         //Assumes you are not passing in a Court, but handles Aces and Crowns.
+        //Used in random move generation and move validation.
+        //In certain rare cases you have a choice, so this function returns an array of cells.
 
         const to1 = this.getNextForward(from, suits[0]); 
         if (suits.length === 1)
@@ -439,34 +450,10 @@ export class FroggerGame extends GameBase {
             return [to2];
     }
 
-    private countHomeFrogs(): number {
-        return this.countColumnFrogs(this.columns - 1);
-    }
-
-    private countStartFrogs(): number {
-        return this.countColumnFrogs(0);
-    }
-
-    private getCrocRowFromColumn(col: number): number {
-        for (let row = 1; row < 4; row++) {
-            const croc = this.coords2algebraic(col, row);
-            if (this.board.has(croc) && this.board.get(croc) === "X0") {
-                return row;
-            }
-        }
-        throw new Error("Could not find row for crocodile column.");
-        return 0;
-    }
-
     private getSuits(cardId: string): string[] {
         const card = Card.deserialize(cardId)!;
         const suits = card.suits.map(s => s.uid);
         return suits;
-    }
-
-    private getRank(cardId: string): string {
-        const card = Card.deserialize(cardId)!;
-        return card.rank.uid;
     }
 
     private getUnsuitedCells(): string[] {
@@ -482,6 +469,8 @@ export class FroggerGame extends GameBase {
     }
 
     private modifyFrogStack(cell: string, increment: boolean): void {
+        //Handle the process of incrementing and decrementing the frog stacks
+        // in the start and home columns.
         //It's the responsibility of the caller to validate the arguments.
         const [cellX, cellY] =  this.algebraic2coords(cell);
 
@@ -539,7 +528,8 @@ export class FroggerGame extends GameBase {
     }
 
     private moveFrogToExcuse(from: string): string {
-        //Wrapper to determine Excuse row.
+        //Wrapper for moveFrog that determines the correct Excuse row,
+        // because bounced frogs don't necessarily belong to currplayer.
         const frog = this.board.get(from)!;
         const row = parseInt(frog.charAt(1),10);
         const to = this.coords2algebraic(0, row);
@@ -548,7 +538,8 @@ export class FroggerGame extends GameBase {
     }
 
     private moveNeighbors(cell: string, cardId: string): string[][] {
-        //Move other frogs off your lily pad.  Track who, if anyone, was bounced.
+        //Tests for bouncing condition and if so, moves other frogs off your lily pad.
+        //Returns a list of who, if anyone, was bounced.
         const bounced: string[][] = [];
         
         //Bouncing occurs when an Ace or Crown was played, not a number card or a Court.
@@ -578,16 +569,72 @@ export class FroggerGame extends GameBase {
         return bounced;
     }
 
+    private parseMove(submove: string): IFrogMove {
+        //Does not handle the empty move or passes.
+        let mv, from, to, card;
+ 
+        const ifm: IFrogMove = {
+            complete: -1,
+            forward: false,
+            refill: false
+        }
+
+        //Setting refill (in variant with refill button).
+        if (submove.indexOf("!") > - 1) {
+            submove = submove.split("!")[0];
+            ifm.refill = true;
+        }
+
+        //Setting card and direction, finding mv.
+        if (submove.indexOf(":") > -1) {
+            //Card followed by move is a forward move.
+            [card, mv] = submove.split(":");
+            ifm.card = card;
+            ifm.forward = true;
+        } else if (submove.indexOf(",") > -1) {
+            //Move followed by card is a backwards move.
+            [mv, card] = submove.split(",");
+            if (card) 
+                ifm.card = card;
+        } else if (submove.indexOf("-") > -1) {
+            //Raw move is a unproductive or partial backwards move.
+            mv = submove;
+            //ifm.complete = -1 or 0 depending on parse of to.
+        } else {
+            console.log();
+            //Card alone is a blocked move.
+            //From alone is a partial move.
+        }
+
+        //Setting from, to, and complete.
+        if (mv) {
+            [from, to] = mv.split("-");
+            ifm.from = from;
+            if (to) {
+                ifm.to = to;
+                if (ifm.card)
+                    ifm.complete = 1;
+                else
+                    ifm.complete = 0;
+            }
+        }
+
+        return ifm;
+    }
+    
     private popCrocs(): string[][] {
+        //Moves the crocodiles and their victims.
+        //Returns a list of the victims for logging and rendering.
         const victims: string[][] = [];
         for (let col = 1; col < this.columns - 1; col++) {
             // check for pawn column using the suit board
             if ( this.suitboard.has(this.coords2algebraic(col, 3)) ) {
-                // we have a croc's column; get its row.
-                const crocRow = this.getCrocRowFromColumn(col);
+                //We have a croc's column; we could go looking for its row
+                // but we can also just derive it from the stack length.
+                const crocRow = (((this.stack.length / this.numplayers) - 1) % 3) + 1;
                 const victimRow = (crocRow % 3) + 1;
                 const crocFrom = this.coords2algebraic(col, crocRow);
-                const victimFrom = this.coords2algebraic(col, victimRow);
+                const victimFrom = this.coords2algebraic(col, victimRow); 
                 if ( this.board.has(victimFrom) ) {
                     const victimTo = this.moveFrogToExcuse(victimFrom);
                     victims.push([victimFrom, victimTo]);
@@ -606,28 +653,30 @@ export class FroggerGame extends GameBase {
 
     private popMarket(card: string): boolean {
         //Remove the drawn card.
+        //For convenience, also tests for an empty market.
         this.removeCard(card, this.market);
         this.hands[this.currplayer - 1].push(card);
-
+        
         return (this.market.length === 0);
-
-        //If the market is empty, we need to draw a new market.
-        //TODO: test the passing/refilling variant.
     }
 
     private randomElement(array: string[]): string {
+        //Return a random element from an array.
+        //Used for random moves.
         const index = Math.floor(Math.random() * array.length);
         return array[index];
     }
 
     private refillMarket(): boolean {
         //Fills the market regardless of current size.
-        
-        //But if it's already full (in the variant), return.
+        //Shuffles the discards when necessary.
+        //Refill variant behavior is mostly handled by the caller,
+
+        //May be called when the market is already full (in the continuous variant).
         if (this.market.length === this.marketsize)
             return false;
         
-        //First, draw from the deck.
+        //First, try to draw what we need from the deck.
         const toDraw = Math.min(this.marketsize, this.deck.size);
         this.market = [...this.deck.draw(toDraw).map(c => c.uid)];
 
@@ -650,6 +699,8 @@ export class FroggerGame extends GameBase {
     }
 
     private removeCard(card: string, arr: string[]): void {
+        //Remove a card from an array.
+        //It's up to the caller to put the card somewhere else.
         const index = arr.indexOf(card);
         if (index > -1) {
             arr.splice(index, 1);
@@ -659,20 +710,8 @@ export class FroggerGame extends GameBase {
         return;
     }
 
-    private setSuitedCells(): Map<string, string> {
-        const suitboard = new Map<string, string>();
-        const cards = this.getBoardCards();
-        for (let col = 1; col < this.columns - 1; col++) {
-            const suits = this.getSuits(cards[col - 1]);
-            for (let s = 1; s < suits.length + 1; s++) {
-                const cell = this.coords2algebraic(col, s);
-                suitboard.set(cell,suits[s-1]);
-            }
-        }
-        return suitboard;
-    }
-    
     public moves(player?: playerid): string[] {
+        //Used for the autopasser.  Not a full move list.
         if (this.gameover) {
             return [];
         }
@@ -692,8 +731,8 @@ export class FroggerGame extends GameBase {
     public randomMove(): string {
         //We return only one, legal move, for testing purposes.
 
-        //Refill/skipto case.
-        if ( this.variants.includes("refills") && this.skipto && this.skipto !== this.currplayer )
+        //Refill/skipto case.  Not reachable from the move list, but useful for testing.
+        if ( this.variants.includes("refills") && this.skipto !== undefined && this.skipto !== this.currplayer )
             return "pass";
         
         if (this.checkBlocked()) {
@@ -706,11 +745,25 @@ export class FroggerGame extends GameBase {
         //But...
         if ( this.hands[this.currplayer - 1].length === 0 )
             handcard = false;
-        if ( this.countStartFrogs() + this.countHomeFrogs() === 6 )
+        if ( this.countColumnFrogs() + this.countColumnFrogs(true) === 6 )
             handcard = true;
         
-        //Pick a frog at random.
-        const from = this.randomElement(this.getFrogs(!handcard));
+        //Pick an appropriate frog for hopping forward or back, randomly.
+        //Need a frog that can move, so skip the home row.
+        const frarray = [];
+        for (let row = 1; row < this.rows; row++) {
+            for (let col = 0; col < this.columns - 1; col++) {
+                if ( col === 0 && !handcard )
+                    continue;
+                const cell = this.coords2algebraic(col, row);
+                if (this.board.has(cell)) {
+                    const frog = this.board.get(cell)!;
+                    if ( frog.charAt(1) === this.currplayer.toString() )
+                        frarray.push(cell);
+                }
+            }
+        }
+        const from = this.randomElement(frarray);
         
         if ( handcard ) {
             //hop forward
@@ -719,7 +772,8 @@ export class FroggerGame extends GameBase {
             const suit = this.randomElement(suits);
 
             let to;
-            if (this.variants.includes("advanced") && this.getRank(card) !== this.courtrank) {
+            const cardObj = Card.deserialize(card)!;
+            if (this.variants.includes("advanced") && cardObj.rank.uid !== this.courtrank) {
                 //Courts next forward normally in the advanced game.
                 //Aces and Crowns do, too, but this function handles them.
                 to = this.randomElement(this.getNextForwardAdvanced(from, suits));
@@ -739,8 +793,16 @@ export class FroggerGame extends GameBase {
                 //Can choose any market card.
                 card = this.randomElement(this.market);
             } else {
+                //Filter the market by the forbidden suit.
                 const suit = this.suitboard.get(to);
-                const whiteMarket = this.getMarketCards(suit!);
+                const whiteMarket: string[] = [];
+
+                this.market.forEach(card => {
+                    const suits = this.getSuits(card);
+                    if (suits.indexOf(suit!) < 0)
+                        whiteMarket.push(card);
+                });
+
                 if (whiteMarket.length > 0)
                     card = this.randomElement(whiteMarket);
             }
@@ -757,9 +819,18 @@ export class FroggerGame extends GameBase {
         //The move format is one of:
         // handcard:from-to            a regular move forward
         // from-to,marketcard          a productive move backward
-        // from-to,marketcard!refill   a productive move backward, request refill
-        // from-to                     a move backward but no available market card
+        // from-to,marketcard!         a productive move backward, request refill
+        // from-to                     a move backward but no market card taken
         // marketcard://               a whole (blocked) turn to draw a marketcard
+        if (this.gameover) {
+            return {
+                valid: false,
+                complete: -1,
+                move: "",
+                message: i18next.t("apgames:MOVES_GAMEOVER")
+            };
+        }
+        
         try {
             let newmove = "";
             const lastchar = move ? move.slice(-1) : "";
@@ -767,7 +838,7 @@ export class FroggerGame extends GameBase {
             const currmove = moves.length > 0 ? moves[moves.length - 1] : "";
 
             if ( this.variants.includes("refills") && this.skipto && this.skipto !== this.currplayer ) {
-                //All clicks are bad clicks.  We don't have a pass button
+                //All clicks are bad clicks.  We don't bother with a pass button
                 // because the back end should autopass you.
                 return {
                     move,
@@ -785,11 +856,13 @@ export class FroggerGame extends GameBase {
             }
             
             if (row < 0 && col < 0) {
+                
                 //clicking on a hand or market card
+
                 if (lastchar === "/") {
                     //Deal with the refill button.
                     if (this.variants.includes("refills") && piece === "refill") {
-                        newmove = `${move.slice(0,-1)}!refill/`;
+                        newmove = `${move.slice(0,-1)}!/`;
                     } else {
                         // starting another move (forward).
                         newmove = `${move}${piece!.substring(1)}:`;
@@ -847,7 +920,9 @@ export class FroggerGame extends GameBase {
                         }
                     }
                 }
+                
             } else {
+                
                 //Clicking on the board.
 
                 if (row === 0) {
@@ -860,17 +935,6 @@ export class FroggerGame extends GameBase {
                 }
 
                 const cell = this.coords2algebraic(col, row);
-                /*
-                //Don't need to check for these onclick because they're blocked by the renderer.
-                //Do check on validation.
-                if ( !this.suitboard.has(cell) && this.getUnsuitedCells().indexOf(cell) < 0 ) {
-                    return {
-                        move,
-                        valid: false,
-                        message: i18next.t("apgames:validation.frogger.OFF_BOARD")
-                    }
-                }
-                */
 
                 if (( lastchar === ":" || lastchar === "/" || lastchar === "" ) && ( piece === undefined || piece === "" ) ) {
                     //Piece picking cases, so need a piece.
@@ -893,11 +957,11 @@ export class FroggerGame extends GameBase {
                     newmove = `${move}${cell}`;
                 } else if ( move.split("/").length < this.nummoves ) {
                     //The last char is text and we need to start a new move if legal.
-                    newmove = `${move}/${cell}`;
+                    newmove = `${move}/${cell}-`;
                 } else {
                    return {
-                        move,
-                        valid: false,
+                       move,
+                       valid: false,
                        message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
                     }
                 }
@@ -924,9 +988,17 @@ export class FroggerGame extends GameBase {
 
         //console.log("validating: " + m);
 
-        //m = m.toLowerCase();
+        if (this.gameover) {
+            if (m.length === 0) {
+                result.message = "";
+            } else {
+                result.message = i18next.t("apgames:MOVES_GAMEOVER");
+            }
+            return result;
+        }
+
         m = m.replace(/\s+/g, "");
-        //TODO: remove double slashes.
+        //TODO: remove double slashes??
 
         if (m.length === 0) {
             result.valid = true;
@@ -939,8 +1011,17 @@ export class FroggerGame extends GameBase {
         }
 
         if (m === "pass") {
-            //May only pass in the refill situation.
-            if ( this.variants.includes("refills") && this.skipto && this.skipto !== this.currplayer ) {
+            //May only pass in some refill situations.
+            if ( this.variants.includes("refills") && this.skipto !== undefined ) {
+
+                // && this.skipto !== this.currplayer 
+                //You must pass if you're not the player being skipped to.
+
+                // && this.skipto === this.currplayer && this.nummoves < 3
+                //But you also may pass if you were skipped to
+                //  and it's your supplemental refill turn,
+                //  because you already made at least one move.
+                
                 result.valid = true;
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
                 result.complete = 1;
@@ -978,14 +1059,17 @@ export class FroggerGame extends GameBase {
             }
 
             if (submove.indexOf("!") > - 1) {
-                const subarr = submove.split("!");
-                if (! this.variants.includes("refills") || subarr[1] != "refill" ) {
+                if (! this.variants.includes("refills") ) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation._general.INVALID_MOVE");
                     return result;
                 } else if ( s === 2 ) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.TOO_LATE_FOR_REFILL");
+                    return result;
+                } else if ( s < moves.length - 1 ) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.frogger.TOO_EARLY_FOR_REFILL");
                     return result;
                 } else {
                     refill = true;
@@ -998,9 +1082,12 @@ export class FroggerGame extends GameBase {
             let complete = false;
             let nocard = false;
 
+            //Check if we need to parse this as a partial move.
             if (s < moves.length - 1)
                 complete = true;
-//          console.log("loop ", s, "complete?", complete, "moves?", m, moves);
+            //          console.log("loop ", s, "complete?", complete, "moves?", m, moves);
+
+            console.log(this.parseMove(submove));
             
             if (submove.indexOf(":") > -1) {
                 //Card followed by move is a hand card.
@@ -1138,7 +1225,7 @@ export class FroggerGame extends GameBase {
             }
             //The source location was tested for frogs so must have been on the board.
 
-            //On to to testing.
+            //On to testing.
             const toX = this.algebraic2coords(to)[0];
 
             //It's my interpretation of the rules that you must change cards on a move,
@@ -1156,7 +1243,7 @@ export class FroggerGame extends GameBase {
                 return result;
             } else if (!handcard && toX > fromX) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.MUST_HOP_BACKWARD");
+                result.message = i18next.t("apgames:validation.frogger.CARD_FIRST");
                 return result;
             }
 
@@ -1169,12 +1256,25 @@ export class FroggerGame extends GameBase {
                 }
                 if (toX > 0 && ca) {
                     const suit = this.suitboard.get(to)!;
-                    if (! this.checkMarket(ca, suit) ) {
+                    const suits = this.getSuits(ca);
+                    if (suits.indexOf(suit) > -1) {
                         result.valid = false;
                         result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD");
                         return result;
                     }
-                } // When backing up to start you can pick any market card.
+                } else if (ca) {
+                    // When backing up to start you can pick any market card.
+                } else if (!complete && this.market.length > 0) {
+                    // No card.  May be a partial move.
+                    result.valid = true;
+                    result.complete = -1;
+                    result.canrender = true;
+                    if (s < this.nummoves - 1)
+                        result.message = i18next.t("apgames:validation.frogger.CARD_NEXT_OR");
+                    else
+                        result.message = i18next.t("apgames:validation.frogger.CARD_NEXT");
+                    return result;
+                }
             }
 
             //Moving forward tests.
@@ -1209,6 +1309,7 @@ export class FroggerGame extends GameBase {
             }
         }
 
+        //Not sure we need to track this.
         console.log("don't lint me man", marketEmpty, refill);
 
         //Really really done.
@@ -1241,6 +1342,12 @@ export class FroggerGame extends GameBase {
 
         if ( m === "pass") {
             this.results.push({type: "pass"});
+
+            //Passes only happen in the context of the refill option.
+            //Besides the forced passes, the original player can pass
+            //  once he sees the market and (perhaps) doesn't like it.
+            //In that case, we need to clean up (below).
+            
         } else {
         
             for (let s = 0; s < moves.length; s++) {
@@ -1290,7 +1397,7 @@ export class FroggerGame extends GameBase {
                     marketEmpty = this.popMarket(ca);
                     if (from) {
                         this.results.push({type: "move", from: from!, to: to!, what: ca!, how: "back"});
-                        //TODO: midstream market
+                        //TODO?: midstream market
                     }
                 } else {
                     this.results.push({type: "move", from: from!, to: to!, what: "no card", how: "back"});
@@ -1309,13 +1416,6 @@ export class FroggerGame extends GameBase {
 
         if (partial) { return this; }
 
-        //update market if necessary
-        if (marketEmpty || this.variants.includes("continuous")) {
-                const refilled = this.refillMarket();
-                if (refilled)
-                    this.results.push({type: "deckDraw"});
-        }
- 
         if (refill) {
             //Set skipto and nummoves.
             //Don't progress crocodiles.
@@ -1326,6 +1426,14 @@ export class FroggerGame extends GameBase {
             this.skipto = this.currplayer;
             this.nummoves = remaining!;
         } else {
+
+            //If this was the refill turn, unset skipto and nummoves,
+            //  regardless of whether currplayer passed or moved.
+            if ( this.variants.includes("refills") && this.skipto !== undefined && this.skipto === this.currplayer) {
+                this.skipto = undefined;
+                this.nummoves = 3;
+            }
+
             //update crocodiles if croccy
             if (this.variants.includes("crocodiles") && this.currplayer as number === this.numplayers && !this.skipto) {
                 this.results.push({type: "declare"});
@@ -1336,8 +1444,16 @@ export class FroggerGame extends GameBase {
                     this.results.push({type: "eject", from: from, to: to, what: "crocodiles"});
                 });
             }
+            
         }
 
+        //update market if necessary
+        if (marketEmpty || this.variants.includes("continuous")) {
+                const refilled = this.refillMarket();
+                if (refilled)
+                    this.results.push({type: "deckDraw"});
+        }
+ 
         // update currplayer
         this.lastmove = m;
         let newplayer = (this.currplayer as number) + 1;
@@ -1352,7 +1468,7 @@ export class FroggerGame extends GameBase {
     }
 
     protected checkEOG(): FroggerGame {
-        if ( this.countHomeFrogs() === 6 ) {
+        if ( this.countColumnFrogs(true) === 6 ) {
             this.gameover = true;
             this.winner.push(this.currplayer);
         }
