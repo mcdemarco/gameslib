@@ -570,11 +570,13 @@ export class FroggerGame extends GameBase {
     }
 
     private parseMove(submove: string): IFrogMove {
-        //Does not handle the empty move or passes.
+        //Parse a string into an IFrogMove object.
+        //Does not handle the empty move or passes, but does handle the blocked "move".
+        //Does not validate move direction, cells, or cards.
         let mv, from, to, card;
  
         const ifm: IFrogMove = {
-            complete: -1,
+            complete: -2,
             forward: false,
             refill: false
         }
@@ -591,32 +593,53 @@ export class FroggerGame extends GameBase {
             [card, mv] = submove.split(":");
             ifm.card = card;
             ifm.forward = true;
+            //ifm.complete = -1 or 1, pending parse of mv.
         } else if (submove.indexOf(",") > -1) {
             //Move followed by card is a backwards move.
             [mv, card] = submove.split(",");
-            if (card) 
+            if (card) {
                 ifm.card = card;
+                ifm.complete = 1;
+            } else {
+                ifm.complete = 0;
+            }
         } else if (submove.indexOf("-") > -1) {
             //Raw move is a unproductive or partial backwards move.
             mv = submove;
             //ifm.complete = -1 or 0 depending on parse of to.
+        } else if (/\d/.test(submove.charAt(1))) {
+            //A cell has a second digit that's numeric; a card wouldn't.
+            mv = submove;
+            //From alone is a partial move so...
+            ifm.complete = -1;
         } else {
-            console.log();
-            //Card alone is a blocked move.
-            //From alone is a partial move.
+            //... or a card.  A card alone is a blocked move or a partial move.
+            ifm.card = submove;
+            mv = "";
+            //We aren't validating here so give it the benefit of the doubt.
+            ifm.complete = 0;
         }
 
-        //Setting from, to, and complete.
+        //Setting from, to, and remaining completes.
         if (mv) {
             [from, to] = mv.split("-");
             ifm.from = from;
             if (to) {
                 ifm.to = to;
-                if (ifm.card)
-                    ifm.complete = 1;
-                else
-                    ifm.complete = 0;
+                if (ifm.complete < -1) {
+                    if (ifm.card)
+                        ifm.complete = 1;
+                    else
+                        ifm.complete = 0;
+                }
+            } else {
+                ifm.complete = -1;
             }
+        } else {
+            //If we were waiting to parse a move, we didn't find it.
+            if (ifm.complete < -1)
+                ifm.complete = -1;
+
         }
 
         return ifm;
@@ -832,21 +855,25 @@ export class FroggerGame extends GameBase {
         }
         
         try {
-            let newmove = "";
-            const lastchar = move ? move.slice(-1) : "";
-            const moves =  move.split("/");
-            const currmove = moves.length > 0 ? moves[moves.length - 1] : "";
 
             if ( this.variants.includes("refills") && this.skipto && this.skipto !== this.currplayer ) {
                 //All clicks are bad clicks.  We don't bother with a pass button
-                // because the back end should autopass you.
+                // because the back end should have autopassed you.
                 return {
                     move,
                     valid: false,
                     message: i18next.t("apgames:validation.frogger.MUST_PASS")
                 }
             }
+
+            let newmove = "";
+            const lastchar = move ? move.slice(-1) : "";
+            const moves =  move.split("/");
+            const isFirstMove = (moves.length === 1);
+ //           const isLastMove = (moves.length === this.nummoves);
+            const currmove = moves[moves.length - 1];
             
+         
             if (moves.length > this.nummoves) {
                 return {
                     move,
@@ -856,18 +883,9 @@ export class FroggerGame extends GameBase {
             }
             
             if (row < 0 && col < 0) {
-                
-                //clicking on a hand or market card
+                //clicking on a hand or market card or refill button
 
-                if (lastchar === "/") {
-                    //Deal with the refill button.
-                    if (this.variants.includes("refills") && piece === "refill") {
-                        newmove = `${move.slice(0,-1)}!/`;
-                    } else {
-                        // starting another move (forward).
-                        newmove = `${move}${piece!.substring(1)}:`;
-                    }
-                } else if (lastchar === "") {
+                if (isFirstMove && currmove === "") {
                     //Refill is not possible here.
                     
                     // starting the first move (forward) or possibly the blocked option
@@ -877,46 +895,61 @@ export class FroggerGame extends GameBase {
                     } else {
                         newmove = `${piece!.substring(1)}:`;
                     }
-                } else if (lastchar === "-") {
-                    return {
-                        move,
-                        valid: false,
-                        message: i18next.t("apgames:validation.frogger.PLACE_NEXT")
-                    }
-                } else if (lastchar === ":") {
-                    return {
-                        move,
-                        valid: false,
-                        message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
+                } else if (currmove === "") {
+                    //Deal with the refill button.
+                    if (this.variants.includes("refills") && piece === "refill") {
+                        newmove = `${move.slice(0,-1)}!/`;
+                    } else {
+                        // starting another move (forward).
+                        newmove = `${move}${piece!.substring(1)}:`;
                     }
                 } else {
-                    //The last char was text (the end of a board move), so probably picking a market card.
-                    if ( moves.length <= this.nummoves ) {
-                        
-                        if (this.variants.includes("refills") && piece === "refill") {
-                            //This is not an appropriate time to click the refill button.
-                            if ( moves.length === this.nummoves) {
-                                return {
-                                    move,
-                                    valid: false,
-                                    message: i18next.t("apgames:validation.frogger.TOO_LATE_FOR_REFILL")
-                                }
-                            } else {
-                                return {
-                                    move,
-                                    valid: false,
-                                    message: i18next.t("apgames:validation.frogger.MISPLACED_REFILL")
-                                }
-                            }
-                        } else {
-                            newmove = `${move},${piece!.substring(1)}/`;
-                        }
-                        
-                    } else {
+                    //currmove is a parseable move, so parse it.
+                    const currIFM = this.parseMove(currmove);
+                    console.log(currIFM);
+
+                    
+                    if (lastchar === "-") {
                         return {
                             move,
                             valid: false,
-                            message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
+                            message: i18next.t("apgames:validation.frogger.PLACE_NEXT")
+                        }
+                    } else if (lastchar === ":") {
+                        return {
+                            move,
+                            valid: false,
+                            message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
+                        }
+                    } else {
+                        //The last char was text (the end of a board move), so probably picking a market card.
+                        if ( moves.length <= this.nummoves ) {
+                            
+                            if (this.variants.includes("refills") && piece === "refill") {
+                                //This is not an appropriate time to click the refill button.
+                                if ( moves.length === this.nummoves) {
+                                    return {
+                                        move,
+                                        valid: false,
+                                        message: i18next.t("apgames:validation.frogger.TOO_LATE_FOR_REFILL")
+                                    }
+                                } else {
+                                    return {
+                                        move,
+                                        valid: false,
+                                        message: i18next.t("apgames:validation.frogger.MISPLACED_REFILL")
+                                    }
+                                }
+                            } else {
+                                newmove = `${move},${piece!.substring(1)}/`;
+                            }
+                            
+                        } else {
+                            return {
+                                move,
+                                valid: false,
+                                message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
+                            }
                         }
                     }
                 }
