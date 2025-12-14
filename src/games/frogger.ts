@@ -571,8 +571,16 @@ export class FroggerGame extends GameBase {
 
     private parseMove(submove: string): IFrogMove {
         //Parse a string into an IFrogMove object.
-        //Does not handle the empty move or passes, but does handle the blocked "move".
         //Does not validate move direction, cells, or cards.
+
+        
+        //The move format is one of:
+        // handcard:from-to            a regular move forward
+        // from-to,marketcard          a productive move backward
+        // from-to,marketcard!         a productive move backward, request refill
+        // from-to                     a move backward but no market card taken
+        // marketcard://               a whole (blocked) turn to draw a marketcard
+
         let mv, from, to, card;
  
         const ifm: IFrogMove = {
@@ -581,6 +589,11 @@ export class FroggerGame extends GameBase {
             refill: false
         }
 
+        //To ignore the empty move or passes, we leave complete at -2.
+        if (submove === "" || submove === "pass")
+            return ifm;
+
+        
         //Setting refill (in variant with refill button).
         if (submove.indexOf("!") > - 1) {
             submove = submove.split("!")[0];
@@ -839,12 +852,7 @@ export class FroggerGame extends GameBase {
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
-        //The move format is one of:
-        // handcard:from-to            a regular move forward
-        // from-to,marketcard          a productive move backward
-        // from-to,marketcard!         a productive move backward, request refill
-        // from-to                     a move backward but no market card taken
-        // marketcard://               a whole (blocked) turn to draw a marketcard
+
         if (this.gameover) {
             return {
                 valid: false,
@@ -867,12 +875,13 @@ export class FroggerGame extends GameBase {
             }
 
             let newmove = "";
-            const lastchar = move ? move.slice(-1) : "";
+//            const lastchar = move ? move.slice(-1) : "";
             const moves =  move.split("/");
             const isFirstMove = (moves.length === 1);
- //           const isLastMove = (moves.length === this.nummoves);
+            const isLastMove = (moves.length === this.nummoves);
             const currmove = moves[moves.length - 1];
-            
+            const currIFM = this.parseMove(currmove);
+            console.log(currIFM);
          
             if (moves.length > this.nummoves) {
                 return {
@@ -903,54 +912,37 @@ export class FroggerGame extends GameBase {
                         // starting another move (forward).
                         newmove = `${move}${piece!.substring(1)}:`;
                     }
-                } else {
-                    //currmove is a parseable move, so parse it.
-                    const currIFM = this.parseMove(currmove);
-                    console.log(currIFM);
-
-                    
-                    if (lastchar === "-") {
-                        return {
-                            move,
-                            valid: false,
-                            message: i18next.t("apgames:validation.frogger.PLACE_NEXT")
-                        }
-                    } else if (lastchar === ":") {
-                        return {
-                            move,
-                            valid: false,
-                            message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
-                        }
-                    } else {
-                        //The last char was text (the end of a board move), so probably picking a market card.
-                        if ( moves.length <= this.nummoves ) {
-                            
-                            if (this.variants.includes("refills") && piece === "refill") {
-                                //This is not an appropriate time to click the refill button.
-                                if ( moves.length === this.nummoves) {
-                                    return {
-                                        move,
-                                        valid: false,
-                                        message: i18next.t("apgames:validation.frogger.TOO_LATE_FOR_REFILL")
-                                    }
-                                } else {
-                                    return {
-                                        move,
-                                        valid: false,
-                                        message: i18next.t("apgames:validation.frogger.MISPLACED_REFILL")
-                                    }
-                                }
-                            } else {
-                                newmove = `${move},${piece!.substring(1)}/`;
+                } else if (currIFM.from && currIFM.to === undefined) {
+                    return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.frogger.PLACE_NEXT")
+                    }
+                } else if (currIFM.card && currIFM.from === undefined) {
+                    return {
+                        move,
+                        valid: false,
+                        message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
+                    }
+                } else if (currIFM.to && currIFM.forward === false && currIFM.card === undefined) {
+                    //Hopefully picking a market card.
+                    if (this.variants.includes("refills") && piece === "refill") {
+                        //This is not an appropriate time to click the refill button.
+                        if ( moves.length === this.nummoves) {
+                            return {
+                                move,
+                                valid: false,
+                                message: i18next.t("apgames:validation.frogger.TOO_LATE_FOR_REFILL")
                             }
-                            
                         } else {
                             return {
                                 move,
                                 valid: false,
-                                message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
+                                message: i18next.t("apgames:validation.frogger.MISPLACED_REFILL")
                             }
                         }
+                    } else {
+                        newmove = `${move},${piece!.substring(1)}/`;
                     }
                 }
                 
@@ -969,33 +961,40 @@ export class FroggerGame extends GameBase {
 
                 const cell = this.coords2algebraic(col, row);
 
-                if (( lastchar === ":" || lastchar === "/" || lastchar === "" ) && ( piece === undefined || piece === "" ) ) {
+                if (currmove === "" || currIFM.from === undefined) {
                     //Piece picking cases, so need a piece.
+                    if ( piece === undefined || piece === "" ) {
+                         return {
+                            move,
+                            valid: false,
+                            message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
+                        }
+                    } else {
+                        //picked a piece to move.
+                        if (move)
+                            newmove += `${move}${cell}-`;
+                        else
+                            newmove += `${cell}-`;
+                    }
+                } else if (currIFM.to === undefined) {
+                    //picked the target.  Don't check occupied (piece) here because it's complicated.
+                    if (currIFM.card) {
+                        //picked the target and finished the move forward.
+                        newmove = `${move}${cell}/`;
+                    } else {
+                        //picked the target but not a market card.
+                        newmove = `${move}${cell}`;
+                    }
+                } else if (currIFM.complete > -1 && !isLastMove) {
+                    //Finished a hop forward or an unproductive hop back,
+                    // so can start a new move (back).
+                    newmove = `${move}/${cell}-`;
+                } else {
+                    //Getting hoppy.
                     return {
                         move,
                         valid: false,
-                        message: i18next.t("apgames:validation.frogger.PIECE_NEXT")
-                    }
-                } else if ( lastchar === ":" || lastchar === "/" ) {
-                    //picked the piece.
-                    newmove += `${move}${cell}-`;
-                } else if ( lastchar === "" ) {
-                    //picked a piece for moving back.
-                    newmove += `${cell}-`;
-                } else if ( lastchar === "-" && currmove.indexOf(":") > -1) {
-                    //picked the target and finished the move.
-                    newmove = `${move}${cell}/`;
-                } else if ( lastchar === "-" ) {
-                    //picked the target but not a market card.
-                    newmove = `${move}${cell}`;
-                } else if ( move.split("/").length < this.nummoves ) {
-                    //The last char is text and we need to start a new move if legal.
-                    newmove = `${move}/${cell}-`;
-                } else {
-                   return {
-                       move,
-                       valid: false,
-                       message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
+                        message: i18next.t("apgames:validation.frogger.TOO_HOPPY", {count: this.nummoves})
                     }
                 }
             }
