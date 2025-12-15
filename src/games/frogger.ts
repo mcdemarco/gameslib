@@ -652,7 +652,6 @@ export class FroggerGame extends GameBase {
             //If we were waiting to parse a move, we didn't find it.
             if (ifm.complete < -1)
                 ifm.complete = -1;
-
         }
 
         return ifm;
@@ -1097,8 +1096,9 @@ export class FroggerGame extends GameBase {
             const subIFM = this.parseMove(submove);
             console.log(subIFM);
 
+            //Check blocked first.
             if (blocked) {
-                if (subIFM.forward || subIFM.from) {
+                if (subIFM.forward || subIFM.from || ! subIFM.card) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.NO_CHOICE_BLOCKED");
                     return result;
@@ -1111,9 +1111,19 @@ export class FroggerGame extends GameBase {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.NO_MOVE_BLOCKED");
                     return result;
+                } else if (cloned.market.indexOf(subIFM.card) === -1) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.frogger.NO_SUCH_MARKET_CARD");
+                    return result;
+                } else {
+                    result.valid = true;
+                    result.complete = 1;
+                    result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                    return result;
                 }
             }
 
+            //Check and set refill.
             if (subIFM.refill) {
                 if (! this.variants.includes("refills") ) {
                     result.valid = false;
@@ -1138,59 +1148,8 @@ export class FroggerGame extends GameBase {
             if (s < moves.length - 1 || allcomplete)
                 complete = true;
 
-            /*
-
-            if (!subIFM.forward && subIFM.card && !subIFM.from) {
-                //Raw card must be a blocked move or a partial.
-                if (complete || subIFM.complete === 1) {
-                    if (s > 0) {
-                        //Bad blocked move (in presence of other moves)
-                        result.valid = false;
-                        result.message = i18next.t("apgames:validation.frogger.TOO_LATE_FOR_BLOCKED");
-                        return result;
-                    } else if (moves.length > 1) {//&& s === 0
-                        //Bad blocked move (in presence of other moves)
-                        //TODO: obviate this case by fixing the move stack.
-                        result.valid = false;
-                        result.message = i18next.t("apgames:validation.frogger.NO_MOVE_BLOCKED");
-                        return result;
-                    } else { // s === 0 && no other moves
-                        //Blocked move on its own.
-                        //We don't need to check the clone here
-                        //because no other changes have been made,
-                        //and none are allowed on a blocked move.
-                        if (!blocked) {
-                            result.valid = false;
-                            result.message = i18next.t("apgames:validation.frogger.NOT_BLOCKED");
-                            return result;
-                        } else if (this.market.indexOf(subIFM.card) === -1) {
-                            result.valid = false;
-                            result.message = i18next.t("apgames:validation.frogger.NO_SUCH_MARKET_CARD");
-                            return result;
-                        } else {
-                            result.valid = true;
-                            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                            result.complete = 1;
-                            return result;
-                        }
-                    }
-                } else {//incomplete, no from
-                    result.valid = true;
-                    if (cloned.market.indexOf(subIFM.card) > -1) {
-                        result.message = i18next.t("apgames:validation.frogger.SUBMIT_BLOCKED");
-                        result.complete = 1;
-                    } else { //hand card, partial move
-                        result.message = i18next.t("apgames:validation.frogger.PIECE_NEXT"); 
-                        result.complete = -1;
-                    }
-                    return result;
-                }
-            }
-
-            */
-
-            //Next: check cards.
-            //There is a case remaining with no cards.
+            //Check cards.
+            //(There is a case remaining with no card.)
             if (subIFM.card) {
                 if (subIFM.forward && cloned.hands[cloned.currplayer - 1].indexOf(subIFM.card!) < 0 ) {
                     //Bad hand card.
@@ -1205,7 +1164,7 @@ export class FroggerGame extends GameBase {
                 }
             }
 
-            //Parse unparsed moves.
+            //Check moves.
             //There is no case remaining without moves, except partials.
             if ( !subIFM.from ) {
                 if (!complete) {
@@ -1221,8 +1180,11 @@ export class FroggerGame extends GameBase {
                 }
             }
 
-            //Once we have a move from, we have a frog.  Check frog.
+            //Check frog.
+            //(Once we have a move from, we have a frog.)
             const frog = cloned.board.get(subIFM.from!);
+
+            //Check frog existence and ownership.
             if (!frog || frog!.charAt(1)! !== cloned.currplayer.toString() ) {
                 //Bad frog.
                 result.valid = false;
@@ -1231,9 +1193,9 @@ export class FroggerGame extends GameBase {
             }
 
             //Check frog location.
+            //(Frogs cannot leave home.)
             const [fromX, fromY] = this.algebraic2coords(subIFM.from);
             if (fromY === this.columns - 1) {
-                //No deposit, no return.
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.NO_RETURN");
                 return result;
@@ -1272,7 +1234,7 @@ export class FroggerGame extends GameBase {
                 return result;  
             }
 
-            //Test the move direction (determined from move structure) against the actual cells.
+            //Test the move direction (determined from move structure) against the actual cells provided.
             if (subIFM.forward && toX < fromX) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.MUST_HOP_FORWARD");
@@ -1371,8 +1333,6 @@ export class FroggerGame extends GameBase {
             }
         }
 
-        const moves = m.split("/");
-        
         this.results = [];
         let marketEmpty = false;
         let refill = false;
@@ -1387,6 +1347,8 @@ export class FroggerGame extends GameBase {
             //In that case, we need to clean up (below).
             
         } else {
+        
+            const moves = m.split("/");
         
             for (let s = 0; s < moves.length; s++) {
                 let submove = moves[s];
