@@ -1194,8 +1194,8 @@ export class FroggerGame extends GameBase {
 
             //Check frog location.
             //(Frogs cannot leave home.)
-            const [fromX, fromY] = this.algebraic2coords(subIFM.from);
-            if (fromY === this.columns - 1) {
+            const fromX = this.algebraic2coords(subIFM.from)[0];
+            if (fromX === this.columns - 1) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.NO_RETURN");
                 return result;
