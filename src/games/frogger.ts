@@ -76,7 +76,7 @@ export class FroggerGame extends GameBase {
             { uid: "courts" }, //include courts in the draw deck
             { uid: "courtpawns" }, //courts for pawns
             { uid: "#market" }, //i.e., no refills
-            { uid: "refills", group: "market" }, //the official rule
+            { uid: "refills", group: "market", default: true }, //the official rule
             { uid: "continuous", group: "market" },
         ],
         categories: ["goal>evacuate", "mechanic>move", "mechanic>bearoff", "mechanic>block", "mechanic>random>setup", "mechanic>random>play", "board>shape>rect", "board>connect>rect", "components>decktet", "other>2+players"],
@@ -766,6 +766,10 @@ export class FroggerGame extends GameBase {
     public randomMove(): string {
         //We return only one, legal move, for testing purposes.
 
+        if (this.gameover) {
+            throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
+        }
+
         //Refill/skipto case.  Not reachable from the move list, but useful for testing.
         if ( this.variants.includes("refills") && this.skipto !== undefined && this.skipto !== this.currplayer )
             return "pass";
@@ -874,13 +878,15 @@ export class FroggerGame extends GameBase {
             }
 
             let newmove = "";
-//            const lastchar = move ? move.slice(-1) : "";
+
             const moves =  move.split("/");
+
             const isFirstMove = (moves.length === 1);
             const isLastMove = (moves.length === this.nummoves);
+
             const currmove = moves[moves.length - 1];
             const currIFM = this.parseMove(currmove);
-            console.log(currIFM);
+            //console.log(currIFM);
          
             if (moves.length > this.nummoves) {
                 return {
@@ -1029,12 +1035,15 @@ export class FroggerGame extends GameBase {
         }
 
         m = m.replace(/\s+/g, "");
-        //TODO: remove double slashes??
+        const blocked = this.checkBlocked();
 
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            if ( this.stack.length > this.numplayers )
+            console.log("blocked?", blocked);
+            if ( blocked )
+                result.message = i18next.t("apgames:validation.frogger.NO_CHOICE_BLOCKED");
+            else if ( this.stack.length > this.numplayers )
                 result.message = i18next.t("apgames:validation.frogger.LATER_INSTRUCTIONS")
             else
                 result.message = i18next.t("apgames:validation.frogger.INITIAL_INSTRUCTIONS")
@@ -1067,7 +1076,6 @@ export class FroggerGame extends GameBase {
         const cloned: FroggerGame = Object.assign(new FroggerGame(this.numplayers, [...this.variants]), deepclone(this) as FroggerGame);
 
         let allcomplete = false;
-        const blocked = this.checkBlocked();                    
         const moves: string[] = m.split("/");
 
         if ( moves.length > this.nummoves ) {
@@ -1093,8 +1101,8 @@ export class FroggerGame extends GameBase {
                 continue;
             }
 
-            const subIFM = this.parseMove(submove);
-            console.log(subIFM);
+            const subIFM = cloned.parseMove(submove);
+            //console.log(subIFM);
 
             //Check blocked first.
             if (blocked) {
@@ -1125,7 +1133,7 @@ export class FroggerGame extends GameBase {
 
             //Check and set refill.
             if (subIFM.refill) {
-                if (! this.variants.includes("refills") ) {
+                if (! cloned.variants.includes("refills") ) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation._general.INVALID_MOVE");
                     return result;
@@ -1194,8 +1202,8 @@ export class FroggerGame extends GameBase {
 
             //Check frog location.
             //(Frogs cannot leave home.)
-            const fromX = this.algebraic2coords(subIFM.from)[0];
-            if (fromX === this.columns - 1) {
+            const fromX = cloned.algebraic2coords(subIFM.from)[0];
+            if (fromX === cloned.columns - 1) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.frogger.NO_RETURN");
                 return result;
@@ -1224,7 +1232,7 @@ export class FroggerGame extends GameBase {
             //The source location was tested for frogs so must have been on the board.
 
             //On to to testing.
-            const toX = this.algebraic2coords(subIFM.to)[0];
+            const toX = cloned.algebraic2coords(subIFM.to)[0];
 
             //It's my interpretation of the rules that you must change cards on a move,
             // not just change space, but I'm not 100% sure about that.
@@ -1247,14 +1255,14 @@ export class FroggerGame extends GameBase {
 
             //Moving back tests.
             if (!subIFM.forward) {
-                if ( !this.checkNextBack(subIFM.from, subIFM.to)) {
+                if ( !cloned.checkNextBack(subIFM.from, subIFM.to)) {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
                     return result;
                 }
                 if (toX > 0 && subIFM.card) {
-                    const suit = this.suitboard.get(subIFM.to)!;
-                    const suits = this.getSuits(subIFM.card);
+                    const suit = cloned.suitboard.get(subIFM.to)!;
+                    const suits = cloned.getSuits(subIFM.card);
                     if (suits.indexOf(suit) > -1) {
                         result.valid = false;
                         result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD");
@@ -1263,12 +1271,12 @@ export class FroggerGame extends GameBase {
                 } else if (subIFM.card) {
                     // When backing up to start you can pick any market card.
                     // We already checked it was in the market.
-                } else if (!complete && this.market.length > 0) {
+                } else if (!complete && cloned.market.length > 0) {
                     // No card.  May be a partial move.
                     result.valid = true;
                     result.complete = -1;
                     result.canrender = true;
-                    if (s < this.nummoves - 1)
+                    if (s < cloned.nummoves - 1)
                         result.message = i18next.t("apgames:validation.frogger.CARD_NEXT_OR");
                     else
                         result.message = i18next.t("apgames:validation.frogger.CARD_NEXT");
@@ -1279,7 +1287,7 @@ export class FroggerGame extends GameBase {
             //Moving forward tests.
             if (subIFM.forward && !cloned.checkNextForward(subIFM.from, subIFM.to, subIFM.card!)) {
                 result.valid = false;
-                if (this.variants.includes("advanced"))
+                if (cloned.variants.includes("advanced"))
                     result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD_ADVANCED");
                 else
                     result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_FORWARD");
@@ -1287,7 +1295,7 @@ export class FroggerGame extends GameBase {
             }
 
             if (s < moves.length - 1) {
-                //Passed all tests so make the submove for validating the rest.
+                //Passed all tests so make the submove (for validating the rest of the move).
                 //Card adjustments.
                 if (subIFM.forward) {
                     cloned.popHand(subIFM.card!);
@@ -1308,9 +1316,6 @@ export class FroggerGame extends GameBase {
                 allcomplete = complete;
             }
         }
-
-        //Not sure we need to track this.
-        //console.log("don't lint me man", marketEmpty, refill);
 
         //Really really done.
         result.valid = true;
@@ -1750,8 +1755,8 @@ export class FroggerGame extends GameBase {
                 type: "pieces",
                 pieces: this.discards.map(c => "c" + c) as [string, ...string[]],
                 label: i18next.t("apgames:validation.frogger.LABEL_DISCARDS") || "Discards",
-                spacing: 0.375,
-                width: this.columns - 1,
+                spacing: 0.25,
+                width: this.columns + 2,
             });
         }
         
@@ -1767,7 +1772,7 @@ export class FroggerGame extends GameBase {
                 type: "pieces",
                 label: i18next.t("apgames:validation.frogger.LABEL_REMAINING") || "Cards in deck",
                 spacing: 0.25,
-                width: this.columns - 1,
+                width: this.columns + 2,
                 pieces: remaining,
             });
         }
