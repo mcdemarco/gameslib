@@ -585,7 +585,7 @@ export class FroggerGame extends GameBase {
         return bounced;
     }
 
-    private parseMove(submove: string): IFrogMove {
+    public parseMove(submove: string): IFrogMove {
         //Parse a string into an IFrogMove object.
         //Does not validate move direction, cells, or cards.
 
