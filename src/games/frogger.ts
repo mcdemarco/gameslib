@@ -634,7 +634,7 @@ export class FroggerGame extends GameBase {
 
         //Next, split the string on card punctuation:
         if (submove.split(/:|,/).length > 2 || submove.split("-").length > 2) {
-            console.log("malformed move string");
+            //console.log("malformed move string");
             ifm.valid = false;
         } else if (submove.indexOf(":") > -1) {
             //Card followed by move is a forward move.
@@ -683,15 +683,15 @@ export class FroggerGame extends GameBase {
         }
 
         if (ifm.card && !cardex.test(ifm.card)) {
-            console.log("malformed card ",ifm.card);
+            //console.log("malformed card ",ifm.card);
             ifm.valid = false;
         }
         if (ifm.from && !cellex.test(ifm.from)) {
-            console.log("malformed cell ",ifm.from);
+            //console.log("malformed cell ",ifm.from);
             ifm.valid = false;
         }
         if (ifm.to && !cellex.test(ifm.to)) {
-            console.log("malformed cell ",ifm.to);
+            //console.log("malformed cell ",ifm.to);
             ifm.valid = false;
         }
         
@@ -1133,6 +1133,11 @@ export class FroggerGame extends GameBase {
             let submove = moves[s];
 
             const subIFM = cloned.parseMove(submove);
+            if (subIFM.valid === false) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE", {move: submove});
+                return result;
+            }
 
             //Check blocked first.
             if (blocked) {
@@ -1166,7 +1171,7 @@ export class FroggerGame extends GameBase {
             if (subIFM.refill) {
                 if (! cloned.variants.includes("refills") ) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.INVALID_MOVE");
+                    result.message = i18next.t("apgames:validation._general.INVALID_NON-MOVE");
                     return result;
                 } else if ( s === 2 ) {//refilling only happens in the original 3-move sequence.
                     result.valid = false;
@@ -1210,9 +1215,9 @@ export class FroggerGame extends GameBase {
                     result.message = i18next.t("apgames:validation.frogger.PIECE_NEXT");
                     return result;
                 } else {
-                    //malformed
+                    //malformed, no longer reachable?
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE");
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE", {move: submove});
                     return result;
                 }
             }
@@ -1245,9 +1250,9 @@ export class FroggerGame extends GameBase {
                     result.message = i18next.t("apgames:validation.frogger.PLACE_NEXT");
                     return result;
                 } else {
-                    //malformed
+                    //malformed, no longer reachable?
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE");
+                    result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE", {move: submove});
                     return result;
                 }
             }
