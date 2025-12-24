@@ -10,44 +10,91 @@ describe("Frogger", () => {
         // parsing good moves
         expect(g.parseMove("8MS:a3-b3")).to.deep.equal({
             card: "8MS",
-            complete: 1,
             forward: true,
             from: "a3",
+            incomplete: false,
             to: "b3",
-            refill: false
+            refill: false,
+            valid: true
         });
         expect(g.parseMove("c2-b3,8MS")).to.deep.equal({
             card: "8MS",
-            complete: 1,
             forward: false,
             from: "c2",
+            incomplete: false,
             to: "b3",
-            refill: false
+            refill: false,
+            valid: true
         });
         expect(g.parseMove("c2-b3,1M!")).to.deep.equal({
             card: "1M",
-            complete: 1,
             forward: false,
             from: "c2",
+            incomplete: false,
             to: "b3",
-            refill: true
+            refill: true,
+            valid: true
         });
         expect(g.parseMove("c2")).to.deep.equal({
-            complete: -1,
             forward: false,
             from: "c2",
-            refill: false
+            incomplete: true,
+            refill: false,
+            valid: true
         });
-     });
-       
-    it ("Does no validation", () => {
-        expect(g.parseMove("7MS:c5")).to.deep.equal({
-            card: "7MS",
-            complete:-1,
+    });
+
+    it ("Does character validation on parse", () => {
+        expect(g.parseMove("7MSaaa:c5")).to.deep.equal({
+            card: "7MSaaa",
             forward: true,
             from: "c5",
-            refill: false
+            incomplete: true,
+            refill: false,
+            valid: false
         });
+        expect(g.parseMove("7MS:o5-o6!")).to.deep.equal({
+            forward: false,
+            incomplete: false,
+            refill: true,
+            valid: false
+        });
+    });
+
+    it ("Does structural validation on parse", () => {
+        expect(g.parseMove("7MS:m5-m6,6MS!")).to.deep.equal({
+            forward: false,
+            incomplete: false,
+            refill: true,
+            valid: false
+        });
+        expect(g.parseMove("7MS,m5-m6,6MS!")).to.deep.equal({
+            forward: false,
+            incomplete: false,
+            refill: true,
+            valid: false
+        });
+        expect(g.parseMove("7MS:m5-m6:6MS")).to.deep.equal({
+            forward: false,
+            incomplete: false,
+            refill: false,
+            valid: false
+        });
+        expect(g.parseMove("7MS;m5-m6*6MS")).to.deep.equal({
+            forward: false,
+            incomplete: false,
+            refill: false,
+            valid: false
+        });
+        expect(g.parseMove("c2-,1M!")).to.deep.equal({
+            card: "1M",
+            forward: false,
+            from: "c2",
+            incomplete: true,
+            refill: true,
+            valid: false
+        });
+        expect(g.parseMove("c2-,1M!")).to.have.deep.property("valid", false);
     });
 });
 

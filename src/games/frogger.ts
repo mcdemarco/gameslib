@@ -35,12 +35,13 @@ interface ILegendObj {
 }
 
 interface IFrogMove {
-    complete: number;
     forward: boolean;
     card?: string;
     from?: string;
     to?: string;
     refill: boolean;
+    incomplete: boolean;
+    valid: boolean;
 }
 
 export class FroggerGame extends GameBase {
@@ -587,92 +588,116 @@ export class FroggerGame extends GameBase {
 
     public parseMove(submove: string): IFrogMove {
         //Parse a string into an IFrogMove object.
-        //Does not validate move direction, cells, or cards.
+        //Does only structural validation.
 
-        
+        //Because the Excuse does not appear in moves, 
+        // the card format is: 
+        const cardex = /^(\d?[A-Z]{1,2}||[A-Z]{2,4})$/;
+        //The cell format is: 
+        const cellex = /^[a-n][1-5]$/;
+        //A regex to check for illegal characters (except !) is:
+        const illegalChars = /[^A-Za-n1-9:,\-]/;
+
         //The move format is one of:
         // handcard:from-to            a regular move forward
         // from-to,marketcard          a productive move backward
         // from-to,marketcard!         a productive move backward, request refill
         // from-to                     a move backward but no market card taken
-        // marketcard://               a whole (blocked) turn to draw a marketcard
+        // marketcard//                a whole (blocked) turn to draw a marketcard
 
         let mv, from, to, card;
  
         const ifm: IFrogMove = {
-            complete: -2,
+            incomplete: false,
             forward: false,
-            refill: false
+            refill: false,
+            valid: true
         }
 
-        //To ignore the empty move or passes, we leave complete at -2.
+        //To ignore the empty move or passes, we pass out the meaningless defaults.
         if (submove === "" || submove === "pass")
             return ifm;
 
-        
         //Setting refill (in variant with refill button).
         if (submove.indexOf("!") > - 1) {
             submove = submove.split("!")[0];
             ifm.refill = true;
         }
 
-        //Setting card and direction, finding mv.
-        if (submove.indexOf(":") > -1) {
+        //Check for legal characters, after trimming the single legal !.
+        if (illegalChars.test(submove)) {
+            ifm.valid = false;
+            return ifm;
+        }
+
+        //A partial move that can't be submitted is set to incomplete.
+
+        //Next, split the string on card punctuation:
+        if (submove.split(/:|,/).length > 2 || submove.split("-").length > 2) {
+            console.log("malformed move string");
+            ifm.valid = false;
+        } else if (submove.indexOf(":") > -1) {
             //Card followed by move is a forward move.
             [card, mv] = submove.split(":");
             ifm.card = card;
             ifm.forward = true;
-            //ifm.complete = -1 or 1, pending parse of mv.
+            //may be incomplete depending on parse of to.
         } else if (submove.indexOf(",") > -1) {
             //Move followed by card is a backwards move.
             [mv, card] = submove.split(",");
             if (card) {
                 ifm.card = card;
-                ifm.complete = 1;
-            } else {
-                ifm.complete = 0;
             }
+            //In this case mv is required, so check it now.
+            if ( !mv || mv.split("-").length < 2 || mv.split("-").indexOf("") > -1 )
+                ifm.valid = false;
         } else if (submove.indexOf("-") > -1) {
             //Raw move is a unproductive or partial backwards move.
             mv = submove;
-            //ifm.complete = -1 or 0 depending on parse of to.
+            //may be incomplete depending on parse of to.
         } else if (/\d/.test(submove.charAt(1))) {
             //A cell has a second digit that's numeric; a card wouldn't.
             mv = submove;
             //From alone is a partial move so...
-            ifm.complete = -1;
+            ifm.incomplete = true;
         } else {
             //... or a card.  A card alone is a blocked move or a partial move.
             ifm.card = submove;
             mv = "";
-            //We aren't validating here so give it the benefit of the doubt.
-            ifm.complete = 0;
+            //We aren't validating here so give it the benefit of the doubt and don't mark incomplete.
         }
 
         //Setting from, to, and remaining completes.
         if (mv) {
             [from, to] = mv.split("-");
             ifm.from = from;
-            if (to) {
+            if (to)
                 ifm.to = to;
-                if (ifm.complete < -1) {
-                    if (ifm.card)
-                        ifm.complete = 1;
-                    else
-                        ifm.complete = 0;
-                }
-            } else {
-                ifm.complete = -1;
-            }
+            else 
+                ifm.incomplete = true;
         } else {
             //If we were waiting to parse a move, we didn't find it.
-            if (ifm.complete < -1)
-                ifm.complete = -1;
+            if (ifm.forward === true)
+                ifm.incomplete = true;
+            //else if (ifm.forward === false && ifm.card)
         }
 
+        if (ifm.card && !cardex.test(ifm.card)) {
+            console.log("malformed card ",ifm.card);
+            ifm.valid = false;
+        }
+        if (ifm.from && !cellex.test(ifm.from)) {
+            console.log("malformed cell ",ifm.from);
+            ifm.valid = false;
+        }
+        if (ifm.to && !cellex.test(ifm.to)) {
+            console.log("malformed cell ",ifm.to);
+            ifm.valid = false;
+        }
+        
         return ifm;
     }
-    
+
     private popCrocs(): string[][] {
         //Moves the crocodiles and their victims.
         //Returns a list of the victims for logging and rendering.
@@ -1005,7 +1030,7 @@ export class FroggerGame extends GameBase {
                         //picked the target but not a market card.
                         newmove = `${move}${cell}`;
                     }
-                } else if (currIFM.complete > -1 && !isLastMove) {
+                } else if (currIFM.incomplete === false && !isLastMove) { //complete > -1 && !isLastMove) {
                     //Finished a hop forward or an unproductive hop back,
                     // so can start a new move (back).
                     newmove = `${move}/${cell}-`;
