@@ -1173,11 +1173,11 @@ export class FroggerGame extends GameBase {
                     result.valid = false;
                     result.message = i18next.t("apgames:validation._general.INVALID_NON-MOVE");
                     return result;
-                } else if ( s === 2 ) {//refilling only happens in the original 3-move sequence.
+                } else if ( s === 2 ) {//refilling only happens in the original 3-move sequence, before the third move.
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.TOO_LATE_FOR_REFILL");
                     return result;
-                } else if ( s < moves.length - 1 ) {
+                } else if ( s < moves.length - 1 ) {//refill request needs to end the sequence
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.TOO_EARLY_FOR_REFILL");
                     return result;
@@ -1193,7 +1193,7 @@ export class FroggerGame extends GameBase {
             //Check cards.
             //(There is a case remaining with no card.)
             if (subIFM.card) {
-                if (subIFM.forward && cloned.closedhands[cloned.currplayer - 1].concat(cloned.hands[cloned.currplayer - 1]).indexOf(subIFM.card!) < 0 ) {
+               if (subIFM.forward && (cloned.closedhands[cloned.currplayer - 1].concat(cloned.hands[cloned.currplayer - 1])).indexOf(subIFM.card!) < 0 ) {                    
                     //Bad hand card.
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.NO_SUCH_HAND_CARD", {card: subIFM.card});
@@ -1333,6 +1333,8 @@ export class FroggerGame extends GameBase {
                 //Card adjustments.
                 if (subIFM.forward) {
                     cloned.popHand(subIFM.card!);
+                    //console.log(subIFM.card, " in ", cloned.hands[cloned.currplayer - 1] , cloned.closedhands[cloned.currplayer - 1]);
+
                     //Also pop other frogs if it's a crown or ace.
                     cloned.moveNeighbors(subIFM.to,subIFM.card!);
                 } else if (subIFM.card) {

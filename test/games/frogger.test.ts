@@ -5,7 +5,7 @@ import { expect } from "chai";
 import { FroggerGame } from '../../src/games';
 
 describe("Frogger", () => {
-    const g = new FroggerGame(2);
+    let g = new FroggerGame(2);
     it ("Parses single moves", () => {
         // parsing good moves
         expect(g.parseMove("8MS:a3-b3")).to.deep.equal({
@@ -106,6 +106,43 @@ describe("Frogger", () => {
         expect(g.validateMove("8MS:f2-g4")).to.have.deep.property("valid", false);
         //Cells a5-n5 are off the board.
         expect(g.validateMove("8MS:f2-g5")).to.have.deep.property("valid", false);
+  /*      //Structural issue with a refill request (default refill variant on).
+        expect(g.validateMove("f2-e3,1M!//")).to.have.deep.property("valid", false);
+        //Structural issue with a refill request (default refill variant on).
+        expect(g.validateMove("f2-e3,1M!/e3-b1,2MK")).to.have.deep.property("valid", false);
+        //Structural issue with a refill request (default refill variant on).
+        expect(g.validateMove("f2-e3,1M!")).to.have.deep.property("valid", false);*/
     });
+
+    g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":[],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-27T20:25:46.174Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PVLY"],["c4","4YK"],["d4","2MK"],["e4","9VY"],["f4","7VY"],["g4","PMYK"],["h4","5YK"],["i4","6MV"],["j4","PSVK"],["k4","PMSL"],["l4","NV"],["m4","1L"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["4VL","2SY","1Y","8YK"],["NY","6SY","1K","5ML"]],"hands":[[],[]],"market":["6LK","3MV","1S","1V","7SK","9LK"],"discards":[],"nummoves":3}]}`);
+
+    it ("Handles multi-part moves", () => {
+        expect(g.validateMove("8YK:a3-c2/c2-b2,1S/b2-a3,7MK/")).to.have.deep.property("valid", false);  //Not a real card.
+        expect(g.validateMove("8YK:a3-c2/c2-d2,1S/b2-a3,7SK/")).to.have.deep.property("valid", false);  //Wrong direction.
+        expect(g.validateMove("8YK:a3-c2/c2-b2,1S!/b2-a3,7SK/")).to.have.deep.property("valid", false); //Can't refill.
+        expect(g.validateMove("8YK:a3-c2/c2-b2,1S/b2-a3,7SK/")).to.have.deep.property("valid", true);   //A legal sequence.
+        g.move("8YK:a3-c2/c2-b2,1S/b2-a3,7SK/");
+        expect(g.validateMove("8YK:a3-c2/c2-b2,1S/b2-a3,7SK/")).to.have.deep.property("valid", false);  //No longer legal.
+
+        expect(g.validateMove("6SY:a2-j3/1K:j3-n2!/")).to.have.deep.property("valid", false); //Can't refill.
+        expect(g.validateMove("6SY:a2-j3/1K:j3-n1/")).to.have.deep.property("valid", false);  //Other player's home invasion.
+        expect(g.validateMove("6SY:a2-j3/1K:j3-p2/")).to.have.deep.property("valid", false);  //Off the board.
+        expect(g.validateMove("6SY:a2-j3/1K:j3-n0/")).to.have.deep.property("valid", false);  //Offsides.
+        expect(g.validateMove("6SY:a2-j3/1K:j3-n2/")).to.have.deep.property("valid", true);   //A legal sequence.
+        g.move("6SY:a2-j3/1K:j3-n2/");
+        expect(g.validateMove("6SY:a2-j3/1K:j3-n2/")).to.have.deep.property("valid", false);  //No longer legal.
+
+        expect(g.validateMove("2SY:a3-j3/NY:j3-n3/1S:a3-j3/")).to.have.deep.property("valid", false);  //Steal other player's card.
+        expect(g.validateMove("2SY:a3-j3/4VL:j3-n3/1S:a3-j3/")).to.have.deep.property("valid", false); //Use own wrong card.
+        expect(g.validateMove("2SY:a3-j3/2SY:j3-n3/1S:a3-j3/")).to.have.deep.property("valid", false); //Steal own discard.
+        expect(g.validateMove("2SY:a3-j3/6SY:j3-n3/1S:a3-j3/")).to.have.deep.property("valid", false); //Steal other discard.
+        expect(g.validateMove("2SY:a3-j3/NY:j3-n3/1S:a3-j3/")).to.have.deep.property("valid", false); //Steal deck card.
+        expect(g.validateMove("2SY:a3-j3/1Y:j3-n3/3SK:a3-j3/")).to.have.deep.property("valid", false); //Steal another deck card.
+        expect(g.validateMove("2SY:a3-j3/1Y:j3-n3/1S:a3-j3/")).to.have.deep.property("valid", true);   //A legal sequence.
+        g.move("2SY:a3-j3/1Y:j3-n3/1S:a3-j3/");
+        expect(g.validateMove("2SY:a3-j3/1Y:j3-n3/1S:a3-j3/")).to.have.deep.property("valid", false);  //No longer legal.
+  
+     });
+   
 });
 
