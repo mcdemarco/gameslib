@@ -206,38 +206,56 @@ describe("Frogger", () => {
     });
 
   
-    it ("Goes chomp correctly", () => {
+    it ("Goes chomp and refills a continuous market correctly", () => {
         const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["crocodiles","continuous"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-28T02:33:17.187Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PMSL"],["b3","X0"],["c4","PSVK"],["c3","X0"],["d4","NV"],["e4","PVLY"],["e3","X0"],["f4","9VY"],["g4","8MS"],["h4","PMYK"],["h3","X0"],["i4","NL"],["j4","1Y"],["k4","2MK"],["l4","2VL"],["m4","8VL"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["1M","7SK","1L","1K"],["5SV","4MS","3MV","9LK"]],"hands":[[],[]],"market":["6SY","6LK","4VL"],"discards":[],"nummoves":3}]}`);
         expect(g.board.get("b3")).to.equal("X0");
         expect(g.board.get("c3")).to.equal("X0");
         expect(g.board.get("e3")).to.equal("X0");
         expect(g.board.get("h3")).to.equal("X0");
+        expect(g.market.length).to.equal(3);
 
         expect(g.validateMove("1M:a3-g3/g3-f3,6LK/6LK:f3-i3/")).to.have.deep.property("valid", true); //A legal sequence.
         g.move("1M:a3-g3/g3-f3,6LK/6LK:f3-i3/");
         expect(g.board.get("b3")).to.equal("X0"); //Crocodiles haven't moved.
+        expect(g.market.length).to.equal(3);
 
         expect(g.board.get("a2")).to.equal("X2-6");
         expect(g.validateMove("5SV:a2-c2/")).to.have.deep.property("valid", true); //About to get chomped.
         g.move("5SV:a2-c2/");
         //expect(g.board.get("a2")).to.equal("X2-5");  //The move happens, but too fast to test before chomping.
-        expect(g.board.get("b2")).to.equal("X0"); //Crocodiles have moved.
+        expect(g.board.get("b2")).to.equal("X0"); //Crocodiles have moved.  End of round 1.
         expect(g.board.get("c2")).to.equal("X0");
         expect(g.board.get("e2")).to.equal("X0");
         expect(g.board.get("h2")).to.equal("X0");
         expect(g.board.get("a2")).to.equal("X2-6");  //Chomped frog is back where we started.
+        expect(g.market.length).to.equal(3);
 
-        //Cycle through random moves.
+        //Cycle croc and possibly market using random moves.
         g.move(g.randomMove());
         expect(g.board.get("c2")).to.equal("X0"); //Crocodiles haven't moved.
+        expect(g.market.length).to.equal(3);
+
         g.move(g.randomMove());
-        expect(g.board.get("c1")).to.equal("X0"); //Crocodiles have moved.
+        expect(g.board.get("c1")).to.equal("X0"); //Crocodiles have moved.   End of round 2.
+        expect(g.market.length).to.equal(3);
         
-        //Cycle through random moves.
+        //Cycle crocs to top and possibly market using random moves.
         g.move(g.randomMove());
         expect(g.board.get("e1")).to.equal("X0"); //Crocodiles haven't moved.
+        expect(g.market.length).to.equal(3);
+
         g.move(g.randomMove());
-        expect(g.board.get("e3")).to.equal("X0"); //Crocodiles have moved.
+        expect(g.board.get("e3")).to.equal("X0"); //Crocodiles have moved.   End of round 3.
+        expect(g.market.length).to.equal(3);
+        
+        //One more cycle of crocs and possibly market using random moves.  
+        g.move(g.randomMove());
+        expect(g.board.get("h3")).to.equal("X0"); //Crocodiles haven't moved.
+        expect(g.market.length).to.equal(3);
+
+        g.move(g.randomMove());
+        expect(g.board.get("h2")).to.equal("X0"); //Crocodiles have moved.   End of round 4.
+        expect(g.market.length).to.equal(3);
         
     });
 
