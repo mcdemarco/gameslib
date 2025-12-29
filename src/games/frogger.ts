@@ -49,8 +49,8 @@ export class FroggerGame extends GameBase {
         name: "Frogger",
         uid: "frogger",
         playercounts: [2,3,4,5],
-        version: "20251220",
-        dateAdded: "2025-12-20",
+        version: "20251229",
+        dateAdded: "2025-12-29",
         // i18next.t("apgames:descriptions.frogger")
         description: "apgames:descriptions.frogger",
         // i18next.t("apgames:notes.frogger")
