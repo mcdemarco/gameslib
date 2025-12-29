@@ -68,9 +68,9 @@ describe("Frogger", () => {
         expect(g.parseMove("7MS:m5-m6,6MS!")).to.have.deep.property("valid", false);
         expect(g.parseMove("7MS,m5-m6,6MS!")).to.have.deep.property("valid", false);
         expect(g.parseMove("7MS:m5-m6:6MS")).to.have.deep.property("valid", false);
-        expect(g.parseMove("7MS;m5*m6")).to.have.deep.property("valid", false);            
-        expect(g.parseMove("7MS;m5-n6")).to.have.deep.property("valid", false);            
-        expect(g.parseMove("7MS-m5")).to.have.deep.property("valid", false);            
+        expect(g.parseMove("7MS;m5*m6")).to.have.deep.property("valid", false);
+        expect(g.parseMove("7MS;m5-n6")).to.have.deep.property("valid", false);
+        expect(g.parseMove("7MS-m5")).to.have.deep.property("valid", false);
         expect(g.parseMove("c2-,1M!")).to.have.deep.property("valid", false);
         expect(g.parseMove("c2,1M!")).to.have.deep.property("valid", false);
         expect(g.parseMove("c2-d2-e2")).to.have.deep.property("valid", false);
@@ -93,9 +93,9 @@ describe("Frogger", () => {
         expect(g.validateMove("8MS:m2-n3,9MS!")).to.have.deep.property("valid", false);
         expect(g.validateMove("8MS,m2-n3,9MS!")).to.have.deep.property("valid", false);
         expect(g.validateMove("8MS:m2-n3:9MS")).to.have.deep.property("valid", false);
-        expect(g.validateMove("8MS;m2*n3")).to.have.deep.property("valid", false);            
-        expect(g.validateMove("8MS;m2-n3")).to.have.deep.property("valid", false);            
-        expect(g.validateMove("8MS-m5")).to.have.deep.property("valid", false);            
+        expect(g.validateMove("8MS;m2*n3")).to.have.deep.property("valid", false);
+        expect(g.validateMove("8MS;m2-n3")).to.have.deep.property("valid", false);
+        expect(g.validateMove("8MS-m5")).to.have.deep.property("valid", false);
         expect(g.validateMove("c2-,1M!")).to.have.deep.property("valid", false);
         expect(g.validateMove("c2,1M!")).to.have.deep.property("valid", false);
         expect(g.validateMove("c2-d2-e2")).to.have.deep.property("valid", false);
@@ -111,12 +111,12 @@ describe("Frogger", () => {
         expect(g.validateMove("8MS:f2-g4")).to.have.deep.property("valid", false);
         //Cells a5-n5 are off the board.
         expect(g.validateMove("8MS:f2-g5")).to.have.deep.property("valid", false);
-  /*      //Structural issue with a refill request (default refill variant on).
-        expect(g.validateMove("f2-e3,1M!//")).to.have.deep.property("valid", false);
-        //Structural issue with a refill request (default refill variant on).
-        expect(g.validateMove("f2-e3,1M!/e3-b1,2MK")).to.have.deep.property("valid", false);
-        //Structural issue with a refill request (default refill variant on).
-        expect(g.validateMove("f2-e3,1M!")).to.have.deep.property("valid", false);*/
+        /*      //Structural issue with a refill request (default refill variant on).
+                expect(g.validateMove("f2-e3,1M!//")).to.have.deep.property("valid", false);
+                //Structural issue with a refill request (default refill variant on).
+                expect(g.validateMove("f2-e3,1M!/e3-b1,2MK")).to.have.deep.property("valid", false);
+                //Structural issue with a refill request (default refill variant on).
+                expect(g.validateMove("f2-e3,1M!")).to.have.deep.property("valid", false);*/
     });
 
     it ("Handles multi-part moves", () => {
@@ -149,11 +149,11 @@ describe("Frogger", () => {
     });
 
     it ("Handles the blocked position", () => {
-       const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":[],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-27T20:25:46.174Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PVLY"],["c4","4YK"],["d4","2MK"],["e4","9VY"],["f4","7VY"],["g4","PMYK"],["h4","5YK"],["i4","6MV"],["j4","PSVK"],["k4","PMSL"],["l4","NV"],["m4","1L"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["4VL","2SY","1Y","8YK"],["NY","6SY","1K","5ML"]],"hands":[[],[]],"market":["6LK","3MV","1S","1V","7SK","9LK"],"discards":[],"nummoves":3}]}`);
+        const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":[],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-27T20:25:46.174Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PVLY"],["c4","4YK"],["d4","2MK"],["e4","9VY"],["f4","7VY"],["g4","PMYK"],["h4","5YK"],["i4","6MV"],["j4","PSVK"],["k4","PMSL"],["l4","NV"],["m4","1L"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["4VL","2SY","1Y","8YK"],["NY","6SY","1K","5ML"]],"hands":[[],[]],"market":["6LK","3MV","1S","1V","7SK","9LK"],"discards":[],"nummoves":3}]}`);
         g.move("8YK:a3-c2/c2-b2,1S/b2-a3,7SK/");
         g.move("6SY:a2-j3/1K:j3-n2/");
         g.move("2SY:a3-j3/1Y:j3-n3/1S:a3-j3/");
-  
+        
         //Some setup to block player 1.
         expect(g.validateMove("5ML:a2-d3")).to.have.deep.property("valid", true);   //A legal sequence.
         g.move("5ML:a2-d3");
@@ -180,12 +180,12 @@ describe("Frogger", () => {
         expect(g.validateMove("1V")).to.have.deep.property("valid", true);     //A legal sequence (market card).
         g.move("1V");
 
-        expect(g.validateMove("3MV//")).to.have.deep.property("valid", false);   //Player 2 isn't blocked.
+        expect(g.validateMove("3MV//")).to.have.deep.property("valid", false); //Player 2 isn't blocked.
         
-    });
+    }); 
     
     it ("Enacts a double bounce", () => {
-       const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":[],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-27T20:25:46.174Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PVLY"],["c4","4YK"],["d4","2MK"],["e4","9VY"],["f4","7VY"],["g4","PMYK"],["h4","5YK"],["i4","6MV"],["j4","PSVK"],["k4","PMSL"],["l4","NV"],["m4","1L"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["4VL","2SY","1Y","8YK"],["NY","6SY","1K","5ML"]],"hands":[[],[]],"market":["6LK","3MV","1S","1V","7SK","9LK"],"discards":[],"nummoves":3}]}`);
+        const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":[],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-27T20:25:46.174Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PVLY"],["c4","4YK"],["d4","2MK"],["e4","9VY"],["f4","7VY"],["g4","PMYK"],["h4","5YK"],["i4","6MV"],["j4","PSVK"],["k4","PMSL"],["l4","NV"],["m4","1L"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["4VL","2SY","1Y","8YK"],["NY","6SY","1K","5ML"]],"hands":[[],[]],"market":["6LK","3MV","1S","1V","7SK","9LK"],"discards":[],"nummoves":3}]}`);
         g.move("8YK:a3-c2/c2-b2,1S/b2-a3,7SK/");
         g.move("6SY:a2-j3/1K:j3-n2/");
         g.move("2SY:a3-j3/1Y:j3-n3/1S:a3-j3/");
@@ -195,7 +195,7 @@ describe("Frogger", () => {
         g.move("1V");
         
         //set up the bounce
-        expect(g.validateMove("d3-c3,3MV/c3-b2")).to.have.deep.property("valid", true);  
+        expect(g.validateMove("d3-c3,3MV/c3-b2")).to.have.deep.property("valid", true);
         g.move("d3-c3,3MV/c3-b2");
 
         //Check 
@@ -204,9 +204,8 @@ describe("Frogger", () => {
         g.move("1V:a3-b3/");
         expect(g.board.get("a2")).to.equal("X2-5");
     });
-
-  
-    it ("Goes chomp and refills a continuous market correctly", () => {
+    
+    it ("Goes chomp and refills a continuous market (variants)", () => {
         const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["crocodiles","continuous"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-28T02:33:17.187Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PMSL"],["b3","X0"],["c4","PSVK"],["c3","X0"],["d4","NV"],["e4","PVLY"],["e3","X0"],["f4","9VY"],["g4","8MS"],["h4","PMYK"],["h3","X0"],["i4","NL"],["j4","1Y"],["k4","2MK"],["l4","2VL"],["m4","8VL"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["1M","7SK","1L","1K"],["5SV","4MS","3MV","9LK"]],"hands":[[],[]],"market":["6SY","6LK","4VL"],"discards":[],"nummoves":3}]}`);
         expect(g.board.get("b3")).to.equal("X0");
         expect(g.board.get("c3")).to.equal("X0");
@@ -256,10 +255,71 @@ describe("Frogger", () => {
         g.move(g.randomMove());
         expect(g.board.get("h2")).to.equal("X0"); //Crocodiles have moved.   End of round 4.
         expect(g.market.length).to.equal(3);
-        
+
     });
 
+    it ("Implements basic suit movement rules", () => {
+        const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["courts","#market"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-29T03:38:17.329Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","7VY"],["c4","PVLY"],["d4","PMSL"],["e4","2MK"],["f4","3LY"],["g4","PMYK"],["h4","5ML"],["i4","8YK"],["j4","NY"],["k4","PSVK"],["l4","1L"],["m4","6MV"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["TSLK","NM","9LK","TMLY"],["9MS","7SK","1K","2VL"]],"hands":[[],[]],"market":["NS","3SK","TMVK","5YK","TSVY","NV"],"discards":[],"nummoves":3}]}`);
+
+        //Can move to first occurrence of only suit.
+        expect(g.validateMove("NM:a3-d3")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of only suit.
+        expect(g.validateMove("NM:a3-e3")).to.have.deep.property("valid", false);
+
+        //Can move to first occurrence of first suit.
+        expect(g.validateMove("9LK:a3-c2")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of first suit.
+        expect(g.validateMove("9LK:a3-d1")).to.have.deep.property("valid", false);
+        //Can move to first occurrence of second suit.
+        expect(g.validateMove("9LK:a3-e2")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of second suit.
+        expect(g.validateMove("9LK:a3-i2")).to.have.deep.property("valid", false);
+
+        //Can move to first occurrence of first suit.
+        expect(g.validateMove("TSLK:a3-d2")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of first suit.
+        expect(g.validateMove("TSLK:a3-k3")).to.have.deep.property("valid", false);
+        //Can move to first occurrence of second suit.
+        expect(g.validateMove("TSLK:a3-c2")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of second suit.
+        expect(g.validateMove("TSLK:a3-d1")).to.have.deep.property("valid", false);
+        //Can move to first occurrence of third suit.
+        expect(g.validateMove("TSLK:a3-e2")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of third suit.
+        expect(g.validateMove("TSLK:a3-k1")).to.have.deep.property("valid", false);
+
+    });
+
+    it ("Implements advanced suit movement rules", () => {
+        const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["advanced","courts"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-29T04:01:17.728Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PSVK"],["c4","PMYK"],["d4","9LK"],["e4","7VY"],["f4","9VY"],["g4","NL"],["h4","PMSL"],["i4","9MS"],["j4","5ML"],["k4","PVLY"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["6LK","8YK","TMLY","1L"],["8MS","7SK","NM","5SV"]],"hands":[[],[]],"market":["NK","1Y","2VL","NV","NS","1K"],"discards":[],"nummoves":3}]}`);
+
+        //Can move to first occurrence of only suit. (Ace/Crown rule unchanged.)
+        expect(g.validateMove("1L:a3-d3")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of only suit.
+        expect(g.validateMove("1L:a3-h1")).to.have.deep.property("valid", false);  //TODO: better message?
+
+        //Can move to first occurrence of the first occuring suit.
+        expect(g.validateMove("6LK:a3-b1")).to.have.deep.property("valid", true);
+        //Can't move to first occurrence of the other suit.
+        expect(g.validateMove("6LK:a3-d3")).to.have.deep.property("valid", false);
+        //Can't move to subsequent occurrences of first suit.
+        expect(g.validateMove("6LK:a3-g3")).to.have.deep.property("valid", false);
+        //Can't move to subsequent occurrences of second suit.
+        expect(g.validateMove("6LK:a3-d2")).to.have.deep.property("valid", false);
+
+        //Can move to first occurrence of first suit. (Pawn/Court rule unchanged.)
+        expect(g.validateMove("TMLY:a3-c3")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of first suit.
+        expect(g.validateMove("TMLY:a3-h3")).to.have.deep.property("valid", false);
+        //Can move to first occurrence of second suit.
+        expect(g.validateMove("TMLY:a3-d3")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of second suit.
+        expect(g.validateMove("TMLY:a3-h1")).to.have.deep.property("valid", false);
+        //Can move to first occurrence of third suit.
+        expect(g.validateMove("TMLY:a3-c2")).to.have.deep.property("valid", true);
+        //Can't move to subsequent occurrences of third suit.
+        expect(g.validateMove("TMLY:a3-k1")).to.have.deep.property("valid", false);
+
+    });
     
-
 });
-

@@ -1191,7 +1191,7 @@ export class FroggerGame extends GameBase {
                 complete = true;
 
             //Check cards.
-            //(There is a case remaining with no card.)
+            //(The case remaining with no card is falling back at no profit.)
             if (subIFM.card) {
                if (subIFM.forward && (cloned.closedhands[cloned.currplayer - 1].concat(cloned.hands[cloned.currplayer - 1])).indexOf(subIFM.card!) < 0 ) {                    
                     //Bad hand card.
@@ -1208,14 +1208,14 @@ export class FroggerGame extends GameBase {
 
             //Check moves.
             //There is no case remaining without moves, except partials.
-            if ( !subIFM.from ) {
-                if (!complete) {
+            if ( ! subIFM.from ) {
+                if ( ! complete ) {
                     result.valid = true;
                     result.complete = -1;
                     result.message = i18next.t("apgames:validation.frogger.PIECE_NEXT");
                     return result;
                 } else {
-                    //malformed, no longer reachable?
+                    //Reachable if an unblocked player submits the blocked move.
                     result.valid = false;
                     result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE", {move: submove});
                     return result;
@@ -1243,17 +1243,15 @@ export class FroggerGame extends GameBase {
                 return result;
             }
 
-            if (!subIFM.to ) {
-                if (!complete) {
+            if ( ! subIFM.to ) {
+                if ( ! complete ) {
                     result.valid = true;
                     result.complete = -1;
                     result.message = i18next.t("apgames:validation.frogger.PLACE_NEXT");
                     return result;
                 } else {
-                    //malformed, no longer reachable?
-                    result.valid = false;
-                    result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE", {move: submove});
-                    return result;
+                    //malformed, no longer reachable.
+                    throw new Error("Received malformed IFMove from parser.  This should never happen!");
                 }
             }
 
@@ -1792,7 +1790,7 @@ export class FroggerGame extends GameBase {
         const hands = this.hands.map(h => [...h]);
         const visibleCards = [...this.getBoardCards(), ...hands.flat(), ...this.market, ...this.discards].map(uid => Card.deserialize(uid));
         if (visibleCards.includes(undefined)) {
-            throw new Error(`Could not deserialize one of the cards. This should never happen!`);
+            throw new Error("Could not deserialize one of the cards. This should never happen!");
         }
         const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "c" + c.uid) as [string, ...string[]]
         if (remaining.length > 0) {
