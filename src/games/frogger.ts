@@ -1171,7 +1171,7 @@ export class FroggerGame extends GameBase {
             if (subIFM.refill) {
                 if (! cloned.variants.includes("refills") ) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.INVALID_NON-MOVE");
+                    result.message = i18next.t("apgames:validation.frogger.NO_REFILLS");
                     return result;
                 } else if ( s === 2 ) {//refilling only happens in the original 3-move sequence, before the third move.
                     result.valid = false;

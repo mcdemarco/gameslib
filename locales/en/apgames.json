@@ -4079,6 +4079,7 @@
             "NO_CHOICE_BLOCKED": "If, at the start of your turn, you have no hand cards and none of your frogs can move back, you must draw a single card from the market and end your turn.",
             "NO_MOVE_BLOCKED": "You cannot move after claiming a card for being blocked.",
             "NO_PASSING": "There is no passing as such in Frogger.  If you are blocked, you must draw a single card from the market.",
+            "NO_REFILLS": "Refilling the market is not allowed in this variant.",
             "NO_RETURN": "Frogs may not leave home once they've reached it.",
             "NO_SUCH_HAND_CARD": "The card \"{{card}}\" does not appear to be in your hand.",
             "NO_SUCH_MARKET_CARD": "The card \"{{card}}\" does not appear to be in the market.",
