@@ -596,7 +596,7 @@ export class FroggerGame extends GameBase {
         //The cell format is: 
         const cellex = /^[a-n][1-5]$/;
         //A regex to check for illegal characters (except !) is:
-        const illegalChars = /[^A-Za-n1-9:,\-]/;
+        const illegalChars = /[^A-Za-n1-9:,-]/;
 
         //The move format is one of:
         // handcard:from-to            a regular move forward
@@ -1130,7 +1130,7 @@ export class FroggerGame extends GameBase {
         }
 
         for (let s = 0; s < moves.length; s++) {
-            let submove = moves[s];
+            const submove = moves[s];
 
             const subIFM = cloned.parseMove(submove);
             if (subIFM.valid === false) {
@@ -1390,7 +1390,7 @@ export class FroggerGame extends GameBase {
             const moves = m.split("/");
         
             for (let s = 0; s < moves.length; s++) {
-                let submove = moves[s];
+                const submove = moves[s];
                 if ( submove === "" )
                     continue;
                 
@@ -1530,6 +1530,7 @@ export class FroggerGame extends GameBase {
             state.stack = state.stack.map(mstate => {
                 for (let p = 1; p <= this.numplayers; p++) {
                     if (p === opts.player) { continue; }
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
                     mstate.closedhands[p-1] = mstate.closedhands[p-1].map(c => "");
                 }
                 return mstate;
