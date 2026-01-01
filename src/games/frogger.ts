@@ -77,7 +77,8 @@ export class FroggerGame extends GameBase {
             { uid: "crocodiles" }, //see the comments on the Decktet Wiki
             { uid: "courts" }, //include courts in the draw deck
             { uid: "courtpawns" }, //courts for pawns
-            { uid: "#market" }, //i.e., no refills
+            { uid: "freeswim" }, //no check on market card claims
+            { uid: "#market" }, //Now called the draw pool.  The base setting is no refills.
             { uid: "refills", group: "market", default: true }, //the official rule
             { uid: "continuous", group: "market" }, //continuous small refills
         ],
@@ -371,6 +372,18 @@ export class FroggerGame extends GameBase {
         return (options.indexOf(to) > -1);
     }
 
+    private checkWhiteMarket(card: string, to: string): boolean {
+        const toX = this.algebraic2coords(to)[0];
+        if ( toX === 0 || this.variants.includes("freeswim") ) {
+            // When backing up to start you can pick any market card.
+            return true;
+        }
+
+        const suit = this.suitboard.get(to)!;
+        const suits = this.getSuits(card, "validateMove");
+        return ( suits.indexOf(suit) === -1 )
+    }
+
     private countColumnFrogs(home?: boolean): number {
         //Returns number of currplayer's frogs in the start (false/undefined) or home (true) column.
         let col = 0;
@@ -470,6 +483,26 @@ export class FroggerGame extends GameBase {
             return [to1];
         else
             return [to2];
+    }
+
+    private getWhiteMarket(to: string): string[] {
+        //Returns a list of available market cards given a frog destination.
+        const toX = this.algebraic2coords(to)[0];
+        if ( toX === 0 || this.variants.includes("freeswim") ) {
+            //Unrestricted choice.
+            return this.market.slice();
+        }
+
+        const suit = this.suitboard.get(to);
+        const whiteMarket: string[] = [];
+        //Suit check.
+        this.market.forEach(card => {
+            const suits = this.getSuits(card, "randomMove (backward)");
+            if (suits.indexOf(suit!) < 0)
+                whiteMarket.push(card);
+        });
+        
+        return whiteMarket;
     }
 
     private getSuits(cardId: string, callerInfo: string): string[] {
@@ -888,32 +921,15 @@ export class FroggerGame extends GameBase {
 
             const toArray = this.getNextBack(from);
             const to = this.randomElement(toArray);
-            const toX = this.algebraic2coords(to)[0];
-            let card;
-            if (toX === 0) {
-                //Can choose any market card.
-                card = this.randomElement(this.market);
-            } else {
-                //Filter the market by the forbidden suit.
-                const suit = this.suitboard.get(to);
-                const whiteMarket: string[] = [];
-                //Suit check for random market pick.
-                this.market.forEach(card => {
-                    const suits = this.getSuits(card, "randomMove (backward)");
-                    if (suits.indexOf(suit!) < 0)
-                        whiteMarket.push(card);
-                });
 
-                if (whiteMarket.length > 0)
-                    card = this.randomElement(whiteMarket);
-            }
-
-            if ( card )
+            const whiteMarket = this.getWhiteMarket(to);
+            if (whiteMarket.length > 0) {
+                const card = this.randomElement(whiteMarket);
                 return `${from}-${to},${card}`;
-            else
+            } else {
                 return `${from}-${to}`;
+            }
         }
-
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
@@ -1315,24 +1331,17 @@ export class FroggerGame extends GameBase {
                     result.message = i18next.t("apgames:validation.frogger.INVALID_HOP_BACKWARD");
                     return result;
                 }
-                if (toX > 0 && subIFM.card) {
-                    const suit = cloned.suitboard.get(subIFM.to)!;
-                    //Suit check on moving backward in validateMove.
-                    const suits = cloned.getSuits(subIFM.card, "validateMove");
-                    if (suits.indexOf(suit) > -1) {
+                if (subIFM.card) {
+                    // We already checked it was in the market.
+                    // Suit check on moving backward.
+                    if ( !cloned.checkWhiteMarket(subIFM.card, subIFM.to) ) {
                         result.valid = false;
                         result.message = i18next.t("apgames:validation.frogger.INVALID_MARKET_CARD");
                         return result;
                     } else {
-                        // If we have a card, a move back is complete.
+                        // If we have a valid card, a move back is complete.
                         complete = true;
                     }
-                } else if (subIFM.card) {
-                    // When backing up to start you can pick any market card.
-                    // We already checked it was in the market.
-                    
-                    // If we have a card, a move back is complete.
-                    complete = true;
                 } else if (!complete && cloned.market.length > 0) {
                     // No card.  May be a partial move, or can back up without a card.
                     result.valid = true;

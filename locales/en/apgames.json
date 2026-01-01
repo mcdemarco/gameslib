@@ -1185,6 +1185,10 @@
 		"description": "Add hungry crocodiles to the pawn cards.  Crocodiles advance at the end of each round, sending any frog on their new space back to the Excuse.  This variant is intended for a two-player game, but you may add crocodiles at any player count.",
                 "name": "Crocodiles"
             },
+            "freeswim": {
+		"description": "There is no restriction on cards drawn from the draw pool.",
+                "name": "Free swim"
+            },
             "refills": {
 		"description": "The draw pool may be refilled during a player's turn, by splitting their actions over two turns.",
                 "name": "Refills"
