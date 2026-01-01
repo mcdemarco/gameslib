@@ -113,7 +113,8 @@ export class FroggerGame extends GameBase {
     private marketsize: number = 6;
     private deck!: Deck;
     private suitboard!: Map<string, string>;
-    private selected: string[] = [];
+    private _highlight: string[] = [];
+    private _points: string[] = [];
 
     constructor(state: number | IFroggerState | string, variants?: string[]) {
         super();
@@ -485,6 +486,25 @@ export class FroggerGame extends GameBase {
             return [to2];
     }
 
+    private getNextForwardsForCard(from: string, cardId: string): string[] {
+        //Generates forward points for the renderer.
+        let points: string[] = [];
+        const card = Card.deserialize(cardId);
+        if (card === undefined) {
+            throw new Error(`Could not deserialize the card ${cardId} in getNextForwardsFromCard.`);
+        }
+        const suits = card.suits.map(s => s.uid);
+
+        if (this.variants.includes("advanced") && card.rank.uid !== this.courtrank) {
+            points = this.getNextForwardAdvanced(from, suits);
+        } else {
+            for (let s = 0; s < suits.length; s++) {
+                points.push(this.getNextForward(from, suits[s]));
+            }
+        }            
+        return points;
+    }
+    
     private getWhiteMarket(to: string): string[] {
         //Returns a list of available market cards given a frog destination.
         const toX = this.algebraic2coords(to)[0];
@@ -1285,7 +1305,7 @@ export class FroggerGame extends GameBase {
                 if ( ! complete ) {
                     result.valid = true;
                     result.complete = -1;
-//                    result.canrender = true;
+                    result.canrender = true;
                     result.message = i18next.t("apgames:validation.frogger.PLACE_NEXT");
                     return result;
                 } else {
@@ -1413,7 +1433,8 @@ export class FroggerGame extends GameBase {
         }
 
         this.results = [];
-        this.selected = [];
+        this._highlight = [];
+        this._points = [];
 
         let marketEmpty = false;
         let refill = false;
@@ -1451,8 +1472,14 @@ export class FroggerGame extends GameBase {
                         bounced.forEach( ([from, to]) => {
                             this.results.push({type: "eject", from: from, to: to, what: "a Crown or Ace"});
                         });
+                    } else if (subIFM.from) {
+                        //Partial.  Highlight the frog.
+                        this._points.push(subIFM.from);
+                        //Highlight possible moves.
+                        const forwardPoints = this.getNextForwardsForCard(subIFM.from, subIFM.card);
+                        forwardPoints.forEach(cell => this._points.push(cell));
                     } else {
-                        //Partial.
+                        //Partial no points.
                     }
                 } else if (subIFM.card) {
                     marketEmpty = this.popMarket(subIFM.card);
@@ -1474,7 +1501,9 @@ export class FroggerGame extends GameBase {
                 }
 
                 if (subIFM.card) {
-                    this.selected.push(subIFM.card);
+                    //TODO: unhighlight any claimed market card from previous moves for clarity.
+                    //OR: reduce highlight to a single string.
+                    this._highlight.push(subIFM.card);
                     //console.log("selecting ", subIFM.card);
                 }
             }
@@ -1698,10 +1727,10 @@ export class FroggerGame extends GameBase {
         const legend: ILegendObj = {};
         for (const card of allcards) {
             let glyph = card.toGlyph();
-            if (this.selected.indexOf(card.uid) > -1) {
+            if (this._highlight.indexOf(card.uid) > -1) {
                 glyph = card.toGlyph({border: true, fill: {
                     func: "flatten",
-                    fg: "_context_fill",
+                    fg: "_context_strokes",
                     bg: "_context_background",
                     opacity: 0.2
                 }});
@@ -1869,8 +1898,9 @@ export class FroggerGame extends GameBase {
         //console.log(rep);
 
         // Add annotations
+        rep.annotations = [];
+
         if (this.results.length > 0) {
-            rep.annotations = [];
             for (const move of this.results) {
                 if (move.type === "move") {
                     const [fromX, fromY] = this.algebraic2coords(move.from!);
@@ -1893,6 +1923,21 @@ export class FroggerGame extends GameBase {
                     }
                 }
             }
+        }
+
+        if (this._points.length > 0) {
+            const pts = this._points.map(c => this.algebraic2coords(c));
+            const points: {row: number, col: number}[] = [];
+            const point = pts.shift()!;
+            rep.annotations.push({type: "exit", targets: [{ row: point[1], col: point[0] }]});
+            for (const coords of pts) {
+                points.push({ row: coords[1], col: coords[0] });
+            }
+            rep.annotations.push({type: "dots", targets: points as [{row: number; col: number;}, ...{row: number; col: number;}[]]});
+        }
+
+        if (rep.annotations.length === 0) {
+            delete rep.annotations;
         }
 
         return rep;
