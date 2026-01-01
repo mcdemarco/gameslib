@@ -1487,8 +1487,21 @@ export class FroggerGame extends GameBase {
                     if (subIFM.from) {
                         this.results.push({type: "move", from: subIFM.from, to: subIFM.to!, what: subIFM.card!, how: "back"});
                     }
+                } else if (subIFM.to) {
+                    if (partial) {
+                        //Highlight available market cards.
+                        this._highlight = this.getWhiteMarket(subIFM.to);
+                    } else {
+                        this.results.push({type: "move", from: subIFM.from!, to: subIFM.to, what: "no card", how: "back"});
+                    }
+                } else if (subIFM.from) {
+                    //Partial.  Highlight the frog.
+                    this._points.push(subIFM.from);
+                    //Highlight possible moves.
+                    const backwardPoints = this.getNextBack(subIFM.from);
+                    backwardPoints.forEach(cell => this._points.push(cell));
                 } else {
-                    this.results.push({type: "move", from: subIFM.from!, to: subIFM.to!, what: "no card", how: "back"});
+                    //Would be the empty move but that's already covered.
                 }
 
                 if (subIFM.from && subIFM.to) {
@@ -1501,10 +1514,9 @@ export class FroggerGame extends GameBase {
                 }
 
                 if (subIFM.card) {
-                    //TODO: unhighlight any claimed market card from previous moves for clarity.
-                    //OR: reduce highlight to a single string.
-                    this._highlight.push(subIFM.card);
-                    //console.log("selecting ", subIFM.card);
+                    //In this situation we only highlight a single card,
+                    //but we need an array to highlight legal market cards.
+                    this._highlight = [subIFM.card];
                 }
             }
         }
@@ -1927,13 +1939,18 @@ export class FroggerGame extends GameBase {
 
         if (this._points.length > 0) {
             const pts = this._points.map(c => this.algebraic2coords(c));
+
+            //The first point is always the frog, so render it more visibly.
             const points: {row: number, col: number}[] = [];
             const point = pts.shift()!;
             rep.annotations.push({type: "exit", targets: [{ row: point[1], col: point[0] }]});
-            for (const coords of pts) {
-                points.push({ row: coords[1], col: coords[0] });
+            //The type requires contents so test.
+            if (pts.length > 0) {
+                for (const coords of pts) {
+                    points.push({ row: coords[1], col: coords[0] });
+                }
+                rep.annotations.push({type: "dots", targets: points as [{row: number; col: number;}, ...{row: number; col: number;}[]]});
             }
-            rep.annotations.push({type: "dots", targets: points as [{row: number; col: number;}, ...{row: number; col: number;}[]]});
         }
 
         if (rep.annotations.length === 0) {
