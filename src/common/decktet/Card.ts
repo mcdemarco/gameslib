@@ -176,17 +176,26 @@ export class Card {
         return new Card({name: this.name, rank: this.rank, suits: [...this.suits.map(s => s.clone())], personality: this.personality, location: this.location, event: this.event, deck: this.deck});
     }
 
+    public cloneForDeck(deck: number): Card {
+        return new Card({name: this.name, rank: this.rank, suits: [...this.suits.map(s => s.clone())], personality: this.personality, location: this.location, event: this.event, deck: deck});
+    }
+
     public static deserialize(card: Card|string, allowCustom = false): Card|undefined {
         if (typeof card === "string") {
             const found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase());
             if (allowCustom && found === undefined) {
-                const [strRank, ...strSuits] = card.split("");
+                let [strRank, ...strSuits] = card.split("");
+                let strDeck: number = 0;
+                if (card.length > 1 && card.charAt(card.length - 1).match(/\d/)) {
+                    strDeck = parseInt(card.charAt(card.length - 1),10);
+                    [strRank, ...strSuits] = card.substring(0,card.length - 2).split("");
+                }
                 const rank = Component.deserialize(strRank);
                 const suits = strSuits.map(s => Component.deserialize(s));
                 if (rank === undefined || suits.includes(undefined)) {
                     return undefined;
                 }
-                return new Card({name: "_custom", rank, suits: (suits as Component[]).sort((a,b) => a.seq - b.seq)});
+                return new Card({name: "_custom", rank, suits: (suits as Component[]).sort((a,b) => a.seq - b.seq), deck: strDeck});
             }
             return found;
         }
