@@ -17,9 +17,9 @@ describe("Decktets", () => {
         expect(mydeck.size).eq(44);
         expect(mydeck.remove("1K")).to.have.deep.property("size", 43);
     });
+    
     it ("Now makes a double decktet", () => {
         const mydeck = new Deck([...cardsBasic, ...cardsExtended],2);
-        console.log(mydeck);
         expect(mydeck.size).eq(90);
         expect(mydeck.draw(1).map(c => c.uid)[0]).eq("1M1");
         expect(mydeck.size).eq(89);
@@ -32,5 +32,17 @@ describe("Decktets", () => {
         expect(mydeck.remove("1K2")).to.have.deep.property("size", 86);
         expect(mydeck.removeAll("1Y")).to.have.deep.property("size", 84);
 
+    });
+    
+    it ("Doesn't blow up when the deck is out", () => {
+        const mydeck = new Deck([...cardsBasic, ...cardsExtended],3);
+        expect(mydeck.size).eq(135);
+        mydeck.draw(134);
+        expect(mydeck.size).eq(1);
+        expect(mydeck.draw(1).map(c => c.plain)[0]).eq("Court Suns Waves Wyrms");
+        expect(mydeck.size).eq(0);
+        const [card] = mydeck.draw(1);
+        expect(card).eq(undefined);
+        
     });
 });
