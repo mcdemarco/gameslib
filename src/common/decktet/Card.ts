@@ -123,7 +123,7 @@ export class Card {
         return hasMatch;
     }
 
-    public toGlyph(opts: {border?: boolean; fill?: string|number|Colourfuncs, opacity?: number} = {}): [Glyph, ...Glyph[]] {
+    public toGlyph(opts: {border?: boolean; fill?: string|number|Colourfuncs, opacity?: number, rotate?: number} = {}): [Glyph, ...Glyph[]] {
         let border = false;
         if (opts !== undefined && opts.border !== undefined) {
             border = opts.border;
@@ -142,6 +142,7 @@ export class Card {
                 scale: border? 1.1 : 1,
                 colour: fill,
                 opacity: opacity === undefined ? 0 : opacity,
+                rotate: opts.rotate ? opts.rotate : 0
             },
         ];
         // rank
