@@ -2,16 +2,16 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaPieces, Colourfuncs, Glyph, MarkerGlyph } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { diagDirections, Direction, oppositeDirections, orthDirections, reviver, shuffle, UserFacingError } from "../common";
+import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
-import { Card, Deck, cardsBasic, cardsExtended, suits } from "../common/decktet";
+import { Deck, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
 
 export type playerid = 1|2;
 export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
-export type location = [number, number];
+export type DeedContents = [playerid, number, number[]];
 
 const suitOrder = ["M","S","V","L","Y","K"];
 const crowdedRanks = ["Pawn","Court"];
@@ -20,6 +20,8 @@ export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: [string[], string[][], string[][]];
     crowns: string[][];
+    deeds: Map<string, DeedContents>;
+    discards: string[];
     hands: string[][];
     tokens: [number[], number[]];
     shuffled: boolean;
@@ -79,6 +81,8 @@ export class MagnateGame extends GameBase {
     public currplayer: playerid = 1;
     public board: [string[], string[][], string[][]] = [[],[],[]];
     public crowns: string[][] = [];
+    public deeds!: Map<string, DeedContents>;
+    public discards: string[] = [];
     public hands: string[][] = [];
     public tokens: [number[], number[]] = [[], []];
     public shuffled: boolean = false;
@@ -90,6 +94,7 @@ export class MagnateGame extends GameBase {
     private pawnrank: string = "P";
     private courtrank: string = "T";
     private districts: number = 5;
+    private deck!: Deck;
     private highlights: string[] = [];
 
     constructor(state?: IMagnateState | string, variants?: string[]) {
@@ -105,11 +110,6 @@ export class MagnateGame extends GameBase {
             }
             const deckCount = (this.variants.includes("mega") ? 2 : 1);
             const handCount = (this.variants.includes("mega") ? 6 : 3);
-
-            /*init deck
-            const cards = [...cardsBasic];
-            const deck = new Deck(cards, deckCount);
-            deck.shuffle(); */
 
             if (this.variants.includes("mega"))
                 this.districts = 9; //8 pawns plus the excuse
@@ -146,13 +146,8 @@ export class MagnateGame extends GameBase {
                     tokens[p][suitOrder.indexOf(suit)]++;
                 }
             }
-
-            //Init draw deck and hands.
-            let deckCards = [...cardsBasic];
-            if (this.variants.includes("courts"))
-                deckCards = [...cardsBasic, ...cardsExtended.filter(c => c.rank.uid === this.courtrank)]; 
-
-            const deck = new Deck(deckCards, deckCount);
+ 
+            const deck = this.initDeck(deckCount);
             deck.shuffle();
             
             const hands: [string[], string[]] = [[],[]];
@@ -170,6 +165,8 @@ export class MagnateGame extends GameBase {
                 currplayer: 1,
                 board,
                 crowns,
+                deeds: new Map(), 
+                discards: [],
                 hands,
                 tokens,
                 shuffled: false
@@ -191,6 +188,19 @@ export class MagnateGame extends GameBase {
         this.load();
     }
 
+    private initDeck(deckCount: number): Deck {
+        //Init draw deck and hands.
+
+        //Remove the crowns from the basic deck.
+        const cards = [...cardsBasic.filter(c => c.rank.name !== "Crown")];
+
+        //Usually add the courts.
+        if (this.variants.includes("courts"))
+            cards.push(...[...cardsExtended.filter(c => c.rank.uid === this.courtrank)]);
+
+        return new Deck(cards, deckCount);
+    }
+
     public load(idx = -1): MagnateGame {
         if (idx < 0) {
             idx += this.stack.length;
@@ -204,463 +214,48 @@ export class MagnateGame extends GameBase {
         this.currplayer = state.currplayer;
         this.board = deepclone(state.board) as [string[], string[][], string[][]];
         this.crowns = state.crowns.map(c => [...c]);
+        this.deeds = new Map(state.deeds);
+        this.discards = [...state.discards];
         this.hands = state.hands.map(h => [...h]);
         this.tokens = [[...state.tokens[0]], [...state.tokens[1]]];
+
+        // Deck is reset every time you load
+        const deckCount = (this.variants.includes("mega") ? 2 : 1);
+        this.deck = this.initDeck(deckCount);
+        
+        // remove cards from the deck that are on the board, the discard, or in known hands
+        const board = this.board.flat().flat();
+        for (const uid of [...board, ...this.discards]) {
+            this.deck.remove(uid);
+        }
+        for (const hand of this.hands) {
+            for (const uid of hand) {
+                if (uid !== "") {
+                    this.deck.remove(uid);
+                }
+            }
+        }
+        this.deeds.forEach((value, key) => this.deck.remove(key));
+
+        this.deck.shuffle();
 
         return this;
     }
 
-     public getBoardSize(): number[] {
-        //0: rows (6 or 9)
-        //1: columns (7 or 9)
-        //2: maxdim (7 or 9)
-        if (this.variants !== undefined && this.variants.length > 0 && this.variants.includes("double"))
-            return [9,9,9];
-        else
-            return [6,7,7];
-    }
-
-    public getDeck(): string[] {
-        //deck is not Deck but an array of modified uids
-        //b/c Deck does not support a double deck,
-        //and we don't do anything complicated with cards anyway.
-        const deck: string[] = [];
-
-        const cards = [...cardsBasic, ...cardsExtended];
-        const deckOfClass = new Deck(cards);
-        const origSize = deckOfClass.size;
-
-        for (let c=0; c<origSize; c++) {
-            const [card] = deckOfClass.draw();
-            deck.push(card.uid + "_0");
-
-            if (this.variants.includes("double")) {
-                if (card.rank.name !== "Crown")
-                    deck.push(card.uid + "_1");
-            }
-        }
-        return deck;
-    }
-
     /* helper functions for general gameplay */
 
-    public canMoveFrom(cell: string): boolean {
-        if (this.occupied.has(cell) && this.occupied.get(cell) === this.currplayer)
-            return true;
-        else
-            return false;
-    }
-
-    public canMoveTo(fromCell: string, toCell: string): boolean {
-        //This is going to get complicated.
-
-        //Low-hanging fruit.
-        if (! this.board.has(toCell)) {
-            //Cannot land in the gaps.
+    public canPlace(district: number): boolean {
+        if (false) {
+            //Check for a deeded card.
             return false;
         }
-        const card = this.getCardFromCell(toCell);
-        if (card.rank.name === "Excuse") {
-            //Cannot land on the Excuse.
+        if (false) {
+            //Check  for suit mismatch.
             return false;
         }
 
-        //Need to check the move.
-
-        const suits = this.getSuits(fromCell);
-
-        const fromLoc = this.algebraic2loc(fromCell);
-        const toLoc = this.algebraic2loc(toCell);
-
-        const targets = this.assembleTargets(fromLoc, suits)!;
-        const toTarget = targets.filter(loc => (loc[0] === toLoc[0] && loc[1] === toLoc[1]));
-
-        return (toTarget.length > 0);
-    }
-
-    public canPlace(cell: string): boolean {
-        if (this.occupied.has(cell)) {
-            return false;
-        }
-        if (! this.board.has(cell)) {
-            return false;
-        }
-
-        const card = this.getCardFromCell(cell);
-        if (card.rank.name === "Ace")
-            return true;
-        if (card.rank.name === "Crown") {
-            if (this.variants.includes("double"))
-                return false;
-            else
-                return true;
-        } else
-            return false;
-    }
-
-    public getCardFromCell(cell: string): Card {
-        return this.getCardFromID(this.getIDFromCell(cell))!;
-    }
-
-    public getIDFromCell(cell: string): string {
-        if (this.board.has(cell)) {
-            return this.board.get(cell)!;
-        } else if (cell[0] === "m") {
-            //The market is always fully populated.
-            return this.market[this.algebraic2coord(cell)]!;
-        } else {
-            throw new Error(`The cell has no card: ${cell}.`);
-        }
-    }
-
-    public getCardFromID(id: string): Card {
-        return this.getCardFromUID(this.getUIDFromID(id));
-    }
-
-    public getCardFromUID(uid: string): Card {
-        return Card.deserialize(uid)!;
-    }
-
-    public getUIDFromID(id: string): string {
-        return id.split("_")[0];
-    }
-
-    /* end helper functions for general gameplay */
-
-    /* suit-based movement logic */
-
-    private bounce(fromCell: string, toCell: string): string {
-        //Moves the occupant out of the way when toCell is occupied.
-
-        //We know this.occupied.has(toCell).
-        const bouncePlayer = this.occupied.get(toCell!)!;
-
-        //Convert to locations for easier calculating.
-        const fromLoc = this.algebraic2loc(fromCell);
-        const toLoc = this.algebraic2loc(toCell);
-        const bounceLoc = [...toLoc] as location;
-
-        if (fromLoc[0] === toLoc[0]) {
-            if (fromLoc[1] > toLoc[1])
-                bounceLoc[1] = toLoc[1] - 1;
-            else
-                bounceLoc[1] = toLoc[1] + 1;
-        } else {//fromLoc[1] === toLoc[1]
-            if (fromLoc[0] > toLoc[0])
-                bounceLoc[0] = toLoc[0] - 1;
-            else
-                bounceLoc[0] = toLoc[0] + 1;
-        }
-        const bounceCell = this.loc2algebraic(bounceLoc);
-        this.occupied.set(bounceCell,bouncePlayer);
-
-        return bounceCell;
-    }
-
-    private getSuits(cell: string): string[] {
-        const card = this.getCardFromCell(cell);
-        const suits = card.suits.map(s => s.name);
-        return suits;
-    }
-
-    private getTableau(loc: location): number {
-        return this.tableau[loc[0]][loc[1]];
-    }
-
-    private getNext(loc: location, dir: Direction): location {
-        //Get the next location in a compass direction, not checked.
-        const nextLoc = [...loc] as location;
-        switch (dir) {
-            case "N":
-                nextLoc[1]--;
-                break;
-            case "NE":
-                nextLoc[1]--;
-            // eslint-disable-next-line no-fallthrough
-            case "E":
-                nextLoc[0]++;
-                break;
-            case "SE":
-                nextLoc[0]++;
-            // eslint-disable-next-line no-fallthrough
-            case "S":
-                nextLoc[1]++;
-                break;
-            case "SW":
-                nextLoc[1]++;
-            // eslint-disable-next-line no-fallthrough
-            case "W":
-                nextLoc[0]--;
-                break;
-            case "NW":
-                nextLoc[1]--;
-                nextLoc[0]--;
-                break;
-            default:
-                throw new Error(`The direction is invalid: ${dir}.`);
-        }
-
-        return nextLoc!;
-    }
-
-    private populateTableau(): number[][] {
-        //Abstract the data structure to only what is needed for movement.
-        const tableau = new Array(this.columns).fill(-1).map(() => new Array(this.rows).fill(-1));
-        for (let x = 0; x < this.columns; x++) {
-            for (let y = 0; y < this.rows; y++) {
-                //The tableau was initialized to all -1's (gaps).
-                const cell = this.coords2algebraic(x, y);
-                if (this.board.has(cell)) {
-                    // Revise card spaces: 2 is occupied, 1 is unoccupied, 0 is the Excuse.
-                    if (this.occupied.has(cell)) {
-                        //The card is occupied by a piece.
-                        tableau[x][y] = 2;
-                    } else {
-                        //There's an unoccupied card.
-                        const card = this.getCardFromCell(cell);
-                        //Check for excuse.
-                        if (card.rank.name === "Excuse")
-                            tableau[x][y] = 0;
-                        else
-                            tableau[x][y] = 1;
-                    }
-                }
-            }
-        }
-
-        return tableau;
-    }
-
-    private checkUnoccupied(loc: location): boolean {
-        //Check the location is on the board and a legal intermediate/target.
-        return (this.onBoard(loc) && this.getTableau(loc) === 1);
-    }
-
-    private checkOccupied(loc: location): boolean {
-        //Check the location is on the board and occupied (for wyrming).
-         return (this.onBoard(loc) && this.getTableau(loc) === 2);
-    }
-
-    private checkSolitary(loc: location, source: Direction): boolean {
-        //Check the target location is surrounded on all non-source,
-        //onBoard sides by unoccupied cards,
-        //regardless of source and target contents which are checked elsewhere.
-        for (const dir of orthDirections) {
-            if (dir !== source) {
-                const neighbor = this.getNext(loc,dir);
-                if (!this.onBoard(neighbor))
-                    continue;
-                else {
-                    const tabValue = this.getTableau(neighbor);
-                    if (tabValue === 2 || tabValue === 0)
-                        return false;
-                    else
-                        continue;
-                }
-            }
-        }
-        //If we found no neighbors, the space is solitary.
         return true;
     }
-
-    private checkGap(loc: location): boolean {
-        //Check the location is on the board and a gap (for moon jumping).
-        return (this.onBoard(loc) && this.getTableau(loc) === -1);
-    }
-
-    private isBlockage(loc: location): boolean {
-        //Check for the exact edge of the board.
-        if (loc[0] === -1 || loc[1] === -1 || loc[0] === this.columns || loc[1] === this.rows) {
-            return true;
-        } else if (this.checkUnoccupied(loc)) {
-            //an unoccupied card is the only non-blockage in the tableau
-            return false;
-        } else {
-            //This is occupied, a gap, or the Excuse.
-            return true;
-        }
-    }
-
-    private onBoard(loc: location): boolean {
-        //Check for leaving the board with movement math.
-        if (loc[0] < 0 || loc[1] < 0 || loc[0] >= this.columns || loc[1] >= this.rows)
-            return false;
-        else
-            return true;
-    }
-
-    private assembleTargets(meepleLoc: location, suits: string[]): location[] {
-        //get targets
-        let myTargets: location[] = [];
-        if (suits.includes('Moons'))
-            myTargets = myTargets.concat(this.collectMoonTargets(meepleLoc));
-        if (suits.includes('Suns'))
-            myTargets = myTargets.concat(this.collectSunTargets(meepleLoc));
-        if (suits.includes('Waves'))
-            myTargets = myTargets.concat(this.collectWaveTargets(meepleLoc));
-        if (suits.includes('Leaves'))
-            myTargets = myTargets.concat(this.collectLeafTargets(meepleLoc));
-        if (suits.includes('Wyrms'))
-            myTargets = myTargets.concat(this.collectWyrmTargets(meepleLoc));
-        if (suits.includes('Knots'))
-            myTargets = myTargets.concat(this.collectKnotTargets(meepleLoc));
-
-        return myTargets;
-    }
-
-    private collectMoonTargets(meepleLoc: location): location[] {
-        const targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let nextLoc = this.getNext(meepleLoc,dir);
-
-            //The first space orthogonally must be a gap.
-            if (this.checkGap(nextLoc)) {
-                //Check the next space in the current direction.
-                for (let a = 2; a < this.maxdim; a++) {
-                    nextLoc = this.getNext(nextLoc,dir);
-                    if (this.checkGap(nextLoc)) {
-                        continue;
-                    } else if (this.checkUnoccupied(nextLoc)) {
-                        targets.push(nextLoc);
-                        break;
-                    } else {
-                        //The excuse, an occupied card, or off the board.
-                        break;
-                    }
-                }
-            }
-        }
-
-        //these are already legal targets and don't need filtering.
-        return targets;
-    }
-
-    private collectSunTargets(meepleLoc: location): location[] {
-        const targets: location[] = [];
-
-        for (const dir of diagDirections) {
-            const nextLoc = this.getNext(meepleLoc,dir);
-            if (this.checkUnoccupied(nextLoc)) {
-                targets.push(nextLoc);
-                const secondLoc = this.getNext(nextLoc,dir);
-                if (this.checkUnoccupied(secondLoc))
-                    targets.push(secondLoc);
-            } //Otherwise:
-            //if the first space diagonally is off the board, so is the second.
-            //if it's is the Excuse or occupied, we cannot reach the second.
-        }
-
-        //these are already legal targets and don't need filtering.
-        return targets;
-    }
-
-    private collectWaveTargets(meepleLoc: location): location[] {
-        const targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let candidateLoc = [...meepleLoc] as location;
-
-            //Check the next space in the current direction.
-            for (let a = 1; a < this.maxdim; a++) {
-                candidateLoc = this.getNext(candidateLoc,dir);
-                if (! this.checkUnoccupied(candidateLoc))
-                    break;
-                else {
-                    const stopLoc = this.getNext(candidateLoc,dir);
-                    if (this.isBlockage(stopLoc)) {
-                        targets.push(candidateLoc);
-                        break;
-                    }
-                }// else continue
-            }
-        }
-
-        return targets;
-    }
-
-    private collectLeafTargets(meepleLoc: location): location[] {
-        const targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let nextLoc = [...meepleLoc] as location;
-            //Check the next space in the current direction.
-            for (let a = 1; a < this.maxdim; a++) {
-                nextLoc = this.getNext(nextLoc,dir);
-                if (this.checkUnoccupied(nextLoc)) {
-                    //We don't need to check the space we're coming from.
-                    const source = oppositeDirections.get(dir)!;
-                    if (this.checkSolitary(nextLoc,source)) {
-                        targets.push(nextLoc);
-                    } //Else don't push but continue in this direction.
-                } else {
-                    //Otherwise, it's a gap, the excuse, an occupied card, or off the board.
-                    break;
-                }
-            }
-        }
-
-        // legal targets, don't need filtering.
-        return targets;
-    }
-
-    private collectWyrmTargets(meepleLoc: location): location[] {
-        const targets: location[] = [];
-
-        for (const dir of orthDirections) {
-            let candidateLoc = [...meepleLoc] as location;
-
-            //Check the next space in the current direction.
-            for (let a = 1; a < this.maxdim; a++) {
-                candidateLoc = this.getNext(candidateLoc,dir);
-                if (this.checkOccupied(candidateLoc)) {
-                    //Check the rest of the conditions and push or break.
-                    const bounceLoc = this.getNext(candidateLoc,dir);
-                    if (this.checkUnoccupied(bounceLoc)) {
-                        targets.push(candidateLoc);
-                    }
-                    break;
-                } else if (!this.checkUnoccupied(candidateLoc)) {
-                    //In this case we hit the Excuse, a gap, or the edge.
-                    break;
-                }// else can continue over this card
-            }
-        }
-
-        return targets;
-    }
-
-    private collectKnotTargets(meepleLoc: location): location[] {
-        const targets: location[] = [];
-
-        //We take three steps, never backwards.
-        for (const dir1 of orthDirections) {
-            const loc1 = this.getNext(meepleLoc,dir1);
-            if (this.checkUnoccupied(loc1)) {
-                for (const dir2 of orthDirections) {
-                    const source1 = oppositeDirections.get(dir1)!;
-                    if (dir2 !== source1) {
-                        const loc2 = this.getNext(loc1,dir2)
-                        if (this.checkUnoccupied(loc2)) {
-                            for (const dir3 of orthDirections) {
-                                const source2 = oppositeDirections.get(dir2)!;
-                                if (dir3 !== source2) {
-                                    const loc3 = this.getNext(loc2,dir3);
-                                    if (this.checkUnoccupied(loc3))
-                                        targets.push(loc3);
-                                }
-                            }
-                        }
-                    }
-                }
-
-            }
-        }
-
-        return targets;
-    }
-
-    /* end suit movement logic */
 
     public moves(player?: playerid): string[] {
         if (this.gameover) {
@@ -669,14 +264,6 @@ export class MagnateGame extends GameBase {
 
         if (player === undefined) {
             player = this.currplayer;
-        }
-
-        if (this.mode === "place" && this.occupied.size === 6) {
-            return ["pass"];
-        }
-
-        if (this.mode === "collect" && this.currplayer === this.eliminated) {
-            return ["pass"];
         }
 
         const moves: string[] = [];
@@ -718,13 +305,6 @@ export class MagnateGame extends GameBase {
         }
 
         return moves.sort((a,b) => a.localeCompare(b));
-    }
-
-    public myMoves(cell: string): string[] {
-        const meepleLoc = this.algebraic2loc(cell);
-        const suits = this.getSuits(cell);
-        const targets = this.assembleTargets(meepleLoc,suits);
-        return targets.map(loc => this.loc2algebraic(loc));
     }
 
     public randomMove(): string {
@@ -1065,7 +645,9 @@ export class MagnateGame extends GameBase {
     }
 
     protected checkEOG(): MagnateGame {
-        if (this.lastmove === "pass" && this.stack[this.stack.length - 1].lastmove === "pass") {
+        const finalHandSize = (this.variants.includes("mega") ? 4 : 2);
+        //May not be exactly equal in mega.
+        if (this.deck.size === 0 && this.hands[0].length <= finalHandSize && this.hands[1].length <= finalHandSize) {
             this.gameover = true;
             const scores: number[] = [];
             for (let p = 1; p <= this.numplayers; p++) {
