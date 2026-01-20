@@ -30,6 +30,7 @@ export interface IMoveState extends IIndividualState {
     hands: string[][];
     tokens: [number[], number[]];
     shuffled: boolean;
+    lastmove?: string;
 };
 
 export interface IMagnateState extends IAPGameState {
@@ -135,7 +136,7 @@ export class MagnateGame extends GameBase {
             districtDeck.shuffle();
 
             for (let d = 0; d < this.districts; d++) {
-                if ( d === Math.round(this.districts / 2) ) {
+                if ( d === Math.round(this.districts / 2) - 1 ) {
                     board[0][d] = "01"; //the Excuse
                 } else {
                     const [card] = districtDeck.draw();
@@ -201,7 +202,7 @@ export class MagnateGame extends GameBase {
         this.load();
     }
 
-    private initDeck(deckCount: number): Deck {
+    private initDeck(deckCount: number, forRender?: boolean): Deck {
         //Init draw deck and hands.
 
         //Remove the crowns from the basic deck.
@@ -210,6 +211,12 @@ export class MagnateGame extends GameBase {
         //Usually add the courts.
         if (this.variants.includes("courts"))
             cards.push(...[...cardsExtended.filter(c => c.rank.uid === this.courtrank)]);
+        
+        if (forRender) {
+            //Add the center row.
+            cards.push(...[...cardsExtended.filter(c => c.rank.uid === this.pawnrank)]);
+            cards.push([...cardsExtended.filter(c => c.rank.name === "Excuse")][0]);
+        }
 
         return new Deck(cards, deckCount);
     }
@@ -231,16 +238,20 @@ export class MagnateGame extends GameBase {
         this.discards = [...state.discards];
         this.hands = state.hands.map(h => [...h]);
         this.tokens = [[...state.tokens[0]], [...state.tokens[1]]];
+        this.lastmove = state.lastmove;
+
+        if (this.variants.includes("mega"))
+            this.districts = 9; //8 pawns plus the excuse
 
         // Deck is reset every time you load
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
         this.deck = this.initDeck(deckCount);
         
         // remove cards from the deck that are on the board, the discard, or in known hands
-        const board = this.board.flat().flat();
-        for (const uid of [...board[1], ...board[2], ...this.discards]) {
+        for (const uid of [...this.board[1].flat(), ...this.board[2].flat(), ...this.discards]) {
             this.deck.remove(uid);
         }
+
         for (const hand of this.hands) {
             for (const uid of hand) {
                 if (uid !== "") {
@@ -248,6 +259,7 @@ export class MagnateGame extends GameBase {
                 }
             }
         }
+
         this.deeds.forEach((value, key) => this.deck.remove(key));
 
         this.deck.shuffle();
@@ -553,53 +565,53 @@ export class MagnateGame extends GameBase {
             discards: [...this.discards],
             hands: this.hands.map(h => [...h]),
             tokens: [[...this.tokens[0]],[...this.tokens[1]]],
-            shuffled: this.shuffled
-        };
+            shuffled: this.shuffled,
+            lastmove: this.lastmove,
+         };
     }
 
     private getMaxDistrictSize(player: number): number {
         //Gets max district size (disregarding deeds).
         //Add one later for deeds.
         let max = 0;
+        let board = this.board[player];
         for (let d = 0; d < this.districts; d++) {
             //const deed = this.hasDeed(d, player as playerid) ? 1 : 0;
-            max = Math.max(this.board[player][d].length, max); 
+            const districtLength = board ? (board[d] ? board[d].length : 0) : 0;
+            max = Math.max(districtLength, max);
         }
         return max;
     }
 
     private renderCards(): Card[] {
         //Init draw deck and hands.
+        const deckCount = (this.variants.includes("mega") ? 2 : 1);
+        const renderDeck = this.initDeck(deckCount, true);
+                
+        return renderDeck.cards;
+    }
 
-        //Remove the crowns from the basic deck.
-        const cards = [...cardsBasic.filter(c => c.rank.name !== "Crown")];
-
-        //Usually add the courts.
-        if (this.variants.includes("courts"))
-            cards.push(...[...cardsExtended.filter(c => c.rank.uid === this.courtrank)]);
-
-        //For the renderer, we need some more cards.
-        cards.push(...[...cardsExtended.filter(c => c.rank.uid === this.pawnrank)]);
-        cards.push([...cardsExtended.filter(c => c.rank.uid === "0")][0]);
-        
-        return cards;
+    private trimCard(card: string): string {
+        //Changed my mind.
+        return card; //.substring(0,card.length - 1);
     }
 
     private renderPieces(): string {
         const pstr: string[] = [];
 
+        console.log(this.board);
         //Player two's tableau.
         const p2rows = this.getMaxDistrictSize(2);
         for (let r = 0; r < p2rows; r++) {
             const row = [];
             for (let b2 = 0; b2 < this.districts; b2++) {
                 if (this.board[2][b2].length >= r) {
-                    const c = this.board[2][b2][r];
+                    const c = this.trimCard(this.board[2][b2][r]);
                     row.push("c" + c + "r");
                 } else if (this.board[2][b2].length == r - 1) {
                     //Check for a deed.
                     if (this.hasDeed(b2, 2)) {
-                        const c = this.getDeedCard(b2, 2);
+                        const c = this.trimCard(this.getDeedCard(b2, 2));
                         row.push("c" + c + "r");
                     }
                 } else {
@@ -612,11 +624,11 @@ export class MagnateGame extends GameBase {
         //Invert here.
         pstr.reverse();
 
-        //the center row, glyphs rotated in render() for now
+        //the center row
         const row = [];
         for (let bc = 0; bc < this.districts; bc++) {
-            const c = this.board[0][bc];
-            row.push("c" + c)
+            const c = this.trimCard(this.board[0][bc]);
+            row.push("c" + c);
         }
         pstr.push(row.join(","));
 
@@ -626,13 +638,15 @@ export class MagnateGame extends GameBase {
             const row = [];
             for (let b1 = 0; b1 < this.districts; b1++) {
                 if (this.board[1][b1].length >= r) {
-                    const c = this.board[1][b1][r];
+                    const c = this.trimCard(this.board[1][b1][r]);
                     row.push("c" + c);
-                } else if (this.board[1][b1].length == r - 1) {
+                } else if (this.board[1][b1].length === r - 1) {
                     //Check for a deed.
                     if (this.hasDeed(b1, 1)) {
-                        const c = this.getDeedCard(b1, 1);
+                        const c = this.trimCard(this.getDeedCard(b1, 1));
                         row.push("c" + c);
+                    } else {
+                        row.push("-");
                     }
                 } else {
                     row.push("-");
@@ -654,34 +668,33 @@ export class MagnateGame extends GameBase {
         
         // No pieces on the board, just markers.
         const pstr = this.renderPieces();
+        console.log(pstr);
 
         // build card markers ?        
         const markers: MarkerGlyph[] = []; //TODO?
 
         // Build legend of most cards, including an Excuse.
-        //const deckCount = (this.variants.includes("mega") ? 2 : 1);
         const allcards = this.renderCards();
+        console.log(allcards.map(c => c.uid));
 
         const legend: ILegendObj = {};
         for (const card of allcards) {
             let glyph = card.toGlyph();
+            let cardui = this.trimCard(card.uid);
 
-            //Rotate the pawny pieces and the excuse (center row) 90 deg 
-            if (card.rank.uid === this.pawnrank || card.rank.uid === "0") {
-                 glyph = card.toGlyph({border: true, rotate: 90, fill: {
+            // the pawny pieces and the excuse (center row)
+            if (card.rank.uid === this.pawnrank || card.rank.name === "Excuse") {
+                 glyph = card.toGlyph({border: true, fill: {
                     func: "flatten",
                     fg: "_context_labels",
                     bg: "_context_background",
                     opacity: 0.2,
                  }});
-                legend["c" + card.uid] = glyph;
-            } else {
-                //Just make two copies of everything else for now.
-                legend["c" + card.uid] = glyph;
-                const glyph2 = card.toGlyph({rotate: 180});
-                legend["c" + card.uid + "r"] = glyph2;
-            }            
+            }
+            legend["c" + cardui] = glyph;
         }
+
+        console.log(legend);
 
         for (const suit of suits) {
             legend[suit.uid] = {
@@ -745,14 +758,15 @@ export class MagnateGame extends GameBase {
         
         // Build rep
         const rep: APRenderRep =  {
+            options: ["hide-labels"],
             board: {
                 style: "squares",
                 width: this.districts,
                 height: rows,
                 tileHeight: 1,
                 tileWidth: 1,
-                tileSpacing: 0.25,
-                strokeOpacity: 0.2,
+                tileSpacing: 0.15,
+                strokeOpacity: 0,
                 labelColour: "#888",
                 markers,
             },

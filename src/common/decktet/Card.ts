@@ -123,7 +123,7 @@ export class Card {
         return hasMatch;
     }
 
-    public toGlyph(opts: {border?: boolean; fill?: string|number|Colourfuncs, opacity?: number, rotate?: number} = {}): [Glyph, ...Glyph[]] {
+    public toGlyph(opts: {border?: boolean; fill?: string|number|Colourfuncs, opacity?: number} = {}): [Glyph, ...Glyph[]] {
         let border = false;
         if (opts !== undefined && opts.border !== undefined) {
             border = opts.border;
@@ -141,8 +141,7 @@ export class Card {
                 name: border ? "piece-square" : "piece-square-borderless",
                 scale: border? 1.1 : 1,
                 colour: fill,
-                opacity: opacity === undefined ? 0 : opacity,
-                rotate: opts.rotate ? opts.rotate : 0
+                opacity: opacity === undefined ? 0 : opacity
             },
         ];
         // rank
@@ -154,7 +153,8 @@ export class Card {
                 nudge: {
                     dx: 250,
                     dy: -250,
-                }
+                },
+                orientation: "vertical"
             });
         }
         const nudges: [number,number][] = [[-250, -250], [-250, 250], [250, 250]];
@@ -167,7 +167,8 @@ export class Card {
                 nudge: {
                     dx: nudge[0],
                     dy: nudge[1],
-                }
+                },
+                orientation: "vertical"
             });
         }
         return glyph;
