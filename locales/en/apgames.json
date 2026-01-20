@@ -114,6 +114,7 @@
         "loa": "A classic game where you try to gather all your pieces into a single connected group. Pieces can only move the exact number of spaces as the number of pieces that lie along the line of movement. The \"Scrambled Eggs\" initial layout variant is supported.",
         "logger": "A Looney pyramids game where the players vie to grow and harvest more trees than their opponents.",
         "lox": "Hex connection game with captures inspired by Tumbleweed. A cell is controlled by a player if it has more lines of sight to the player's pieces than half of the number neighbours that it has. If an opponent's piece is on your controlled cell, you may capture it by replacing it with your own piece on your turn. The player with a solid connection between their two sides at the start of their turn wins.",
+        "magnate": "An economic game for the Decktet in which players develop their own sides of five districts by building cards in matching suits.  Higher ranked cards cost more, but contribute more towards income (even while only partly built) and control of the district.  The (taxable) currency of the land is suit tokens, collected by selling unwanted cards, or earned from partly- or fully-built cards on a roll of the dice as in Catan.  In case of a tie on control of the five districts, the tiebreakers are total property value, then number of suit tokens remaining.",
         "majorities": "A game of majorities. A majority of pieces in a line wins that line. A majority of parallel lines in a direction wins that direction. A majority of directions wins the game. The first player places one piece, and thereafter, each player places two pieces per turn.",
         "manalath": "Manalath is a game on a hexagonal grid where you can place pieces of either colour. You win if at the end of your turn there's a group of five pieces of your colour, but you *lose* if there's a group of four stones of your colour. How are you going to do that?!",
         "margo": "Margo is a stacking Go variant. Players may not pass. The game ends when one player is not able to move, and the player with the most balls on the board wins.",
@@ -1493,6 +1494,32 @@
             },
             "size-15": {
                 "name": "Size-15 board."
+            }
+        },
+        "magnate": {
+            "courtpawns": {
+		"description": "For variety, the roles of pawns and courts may be reversed.",
+                "name": "Courts for Pawns"
+            },
+            "courts": {
+                "description": "Include Courts in the deck.  Fully built Courts are worth ten points when scoring districts.  They cost ten suit tokens, with the usual restriction of at least one token in each suit.  Courts may be deeded for three suit tokens (one of each suit).",
+                "name": "Courts"
+            },
+            "deucey": {
+                "description": "Aces normally score one point per card of that suit in the player's own district, including the Ace itself.  In this variant, Aces score a point of all matching cards on both sides of the district as well as the Pawn, if applicable.",
+                "name": "Acey deucey"
+            },
+            "mega": {
+		"description": "A scaled-up double-deck version of the game by Greg James, with nine districts, six-card hands, and two moves per turn.  The double taxanion variant is intended to go wdth this version.",
+                "name": "Mega-Magnate"
+            },
+            "stacked": {
+		"description": "To cut down on swinginess, the deck may be stacked to ensure a fair distribution of cards.",
+                "name": "Stacked deck"
+            },
+            "taxtax": {
+		"description": "Two taxation dice are rolled, so two suits may be taxed.  (When they match, only a single suit is taxed.)",
+                "name": "Double Taxation"
             }
         },
         "majorities": {
@@ -4500,6 +4527,22 @@
             "INSUFFICIENT_LOS": "{{count}} directions with line of sight is required to capture the cell on {{cell}}.",
             "CAPTURE4PLACE": "You suffixed the cell with 'x' to indicate capture, but this is not a capture move. Try '{{cell}}'.",
             "OPPONENT_CONTROLLED": "The cell at {{where}} is controlled by your opponent."
+        },
+        "magnate": {
+            "CARD_DONE_INSTRUCTIONS": "Click a deed to add tokens to it, select tokens to trade, or end your turn.",
+            "CARD_NOT_DONE_INSTRUCTIONS": "Click a hand card to deed, build, or sell, click a deed to add tokens to it, or select tokens to trade.",
+            "INITIAL_PLACEMENT_INSTRUCTIONS": "Click a hand card to deed, build, or sell.",
+            "INVALID_BUILD": "You do not have the suit tokens necessary to build this card.",
+            "INVALID_DEED": "You do not have the suit tokens necessary to deed this card.",
+            "INVALID_PLACEMENT": "The selected card cannot be built here because no suits match.",
+            "INVALID_PURCHASE": "The selected tokens are insufficient to build this card.",
+            "LABEL_DECK": "Cards in deck",
+            "LABEL_COLLECTION": "Player {{playerNum}}'s suit tokens",
+            "LABEL_DISCARDS": "Discard pile",
+            "LABEL_HAND": "Player {{playerNum}}'s hand",
+            "TOKEN_ADD_INSTRUCTIONS": "Click the tokens to add to this deed.",
+            "TOKEN_TRADE_INSTRUCTIONS": "Click the suit token you want in exchange.",
+            "VALID_PLACEMENT": "Looks like a good placement."
         },
         "majorities": {
             "INITIAL_INSTRUCTIONS": "Select two cells to place your pieces.",
