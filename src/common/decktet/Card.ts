@@ -141,7 +141,7 @@ export class Card {
                 name: border ? "piece-square" : "piece-square-borderless",
                 scale: border? 1.1 : 1,
                 colour: fill,
-                opacity: opacity === undefined ? 0 : opacity
+                opacity: opacity === undefined ? 0 : opacity,
             },
         ];
         // rank
@@ -154,7 +154,7 @@ export class Card {
                     dx: 250,
                     dy: -250,
                 },
-                orientation: "vertical"
+                orientation: "vertical",
             });
         }
         const nudges: [number,number][] = [[-250, -250], [-250, 250], [250, 250]];
@@ -168,7 +168,7 @@ export class Card {
                     dx: nudge[0],
                     dy: nudge[1],
                 },
-                orientation: "vertical"
+                orientation: "vertical",
             });
         }
         return glyph;
@@ -183,8 +183,15 @@ export class Card {
     }
 
     public static deserialize(card: Card|string, allowCustom = false): Card|undefined {
+        let strDeck = 0;
         if (typeof card === "string") {
-            const found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase());
+            let found: Card|undefined;
+            if (card.length > 1 && card.charAt(card.length - 1).match(/\d/)) {
+                strDeck = parseInt(card.charAt(card.length - 1),10);
+                found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase().substring(0,card.length - 1));
+            } else {
+                found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase());
+            }
             if (allowCustom && found === undefined) {
                 let [strRank, ...strSuits] = card.split("");
                 let strDeck: number = 0;
@@ -201,7 +208,7 @@ export class Card {
             }
             return found;
         }
-        return new Card({name: card._name, rank: Component.deserialize(card._rank)!, suits: [...card._suits.map(s => Component.deserialize(s)!)], personality: card._personality, location: card._location, event: card._event, deck: card._deck});
+        return new Card({name: card._name, rank: Component.deserialize(card._rank)!, suits: [...card._suits.map(s => Component.deserialize(s)!)], personality: card._personality, location: card._location, event: card._event, deck: strDeck});
     }
 }
 

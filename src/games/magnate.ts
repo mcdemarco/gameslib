@@ -315,7 +315,7 @@ export class MagnateGame extends GameBase {
             matchMe = myBoard[col][myBoard[col].length - 1];
 
         //Check for suit mismatch.
-        
+        console.log(card, matchMe);        
         return this.matched(card, matchMe);
     }
 
@@ -361,13 +361,16 @@ export class MagnateGame extends GameBase {
     private matched(card1: string, card2: string): boolean {
         const c1 = Card.deserialize(card1);
         const c2 = Card.deserialize(card2);
-
+        
+        //This shouldn't happen.
         if (c1 === undefined || c2 === undefined)
             return false;
-        
+
+        //This should only happen in a particular order but whatevs.
         if (c1.rank.name === "Excuse" || c2.rank.name === "Excuse")
             return true;
-
+        
+        console.log(c1.sharesSuitWith(c2));
         return c1.sharesSuitWith(c2);
     }
 
@@ -441,21 +444,24 @@ export class MagnateGame extends GameBase {
         const randomIndex = Math.floor(Math.random() * handCount);
 
         const card = this.hands[this.currplayer - 1][randomIndex];
-        
-        //Test if the card can be placed. 
-        for (let d = 1; d <= this.districts; d++) {
-            if (this.canPlace(card, d.toString())) {
-                //No economy testing:  40% build, 40% deed, 20% sell.
-                const rando = Math.random();
+        //The default is to sell it.
+        let move: string = "";
 
-                if (rando < 0.4)
-                    return card + ">" + d;
-                else if (rando < 0.4)
-                    return card + ">" + d + "d";
-                else
-                    break;
-                
-                /*
+        const rando = Math.random();
+        if (rando < 0.8) {      
+            //Test if the card can be placed. 
+            for (let d = 1; d <= this.districts; d++) {
+                if (move === "") {
+                    if (this.canPlace(card, d.toString())) {
+                        //No economy testing:  40% build, 40% deed, 20% sell.
+                        if (rando < 0.4)
+                            move = card + ">" + d;
+                        else 
+                            move = card + ">" + d + "d";
+                    }
+                }
+            }
+                        /*
                 //Test if the card can be paid for outright. If so, play it.
                 if (this.canPay(card)) {
                     return card + d; //+ "payment here";
@@ -466,12 +472,11 @@ export class MagnateGame extends GameBase {
                     }
                 } // else fall through
                 */
-
-            }
         }
+        if (move === "")
+            move = card + ">$";
         
-        //Otherwise, sell it.
-        return card + ">$"; //No payment means a sale?
+        return move;
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {

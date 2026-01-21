@@ -3,7 +3,7 @@
 import "mocha";
 import { expect } from "chai";
 //import { Card, Deck, cardSortAsc, cardSortDesc, cardsBasic, cardsExtended } from "../../src/common/decktet";
-import { Deck, cardsBasic, cardsExtended } from "../../src/common/decktet";
+import { Card, Deck, cardsBasic, cardsExtended } from "../../src/common/decktet";
 
 describe("Decktets", () => {
     it ("Still makes a single decktet", () => {
@@ -44,5 +44,10 @@ describe("Decktets", () => {
         const [card] = mydeck.draw(1);
         expect(card).eq(undefined);
         
+    });
+    
+    it ("Deserializes", () => {
+        expect(Card.deserialize("0")).to.have.deep.property("name", "The Excuse");
+        expect(Card.deserialize("01")).to.have.deep.property("name", "The Excuse");
     });
 });
