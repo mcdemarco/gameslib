@@ -258,6 +258,7 @@ export class MagnateGame extends GameBase {
         for (const hand of this.hands) {
             for (const uid of hand) {
                 if (uid !== "") {
+                    console.log(uid);
                     this.deck.remove(uid);
                 }
             }
@@ -316,6 +317,45 @@ export class MagnateGame extends GameBase {
         //Check for suit mismatch.
         
         return this.matched(card, matchMe);
+    }
+
+    private drawUp(): void {
+        //Shuffles the discards, once.
+
+        //First, try to draw what we need from the deck.
+        const toDraw = this.variants.includes("mega") ? 2 : 1;
+        const drawn = this.deck.draw(Math.min(this.deck.size,toDraw)).map(c => c.uid);
+
+        drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
+        
+        if (drawn.length === toDraw)
+            return;
+        
+        if (this.shuffled) {
+            return;
+        } else {
+            //Return the discards to the deck and shuffle.
+            this.discards.forEach( card => {
+                this.deck.add(card);
+            });
+            this.discards = [];
+            this.deck.shuffle();
+
+            this.shuffled = true;
+
+/*            //TODO
+            //Draw the rest.  
+            for (let n = this.market.length; n < this.marketsize; n++) {
+                const [card] = this.deck.draw();
+                if (card) {
+                    this.market.push(card.uid);
+                    toDraw++;
+                } else {
+                    return toDraw;
+                }
+            }*/
+        }
+        return;
     }
 
     private matched(card1: string, card2: string): boolean {
@@ -539,7 +579,7 @@ export class MagnateGame extends GameBase {
 
         //TODO!
         const [card,destination] = m.split(">");
-        this.removeCard(card, this.hands[this.currplayer]);
+        this.removeCard(card, this.hands[this.currplayer - 1]);
 
         if (destination === "$") {
             //TODO: Profit!
@@ -561,6 +601,9 @@ export class MagnateGame extends GameBase {
         }
 
         if (partial) { return this; }
+
+        // draw up
+        this.drawUp();
 
         // update currplayer
         this.lastmove = m;
