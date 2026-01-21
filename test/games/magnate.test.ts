@@ -4,12 +4,13 @@ import "mocha";
 import { expect } from "chai";
 import { MagnateGame } from '../../src/games';
 
-describe("Frogger", () => {
+describe("Magnate", () => {
     const g = new MagnateGame();
-    it ("Parses single moves", () => {
+    it ("Validates single moves", () => {
         // parsing good moves
         expect(g.validateMove("7MS;m5*m6")).to.have.deep.property("valid", true);
         g.render();
+        g.randomMove();
 
         /*
           expect(g.parseMove("8MS:a3-b3")).to.deep.equal({

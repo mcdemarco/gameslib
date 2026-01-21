@@ -190,7 +190,7 @@ export class Card {
                 let strDeck: number = 0;
                 if (card.length > 1 && card.charAt(card.length - 1).match(/\d/)) {
                     strDeck = parseInt(card.charAt(card.length - 1),10);
-                    [strRank, ...strSuits] = card.substring(0,card.length - 2).split("");
+                    [strRank, ...strSuits] = card.substring(0,card.length - 1).split("");
                 }
                 const rank = Component.deserialize(strRank);
                 const suits = strSuits.map(s => Component.deserialize(s));
