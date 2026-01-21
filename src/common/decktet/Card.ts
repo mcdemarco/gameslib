@@ -183,18 +183,19 @@ export class Card {
     }
 
     public static deserialize(card: Card|string, allowCustom = false): Card|undefined {
-        let strDeck = 0;
+        let strDeck: number = 0;
         if (typeof card === "string") {
             let found: Card|undefined;
             if (card.length > 1 && card.charAt(card.length - 1).match(/\d/)) {
                 strDeck = parseInt(card.charAt(card.length - 1),10);
                 found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase().substring(0,card.length - 1));
+                if (found)
+                    return new Card({name: found._name, rank: Component.deserialize(found._rank)!, suits: [...found._suits.map(s => Component.deserialize(s)!)], personality: found._personality, location: found._location, event: found.event, deck: strDeck});
             } else {
                 found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase());
             }
             if (allowCustom && found === undefined) {
                 let [strRank, ...strSuits] = card.split("");
-                let strDeck: number = 0;
                 if (card.length > 1 && card.charAt(card.length - 1).match(/\d/)) {
                     strDeck = parseInt(card.charAt(card.length - 1),10);
                     [strRank, ...strSuits] = card.substring(0,card.length - 1).split("");

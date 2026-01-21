@@ -448,12 +448,14 @@ export class MagnateGame extends GameBase {
         let move: string = "";
 
         const rando = Math.random();
-        if (rando < 0.8) {      
+        if (rando < 0.8) {
+            console.log(rando);
             //Test if the card can be placed. 
             for (let d = 1; d <= this.districts; d++) {
                 if (move === "") {
                     if (this.canPlace(card, d.toString())) {
                         //No economy testing:  40% build, 40% deed, 20% sell.
+                        console.log("could place");
                         if (rando < 0.4)
                             move = card + ">" + d;
                         else 
@@ -461,6 +463,8 @@ export class MagnateGame extends GameBase {
                     }
                 }
             }
+            console.log(move);
+        }
                         /*
                 //Test if the card can be paid for outright. If so, play it.
                 if (this.canPay(card)) {
@@ -472,9 +476,11 @@ export class MagnateGame extends GameBase {
                     }
                 } // else fall through
                 */
-        }
+        
         if (move === "")
             move = card + ">$";
+
+        console.log(move);
         
         return move;
     }
@@ -714,21 +720,20 @@ export class MagnateGame extends GameBase {
         return renderDeck.cards;
     }
 
-    private renderPieces(): string {
-        const pstr: string[] = [];
+    private renderPlayerPieces(player: number, maxRows: number): string[] {
+        const pstra: string[] = [];
 
-        //Player two's tableau.
-        const p2rows = this.getMaxDistrictSize(2);
-        let board = this.board[2];
-        for (let r = 0; r <= p2rows; r++) {
+        //A player's tableau.
+        let board = this.board[player];
+        for (let r = 0; r <= maxRows; r++) {
             const row = [];
-            for (let b2 = 0; b2 < this.districts; b2++) {
-                if (board[b2].length > r) {
-                    const c = board[b2][r];
-                    row.push("c" + c + "r");
-                } else if (board[b2].length === r) {
+            for (let d = 0; d < this.districts; d++) {
+                if (board[d].length > r) {
+                    const c = board[d][r];
+                    row.push("c" + c);
+                } else if (board[d].length === r) {
                     //Check for a deed.
-                    const dist = this.coord2algebraic(b2);
+                    const dist = this.coord2algebraic(d);
                     if (this.hasDeed(dist, 2)) {
                         const c = this.getDeedCard(dist, 2);
                         row.push("c" + c);
@@ -739,46 +744,10 @@ export class MagnateGame extends GameBase {
                     row.push("-");
                 }
             }
-            pstr.push(row.join(","));
+            pstra.push(row.join(","));
         }
 
-        //Invert here.
-        pstr.reverse();
-
-        //the center row
-        const row = [];
-        for (let bc = 0; bc < this.districts; bc++) {
-            const c = this.board[0][bc];
-            row.push("c" + c);
-        }
-        pstr.push(row.join(","));
-
-        //Player one's tableau.
-        const p1rows = this.getMaxDistrictSize(1);
-        board = this.board[1];
-        for (let r = 0; r <= p1rows; r++) {
-            const row = [];
-            for (let b1 = 0; b1 < this.districts; b1++) {
-                if (board[b1].length > r) {
-                    const c = board[b1][r];
-                    row.push("c" + c);
-                } else if (board[b1].length === r) {
-                    //Check for a deed.
-                    const dist = this.coord2algebraic(b1);
-                    if (this.hasDeed(dist, 1)) {
-                        const c = this.getDeedCard(dist, 1);
-                        row.push("c" + c);
-                    } else {
-                        row.push("-");
-                    }
-                } else {
-                    row.push("-");
-                }
-            }
-            pstr.push(row.join(","));
-        }
-        
-        return pstr.join("\n");
+        return pstra;
     }
     
     public render(): APRenderRep {
@@ -788,11 +757,26 @@ export class MagnateGame extends GameBase {
         const p2rows = this.getMaxDistrictSize(2);
         const centerrow = p2rows + 2;
         const rows = p1rows + p2rows + 3;
-        
-        // No pieces on the board, just markers.
-        const pstr = this.renderPieces();
-        console.log(pstr);
 
+        //Player 2 on top.
+        let pstrArray = this.renderPlayerPieces(2, p2rows);
+        //Invert here.
+        pstrArray.reverse();
+
+        //the center row
+        const row = [];
+        for (let bc = 0; bc < this.districts; bc++) {
+            const c = this.board[0][bc];
+            row.push("c" + c);
+        }
+        pstrArray.push(row.join(","));
+
+        //Player 1 below.
+        const pstr1 = this.renderPlayerPieces(1, p2rows);
+        pstrArray = pstrArray.concat(pstr1);
+        
+        const pstr = pstrArray.join("\n");
+        
         // Mark live spots and deeds.
         const markers: MarkerFlood[] = [];
 

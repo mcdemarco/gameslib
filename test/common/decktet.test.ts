@@ -49,5 +49,7 @@ describe("Decktets", () => {
     it ("Deserializes", () => {
         expect(Card.deserialize("0")).to.have.deep.property("name", "The Excuse");
         expect(Card.deserialize("01")).to.have.deep.property("name", "The Excuse");
+        expect(Card.deserialize("3LY1")).to.have.deep.property("name", "The Savage");
+        expect(Card.deserialize("PSVK5")).to.have.deep.property("deck", 5);
     });
 });
