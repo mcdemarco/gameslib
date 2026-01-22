@@ -258,7 +258,6 @@ export class MagnateGame extends GameBase {
         for (const hand of this.hands) {
             for (const uid of hand) {
                 if (uid !== "") {
-                    console.log(uid);
                     this.deck.remove(uid);
                 }
             }
@@ -315,21 +314,22 @@ export class MagnateGame extends GameBase {
             matchMe = myBoard[col][myBoard[col].length - 1];
 
         //Check for suit mismatch.
-        console.log(card, matchMe);        
         return this.matched(card, matchMe);
     }
 
     private drawUp(): void {
-        //Shuffles the discards, once.
+        //Can shuffle the discards, once.
 
         //First, try to draw what we need from the deck.
         const toDraw = this.variants.includes("mega") ? 2 : 1;
-        const drawn = this.deck.draw(Math.min(this.deck.size,toDraw)).map(c => c.uid);
+        let drawn = this.deck.draw(Math.min(this.deck.size, toDraw)).map(c => c.uid);
 
         drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         
         if (drawn.length === toDraw)
             return;
+
+        const stillToDraw = toDraw - drawn.length;
         
         if (this.shuffled) {
             return;
@@ -343,17 +343,9 @@ export class MagnateGame extends GameBase {
 
             this.shuffled = true;
 
-/*            //TODO
-            //Draw the rest.  
-            for (let n = this.market.length; n < this.marketsize; n++) {
-                const [card] = this.deck.draw();
-                if (card) {
-                    this.market.push(card.uid);
-                    toDraw++;
-                } else {
-                    return toDraw;
-                }
-            }*/
+            //Draw the rest.
+            drawn = this.deck.draw(Math.min(this.deck.size, stillToDraw)).map(c => c.uid);
+            drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         }
         return;
     }
@@ -370,7 +362,6 @@ export class MagnateGame extends GameBase {
         if (c1.rank.name === "Excuse" || c2.rank.name === "Excuse")
             return true;
         
-        console.log(c1.sharesSuitWith(c2));
         return c1.sharesSuitWith(c2);
     }
 
@@ -449,13 +440,11 @@ export class MagnateGame extends GameBase {
 
         const rando = Math.random();
         if (rando < 0.8) {
-            console.log(rando);
             //Test if the card can be placed. 
             for (let d = 1; d <= this.districts; d++) {
                 if (move === "") {
                     if (this.canPlace(card, d.toString())) {
                         //No economy testing:  40% build, 40% deed, 20% sell.
-                        console.log("could place");
                         if (rando < 0.4)
                             move = card + ">" + d;
                         else 
@@ -463,7 +452,6 @@ export class MagnateGame extends GameBase {
                     }
                 }
             }
-            console.log(move);
         }
                         /*
                 //Test if the card can be paid for outright. If so, play it.
@@ -480,8 +468,6 @@ export class MagnateGame extends GameBase {
         if (move === "")
             move = card + ">$";
 
-        console.log(move);
-        
         return move;
     }
 
@@ -635,21 +621,14 @@ export class MagnateGame extends GameBase {
         //May not be exactly equal in mega.
         if (this.deck.size === 0 && this.hands[0].length <= finalHandSize && this.hands[1].length <= finalHandSize) {
             this.gameover = true;
-            const scores: number[] = [];
-            for (let p = 1; p <= this.numplayers; p++) {
-                scores.push(this.getPlayerScore(p));
-            }
+            const scores: IScores[] = this.getPlayersScores();
             if (scores[0] === scores[1]) {
                 //Evaluate tiebreaker.
                 this.winner = this.getTieWinner();
             } else {
                 //Simple win.
-                const max = Math.max(...scores);
-                for (let p = 1; p <= this.numplayers; p++) {
-                    if (scores[p-1] === max) {
-                        this.winner.push(p as playerid);
-                    }
-                }
+                const winner = scores[0] > scores[1] ? 1 : 2;
+                this.winner.push(winner as playerid);
             }
         }
 
@@ -703,7 +682,7 @@ export class MagnateGame extends GameBase {
         //Gets max district size (disregarding deeds).
         //Add one later for deeds.
         let max = 0;
-        let board = this.board[player];
+        const board = this.board[player];
         for (let d = 0; d < this.districts; d++) {
             //const deed = this.hasDeed(d, player as playerid) ? 1 : 0;
             const districtLength = board ? (board[d] ? board[d].length : 0) : 0;
@@ -724,7 +703,7 @@ export class MagnateGame extends GameBase {
         const pstra: string[] = [];
 
         //A player's tableau.
-        let board = this.board[player];
+        const board = this.board[player];
         for (let r = 0; r <= maxRows; r++) {
             const row = [];
             for (let d = 0; d < this.districts; d++) {
@@ -812,7 +791,6 @@ export class MagnateGame extends GameBase {
         const legend: ILegendObj = {};
         for (const card of allcards) {
             let glyph = card.toGlyph({border: true});
-            let cardui = card.uid;
 
             // the pawny pieces and the excuse (center row)
             if (card.rank.uid === this.pawnrank || card.rank.name === "Excuse") {
@@ -823,10 +801,8 @@ export class MagnateGame extends GameBase {
                     opacity: 0.2,
                  }});
             }
-            legend["c" + cardui] = glyph;
+            legend["c" + card.uid] = glyph;
         }
-
-        //console.log(legend["c01"]);
 
         for (const suit of suits) {
             legend[suit.uid] = {
@@ -946,14 +922,76 @@ export class MagnateGame extends GameBase {
     }
 
     /* scoring functions */
+    private getAceScore(index: number, playernum: number, c1: Card): number {
+        let acescore = 0;
+        const myDistrict = this.board[playernum][index];
+        for (let c = 0; c < myDistrict.length; c++) {
+            const c2 = Card.deserialize(myDistrict[c])!;
+            if (c1.sharesSuitWith(c2))
+                acescore++;
+        }
+
+        if (this.variants.includes("deucey")) {
+            //Ace variant with more matches.
+            const c2 = Card.deserialize(this.board[0][index])!;
+            if (c1.sharesSuitWith(c2))
+                acescore++;
+
+            const them = playernum === 1 ? 2 : 1; 
+            const theirDistrict = this.board[them][index];
+            for (let c = 0; c < theirDistrict.length; c++) {
+                const c2 = Card.deserialize(theirDistrict[c])!;
+                if (c1.sharesSuitWith(c2))
+                    acescore++;
+            }
+        }
+
+        return acescore;
+    }
+
+    private getDistrictScoreForPlayer(district: string, player: playerid): number {
+        const index = this.algebraic2coord(district);
+        const myDistrict = this.board[player as number][index];
+        let subscore = 0;
+        for (let c = 0; c < myDistrict.length; c++) {
+            const card = Card.deserialize(myDistrict[c])!;
+            if (card.rank.name === "Ace")
+                subscore += this.getAceScore(index, player, card);
+            else 
+                subscore += Math.ceil(card.rank.seq); //Rounds all "Courts" up to 10. 
+        }
+        return subscore;
+    }
+
+    private getDistrictWinner(district: string): number {
+        //Determines district control.
+        const control = this.getDistrictScoreForPlayer(district,1) - this.getDistrictScoreForPlayer(district,2);
+        return control > 0 ? 1 : (control < 0 ? 2 : 0); 
+    }
+
+    private getDistrictsWinners(): number[] {
+        //Determines district control.
+        const controllers: number[] = [0,0,0];
+        for (let d = 0; d < this.districts; d++) {
+            const controller = this.getDistrictWinner(this.coord2algebraic(d));
+            controllers[controller]++;
+        }
+        controllers.shift();
+        return controllers;
+    }
 
     private getTieWinner(): playerid[] {
-        //Evaluate tiebreaker.
+        //Evaluate first tiebreaker.
         let tieWinner: playerid[] = [];
-        //Sort.
-        const sortedArrays = this.tokens.map(collection => [...collection].sort((a,b) => a - b));
-        //Subtract.
-        const winArray = sortedArrays[0].map((item, index) => item - (sortedArrays[1])[index]).filter((item) => item !== 0);
+        const tieArray: number[][] = [[],[]];
+        for (let p = 1; p <=2; p++) {
+            tieArray[0][p - 1] = this.getTotalScore(p as playerid);
+            tieArray[1][p - 1] = this.tokens[p - 1].reduce(
+                (acc, cur) => acc + cur,
+                0
+            );
+        }
+        const winArray = tieArray.filter( arry => arry[0] !== arry [1] ).map( arry => arry[0] - arry[1]);
 
         if (winArray.length === 0) {
             tieWinner = [1,2] as playerid[];
@@ -963,19 +1001,23 @@ export class MagnateGame extends GameBase {
         return tieWinner;
     }
 
-    public getPlayerScore(player: number): number {
-        //gets min of suits
-        const score = [...this.tokens[player - 1]].sort((a,b) => a - b)[0];
-        return score;
+    private getTotalScore(player: playerid): number {
+        //TODO.
+        let total = 0;
+        for (let d = 1; d <= this.districts; d++) {
+            total += this.getDistrictScoreForPlayer(d.toString(),player)
+        }
+        return total;
     }
 
     public getPlayersScores(): IScores[] {
-        const scores: number[] = [];
-        for (let p = 1; p <= this.numplayers; p++) {
-            scores.push(this.getPlayerScore(p));
-        }
+        let scores: string[] = [];
+        const districts: number[] = this.getDistrictsWinners();
+        scores = districts.map((s, i) => 
+            s + " (" + this.getTotalScore((i + 1) as playerid) + ")"
+                                     );
         return [
-            { name: i18next.t("apgames:status.SCORES"), scores},
+            { name: i18next.t("apgames:status.SCORES"), scores },
         ];
     }
 

@@ -52,4 +52,11 @@ describe("Decktets", () => {
         expect(Card.deserialize("3LY1")).to.have.deep.property("name", "The Savage");
         expect(Card.deserialize("PSVK5")).to.have.deep.property("deck", 5);
     });
+    
+    it ("Handles a degenerate case", () => {
+        const mydeck = new Deck([...cardsBasic, ...cardsExtended]);
+        mydeck.draw(4);
+        const [mycard] = mydeck.draw(1);
+        expect(mycard.sharesSuitWith(mycard)).eq(true);
+    });
 });
