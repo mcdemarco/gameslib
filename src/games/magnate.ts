@@ -695,7 +695,7 @@ export class MagnateGame extends GameBase {
         //Init draw deck and hands.
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
         const renderDeck = this.initDeck(deckCount, true);
-                
+
         return renderDeck.cards;
     }
 
@@ -709,13 +709,13 @@ export class MagnateGame extends GameBase {
             for (let d = 0; d < this.districts; d++) {
                 if (board[d].length > r) {
                     const c = board[d][r];
-                    row.push("c" + c);
+                    row.push("k" + c);
                 } else if (board[d].length === r) {
                     //Check for a deed.
                     const dist = this.coord2algebraic(d);
                     if (this.hasDeed(dist, 2)) {
                         const c = this.getDeedCard(dist, 2);
-                        row.push("c" + c);
+                        row.push("k" + c);
                     } else {
                         row.push("-");
                     }
@@ -746,7 +746,7 @@ export class MagnateGame extends GameBase {
         const row = [];
         for (let bc = 0; bc < this.districts; bc++) {
             const c = this.board[0][bc];
-            row.push("c" + c);
+            row.push("k" + c);
         }
         pstrArray.push(row.join(","));
 
@@ -755,6 +755,7 @@ export class MagnateGame extends GameBase {
         pstrArray = pstrArray.concat(pstr1);
         
         const pstr = pstrArray.join("\n");
+
         
         // Mark live spots and deeds.
         const markers: MarkerFlood[] = [];
@@ -794,14 +795,14 @@ export class MagnateGame extends GameBase {
 
             // the pawny pieces and the excuse (center row)
             if (card.rank.uid === this.pawnrank || card.rank.name === "Excuse") {
-                 glyph = card.toGlyph({border: false, fill: {
+                glyph = card.toGlyph({border: false, fill: {
                     func: "flatten",
                     fg: "_context_labels",
                     bg: "_context_background",
                     opacity: 0.2,
                  }});
             }
-            legend["c" + card.uid] = glyph;
+            legend["k" + card.uid] = glyph;
         }
 
         for (const suit of suits) {
@@ -820,7 +821,7 @@ export class MagnateGame extends GameBase {
             if (hand.length > 0) {
                 areas.push({
                     type: "pieces",
-                    pieces: hand.map(c => "c" + (c === "" ? "UNKNOWN" : c)) as [string, ...string[]],
+                    pieces: hand.map(c => "k" + (c === "" ? "UNKNOWN" : c)) as [string, ...string[]],
                     label: i18next.t("apgames:validation.magnate.LABEL_HAND", {playerNum: p}) || `P${p} Hand`,
                     spacing: 0.5,
                     ownerMark: p
@@ -832,17 +833,17 @@ export class MagnateGame extends GameBase {
         if (this.discards.length > 0) {
             areas.push({
                 type: "pieces",
-                pieces: this.discards.map(c => "c" + c) as [string, ...string[]],
+                pieces: this.discards.map(c => "k" + c) as [string, ...string[]],
                 label: i18next.t("apgames:validation.magnate.LABEL_DISCARDS") || "Discards",
                 spacing: 0.25,
                 width: this.districts + 2,
             });
         }
 
-        const remaining = this.deck.clone().draw(this.deck.size).sort(cardSortAsc).map(c => "c" + c.uid) as [string, ...string[]];
+        const remaining = this.deck.clone().draw(this.deck.size).sort(cardSortAsc).map(c => "k" + c.uid) as [string, ...string[]];
 
 
-        //const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "c" + c.uid)
+        //const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "k" + c.uid)
         if (remaining.length > 0) {
             areas.push({
                 type: "pieces",
@@ -878,6 +879,8 @@ export class MagnateGame extends GameBase {
             }
         }
 */
+
+        console.log(pstr);
         
         // Build rep
         const rep: APRenderRep =  {
