@@ -58,12 +58,9 @@ describe("Magnate", () => {
 
     it ("Plays along a bit", () => {
         const g = new MagnateGame();
-        g.move(g.randomMove());
-        g.move(g.randomMove());
-        g.move(g.randomMove());
-        g.move(g.randomMove());
-        g.move(g.randomMove());
-        g.move(g.randomMove());
+        for (let x = 0; x < 27; x++) {
+            g.move(g.randomMove());
+        }
         console.log(g.status());
     });
 

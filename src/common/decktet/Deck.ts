@@ -45,6 +45,17 @@ export class Deck {
         return this;
     }
 
+    public addOne(uid: string): Deck {
+        const found = Card.deserialize(uid);
+        if (found === undefined) {
+            throw new Error(`Could not find a Decktet card with the uid "${uid}"`);
+        }
+        
+        this._cards.push(found);
+        this.shuffle();
+        return this;
+    }
+
     public addAll(uid: string): Deck {
         if (this._decks === undefined) {
             throw new Error("Use add() to add cards to a single deck.");

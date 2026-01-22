@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, Glyph, MarkerFlood, RowCol } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaPieces, Glyph, MarkerFlood, MarkerOutline, RowCol } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -241,7 +241,13 @@ export class MagnateGame extends GameBase {
         this.discards = [...state.discards];
         this.hands = state.hands.map(h => [...h]);
         this.tokens = [[...state.tokens[0]], [...state.tokens[1]]];
+        this.shuffled = state.shuffled;
         this.lastmove = state.lastmove;
+
+        if (this.variants.includes("courtpawns")) {
+            this.pawnrank = "T";
+            this.courtrank = "P";
+        }
 
         if (this.variants.includes("mega"))
             this.districts = 9; //8 pawns plus the excuse
@@ -266,7 +272,6 @@ export class MagnateGame extends GameBase {
         this.deeds.forEach((value, key) => this.deck.remove(key));
 
         this.deck.shuffle();
-
         return this;
     }
 
@@ -318,8 +323,6 @@ export class MagnateGame extends GameBase {
     }
 
     private drawUp(): void {
-        //Can shuffle the discards, once.
-
         //First, try to draw what we need from the deck.
         const toDraw = this.variants.includes("mega") ? 2 : 1;
         let drawn = this.deck.draw(Math.min(this.deck.size, toDraw)).map(c => c.uid);
@@ -330,13 +333,13 @@ export class MagnateGame extends GameBase {
             return;
 
         const stillToDraw = toDraw - drawn.length;
-        
+
         if (this.shuffled) {
             return;
         } else {
-            //Return the discards to the deck and shuffle.
+            //Can shuffle the discards, once.
             this.discards.forEach( card => {
-                this.deck.add(card);
+                this.deck.addOne(card);
             });
             this.discards = [];
             this.deck.shuffle();
@@ -445,7 +448,7 @@ export class MagnateGame extends GameBase {
                 if (move === "") {
                     if (this.canPlace(card, d.toString())) {
                         //No economy testing:  40% build, 40% deed, 20% sell.
-                        if (rando < 0.4)
+                        if (rando < 0.4 || card[0] === "2") //Can't deed a 2.
                             move = card + ">" + d;
                         else 
                             move = card + ">" + d + "d";
@@ -734,7 +737,7 @@ export class MagnateGame extends GameBase {
         //Need to determine the number of rows every time.
         const p1rows = this.getMaxDistrictSize(1);
         const p2rows = this.getMaxDistrictSize(2);
-        const centerrow = p2rows + 2;
+        const centerrow = p2rows + 1;
         const rows = p1rows + p2rows + 3;
 
         //Player 2 on top.
@@ -757,14 +760,14 @@ export class MagnateGame extends GameBase {
         const pstr = pstrArray.join("\n");
 
         
-        // Mark live spots and deeds.
-        const markers: MarkerFlood[] = [];
+        // Mark live spots, deeds, and control.
+        let markers: (MarkerOutline|MarkerFlood)[] = [];
 
         let sideboard = this.board[1];
         const points1 = [];
         for (let col = 0; col < this.districts; col++) {
             const rawrow = sideboard[col] ? sideboard[col].length : 0;
-            points1.push({col: col, row: rawrow + centerrow} as RowCol);
+            points1.push({col: col, row: rawrow + centerrow + 1} as RowCol);
         }
         markers.push({
             type: "flood",
@@ -777,13 +780,23 @@ export class MagnateGame extends GameBase {
         const points2 = [];
         for (let col = 0; col < this.districts; col++) {
             const rawrow = sideboard[col] ? sideboard[col].length : 0;
-            points2.push({col: col, row: centerrow - rawrow - 2} as RowCol);
+            points2.push({col: col, row: centerrow - rawrow - 1} as RowCol);
         }
         markers.push({
             type: "flood",
             colour: 2,
             opacity: 0.15,
             points: points2 as [RowCol, ...RowCol[]],
+        });
+
+        const controlled = this.getDistrictsWinners();
+        controlled.forEach((dc, i) => {
+            if (dc > 0)
+                markers.push({
+                    type: "outline",
+                    colour: dc,
+                    points: [{col: i, row: centerrow}] as [RowCol, ...RowCol[]],
+                });
         });
         
         // Build legend of most cards, including an Excuse.
@@ -972,7 +985,7 @@ export class MagnateGame extends GameBase {
         return control > 0 ? 1 : (control < 0 ? 2 : 0); 
     }
 
-    private getDistrictsWinners(): number[] {
+    private getDistrictsTotals(): number[] {
         //Determines district control.
         const controllers: number[] = [0,0,0];
         for (let d = 0; d < this.districts; d++) {
@@ -980,6 +993,16 @@ export class MagnateGame extends GameBase {
             controllers[controller]++;
         }
         controllers.shift();
+        return controllers;
+    }
+
+    private getDistrictsWinners(): number[] {
+        //Determines district control.
+        const controllers: number[] = [];
+        for (let d = 0; d < this.districts; d++) {
+            const controller = this.getDistrictWinner(this.coord2algebraic(d));
+            controllers.push(controller);
+        }
         return controllers;
     }
 
@@ -1015,7 +1038,7 @@ export class MagnateGame extends GameBase {
 
     public getPlayersScores(): IScores[] {
         let scores: string[] = [];
-        const districts: number[] = this.getDistrictsWinners();
+        const districts: number[] = this.getDistrictsTotals();
         scores = districts.map((s, i) => 
             s + " (" + this.getTotalScore((i + 1) as playerid) + ")"
                                      );
@@ -1066,7 +1089,7 @@ export class MagnateGame extends GameBase {
                 resolved = true;
                 break;
             case "eog":
-                node.push(i18next.t("apresults:EOG.magnate", {player}));
+                node.push(i18next.t("apresults:EOG.default"));
                 resolved = true;
                 break;
         }
