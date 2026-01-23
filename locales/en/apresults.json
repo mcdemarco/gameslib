@@ -154,6 +154,7 @@
     "CONVERT": {
         "complete": "{{player}} turned a {{what}} into a {{into}} at {{where}}.",
         "courtesan": "King and courtesan swapped positions at {{where}}.",
+        "magnate": "{{player}} completed their deeded card {{what}} in the {{where}}'s district.",
         "moonsquad": "{{player}} recruited a squad.",
         "pacru": "{{player}} converted {{where}}.",
         "paintbucket_one": "{{player}} converted 1 piece at {{where}}.",
@@ -171,6 +172,7 @@
         "emu_deck": "{{player}} drew a face-down card from the deck.",
         "emu_discard": "{{player}} drew the {{what}} from the top of the discard pile.",
         "frogger": "The draw pool was {{what}} refilled.",
+        "magnate": "The discards were shuffled.  There are no shuffles remaining.",
         "quincunx_one": "{{player}} drew {{count}} card.",
         "quincunx_other": "{{player}} drew {{count}} cards."
     },
@@ -395,6 +397,9 @@
         "logger_logger": "{{player}} placed their logger at {{where}}.",
         "logger_plant": "{{player}} planted a sapling at {{where}}.",
         "logger_spawn": "A new sapling sprouted at {{where}}.",
+        "magnate_build": "{{player}} built {{what}} in {{where}}'s district.",
+        "magnate_deed": "{{player}} deeded {{what}} in {{where}}'s district.",
+        "magnate_sell": "{{player}} sold {{what}}.",
         "mattock": "{{player}} placed a miner at {{where}}.",
         "meg_cap": "{{player}} placed a blocker at {{where}}.",
         "meg_cup": "{{player}} placed a receiver at {{where}}.",
@@ -506,6 +511,8 @@
     },
     "RESIGN": "{{player}} has resigned.",
     "ROLL": {
+        "magnate": "{{player}} rolled a(n) {{values}}.",
+        "magnate_taxation": "Taxation was rolled on {{values}}.",
         "single": "The die was rolled: {{values}}.",
         "tablero": "The dice were rolled: {{values}}."
     },
