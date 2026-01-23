@@ -683,7 +683,6 @@ export class MagnateGame extends GameBase {
 
     private getMaxDistrictSize(player: number): number {
         //Gets max district size (disregarding deeds).
-        //Add one later for deeds.
         let max = 0;
         const board = this.board[player];
         for (let d = 0; d < this.districts; d++) {
@@ -716,7 +715,7 @@ export class MagnateGame extends GameBase {
                 } else if (board[d].length === r) {
                     //Check for a deed.
                     const dist = this.coord2algebraic(d);
-                    if (this.hasDeed(dist, 2)) {
+                    if (this.hasDeed(dist, player as playerid)) {
                         const c = this.getDeedCard(dist, 2);
                         row.push("k" + c);
                     } else {
