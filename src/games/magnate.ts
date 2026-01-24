@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, AreaKey, Glyph, MarkerFlood, MarkerOutline, RowCol } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaButtonBar, AreaPieces, AreaKey, Glyph, MarkerFlood, MarkerOutline, RowCol } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { randomInt, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -10,27 +10,28 @@ import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended, suits } from "../co
 const deepclone = require("rfdc/default");
 
 export type playerid = 1|2;
-export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
-//Deeds: the owner, the column, an array of sheltered resources, and a preferred suit (to simplify resource collection).
+//export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
+export type moveType = "B"|"D"|"S"|"A"|"T"|"P";
+//Deeds: the column, an array of added resources, and a preferred suit (to simplify resource collection).
 export type DeedContents = {
-    player: playerid,
     district: string,
     tokens: number[],
-    suit?: Suit
+    suit?: string
 };
 
-const suitOrder = ["M","S","V","L","Y","K"];
+const suitOrder = suits.map(suit => suit.uid); //["M","S","V","L","Y","K"];
+const columnLabels = "abcdefghij".split("");
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: [string[], string[][], string[][]];
     crowns: string[][];
-    deeds: Map<string, DeedContents>;
+    deeds: Map<string, DeedContents>[];
     discards: string[];
     hands: string[][];
     tokens: [number[], number[]];
     shuffled: boolean;
-    roll: number[];
+    //roll: number[];
     lastroll: number[];
     lastmove?: string;
 };
@@ -43,7 +44,17 @@ export interface IMagnateState extends IAPGameState {
 interface ILegendObj {
     [key: string]: Glyph|[Glyph, ...Glyph[]];
 }
-
+/*
+interface IMagnateMove {
+    type: string;
+    card?: string;
+    district?: string;
+    spend: string[];
+    gain: string;
+    incomplete: boolean;
+    valid: boolean;
+}
+*/
 export class MagnateGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
         name: "Magnate",
@@ -54,7 +65,7 @@ export class MagnateGame extends GameBase {
         // i18next.t("apgames:descriptions.magnate")
         description: "apgames:descriptions.magnate",
         // i18next.t("apgames:notes.magnate")
-        //notes: "apgames:notes.magnate",
+        notes: "apgames:notes.magnate",
         urls: [
             "http://wiki.decktet.com/game:magnate",
             "https://boardgamegeek.com/boardgame/41090/magnate",
@@ -87,21 +98,21 @@ export class MagnateGame extends GameBase {
 
     //The UI is quite simple because we only need to specify a column.
     public coord2algebraic(x: number): string {
-        return (x + 1).toString();
+        return columnLabels[x];
     }
     public algebraic2coord(district: string): number {
-        return parseInt(district, 10) - 1;
+        return columnLabels.indexOf(district);
     }
 
     public numplayers = 2;
     public currplayer: playerid = 1;
     public board: [string[], string[][], string[][]] = [[],[],[]];
     public crowns: string[][] = [];
-    public deeds!: Map<string, DeedContents>;
+    public deeds!: [Map<string, DeedContents>,Map<string, DeedContents>];
     public discards: string[] = [];
     public hands: string[][] = [];
     public tokens: [number[], number[]] = [[], []];
-    public roll: number[] = [];
+    //public roll: number[] = [];
     public lastroll: number[] = [];
     public shuffled: boolean = false;
     public gameover: boolean = false;
@@ -161,7 +172,7 @@ export class MagnateGame extends GameBase {
 
             //initial roll
             const lastroll: number[] = this.roller();
-            const roll: number[] = [...lastroll];
+            //const roll: number[] = [...lastroll];
 
             //Taxation and rank rolls have no impact on the first turn,
             //but we may have to process a Christmas roll.
@@ -169,8 +180,8 @@ export class MagnateGame extends GameBase {
             for (let c = 0; c < handCount; c++) {
                 for (let p = 0; p < 2; p++) {
                     const [card] = crownDeck.draw();
-                    crowns[p][c] = card.uid;
                     const suit = card.suits.map(s => s.uid)[0];
+                    crowns[p][c] = suit;
                     tokens[p][suitOrder.indexOf(suit)]++;
                     if (lastroll[0] === 10) //Christmas!
                         tokens[p][suitOrder.indexOf(suit)]++;
@@ -195,11 +206,11 @@ export class MagnateGame extends GameBase {
                 currplayer: 1,
                 board,
                 crowns,
-                deeds: new Map(), 
+                deeds: [new Map(), new Map()],
                 discards: [],
                 hands,
                 tokens,
-                roll,
+                //roll,
                 lastroll,
                 shuffled: false
             };
@@ -270,12 +281,12 @@ export class MagnateGame extends GameBase {
         this.currplayer = state.currplayer;
         this.board = deepclone(state.board) as [string[], string[][], string[][]];
         this.crowns = state.crowns.map(c => [...c]);
-        this.deeds = new Map(state.deeds);
+        this.deeds = [new Map(state.deeds[0]),new Map(state.deeds[1])];
         this.discards = [...state.discards];
         this.hands = state.hands.map(h => [...h]);
         this.tokens = [[...state.tokens[0]], [...state.tokens[1]]];
         this.shuffled = state.shuffled;
-        this.roll = [...state.roll];
+        //this.roll = [...state.roll];
         this.lastroll = [...state.lastroll];
         this.lastmove = state.lastmove;
 
@@ -304,12 +315,14 @@ export class MagnateGame extends GameBase {
             }
         }
 
-        this.deeds.forEach((value, key) => this.deck.remove(key));
+        this.deeds[0].forEach((value, key) => this.deck.remove(key));
+        this.deeds[1].forEach((value, key) => this.deck.remove(key));
 
         this.deck.shuffle();
 
         //We report the previous roll as associated with this player and this turn.
         this.results.push({type: "roll", values: this.lastroll});
+        //If that workn, we could recalculate and report taxes here too.
 
         return this;
     }
@@ -369,7 +382,34 @@ export class MagnateGame extends GameBase {
         
         return !!(suit);
     }
-    */    
+    */
+    
+    private collectOn(rank: number, player: playerid): void {
+        const p = player - 1;
+        //Special ranks:
+        if (rank === 10) {
+            //Crownmas for everyone.
+            for (let suit in this.crowns[p])
+                this.tokens[p][suitOrder.indexOf(suit)]++;
+        } else {
+            const myboard = this.board[player];
+            for (let d = 0; d < this.districts; d++) {
+                for (let c = 0; c < myboard[d].length; c++) {
+                    const mycard = myboard[d][c];
+                    if (mycard[0] === rank.toString()) {
+                        //Correct rank, so collect the suits.
+                        this.tokens[p][suitOrder.indexOf(mycard[1])]++;
+                        if (rank > 1) {
+                            this.tokens[p][suitOrder.indexOf(mycard[2])]++;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return;
+    }
+
     private drawUp(): void {
         //First, try to draw what we need from the deck.
         const toDraw = this.variants.includes("mega") ? 2 : 1;
@@ -406,8 +446,8 @@ export class MagnateGame extends GameBase {
         //Check if a district has a deed.
         //Inefficient, but in practice there should only be a handful to check.
         let deeded = "";
-        this.deeds.forEach((deed, key) => {
-            if (deed.player === player && deed.district === district)
+        this.deeds[player - 1].forEach((deed, key) => {
+            if (deed.district === district)
                 deeded = key;
         }); 
 
@@ -416,11 +456,10 @@ export class MagnateGame extends GameBase {
 
     private hasDeed(district: string, player: playerid): boolean {
         //Check if a district has a deed.
-        //Inefficient, but in practice there should only be a handful to check.
         let deeded = false;
-        this.deeds.forEach((deed) => {
+        this.deeds[player - 1].forEach((deed) => {
             //We don't care about the keys.
-            if (deed.player === player && deed.district === district)
+            if (deed.district === district)
                 deeded = true;
         }); 
 
@@ -442,7 +481,7 @@ export class MagnateGame extends GameBase {
         return c1.sharesSuitWith(c2);
     }
 
-    private nameCard(card: string): string {
+/*    private nameCard(card: string): string {
         //Wrapper for the usual card stringifier.
         const cardObj = Card.deserialize(card)!;
         return cardObj.name;
@@ -454,7 +493,43 @@ export class MagnateGame extends GameBase {
         const card = this.board[0][this.algebraic2coord(district)];
         return this.nameCard(card);
     }
+*/
+/*
+    public parseMove(submove: string): IMagnateMove {
+        //Parse a substring into an IMagnateMove object.
+        //Does only structural validation.
 
+        //Because the Excuse and the Crowns don't appear in moves, 
+        // the card format is: 
+        const cardex = /^(\d?[A-Z]{1,2}[1-2]||[A-Z]{3}[1-2])$/;
+        //The cell format is: 
+        const cellex = /^[a-j]$/;
+        //A regex to check for illegal characters (except !) is:
+        const illegalChars = /[^A-Za-n1-9:,-]/;
+
+        //The move formats depend on the main action:
+        // Buy:    card, district, <tokens>
+        // Deed:   card, district, suit preference?
+        // Sell:   card
+        // Add:    district, <tokens>
+        // Trade:  suit, suit
+        // Prefer: district, suit
+
+        let mv, from, to, card;
+        
+        const imm: IMagnateMove = {
+            incomplete: false,
+            valid: true
+        }
+
+        return imm;
+    }
+*/
+
+    private reportCard(card: string): string {
+        return card.substring(0,card.length - 1);
+    }
+    
     private removeCard(card: string, arr: string[]): boolean {
         //Remove a card from an array.
         //It's up to the caller to put the card somewhere else.
@@ -500,14 +575,15 @@ export class MagnateGame extends GameBase {
         const rando = Math.random();
         if (rando < 0.8) {
             //Test if the card can be placed. 
-            for (let d = 1; d <= this.districts; d++) {
+            for (let d = 0; d < this.districts; d++) {
+                const dist = this.coord2algebraic(d);
                 if (move === "") {
-                    if (this.canPlace(card, d.toString())) {
-                        //No economy testing:  40% build, 40% deed, 20% sell.
+                    if (this.canPlace(card, dist)) {
+                        //No economy testing:  40% buy, 40% deed, 20% sell.
                         if (rando < 0.4 || card[0] === "2") //Can't deed a 2.
-                            move = card + ">" + d;
+                            move = card + ">" + dist;
                         else 
-                            move = card + ">" + d + "d";
+                            move = card + ">" + dist + "D";
                     }
                 }
             }
@@ -648,25 +724,28 @@ export class MagnateGame extends GameBase {
             });
             
         } else {
-            const district = destination.split("d")[0];
+            const district = destination.split("D")[0];
             const col = this.algebraic2coord(district);
+            let type: string;  //Will get this parsing the move later.
             if (district !== destination) {
+                type = "D";  //Will get this parsing the move later.
                 //create  a deed
                 const deed = {
-                    player: this.currplayer,
                     district: district,
                     tokens: [0,0,0],
                 };
-                this.deeds.set(card, deed);
+                this.deeds[this.currplayer - 1].set(card, deed);
 
             } else {
+                type = "B";  //Will get this parsing the move later.
                 this.board[this.currplayer][col].push(card);
             }
 
             this.results.push({
                 type: "place",
                 what: card,
-                where: this.nameDistrict(district)
+                where: district,
+                how: type
             });
                 
         }
@@ -678,12 +757,25 @@ export class MagnateGame extends GameBase {
 
         // update currplayer
         this.lastmove = m;
-        this.lastroll = this.roll;
+        //this.lastroll = this.roll;
 
         //reroll the dice
-        this.roll = this.roller();
+        this.lastroll = this.roller();
         //We don't report this roll until the beginning of the next turn.
-
+        if (this.lastroll.length > 1) {
+            //The taxman cometh.
+            for (let t = 1; t <= this.lastroll.length; t++) {
+                for (let p = 0; p < 2; p++) {
+                    if (this.tokens[p][this.lastroll[t] - 1] > 1)
+                        this.tokens[p][this.lastroll[t] - 1] = 1;
+                }
+            }
+        }
+            
+        for (let p = 1; p <= 2; p++) {
+            this.collectOn(this.lastroll[0], p as playerid);
+        }
+            
         // update currplayer
         let newplayer = (this.currplayer as number) + 1;
         if (newplayer > this.numplayers) {
@@ -734,6 +826,11 @@ export class MagnateGame extends GameBase {
             state.stack = state.stack.map(mstate => {
                 for (let p = 1; p <= this.numplayers; p++) {
                     if (p === opts.player) { continue; }
+                    //Hide hands.
+                    mstate.hands[p - 1] = mstate.hands[ p - 1].map(c => "");
+                    //Hide prefs.
+                    mstate.deeds[p - 1].forEach( value => value.suit = undefined );
+                    //Tokens are public information.
                 }
                 return mstate;
             });
@@ -749,12 +846,12 @@ export class MagnateGame extends GameBase {
             currplayer: this.currplayer,
             board: deepclone(this.board) as [string[], string[][], string[][]],
             crowns: this.crowns.map(c => [...c]),
-            deeds: new Map(this.deeds),
+            deeds: [new Map(this.deeds[0]),new Map(this.deeds[1])],
             discards: [...this.discards],
             hands: this.hands.map(h => [...h]),
             tokens: [[...this.tokens[0]],[...this.tokens[1]]],
             shuffled: this.shuffled,
-            roll: [...this.roll],
+            //roll: [...this.roll],
             lastroll: [...this.lastroll],
             lastmove: this.lastmove,
          };
@@ -765,7 +862,6 @@ export class MagnateGame extends GameBase {
         let max = 0;
         const board = this.board[player];
         for (let d = 0; d < this.districts; d++) {
-            //const deed = this.hasDeed(d, player as playerid) ? 1 : 0;
             const districtLength = board ? (board[d] ? board[d].length : 0) : 0;
             max = Math.max(districtLength, max);
         }
@@ -896,43 +992,101 @@ export class MagnateGame extends GameBase {
             legend["k" + card.uid] = glyph;
         }
 
-        for (const suit of suits) {
-            legend[suit.uid] = {
+
+        //Suit tokens
+        
+        //Colors taken from the decktet sheet.
+        const suitColors: string[] = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
+
+        for (let s = 0; s < 6; s++) {
+            const suit = suits[s];
+            console.log(suit);
+            
+            legend["s" + suit.uid] = {
                 name: suit.glyph!,
                 scale: 0.5
             }
+            
+            const color = suitColors[s];
+            const p0count = this.tokens[0][s] ;
+            legend["s" + suit.uid + p0count.toString()] = [
+                {
+                    name: "piece",
+                    scale: 1.0,
+                    colour: color,
+                    opacity: 0.75
+                },
+                {
+                    name: suit.glyph!,
+                    scale: 0.75,
+                    opacity: 0.3
+                },
+                {
+                    text: p0count.toString(),
+                    scale: 0.85,
+                    colour: "#000"
+                }
+            ];
+            const p1count = this.tokens[1][s];
+            if (p1count !== p0count) {
+                legend["s" + suit.uid + p1count.toString()] = [
+                    {
+                        name: "piece",
+                        scale: 1.0,
+                        colour: color,
+                        opacity: 0.75
+                    },
+                    {
+                        name: suit.glyph!,
+                        scale: 0.75,
+                        opacity: 0.3
+                    },
+                    {
+                        text: p1count.toString(),
+                        scale: 0.85,
+                        colour: "#000"
+                    }
+                ];
+            }
         }
 
-        console.log(this.lastroll);
-        
+        console.log(Object.keys(legend));
+
         legend["Die"] = {
             name: `d6-${this.lastroll[0]}`
         };
+        legend["Tax"] = {
+            name: "d6-empty"
+        };
+        legend["TaxTax"] = {
+            name: "d6-empty"
+        };
+
 
         if (this.lastroll.length > 1) {
-            legend["Tax"] = {
-                name: `d6-${this.lastroll[1]}`
-            };
+
+            legend["Tax"] = [
+                {name: "d6-empty", colour: "_context_background"},
+                {name: suits[this.lastroll[1] - 1].glyph!, scale: 0.75}
+            ];
+
             //Note that the taxtax variant does not always result in double taxation.
             if (this.lastroll.length > 2) {
-                legend["TaxTax"] = {
-                    name: `d6-${this.lastroll[2]}`
-                };
+                legend["TaxTax"] = [
+                    {name: "d6-empty", colour: "_context_background"},
+                    {name: suits[this.lastroll[2] - 1].glyph!, scale: 0.75}
+                ];
             }
-        } else {
-            legend["Tax"] = {
-                name: "d6-empty"
-            };
         }
 
-        // add glyph for empty discard
+        /* add glyph for empty discard
         legend["discard"] = [
             {name: "d6-empty", colour: "_context_background"},
             {text: "$$", scale: 0.9}
-        ];
+        ];*/
 
         // build pieces areas
-        const areas: (AreaPieces|AreaKey)[] = [];
+        const areas: (AreaPieces|AreaKey|AreaButtonBar)[] = [];
 
         //hands
         for (let p = 1; p <= this.numplayers; p++) {
@@ -946,12 +1100,23 @@ export class MagnateGame extends GameBase {
                     ownerMark: p
                 });
             }
+            const tokens = this.tokens[p - 1].map((cnt, idx) => "s" + suitOrder[idx] + cnt.toString());
+            if (tokens.length > 0) {
+                areas.push({
+                    type: "pieces",
+                    pieces: tokens as [string, ...string[]],
+                    label: i18next.t("apgames:validation.magnate.LABEL_COLLECTION", {playerNum: p}) || `P${p} Tokens`,
+                    spacing: 0.25,
+                    width: 6
+                    //ownerMark: p
+                });
+            }
         }
 
         //Build die roll area
         areas.push({
             type: "key",
-            list: this.lastroll.length > 2 ? [
+            list: this.variants.includes("taxtax") ? [
                 {
                     piece: "Die",
                     name: ""
@@ -963,10 +1128,6 @@ export class MagnateGame extends GameBase {
                 {
                     piece: "TaxTax",
                     name: ""
-                },
-                {
-                    piece: "discard",
-                    name: ""
                 }
             ] : [
                 {
@@ -976,15 +1137,37 @@ export class MagnateGame extends GameBase {
                 {
                     piece: "Tax",
                     name: ""
-                },
-                {
-                    piece: "discard",
-                    name: ""
                 }
             ],
-            position: "right",
+            position: "left",
             clickable: false,
             height: 1
+        });
+        //Button area.
+        areas.push({                      
+            type: "buttonBar",
+            position: "right",
+            height: 0.75,
+            buttons: [
+                {
+                    label: "Buy"
+                },
+                {
+                    label: "Deed"
+                },
+                {
+                    label: "Sell"
+                },
+                {
+                    label: "Add"
+                },
+                {
+                    label: "Trade"
+                },
+                {
+                    label: "Prefer"
+                },
+            ]
         });
 
         //discards
@@ -1000,7 +1183,6 @@ export class MagnateGame extends GameBase {
 
         const remaining = this.deck.clone().draw(this.deck.size).sort(cardSortAsc).map(c => "k" + c.uid) as [string, ...string[]];
 
-
         //const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "k" + c.uid)
         if (remaining.length > 0) {
             areas.push({
@@ -1012,35 +1194,9 @@ export class MagnateGame extends GameBase {
             });
         }
 
-/*
-        // suits
-        for (let p = 1; p <= this.numplayers; p++) {
-            const captive = this.tokens[p-1].reduce((partialSum, a) => partialSum + a, 0);
-            if (captive > 0) {
-                const indexBySize = this.tokens[p-1].map((val, idx) => idx).sort((a, b) => this.tokens[p-1][a] - this.tokens[p-1][b]);
-                const captives: string[] = [];
-                indexBySize.forEach(idx => {
-                    const cnt = this.tokens[p-1][idx];
-                    if (cnt > 0) {
-                        for (let c = 0; c<cnt; c++)
-                            captives.push(suitOrder[idx]);
-                    }
-                });
-                areas.push({
-                    type: "pieces",
-                    pieces: captives as [string, ...string[]],
-                    label: i18next.t("apgames:validation.magnate.LABEL_COLLECTION", {playerNum: p}) || `P${p} suits`,
-                    spacing: -0.25,
-                    ownerMark: p,
-                    width: 16,
-                });
-            }
-        }
-*/
-
         // Build rep
         const rep: APRenderRep =  {
-            options: ["hide-labels"],
+            //options: ["hide-labels-half"],
             board: {
                 style: "squares",
                 width: this.districts,
@@ -1049,6 +1205,7 @@ export class MagnateGame extends GameBase {
                 tileWidth: 1,
                 tileSpacing: 0.15,
                 strokeOpacity: 0,
+                rowLabels: [],
                 labelColour: "#888",
                 markers,
             },
@@ -1173,8 +1330,9 @@ export class MagnateGame extends GameBase {
     private getTotalScore(player: playerid): number {
         //TODO.
         let total = 0;
-        for (let d = 1; d <= this.districts; d++) {
-            total += this.getDistrictScoreForPlayer(d.toString(),player)
+        for (let d = 0; d < this.districts; d++) {
+            const dist = this.coord2algebraic(d);
+            total += this.getDistrictScoreForPlayer(dist, player)
         }
         return total;
     }
@@ -1216,12 +1374,13 @@ export class MagnateGame extends GameBase {
                 resolved = true;
                 break;
             case "place":
+                const whatCard = this.reportCard(r.what!);
                 if (r.where === "discards")
-                    node.push(i18next.t("apresults:PLACE.magnate_sell", {player, what: r.what}));
-                else if (this.deeds.has(r.what!)) 
-                    node.push(i18next.t("apresults:PLACE.magnate_deed", {player, where: r.where, what: r.what}));
+                    node.push(i18next.t("apresults:PLACE.magnate_sell", {player, what: whatCard}));
+                else if (r.how === "D")
+                    node.push(i18next.t("apresults:PLACE.magnate_deed", {player, where: r.where, what: whatCard}));
                 else
-                    node.push(i18next.t("apresults:PLACE.magnate_build", {player, where: r.where, what: r.what}));
+                    node.push(i18next.t("apresults:PLACE.magnate_buy", {player, where: r.where,  what: whatCard}));
                 resolved = true;
                 break;
             case "convert": //Complete deed.
