@@ -11,7 +11,7 @@ const deepclone = require("rfdc/default");
 
 export type playerid = 1|2;
 //export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
-export type moveType = "B"|"D"|"S"|"A"|"T"|"P";
+export type moveType = "B"|"D"|"S"|"A"|"T"|"P"|"E";
 //Deeds: the column, an array of added resources, and a preferred suit (to simplify resource collection).
 export type DeedContents = {
     district: string,
@@ -21,6 +21,7 @@ export type DeedContents = {
 
 const suitOrder = suits.map(suit => suit.uid); //["M","S","V","L","Y","K"];
 const columnLabels = "abcdefghij".split("");
+const moveTypes = ["B","D","S","A","T","P"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -44,17 +45,17 @@ export interface IMagnateState extends IAPGameState {
 interface ILegendObj {
     [key: string]: Glyph|[Glyph, ...Glyph[]];
 }
-/*
+
 interface IMagnateMove {
     type: string;
     card?: string;
     district?: string;
-    spend: string[];
-    gain: string;
+    spend?: string[];
+    suit?: string;
     incomplete: boolean;
     valid: boolean;
 }
-*/
+
 export class MagnateGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
         name: "Magnate",
@@ -494,37 +495,137 @@ export class MagnateGame extends GameBase {
         return this.nameCard(card);
     }
 */
-/*
+
     public parseMove(submove: string): IMagnateMove {
         //Parse a substring into an IMagnateMove object.
         //Does only structural validation.
+        //Expects at leat a choice of move type (X:).
 
         //Because the Excuse and the Crowns don't appear in moves, 
         // the card format is: 
         const cardex = /^(\d?[A-Z]{1,2}[1-2]||[A-Z]{3}[1-2])$/;
         //The cell format is: 
         const cellex = /^[a-j]$/;
-        //A regex to check for illegal characters (except !) is:
-        const illegalChars = /[^A-Za-n1-9:,-]/;
+        //The suit format is: 
+        const suitex = /^[MSVLYK][2-8]?$/;
+        //A regex to check for illegal characters is:
+        const illegalChars = /[^A-Za-n1-9:,]/;
 
         //The move formats depend on the main action:
         // Buy:    card, district, <tokens>
-        // Deed:   card, district, suit preference?
+        // Deed:   card, district
         // Sell:   card
-        // Add:    district, <tokens>
+        // Add:    card, <tokens>
         // Trade:  suit, suit
-        // Prefer: district, suit
+        // Prefer: card, suit
+        // Error:  for internal use only
 
-        let mv, from, to, card;
-        
-        const imm: IMagnateMove = {
-            incomplete: false,
+        const mm: IMagnateMove = {
+            type: "E",
+            incomplete: true,
             valid: true
         }
 
-        return imm;
+        //A partial submove that can't be submitted is set to incomplete.
+
+        //Check for legal characters.
+        if (illegalChars.test(submove)) {
+            mm.valid = false;
+            return mm;
+        }
+
+        let card, district, suit: string;
+        let spend: string[];
+
+        //Next, split the string on type.
+        const typed = submove.split(/:/);
+
+        if (typed.length < 2) {
+            //Malformed move string.  We require at least X:
+            mm.valid = false;
+            return mm;
+        }
+
+        //Next, split the string on type.
+        const type = typed[0];
+        if (moveTypes.indexOf(type) < 0) {
+            //Malformed move string.  We require at least X:
+            mm.valid = false;
+            return mm;
+        } else {
+            mm.type = type;
+        }
+
+        //That may be everything.
+        if (typed[1] === "") {
+            //mm.incomplete = true;
+            return mm;
+        }
+
+        //Split the remaining items.
+        const split = typed[1].split(",");
+
+        if ( split[0] === "" ) {
+            //Malformed move string.  We require at least X:
+            mm.valid = false;
+            return mm;
+        }
+        
+        //The only case without a card.
+        if (type === "T") {
+            const spendy = split.shift()!;
+            if (! suitex.test(spendy) ) {
+                //Malformed suit string.
+                mm.valid = false;
+                return mm;
+            } else {
+                mm.spend = [spendy];
+            }
+        } else {
+            card = split.shift()!;
+            if (! cardex.test(card) ) {
+                //Malformed card.
+                mm.valid = false;
+                return mm;
+            } else {
+                mm.card = card;
+            }
+        }
+
+        //The only case without more info.
+        if ( type === "S" ) {
+            mm.incomplete = false;
+            return mm;
+        } else if ( split.length === 0 || split[0] === "" ) {
+            //mm.incomplete = true;
+            return mm;
+        }
+
+        //The district cases.
+         if ( type === "B" || type === "D" ) {
+            district = split.shift()!;
+            if (! cellex.test(district) ) {
+                //Malformed district.
+                mm.valid = false;
+                return mm;
+            } else {
+                mm.district = district; 
+            }
+         } else ( type === "T" || type === "P" ) {
+             //The suit cases har har.
+             suit = split.shift()!;
+             if (! suitex.test(suit) ) {
+                //Malformed suit.
+                mm.valid = false;
+                return mm;
+             }  else {
+                mm.suit = suit; 
+             }
+         } //Skipping add for a minute.
+
+
+        return mm;
     }
-*/
 
     private reportCard(card: string): string {
         return card.substring(0,card.length - 1);
@@ -710,6 +811,14 @@ export class MagnateGame extends GameBase {
         //this.highlights = [];
 
         //TODO!
+
+        const actions = m.split("/");
+
+        for (let a = 0; a < actions.length; a++) {
+            const action = actions[a];
+            console.log(this.parseMove(action));
+        }
+
         const [card,destination] = m.split(">");
         this.removeCard(card, this.hands[this.currplayer - 1]);
 
@@ -1000,8 +1109,7 @@ export class MagnateGame extends GameBase {
 
         for (let s = 0; s < 6; s++) {
             const suit = suits[s];
-            console.log(suit);
-            
+                        
             legend["s" + suit.uid] = {
                 name: suit.glyph!,
                 scale: 0.5
@@ -1012,18 +1120,18 @@ export class MagnateGame extends GameBase {
             legend["s" + suit.uid + p0count.toString()] = [
                 {
                     name: "piece",
-                    scale: 1.0,
+                    scale: 0.75,
                     colour: color,
                     opacity: 0.75
                 },
                 {
                     name: suit.glyph!,
-                    scale: 0.75,
+                    scale: 0.66,
                     opacity: 0.3
                 },
                 {
                     text: p0count.toString(),
-                    scale: 0.85,
+                    scale: 0.70,
                     colour: "#000"
                 }
             ];
@@ -1032,25 +1140,23 @@ export class MagnateGame extends GameBase {
                 legend["s" + suit.uid + p1count.toString()] = [
                     {
                         name: "piece",
-                        scale: 1.0,
+                        scale: 0.75,
                         colour: color,
                         opacity: 0.75
                     },
                     {
                         name: suit.glyph!,
-                        scale: 0.75,
+                        scale: 0.60,
                         opacity: 0.3
                     },
                     {
                         text: p1count.toString(),
-                        scale: 0.85,
+                        scale: 0.63,
                         colour: "#000"
                     }
                 ];
             }
         }
-
-        console.log(Object.keys(legend));
 
         legend["Die"] = {
             name: `d6-${this.lastroll[0]}`
@@ -1090,17 +1196,22 @@ export class MagnateGame extends GameBase {
 
         //hands
         for (let p = 1; p <= this.numplayers; p++) {
-            const hand = this.hands[p - 1];
-            if (hand.length > 0) {
+            const hand = this.hands[p - 1].map(c => "k" + (c === "" ? "UNKNOWN" : c));
+            const tokens = this.tokens[p - 1].map((cnt, idx) => "s" + suitOrder[idx] + cnt.toString());
+            const width = this.variants.includes("mega") ? 12 : 9;
+
+            //This should always be true.
+            if (hand.length + tokens.length > 0) {
+                
                 areas.push({
                     type: "pieces",
-                    pieces: hand.map(c => "k" + (c === "" ? "UNKNOWN" : c)) as [string, ...string[]],
-                    label: i18next.t("apgames:validation.magnate.LABEL_HAND", {playerNum: p}) || `P${p} Hand`,
-                    spacing: 0.5,
+                    pieces: hand.concat(tokens) as [string, ...string[]],
+                    label: i18next.t("apgames:validation.magnate.LABEL_BOTH", {playerNum: p}) || `P${p}'s Hand and Tokens`,
+                    spacing: 0.25,
+                    width: width,
                     ownerMark: p
                 });
-            }
-            const tokens = this.tokens[p - 1].map((cnt, idx) => "s" + suitOrder[idx] + cnt.toString());
+            }/*
             if (tokens.length > 0) {
                 areas.push({
                     type: "pieces",
@@ -1110,7 +1221,7 @@ export class MagnateGame extends GameBase {
                     width: 6
                     //ownerMark: p
                 });
-            }
+            }*/
         }
 
         //Build die roll area
@@ -1139,14 +1250,14 @@ export class MagnateGame extends GameBase {
                     name: ""
                 }
             ],
-            position: "left",
+            position: "right",
             clickable: false,
             height: 1
         });
         //Button area.
         areas.push({                      
             type: "buttonBar",
-            position: "right",
+            position: "left",
             height: 0.75,
             buttons: [
                 {
