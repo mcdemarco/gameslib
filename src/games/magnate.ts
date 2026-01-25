@@ -26,7 +26,7 @@ const moveTypes = ["B","D","S","A","T","P"];
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: [string[], string[][], string[][]];
-    crowns: string[][];
+    crowns: [number[], number[]];
     deeds: Map<string, DeedContents>[];
     discards: string[];
     hands: string[][];
@@ -108,7 +108,7 @@ export class MagnateGame extends GameBase {
     public numplayers = 2;
     public currplayer: playerid = 1;
     public board: [string[], string[][], string[][]] = [[],[],[]];
-    public crowns: string[][] = [];
+    public crowns: [number[], number[]] = [[], []];
     public deeds!: [Map<string, DeedContents>,Map<string, DeedContents>];
     public discards: string[] = [];
     public hands: string[][] = [];
@@ -164,7 +164,7 @@ export class MagnateGame extends GameBase {
             }
             
             //init crowns and tokens
-            const crowns: [string[], string[]] = [[],[]];
+            const crowns: [number[], number[]] = [[0,0,0,0,0,0],[0,0,0,0,0,0]];
             const tokens: [number[], number[]] = [[0,0,0,0,0,0],[0,0,0,0,0,0]];
             
             const crownCards = [...cardsBasic.filter(c => c.rank.name === "Crown")];
@@ -182,10 +182,13 @@ export class MagnateGame extends GameBase {
                 for (let p = 0; p < 2; p++) {
                     const [card] = crownDeck.draw();
                     const suit = card.suits.map(s => s.uid)[0];
-                    crowns[p][c] = suit;
+                    crowns[p][suitOrder.indexOf(suit)]++;
+                    //Could do this with the inappropriate function.
                     tokens[p][suitOrder.indexOf(suit)]++;
-                    if (lastroll[0] === 10) //Christmas!
+                    if (lastroll[0] === 10) {//Christmas!
+                        //Could do this with the appropriate function.
                         tokens[p][suitOrder.indexOf(suit)]++;
+                    }
                 }
             }
             
@@ -281,7 +284,7 @@ export class MagnateGame extends GameBase {
         this.results = [...state._results];
         this.currplayer = state.currplayer;
         this.board = deepclone(state.board) as [string[], string[][], string[][]];
-        this.crowns = state.crowns.map(c => [...c]);
+        this.crowns = [[...state.crowns[0]], [...state.crowns[1]]];
         this.deeds = [new Map(state.deeds[0]),new Map(state.deeds[1])];
         this.discards = [...state.discards];
         this.hands = state.hands.map(h => [...h]);
@@ -387,13 +390,14 @@ export class MagnateGame extends GameBase {
     
     private collectOn(rank: number, player: playerid): void {
         //TODO: use this.credit instead.
-        const tokens = Array(6).fill(0);
+        let tokens = Array(6).fill(0);
         const p = player - 1;
         //Special ranks:
         if (rank === 10) {
             //Crownmas for everyone.
-            for (const suit in this.crowns[p])
-                tokens[suitOrder.indexOf(suit)]++;
+            tokens = this.crowns[p];
+            //          for (const suit in this.crowns[p])
+            //             tokens[suitOrder.indexOf(suit)]++;
         } else {
             const myboard = this.board[player];
             for (let d = 0; d < this.districts; d++) {
@@ -1123,7 +1127,7 @@ export class MagnateGame extends GameBase {
             _timestamp: new Date(),
             currplayer: this.currplayer,
             board: deepclone(this.board) as [string[], string[][], string[][]],
-            crowns: this.crowns.map(c => [...c]),
+            crowns: [[...this.crowns[0]],[...this.crowns[1]]],
             deeds: [new Map(this.deeds[0]),new Map(this.deeds[1])],
             discards: [...this.discards],
             hands: this.hands.map(h => [...h]),
@@ -1320,47 +1324,45 @@ export class MagnateGame extends GameBase {
                     }
                 ];
 
-                if (this.crowns[p].indexOf(suit.uid) > -1) {
-
-                    if (this.crowns[p].lastIndexOf(suit.uid) != this.crowns[p].indexOf(suit.uid)) {
-
-                        legend[lname].push(
-                            {
-                                name: "decktet-crown",
-                                scale: 0.30,
-                                colour: "_context_strokes",
-                                nudge: {
-                                    dx: -275,
-                                    dy: -625,
-                                }
+                if (this.crowns[p][s] === 2) {
+                    
+                    legend[lname].push(
+                        {
+                            name: "decktet-crown",
+                            scale: 0.30,
+                            colour: "_context_strokes",
+                            nudge: {
+                                dx: -275,
+                                dy: -625,
                             }
-                        );
-                        legend[lname].push(
-                            {
-                                name: "decktet-crown",
-                                scale: 0.30,
-                                colour: "_context_strokes",
-                                nudge: {
-                                    dx: 275,
-                                    dy: -625,
-                                }
+                        }
+                    );
+                    legend[lname].push(
+                        {
+                            name: "decktet-crown",
+                            scale: 0.30,
+                            colour: "_context_strokes",
+                            nudge: {
+                                dx: 275,
+                                dy: -625,
                             }
-                        );
-                        
-                    } else {
-
-                        legend[lname].push(
-                            {
-                                name: "decktet-crown",
-                                scale: 0.30,
-                                colour: "_context_strokes",
-                                nudge: {
-                                    dx: 0,
-                                    dy: -650,
-                                }
+                        }
+                    );
+                    
+                } else if (this.crowns[p][s] === 1) {
+                    
+                    legend[lname].push(
+                        {
+                            name: "decktet-crown",
+                            scale: 0.30,
+                            colour: "_context_strokes",
+                            nudge: {
+                                dx: 0,
+                                dy: -650,
                             }
-                        );
-                    } 
+                        }
+                    );
+                
                 } //End crown additions.
             } //end p
         } //end suit
