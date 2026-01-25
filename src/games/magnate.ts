@@ -52,7 +52,7 @@ interface IMagnateMove {
     district?: string;
     spend?: string[];
     suit?: string;
-    incomplete: boolean;
+    incomplete?: boolean;
     valid: boolean;
 }
 
@@ -125,7 +125,7 @@ export class MagnateGame extends GameBase {
     private courtrank: string = "T";
     private districts: number = 5;
     private deck!: Deck;
-//    private highlights: string[] = [];
+    //    private highlights: string[] = [];
 
     constructor(state?: IMagnateState | string, variants?: string[]) {
         super();
@@ -162,7 +162,7 @@ export class MagnateGame extends GameBase {
                 board[1][d] = [];
                 board[2][d] = [];
             }
-         
+            
             //init crowns and tokens
             const crowns: [string[], string[]] = [[],[]];
             const tokens: [number[], number[]] = [[0,0,0,0,0,0],[0,0,0,0,0,0]];
@@ -188,7 +188,7 @@ export class MagnateGame extends GameBase {
                         tokens[p][suitOrder.indexOf(suit)]++;
                 }
             }
- 
+            
             const deck = this.initDeck(deckCount);
             deck.shuffle();
             
@@ -199,7 +199,7 @@ export class MagnateGame extends GameBase {
                     hands[p][h] = card.uid;
                 }
             }
-     
+            
             const fresh: IMoveState = {
                 _version: MagnateGame.gameinfo.version,
                 _results: [],
@@ -332,32 +332,32 @@ export class MagnateGame extends GameBase {
     
     /* helper functions for general gameplay */
     /*
-    private canDeed(card: string): boolean {
-        //TODO: test if this player can afford to deed the card.
-        //CURRENTLY: testing with no economy
-        
-        //Check for a token of each suit.
-        if (card) {        
-            //in case of failure, also check for a trade (used for move generation).
-            return true;
-        }
+      private canDeed(card: string): boolean {
+      //TODO: test if this player can afford to deed the card.
+      //CURRENTLY: testing with no economy
+      
+      //Check for a token of each suit.
+      if (card) {        
+      //in case of failure, also check for a trade (used for move generation).
+      return true;
+      }
 
-        return true;
-    }
+      return true;
+      }
 
-    private canPay(card: string): boolean {
-        //TODO: Test if this player can afford to build the card outright.
-        //CURRENTLY: testing with no economy
-        
-        //Check for the suit tokens with canDeed.
-        if (!this.canDeed(card)) {        
-             return false;
-        }
+      private canPay(card: string): boolean {
+      //TODO: Test if this player can afford to build the card outright.
+      //CURRENTLY: testing with no economy
+      
+      //Check for the suit tokens with canDeed.
+      if (!this.canDeed(card)) {        
+      return false;
+      }
 
-        //TODO: Check  for remaining tokens.
+      //TODO: Check  for remaining tokens.
 
-        return true;
-    }
+      return true;
+      }
     */
     private canPlace(card: string, district: string): boolean {
         const col = this.algebraic2coord(district);
@@ -378,11 +378,11 @@ export class MagnateGame extends GameBase {
     }
 
     /*
-    private canTrade(suit: string): boolean {
-        //TODO: Test if this player can trade for a suit.
-        
-        return !!(suit);
-    }
+      private canTrade(suit: string): boolean {
+      //TODO: Test if this player can trade for a suit.
+      
+      return !!(suit);
+      }
     */
     
     private collectOn(rank: number, player: playerid): void {
@@ -482,19 +482,19 @@ export class MagnateGame extends GameBase {
         return c1.sharesSuitWith(c2);
     }
 
-/*    private nameCard(card: string): string {
-        //Wrapper for the usual card stringifier.
-        const cardObj = Card.deserialize(card)!;
-        return cardObj.name;
+    /*    private nameCard(card: string): string {
+    //Wrapper for the usual card stringifier.
+    const cardObj = Card.deserialize(card)!;
+    return cardObj.name;
     }
 
     private nameDistrict(district: string): string {
-        //Need handles for districts that are
-        //independent of coordinates and rotations.
-        const card = this.board[0][this.algebraic2coord(district)];
-        return this.nameCard(card);
+    //Need handles for districts that are
+    //independent of coordinates and rotations.
+    const card = this.board[0][this.algebraic2coord(district)];
+    return this.nameCard(card);
     }
-*/
+    */
 
     public parseMove(submove: string): IMagnateMove {
         //Parse a substring into an IMagnateMove object.
@@ -522,10 +522,12 @@ export class MagnateGame extends GameBase {
 
         const mm: IMagnateMove = {
             type: "E",
-            incomplete: true,
-            valid: true
+            valid: false
         }
 
+        //Once we have a legit type we can default to valid = true.
+        
+        //Incomplete starts out undefined.
         //A partial submove that can't be submitted is set to incomplete.
 
         //Check for legal characters.
@@ -554,11 +556,12 @@ export class MagnateGame extends GameBase {
             return mm;
         } else {
             mm.type = type;
+            mm.valid = true;
         }
 
         //That may be everything.
         if (typed[1] === "") {
-            //mm.incomplete = true;
+            mm.incomplete = true;
             return mm;
         }
 
@@ -597,12 +600,12 @@ export class MagnateGame extends GameBase {
             mm.incomplete = false;
             return mm;
         } else if ( split.length === 0 || split[0] === "" ) {
-            //mm.incomplete = true;
+            mm.incomplete = true;
             return mm;
         }
 
         //The district cases.
-         if ( type === "B" || type === "D" ) {
+        if ( type === "B" || type === "D" ) {
             district = split.shift()!;
             if (! cellex.test(district) ) {
                 //Malformed district.
@@ -611,18 +614,43 @@ export class MagnateGame extends GameBase {
             } else {
                 mm.district = district; 
             }
-         } else ( type === "T" || type === "P" ) {
-             //The suit cases har har.
-             suit = split.shift()!;
-             if (! suitex.test(suit) ) {
+        } else if ( type === "T" || type === "P" ) {
+            //The suit cases har har.
+            suit = split.shift()!;
+            if (! suitex.test(suit) ) {
                 //Malformed suit.
                 mm.valid = false;
                 return mm;
-             }  else {
+            }  else {
                 mm.suit = suit; 
-             }
-         } //Skipping add for a minute.
+            }
+        } //Skipping add for a minute.
 
+        if ( type === "D" || type === "T" || type === "P" ) {
+            //These cases are now complete.
+            mm.incomplete = false;
+            return mm;
+        }
+
+        //Only tokens left...if that.
+        if ( split.length === 0 || split[0] === "" ) {
+            mm.incomplete = true;
+            return mm;
+        }
+
+        if ( split.filter(s => ! suitex.test(s)).length > 0 ) {
+            //Malformed suit.
+            mm.valid = false;
+            return mm;
+        }
+
+        //TODO: sort?
+        //amalgamate?
+        spend = split.slice();
+
+        //Finished buy and add cases.
+        mm.spend = spend;
+        mm.incomplete = false;
 
         return mm;
     }
@@ -689,17 +717,17 @@ export class MagnateGame extends GameBase {
                 }
             }
         }
-                        /*
-                //Test if the card can be paid for outright. If so, play it.
-                if (this.canPay(card)) {
-                    return card + d; //+ "payment here";
-                } else if (this.canDeed(card)) {
-                    //If the card can be deeded, 50/50 chance of deeding it or selling it.                  
-                    if (Math.random() < 0.5) {
-                        return card; //+ "deed payment here";
-                    }
-                } // else fall through
-                */
+        /*
+        //Test if the card can be paid for outright. If so, play it.
+        if (this.canPay(card)) {
+        return card + d; //+ "payment here";
+        } else if (this.canDeed(card)) {
+        //If the card can be deeded, 50/50 chance of deeding it or selling it.                  
+        if (Math.random() < 0.5) {
+        return card; //+ "deed payment here";
+        }
+        } // else fall through
+        */
         
         if (move === "")
             move = card + ">$";
@@ -744,13 +772,13 @@ export class MagnateGame extends GameBase {
                 const district = this.coord2algebraic(col);
                 newmove = `${move}-${district}`;
             } 
-                /* ???
-                return {
-                    move,
-                    valid: false,
-                    message: i18next.t("apgames:validation.magnate.REVERSED_MARKET")
-                }*/
- 
+            /* ???
+               return {
+               move,
+               valid: false,
+               message: i18next.t("apgames:validation.magnate.REVERSED_MARKET")
+               }*/
+            
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
                 //Revert latest addition to newmove.
@@ -856,7 +884,7 @@ export class MagnateGame extends GameBase {
                 where: district,
                 how: type
             });
-                
+            
         }
 
         if (partial) { return this; }
@@ -880,11 +908,11 @@ export class MagnateGame extends GameBase {
                 }
             }
         }
-            
+        
         for (let p = 1; p <= 2; p++) {
             this.collectOn(this.lastroll[0], p as playerid);
         }
-            
+        
         // update currplayer
         let newplayer = (this.currplayer as number) + 1;
         if (newplayer > this.numplayers) {
@@ -963,7 +991,7 @@ export class MagnateGame extends GameBase {
             //roll: [...this.roll],
             lastroll: [...this.lastroll],
             lastmove: this.lastmove,
-         };
+        };
     }
 
     private getMaxDistrictSize(player: number): number {
@@ -1096,7 +1124,7 @@ export class MagnateGame extends GameBase {
                     fg: "_context_labels",
                     bg: "_context_background",
                     opacity: 0.2,
-                 }});
+                }});
             }
             legend["k" + card.uid] = glyph;
         }
@@ -1109,7 +1137,7 @@ export class MagnateGame extends GameBase {
 
         for (let s = 0; s < 6; s++) {
             const suit = suits[s];
-                        
+            
             legend["s" + suit.uid] = {
                 name: suit.glyph!,
                 scale: 0.5
@@ -1186,10 +1214,10 @@ export class MagnateGame extends GameBase {
         }
 
         /* add glyph for empty discard
-        legend["discard"] = [
-            {name: "d6-empty", colour: "_context_background"},
-            {text: "$$", scale: 0.9}
-        ];*/
+           legend["discard"] = [
+           {name: "d6-empty", colour: "_context_background"},
+           {text: "$$", scale: 0.9}
+           ];*/
 
         // build pieces areas
         const areas: (AreaPieces|AreaKey|AreaButtonBar)[] = [];
@@ -1212,16 +1240,16 @@ export class MagnateGame extends GameBase {
                     ownerMark: p
                 });
             }/*
-            if (tokens.length > 0) {
-                areas.push({
-                    type: "pieces",
-                    pieces: tokens as [string, ...string[]],
-                    label: i18next.t("apgames:validation.magnate.LABEL_COLLECTION", {playerNum: p}) || `P${p} Tokens`,
-                    spacing: 0.25,
-                    width: 6
-                    //ownerMark: p
-                });
-            }*/
+               if (tokens.length > 0) {
+               areas.push({
+               type: "pieces",
+               pieces: tokens as [string, ...string[]],
+               label: i18next.t("apgames:validation.magnate.LABEL_COLLECTION", {playerNum: p}) || `P${p} Tokens`,
+               spacing: 0.25,
+               width: 6
+               //ownerMark: p
+               });
+               }*/
         }
 
         //Build die roll area
@@ -1329,20 +1357,20 @@ export class MagnateGame extends GameBase {
         if (this.results.length > 0) {
             rep.annotations = [];
             /*
-            for (const move of this.results) {
-                if (move.type === "place") {
-                    const [x, y] = this.algebraic2coord(move.where!);
-                    rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
-                } else if (move.type === "move") {
-                    const [fromX, fromY] = this.algebraic2coord(move.from);
-                    const [toX, toY] = this.algebraic2coord(move.to);
-                    rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
-                    rep.annotations.push({type: "enter", occlude: false, targets: [{row: toY, col: toX}]});
-                } else if (move.type === "swap") {
-                    const [x, y] = this.algebraic2coord(move.where!);
-                    rep.annotations.push({type: "enter", occlude: false, dashed: [2,4], targets: [{row: y, col: x}]});
-                }
-            }*/
+              for (const move of this.results) {
+              if (move.type === "place") {
+              const [x, y] = this.algebraic2coord(move.where!);
+              rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
+              } else if (move.type === "move") {
+              const [fromX, fromY] = this.algebraic2coord(move.from);
+              const [toX, toY] = this.algebraic2coord(move.to);
+              rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
+              rep.annotations.push({type: "enter", occlude: false, targets: [{row: toY, col: toX}]});
+              } else if (move.type === "swap") {
+              const [x, y] = this.algebraic2coord(move.where!);
+              rep.annotations.push({type: "enter", occlude: false, dashed: [2,4], targets: [{row: y, col: x}]});
+              }
+              }*/
         }
 
         return rep;
@@ -1453,7 +1481,7 @@ export class MagnateGame extends GameBase {
         const districts: number[] = this.getDistrictsTotals();
         scores = districts.map((s, i) => 
             s + " (" + this.getTotalScore((i + 1) as playerid) + ")"
-                                     );
+                              );
         return [
             { name: i18next.t("apgames:status.SCORES"), scores },
         ];
