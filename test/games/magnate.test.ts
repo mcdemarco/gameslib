@@ -30,7 +30,7 @@ describe("Magnate", () => {
             card: "8MS1",
             district: "a",
             incomplete: false,
-            spend: ["M3"],
+            spend: [3,0,0,0,0,0],
             type: "B",
             valid: true
         });
@@ -40,30 +40,43 @@ describe("Magnate", () => {
             type: "B",
             valid: false
         });
-        expect(g.parseMove("B:8MS1,a,M3,S5")).to.deep.equal({
-            card: "8MS1",
+        expect(g.parseMove("B:1L1,a,M3,S5")).to.deep.equal({
+            card: "1L1",
             district: "a",
             incomplete: false,
-            spend: ["M3","S5"],
+            spend: [3,5,0,0,0,0],
             type: "B",
             valid: true
         });
-        expect(g.parseMove("BB:8MS1,a,M3,S5")).to.deep.equal({
+        expect(g.parseMove("BB:1L1,a,M3,S5")).to.deep.equal({
             type: "E",
             valid: false
         });
     });
     it ("Parses deeds", () => {
 
-        expect(g.parseMove("D:8MS2,a")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("D:TMLY1")).to.deep.equal({
+            card: "TMLY1",
+            incomplete: true,
+            type: "D",
+            valid: true
+        });
+        expect(g.parseMove("D:TMLY2,h")).to.deep.equal({
+            card: "TMLY2",
+            district: "h",
+            incomplete: false,
+            type: "D",
+            valid: true
+        });
+       expect(g.parseMove("D:9MS2,a")).to.deep.equal({
+            card: "9MS2",
             district: "a",
             incomplete: false,
             type: "D",
             valid: true
         });
-        expect(g.parseMove("D:8MS2,a,")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("D:9MS2,a,")).to.deep.equal({
+            card: "9MS2",
             district: "a",
             incomplete: false,
             type: "D",
@@ -72,20 +85,20 @@ describe("Magnate", () => {
     });
     it ("Parses sales", () => {
 
-        expect(g.parseMove("S:8MS2")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("S:9MS2")).to.deep.equal({
+            card: "9MS2",
             incomplete: false,
             type: "S",
             valid: true
         });
-        expect(g.parseMove("S:8MS2,a")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("S:9MS2,a")).to.deep.equal({
+            card: "9MS2",
             incomplete: false,
             type: "S",
             valid: true
         });
-        expect(g.parseMove("S:8MS2,M5,")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("S:9MS2,M5,")).to.deep.equal({
+            card: "9MS2",
             incomplete: false,
             type: "S",
             valid: true
@@ -97,16 +110,16 @@ describe("Magnate", () => {
     });
     it ("Parses adds", () => {
 
-        expect(g.parseMove("A:8MS2")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("A:4MS2")).to.deep.equal({
+            card: "4MS2",
             incomplete: true,
             type: "A",
             valid: true
         });
-        expect(g.parseMove("A:8MS2,M5")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("A:4MS2,M5")).to.deep.equal({
+            card: "4MS2",
             incomplete: false,
-            spend: ["M5"],
+            spend: [5,0,0,0,0,0],
             type: "A",
             valid: true
         });
@@ -114,16 +127,16 @@ describe("Magnate", () => {
     });
     it ("Parses trades", () => {
 
-        expect(g.parseMove("T:M3")).to.deep.equal({
+        expect(g.parseMove("T:Y3")).to.deep.equal({
             incomplete: true,
-            spend: ["M3"],
+            spend: [0,0,0,0,3,0],
             type: "T",
             valid: true
         });
-        expect(g.parseMove("T:M3,K")).to.deep.equal({
+        expect(g.parseMove("T:Y3,M")).to.deep.equal({
             incomplete: false,
-            spend: ["M3"],
-            suit: "K",
+            spend: [0,0,0,0,3,0],
+            suit: "M",
             type: "T",
             valid: true
         });
@@ -131,14 +144,14 @@ describe("Magnate", () => {
     });
     it ("Parses prefs", () => {
 
-        expect(g.parseMove("P:8MS2")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("P:4MS2")).to.deep.equal({
+            card: "4MS2",
             incomplete: true,
             type: "P",
             valid: true
         });
-        expect(g.parseMove("P:8MS2,K")).to.deep.equal({
-            card: "8MS2",
+        expect(g.parseMove("P:4MS2,K")).to.deep.equal({
+            card: "4MS2",
             incomplete: false,
             suit: "K",
             type: "P",
@@ -149,7 +162,7 @@ describe("Magnate", () => {
     
     it ("Validates single moves", () => {
         // parsing good moves
-        expect(g.validateMove("7MS;m5*m6")).to.have.deep.property("valid", true);
+        expect(g.validateMove("P:4MS2,K")).to.have.deep.property("valid", true);
         g.render();
         g.randomMove();
 

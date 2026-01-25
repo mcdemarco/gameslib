@@ -50,7 +50,7 @@ interface IMagnateMove {
     type: string;
     card?: string;
     district?: string;
-    spend?: string[];
+    spend?: number[];
     suit?: string;
     incomplete?: boolean;
     valid: boolean;
@@ -501,9 +501,9 @@ export class MagnateGame extends GameBase {
         //Does only structural validation.
         //Expects at leat a choice of move type (X:).
 
-        //Because the Excuse and the Crowns don't appear in moves, 
+        //Because the Excuse and Crowns don't appear in moves, 
         // the card format is: 
-        const cardex = /^(\d?[A-Z]{1,2}[1-2]||[A-Z]{3}[1-2])$/;
+        const cardex = /^(\d?[A-Z]{1,2}[1-2]||[A-Z]{4}[1-2])$/;
         //The cell format is: 
         const cellex = /^[a-j]$/;
         //The suit format is: 
@@ -537,7 +537,6 @@ export class MagnateGame extends GameBase {
         }
 
         let card, district, suit: string;
-        let spend: string[];
 
         //Next, split the string on type.
         const typed = submove.split(/:/);
@@ -576,13 +575,13 @@ export class MagnateGame extends GameBase {
         
         //The only case without a card.
         if (type === "T") {
-            const spendy = split.shift()!;
-            if (! suitex.test(spendy) ) {
+            const value = split.shift()!;
+            if (! suitex.test(value) ) {
                 //Malformed suit string.
                 mm.valid = false;
                 return mm;
             } else {
-                mm.spend = [spendy];
+                mm.spend = this.spender([value]);
             }
         } else {
             card = split.shift()!;
@@ -644,14 +643,11 @@ export class MagnateGame extends GameBase {
             return mm;
         }
 
-        //TODO: sort?
-        //amalgamate?
-        spend = split.slice();
-
+        //amalgamapping the spend
+        mm.spend = this.spender(split);
+        
         //Finished buy and add cases.
-        mm.spend = spend;
         mm.incomplete = false;
-
         return mm;
     }
 
@@ -670,6 +666,18 @@ export class MagnateGame extends GameBase {
         return false;
     }
 
+    private spender(values: string[]): number[] {
+        const spend: number[] = Array(6).fill(0);
+
+        values.forEach(value => {
+            const suit = value[0];
+            const quantity = value.length > 1 ? parseInt(value[1],10) : 1;
+            spend[suitOrder.indexOf(suit)] += quantity;
+        });
+ 
+        return spend;
+    }
+    
 
     
     //Not autopassing (or passing) so don't need a moves function?
@@ -710,9 +718,9 @@ export class MagnateGame extends GameBase {
                     if (this.canPlace(card, dist)) {
                         //No economy testing:  40% buy, 40% deed, 20% sell.
                         if (rando < 0.4 || card[0] === "2") //Can't deed a 2.
-                            move = card + ">" + dist;
+                            move = "B:" + card + "," + dist + ",M1";//Fake suits.
                         else 
-                            move = card + ">" + dist + "D";
+                            move = "D:" + card + "," + dist;
                     }
                 }
             }
@@ -730,59 +738,63 @@ export class MagnateGame extends GameBase {
         */
         
         if (move === "")
-            move = card + ">$";
+            move = "S:" + card;
 
         return move;
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
-        //First click should be on a hand card, deed, or token pieces (3 or more for trading).
+        //First click should be on a move button.
         //Subsequent clicks should be:
         // * hand card > district > tokens (if not autocompleted)
-        // * hand card > discards
-        // * deed > payment tokens
-        // * token pile > bank (for suit selection)
+        // * hand card > district (deeds)
+        // * hand card (sales)
+        // * deed card > add tokens
+        // * token pile > token pile (for trades)
+        // * deed card > preferred suit
         
         try {
             let newmove = "";
             // clicking on hand pieces or token pieces.
+            console.log(row, col, piece);
             if (row < 0 && col < 0) {
-                if (! move.includes("-")) {
-                    //it's too early to click on the market.
-                    //TODO: invalid partial result
+                if (piece?.startsWith("_btn_")) {
+                    const type = piece.split("_")[2].charAt(0);
+                    console.log(type);
+                    if (move)
+                        newmove = `${move}/${type}:`;
+                    else
+                        newmove = `${type}:`;
+                } else if (!move) {
+                    //it's too early to click on other stuff.
                     return {
                         move,
                         valid: false,
-                        message: i18next.t("apgames:validation.magnate.EARLY_TO_MARKET")
+                        message: i18next.t("apgames:validation.magnate.INITIAL_BUTTON_INSTRUCTIONS")
                     }
-                } else if (move.includes(",")) {
-                    //it's too late to click on the market.
-                    //TODO: invalid partial result
-                    return {
-                        move,
-                        valid: false,
-                        message: i18next.t("apgames:validation.magnate.LATE_TO_MARKET")
-                    }
-                } else {
-                    newmove = `${move}`; //+ this.coord2algebraic(this.market.indexOf(piece!.substring(1)));
+                } else if (piece?.startsWith("k")) {
+                    //clicking a hand card
+                    newmove = `${move}${piece},`;
+                } else if (piece?.startsWith("s")) {
+                    //clicking a suit token.
+                    const suit = piece.charAt(1);
+                    newmove = `${move}${suit},`;
+                } 
+            } else {
+                // otherwise, clicked on the board
+                if (piece?.startsWith("k")) {
+                    //clicking a deed card
+                    newmove = `${move}${piece},`;
+                } else {   
+                    const district = this.coord2algebraic(col);
+                    newmove = `${move}${district},`;
                 }
             }
-            // otherwise, clicked on the board
-            else {
-                const district = this.coord2algebraic(col);
-                newmove = `${move}-${district}`;
-            } 
-            /* ???
-               return {
-               move,
-               valid: false,
-               message: i18next.t("apgames:validation.magnate.REVERSED_MARKET")
-               }*/
             
             const result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
                 //Revert latest addition to newmove.
-                result.move = newmove.includes(",") ? newmove.split(",")[0] : (newmove.includes("-") ? newmove.split("-")[0] : "");
+                result.move = newmove.includes(",") ? newmove.split(",")[0] : (newmove.includes(":") ? newmove.split(":")[0] : "");
             } else {
                 result.move = newmove;
             }
@@ -799,6 +811,15 @@ export class MagnateGame extends GameBase {
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
+        if (this.gameover) {
+            if (m.length === 0) {
+                result.message = "";
+            } else {
+                result.message = i18next.t("apgames:MOVES_GAMEOVER");
+            }
+            return result;
+        }
+
         m = m.replace(/\s+/g, "");
 
         if (m.length === 0) {
@@ -813,7 +834,62 @@ export class MagnateGame extends GameBase {
         }
 
         //If the move is complicated, we need a clone here.
+        const cloned = Object.assign(new MagnateGame(), deepclone(this) as MagnateGame);
+
+        const moves: string[] = m.split("/");
+
+        if (moves[moves.length - 1] === "") {
+            //Trim the dummy move.
+            //Could also test that the last character of m is a /.
+            moves.length--;
+        }
         
+        for (let s = 0; s < moves.length; s++) {
+            const action = moves[s];
+
+            const pact = cloned.parseMove(action);
+            if (pact.valid === false) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE", {move: action});
+                return result;
+            }
+
+            //Low-hanging fruit.
+            if (pact.type === "T") {
+                if (pact.spend === undefined) {
+                    result.valid = true;
+                    result.complete = -1;
+                    result.message = i18next.t("apgames:validation._general.SPEND_INSTRUCTIONS");
+                    return result;
+                } 
+                const suitIndex = pact.spend.indexOf(3);
+                if (suitIndex < 0 || pact.spend.reduce((cur,acc) =>
+                    cur + acc, 0) !== 3 ) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation._general.MALFORMED_TRADE");
+                    return result;
+                } else if ( cloned.tokens[cloned.currplayer - 1][suitIndex] < 3 ) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation._general.INVALID_TRADE");
+                    return result; 
+                }
+
+                //Dock the user.
+                cloned.tokens[cloned.currplayer - 1][suitIndex] -= 3;
+
+                if (pact.suit === undefined) {
+                    result.valid = true;
+                    result.complete = -1;
+                    result.message = i18next.t("apgames:validation._general.TOKEN_TRADE_INSTRUCTIONS");
+                    return result;
+                }
+
+                //Credit the user.
+                const newSuitIndex = suitOrder.indexOf(pact.suit);
+                cloned.tokens[cloned.currplayer - 1][suitIndex] += 1;
+            }
+
+        }
         // we're good!
         result.valid = true;
         result.complete = 1;
@@ -844,47 +920,47 @@ export class MagnateGame extends GameBase {
 
         for (let a = 0; a < actions.length; a++) {
             const action = actions[a];
-            console.log(this.parseMove(action));
-        }
+            const pact = this.parseMove(action);
 
-        const [card,destination] = m.split(">");
-        this.removeCard(card, this.hands[this.currplayer - 1]);
+            if (pact.card) {
+                this.removeCard(pact.card, this.hands[this.currplayer - 1]);
 
-        if (destination === "$") {
-            //TODO: Profit!
-            this.discards.push(card);
-
-            this.results.push({
-                type: "place",
-                what: card,
-                where: "discards"
-            });
+                if (pact.type === "S") {
+                    //TODO: Profit!
+                    this.discards.push(pact.card);
+                    
+                    this.results.push({
+                        type: "place",
+                        what: pact.card,
+                        where: "discards"
+                    });
             
-        } else {
-            const district = destination.split("D")[0];
-            const col = this.algebraic2coord(district);
-            let type: string;  //Will get this parsing the move later.
-            if (district !== destination) {
-                type = "D";  //Will get this parsing the move later.
-                //create  a deed
-                const deed = {
-                    district: district,
-                    tokens: [0,0,0],
-                };
-                this.deeds[this.currplayer - 1].set(card, deed);
+                } else if (pact.district) {
+                    
+                    const col = this.algebraic2coord(pact.district);
+                    if (pact.type = "D") {
+                        //create  a deed
+                        const deed = {
+                            district: pact.district,
+                            tokens: [0,0,0],
+                        };
+                        this.deeds[this.currplayer - 1].set(pact.card, deed);
+                        
+                    } else {
+                        if (pact.type = "B") {
+                            this.board[this.currplayer][col].push(pact.card);
+                        }
 
-            } else {
-                type = "B";  //Will get this parsing the move later.
-                this.board[this.currplayer][col].push(card);
+                        this.results.push({
+                            type: "place",
+                            what: pact.card,
+                            where: pact.district,
+                            how: pact.type
+                        });
+            
+                    }
+                }
             }
-
-            this.results.push({
-                type: "place",
-                what: card,
-                where: district,
-                how: type
-            });
-            
         }
 
         if (partial) { return this; }
