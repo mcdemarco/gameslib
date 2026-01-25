@@ -386,12 +386,14 @@ export class MagnateGame extends GameBase {
     */
     
     private collectOn(rank: number, player: playerid): void {
+        //TODO: use this.credit instead.
+        const tokens = Array(6).fill(0);
         const p = player - 1;
         //Special ranks:
         if (rank === 10) {
             //Crownmas for everyone.
-            for (let suit in this.crowns[p])
-                this.tokens[p][suitOrder.indexOf(suit)]++;
+            for (const suit in this.crowns[p])
+                tokens[suitOrder.indexOf(suit)]++;
         } else {
             const myboard = this.board[player];
             for (let d = 0; d < this.districts; d++) {
@@ -399,16 +401,63 @@ export class MagnateGame extends GameBase {
                     const mycard = myboard[d][c];
                     if (mycard[0] === rank.toString()) {
                         //Correct rank, so collect the suits.
-                        this.tokens[p][suitOrder.indexOf(mycard[1])]++;
+                        tokens[suitOrder.indexOf(mycard[1])]++;
                         if (rank > 1) {
-                            this.tokens[p][suitOrder.indexOf(mycard[2])]++;
+                            tokens[suitOrder.indexOf(mycard[2])]++;
                         }
                     }
                 }
             }
         }
+        //TODO: test return condition to "log" gains?
+        this.credit(tokens, player);
         
         return;
+    }
+
+    private credit(tokenArray: number[], player: playerid): boolean {
+        //Debits and credits are forumlated as arrays of 6 numbers.
+        //Credits should never fail.
+        return this.edit(1, tokenArray, player);
+    }
+
+    private credit1(suit: string, player: playerid): boolean {
+        //Wrapper function for trades.
+        const tokenArray: number[] = Array(6).fill(0);
+        tokenArray[suitOrder.indexOf(suit)]++;
+        return this.credit(tokenArray, player);
+    }
+
+    private debit(tokenArray: number[], player: playerid): boolean {
+        //Debits and credits are forumlated as arrays of 6 numbers.
+        return this.edit(-1, tokenArray, player);
+    }
+/*    
+    private debit3(suit: string, player: playerid): void {
+        //Wrapper function for trades.
+        const tokenArray: number[] = Array(6).fill(0);
+        tokenArray[suitOrder.indexOf(suit)] = 3;
+        this.debit(tokenArray, player);
+        return;
+    }
+*/
+    private edit(operation: number, tokenArray: number[], player: playerid): boolean {
+        //Debits and credits are forumlated as arrays of 6 numbers.
+        const playerIdx = player - 1;
+        const tokens = this.tokens[playerIdx];
+
+        if (operation === -1) {
+            //Test before editing.  There is no going into debt in Magnate.
+            if (tokens.filter( (value, index) => tokenArray[index] > value ).length > 0)
+                return false;
+        }
+
+        //Safe to edit.
+        tokens.forEach((value, index) => {
+            tokens[index] = value + (tokenArray[index] * operation);
+        });
+            
+        return true;
     }
 
     private drawUp(): void {
@@ -512,10 +561,10 @@ export class MagnateGame extends GameBase {
         const illegalChars = /[^A-Za-n1-9:,]/;
 
         //The move formats depend on the main action:
-        // Buy:    card, district, <tokens>
+        // Buy:    card, district, spend
         // Deed:   card, district
         // Sell:   card
-        // Add:    card, <tokens>
+        // Add:    card, spend
         // Trade:  suit, suit
         // Prefer: card, suit
         // Error:  for internal use only
@@ -756,11 +805,10 @@ export class MagnateGame extends GameBase {
         try {
             let newmove = "";
             // clicking on hand pieces or token pieces.
-            console.log(row, col, piece);
+            //console.log(row, col, piece);
             if (row < 0 && col < 0) {
                 if (piece?.startsWith("_btn_")) {
                     const type = piece.split("_")[2].charAt(0);
-                    console.log(type);
                     if (move)
                         newmove = `${move}/${type}:`;
                     else
@@ -845,12 +893,16 @@ export class MagnateGame extends GameBase {
         }
         
         for (let s = 0; s < moves.length; s++) {
-            const action = moves[s];
+            let action = moves[s];
+            //Trim any dangling commas.
+            if (action[action.length - 1] === ",")
+                action = action[action.length - 1];
 
+            //Parse.
             const pact = cloned.parseMove(action);
             if (pact.valid === false) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.frogger.INVALID_MOVE", {move: action});
+                result.message = i18next.t("apgames:validation.magnate.INVALID_MOVE", {move: action});
                 return result;
             }
 
@@ -859,35 +911,48 @@ export class MagnateGame extends GameBase {
                 if (pact.spend === undefined) {
                     result.valid = true;
                     result.complete = -1;
-                    result.message = i18next.t("apgames:validation._general.SPEND_INSTRUCTIONS");
+                    result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
                     return result;
-                } 
+                }
+                //TODO: Would be quicker to change debit to return success or failure.
+                //Credit should always succeed.
                 const suitIndex = pact.spend.indexOf(3);
                 if (suitIndex < 0 || pact.spend.reduce((cur,acc) =>
                     cur + acc, 0) !== 3 ) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.MALFORMED_TRADE");
+                    result.message = i18next.t("apgames:validation.magnate.MALFORMED_TRADE");
                     return result;
                 } else if ( cloned.tokens[cloned.currplayer - 1][suitIndex] < 3 ) {
                     result.valid = false;
-                    result.message = i18next.t("apgames:validation._general.INVALID_TRADE");
+                    result.message = i18next.t("apgames:validation.magnate.INVALID_TRADE");
                     return result; 
                 }
 
-                //Dock the user.
-                cloned.tokens[cloned.currplayer - 1][suitIndex] -= 3;
+                //Dock the cloned user (for subsequent submove validation).
+                cloned.debit(pact.spend,cloned.currplayer);
 
                 if (pact.suit === undefined) {
                     result.valid = true;
                     result.complete = -1;
-                    result.message = i18next.t("apgames:validation._general.TOKEN_TRADE_INSTRUCTIONS");
+                    result.message = i18next.t("apgames:validation.magnate.TOKEN_TRADE_INSTRUCTIONS");
                     return result;
                 }
 
-                //Credit the user.
-                const newSuitIndex = suitOrder.indexOf(pact.suit);
-                cloned.tokens[cloned.currplayer - 1][suitIndex] += 1;
-            }
+                //Credit the user (for subsequent submove validation).
+                cloned.credit1(pact.suit, cloned.currplayer);
+                
+            } else {//In all other cases we should have a card.
+                if (pact.card === undefined) {
+                    result.valid = true;
+                    result.complete = -1;
+                    result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
+                    return result;
+                } 
+                //More low-hanging fruit.
+         /*       if (pact.type === "P") {
+                    //Set the suit.
+                }
+           */ }
 
         }
         // we're good!
@@ -938,7 +1003,7 @@ export class MagnateGame extends GameBase {
                 } else if (pact.district) {
                     
                     const col = this.algebraic2coord(pact.district);
-                    if (pact.type = "D") {
+                    if (pact.type === "D") {
                         //create  a deed
                         const deed = {
                             district: pact.district,
@@ -947,7 +1012,7 @@ export class MagnateGame extends GameBase {
                         this.deeds[this.currplayer - 1].set(pact.card, deed);
                         
                     } else {
-                        if (pact.type = "B") {
+                        if (pact.type === "B") {
                             this.board[this.currplayer][col].push(pact.card);
                         }
 
@@ -1040,7 +1105,7 @@ export class MagnateGame extends GameBase {
                 for (let p = 1; p <= this.numplayers; p++) {
                     if (p === opts.player) { continue; }
                     //Hide hands.
-                    mstate.hands[p - 1] = mstate.hands[ p - 1].map(c => "");
+                    mstate.hands[p - 1] = mstate.hands[p - 1].map(() => "");
                     //Hide prefs.
                     mstate.deeds[p - 1].forEach( value => value.suit = undefined );
                     //Tokens are public information.
@@ -1148,7 +1213,7 @@ export class MagnateGame extends GameBase {
 
         
         // Mark live spots, deeds, and control.
-        let markers: (MarkerOutline|MarkerFlood)[] = [];
+        const markers: (MarkerOutline|MarkerFlood)[] = [];
 
         let sideboard = this.board[1];
         const points1 = [];
@@ -1220,48 +1285,108 @@ export class MagnateGame extends GameBase {
             }
             
             const color = suitColors[s];
-            const p0count = this.tokens[0][s] ;
-            legend["s" + suit.uid + p0count.toString()] = [
-                {
-                    name: "piece",
-                    scale: 0.75,
-                    colour: color,
-                    opacity: 0.75
-                },
-                {
-                    name: suit.glyph!,
-                    scale: 0.66,
-                    opacity: 0.3
-                },
-                {
-                    text: p0count.toString(),
-                    scale: 0.70,
-                    colour: "#000"
-                }
-            ];
-            const p1count = this.tokens[1][s];
-            if (p1count !== p0count) {
-                legend["s" + suit.uid + p1count.toString()] = [
+            for (let p = 0; p < 2; p++) {
+                const pcount = this.tokens[p][s];
+                const lname = "s" + suit.uid + (p + 1).toString();
+
+                legend[lname] = [
                     {
                         name: "piece",
                         scale: 0.75,
                         colour: color,
-                        opacity: 0.75
+                        opacity: 0.75,
+                        nudge: {
+                            dx: 0,
+                            dy: 100,
+                        }
                     },
                     {
                         name: suit.glyph!,
                         scale: 0.60,
-                        opacity: 0.3
+                        opacity: 0.3,
+                        nudge: {
+                            dx: 0,
+                            dy: 125,
+                        }
                     },
                     {
-                        text: p1count.toString(),
-                        scale: 0.63,
-                        colour: "#000"
+                        text: pcount.toString(),
+                        scale: 0.70,
+                        colour: "#000",
+                        nudge: {
+                            dx: 0,
+                            dy: 100,
+                        }
                     }
                 ];
-            }
-        }
 
+                if (this.crowns[p].indexOf(suit.uid) > -1) {
+
+                    if (this.crowns[p].lastIndexOf(suit.uid) != this.crowns[p].indexOf(suit.uid)) {
+
+                        legend[lname].push(
+                            {
+                                name: "decktet-crown",
+                                scale: 0.30,
+                                colour: "_context_strokes",
+                                nudge: {
+                                    dx: -275,
+                                    dy: -625,
+                                }
+                            }
+                        );
+                        legend[lname].push(
+                            {
+                                name: "decktet-crown",
+                                scale: 0.30,
+                                colour: "_context_strokes",
+                                nudge: {
+                                    dx: 275,
+                                    dy: -625,
+                                }
+                            }
+                        );
+                        
+                    } else {
+
+                        legend[lname].push(
+                            {
+                                name: "decktet-crown",
+                                scale: 0.30,
+                                colour: "_context_strokes",
+                                nudge: {
+                                    dx: 0,
+                                    dy: -650,
+                                }
+                            }
+                        );
+                    } 
+                } //End crown additions.
+            } //end p
+        } //end suit
+
+                    /* else 
+                
+                    legend["s" + suit.uid + (p + 1).toString()] = [
+                        {
+                            name: "piece",
+                            scale: 0.75,
+                            colour: color,
+                            opacity: 0.75
+                        },
+                        {
+                            name: suit.glyph!,
+                            scale: 0.60,
+                            opacity: 0.3
+                        },
+                        {
+                            text: pcount.toString(),
+                            scale: 0.63,
+                            colour: "#000"
+                        }
+                        ];
+                        */
+  
         legend["Die"] = {
             name: `d6-${this.lastroll[0]}`
         };
@@ -1301,7 +1426,7 @@ export class MagnateGame extends GameBase {
         //hands
         for (let p = 1; p <= this.numplayers; p++) {
             const hand = this.hands[p - 1].map(c => "k" + (c === "" ? "UNKNOWN" : c));
-            const tokens = this.tokens[p - 1].map((cnt, idx) => "s" + suitOrder[idx] + cnt.toString());
+            const tokens = this.tokens[p - 1].map((cnt, idx) => "s" + suitOrder[idx] + p.toString());
             const width = this.variants.includes("mega") ? 12 : 9;
 
             //This should always be true.
@@ -1577,6 +1702,7 @@ export class MagnateGame extends GameBase {
         let resolved = false;
         switch (r.type) {
             case "roll":
+                // eslint-disable-next-line no-case-declarations
                 const or = [...r.values];
                 if (or.length === 1)
                     node.push(i18next.t("apresults:ROLL.magnate", {player, values: or[0]}));
@@ -1589,6 +1715,7 @@ export class MagnateGame extends GameBase {
                 resolved = true;
                 break;
             case "place":
+                // eslint-disable-next-line no-case-declarations
                 const whatCard = this.reportCard(r.what!);
                 if (r.where === "discards")
                     node.push(i18next.t("apresults:PLACE.magnate_sell", {player, what: whatCard}));

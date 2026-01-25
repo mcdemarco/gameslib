@@ -4531,10 +4531,11 @@
         },
         "magnate": {
             "INITIAL_BUTTON_INSTRUCTIONS": "Click a button to select your first action.",
-            "CARD_NOT_DONE_INSTRUCTIONS": "Click a hand card to deed, build, or sell, click a deed to add tokens to it, or select tokens to trade.",
+            "CARD_NOT_DONE_INSTRUCTIONS": "Click a hand card to buy, deed, or sell, click a deed to add tokens to it, or select tokens to trade.",
             "INITIAL_PLACEMENT_INSTRUCTIONS": "Click a hand card to deed, buy, or sell.",
             "INVALID_BUY": "You do not have the suit tokens necessary to buy this card.",
             "INVALID_DEED": "You do not have the suit tokens necessary to deed this card.",
+            "INVALID_MOVE": "The action '{{move}}' could not be parsed.",
             "INVALID_PLACEMENT": "The selected card cannot be placed here because no suits match.",
             "INVALID_PURCHASE": "The selected tokens are insufficient to buy this card.",
             "INVALID_TRADE": "You do not have three tokens of that suit available to trade.",

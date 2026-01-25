@@ -1,5 +1,3 @@
-/* tslint:disable:no-unused-expression */
-
 import "mocha";
 import { expect } from "chai";
 import { MagnateGame } from '../../src/games';
@@ -163,7 +161,6 @@ describe("Magnate", () => {
     it ("Validates single moves", () => {
         // parsing good moves
         expect(g.validateMove("P:4MS2,K")).to.have.deep.property("valid", true);
-        g.render();
         g.randomMove();
 
         /*
@@ -210,12 +207,18 @@ describe("Magnate", () => {
         }); */
     });
 
+    it ("Renders without exploding", () => {
+        g.render();
+    });
+
     it ("Plays along a bit", () => {
         const g = new MagnateGame();
         for (let x = 0; x < 5; x++) {  //27
-            g.move(g.randomMove());
+            const mv = g.randomMove();
+            //console.log(mv);
+            g.move(mv);
         }
-        console.log(g.status());
+        //console.log(g.status());
     });
 
 });
