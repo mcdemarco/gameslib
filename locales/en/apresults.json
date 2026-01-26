@@ -154,7 +154,8 @@
     "CONVERT": {
         "complete": "{{player}} turned a {{what}} into a {{into}} at {{where}}.",
         "courtesan": "King and courtesan swapped positions at {{where}}.",
-        "magnate": "{{player}} completed their deeded card {{what}} in district {{where}}.",
+        "magnate_deed": "{{player}} completed their deeded card {{what}} in district {{where}}.",
+        "magnate_trade": "{{player}} traded three {{what}} tokens in for one {{into}}.",
         "moonsquad": "{{player}} recruited a squad.",
         "pacru": "{{player}} converted {{where}}.",
         "paintbucket_one": "{{player}} converted 1 piece at {{where}}.",
