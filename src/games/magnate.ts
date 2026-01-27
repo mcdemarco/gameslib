@@ -19,9 +19,10 @@ export type DeedContents = {
     suit?: string
 };
 
-const suitOrder = suits.map(suit => suit.uid); //["M","S","V","L","Y","K"];
 const columnLabels = "abcdefghij".split("");
 const moveTypes = ["B","D","S","A","T","P"];
+const suitColors: string[] = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
+const suitOrder = suits.map(suit => suit.uid); //["M","S","V","L","Y","K"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -1311,7 +1312,91 @@ export class MagnateGame extends GameBase {
         return max;
     }
 
-    private renderCards(): Card[] {
+    private renderDecktetGlyph(card: Card, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
+        //Refactored from the toGlyph method of Card for opacity, verticality, deed tokens, etc.
+        if (border === undefined) {
+            border = false;
+        }
+        if (opacity === undefined) {
+            opacity = 0;
+        }
+        const glyph: [Glyph, ...Glyph[]] = [
+            {
+                name: border ? "piece-square" : "piece-square-borderless",
+                scale: border? 1.1 : 1,
+                colour: "_context_background",
+            },
+        ]
+        // rank
+        if (card.rank.glyph !== undefined) {
+            glyph.push({
+                name: card.rank.glyph,
+                scale: 0.5,
+                colour: "_context_strokes",
+                nudge: {
+                    dx: 250,
+                    dy: -250,
+                },
+                orientation: "vertical",
+                opacity: opacity,
+            });
+        }
+        const nudges: [number,number][] = [[-250, -250], [-250, 250], [250, 250]];
+        for (let i = 0; i < card.suits.length; i++) {
+            const suit = card.suits[i];
+            const nudge = nudges[i];
+            if ( deed && deed.suit && deed.suit === suit.uid )
+                glyph.push({
+                    name: "piece",
+                    scale: 0.5,
+                    nudge: {
+                        dx: nudge[0],
+                        dy: nudge[1],
+                    },
+                    colour: suitColors[suit.seq - 1],
+                    opacity: opacity,
+                });
+            else if ( deed ) // && tokens[i] > 0)
+                glyph.push({
+                    name: "piece-borderless",
+                    scale: 0.5,
+                    nudge: {
+                        dx: nudge[0],
+                        dy: nudge[1],
+                    },
+                    colour: suitColors[suit.seq - 1],
+                    opacity: opacity,
+                });
+
+
+            glyph.push({
+                name: suit.glyph,
+                scale: 0.5,
+                nudge: {
+                    dx: nudge[0],
+                    dy: nudge[1],
+                },
+                orientation: "vertical",
+                opacity: opacity,
+            });
+
+            if (deed && deed.tokens) // && deed.tokens[i] > 0)
+                glyph.push({
+                    text: deed.tokens[i].toString(),
+                    scale: 0.5,
+                    nudge: {
+                        dx: nudge[0],
+                        dy: nudge[1],
+                    },
+                    orientation: "vertical",
+                    colour: "#000"
+                });
+            
+        }
+        return glyph;
+    }
+    
+    private renderableCards(): Card[] {
         //Init draw deck and hands.
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
         const renderDeck = this.initDeck(deckCount, true);
@@ -1417,7 +1502,7 @@ export class MagnateGame extends GameBase {
         });
         
         // Build legend of most cards, including an Excuse.
-        const allcards = this.renderCards();
+        const allcards = this.renderableCards();
         
         const legend: ILegendObj = {};
         for (const card of allcards) {
@@ -1431,24 +1516,27 @@ export class MagnateGame extends GameBase {
                     bg: "_context_background",
                     opacity: 0.2,
                 }});
+            } else if ( this.deeds[0].has(card.uid) ) {
+                //TODO: a function that also handles the suit counts.
+                glyph = this.renderDecktetGlyph(card, this.deeds[0].get(card.uid), true, 0.33);
+            } else if ( this.deeds[1].has(card.uid) ) {
+                //TODO: a function that also handles the suit counts.
+                glyph = this.renderDecktetGlyph(card, this.deeds[1].get(card.uid), true, 0.33);
             }
+            
             legend["k" + card.uid] = glyph;
         }
 
-
         //Suit tokens
         
-        //Colors taken from the decktet sheet.
-        const suitColors: string[] = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
-
         for (let s = 0; s < 6; s++) {
             const suit = suits[s];
             
-            legend["s" + suit.uid] = {
+   /*         legend["s" + suit.uid] = {
                 name: suit.glyph!,
                 scale: 0.5
             }
-            
+   */         
             const color = suitColors[s];
             for (let p = 0; p < 2; p++) {
                 const pcount = this.tokens[p][s];
@@ -1527,39 +1615,30 @@ export class MagnateGame extends GameBase {
                 } //End crown additions.
             } //end p
         } //end suit
-
-                    /* else 
-                
-                    legend["s" + suit.uid + (p + 1).toString()] = [
-                        {
-                            name: "piece",
-                            scale: 0.75,
-                            colour: color,
-                            opacity: 0.75
-                        },
-                        {
-                            name: suit.glyph!,
-                            scale: 0.60,
-                            opacity: 0.3
-                        },
-                        {
-                            text: pcount.toString(),
-                            scale: 0.63,
-                            colour: "#000"
-                        }
-                        ];
-                        */
-  
-        legend["Die"] = {
-            name: `d6-${this.lastroll[0]}`
-        };
+    
+        if (this.lastroll[0] < 10) {
+            legend["Die"] = {
+                name: `d6-${this.lastroll[0]}`
+            };
+        } else {
+            legend["Die"] = [
+                {
+                    name: "d6-empty"
+                },
+                {
+                    text: "10",
+                    scale: 0.70,
+                    colour: "_context_strokes",
+                }
+            ];
+        }
+        
         legend["Tax"] = {
             name: "d6-empty"
         };
         legend["TaxTax"] = {
             name: "d6-empty"
         };
-
 
         if (this.lastroll.length > 1) {
 
