@@ -160,8 +160,10 @@ describe("Magnate", () => {
     
     it ("Validates single moves", () => {
         // parsing good moves
-        expect(g.validateMove("P:4MS2,K")).to.have.deep.property("valid", true);
-        g.randomMove();
+        const mv = g.randomMove();
+        expect(g.validateMove(mv)).to.have.deep.property("valid", true);
+        g.move(mv);
+        //g.randomMove();
 
         /*
           expect(g.parseMove("8MS:a3-b3")).to.deep.equal({
