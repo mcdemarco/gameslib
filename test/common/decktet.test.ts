@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-expressions */
-
 import "mocha";
 import { expect } from "chai";
 //import { Card, Deck, cardSortAsc, cardSortDesc, cardsBasic, cardsExtended } from "../../src/common/decktet";
