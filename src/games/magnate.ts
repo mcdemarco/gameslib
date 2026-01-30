@@ -379,8 +379,7 @@ export class MagnateGame extends GameBase {
         }
 
         const cardObj = Card.deserialize(card)!;
-        //Sets correct "Court" cost with exception for Aces.
-        const price = cardObj.rank.seq === 1 ? 3 : Math.ceil(cardObj.rank.seq);
+        const price = this.getPriceFromRank(cardObj.rank.seq);
 
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         let reserves = 0;
@@ -693,6 +692,45 @@ export class MagnateGame extends GameBase {
         return deeded;
     }
 
+    private getPriceFromRank(rank: number): number {
+        //Sets correct "Court" cost with exception for Aces.
+        //Rank is of the type/form card.rank.seq.
+        return rank === 1 ? 3 : Math.ceil(rank) ;
+    }
+    
+    private getRandomPayment(card: string, full?: boolean): string {
+        //Construct a full or partial payment for use in random moves.
+        //It may not qualify as a deed payment so don't rely on success.
+        
+        const cardObj = Card.deserialize(card)!;
+        
+        const payment: string[] = [];
+        const resources = this.tokens[this.currplayer - 1];
+
+        const price = this.getPriceFromRank(cardObj.rank.seq);
+
+        const suits = cardObj.suits.map(s => s.uid);
+
+        //Guarantee of suit coverage for buys.
+        suits.forEach(s => {
+            if (resources[suitOrder.indexOf(s)] > 0)
+                payment.push(s);
+        });
+
+        if ( full && payment.length < price ) {
+            //We may have already paid in full.
+            while (payment.length < price) {
+                //Select a random suit and push if available.
+                const randi = randomInt(suits.length) - 1;
+                const suit = suits[randi];
+                if (resources[suitOrder.indexOf(suit)] > 0)
+                    payment.push(suit);
+            }
+        }
+
+        return payment.join(",");
+    }
+
     private hasDeed(district: string, player: playerid): boolean {
         //Check if a district has a deed.
         let deeded = false;
@@ -967,7 +1005,7 @@ export class MagnateGame extends GameBase {
                     if (this.canPlace(card, dist)) {
                         //No economy testing:  40% buy, 40% deed, 20% sell.
                         if ( ( rando < 0.4 && this.canPay(card) ) || card[0] === "2" ) //Can't deed a 2.
-                            move = "B:" + card + "," + dist;//Need suits.
+                            move = "B:" + card + "," + dist + "," + this.getRandomPayment(card, true);//Need suits.
                         else if (this.canDeed(card))
                             move = "D:" + card + "," + dist;
                     }
@@ -1007,10 +1045,12 @@ export class MagnateGame extends GameBase {
             // clicking on hand pieces or token pieces.
             //console.log(row, col, piece);
             if (row < 0 && col < 0) {
-                if (piece?.startsWith("_btn_")) {
+                if ( piece?.startsWith("_btn_")) {
                     const type = piece.split("_")[2].charAt(0);
-                    if ( move && move.endsWith(":"))  //Reset type.
+                    if ( move && move.endsWith(":") )  //Reset type.
                         newmove = `${move.substring(0,move.length - 2)}${type}:`;
+                    else if ( move && move.endsWith(",") ) //Trim and add next action.
+                        newmove = `${move.substring(0,move.length - 1)}/${type}:`;
                     else if (move) //Next action.
                         newmove = `${move}/${type}:`;
                     else //First action.
@@ -1023,9 +1063,9 @@ export class MagnateGame extends GameBase {
                         message: i18next.t("apgames:validation.magnate.INITIAL_BUTTON_INSTRUCTIONS")
                     }
                 } else if ( piece?.startsWith("k") && move.endsWith(":") ) {
-                    //clicking a hand card
+                    //clicking a hand card for buy/deed/sell.
                     const card = piece.split("k")[1];
-                    newmove = `${move}${card},`;
+                    newmove = `${move}${card},`; 
                 } else if ( piece?.startsWith("k") ) {
                     //Too late to choose a hand card.
                     //Just ignore it.
@@ -1055,7 +1095,7 @@ export class MagnateGame extends GameBase {
                     const card = piece.split("k")[1];
                     newmove = `${move}${card},`;
                 } else if ( piece?.startsWith("k") ) {
-                    //clicking a board card, which we interpret as its district.
+                    //clicking a board card, which in this case we interpret as its district.
                     const district = this.coord2algebraic(col);
                     newmove = `${move}${district},`;
                 } else if (move && move.endsWith(":")) {
