@@ -24,6 +24,7 @@
         "biscuit": "The following cards were in opposing hands: {{cards}}.",
         "deckfish": "{{player}} was unable to move and must pass from now on.",
         "frogger": "{{player}} chose to refill the draw pool.  Other players must pass so he can take his {{moves}} remaining move(s).",
+        "magnate": "{{player}} {{payload}}",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}.",
         "stawvs": "{{player}} was unable to move and must pass from now on.  Their pieces remain on the following pyramids: {{pyramids}}."
     },
@@ -512,8 +513,9 @@
     },
     "RESIGN": "{{player}} has resigned.",
     "ROLL": {
-        "magnate": "{{player}} rolled {{values}}.",
-        "magnate_taxation": "Taxation was rolled for {{values}}.",
+        "magnate": "The next player rolled {{values}}.",
+        "magnate_initial": "{{player}} rolled {{values}}.",
+        "magnate_initial_ten": "{{player}} rolled {{values}}.  Players collected their Crown values.",
         "single": "The die was rolled: {{values}}.",
         "tablero": "The dice were rolled: {{values}}."
     },

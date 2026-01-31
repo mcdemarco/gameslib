@@ -176,7 +176,6 @@ export class MagnateGame extends GameBase {
 
             //initial roll
             const lastroll: number[] = this.roller();
-            //const roll: number[] = [...lastroll];
 
             //Taxation and rank rolls have no impact on the first turn,
             //but we may have to process a Christmas roll.
@@ -221,9 +220,9 @@ export class MagnateGame extends GameBase {
                 lastroll,
                 shuffled: false
             };
-
             
             this.stack = [fresh];
+            
         } else {
             if (typeof state === "string") {
                 state = JSON.parse(state, reviver) as IMagnateState;
@@ -326,10 +325,6 @@ export class MagnateGame extends GameBase {
         this.deeds[1].forEach((value, key) => this.deck.remove(key));
 
         this.deck.shuffle();
-
-        //We report the previous roll as associated with this player and this turn.
-        this.results.push({type: "roll", values: this.lastroll});
-        //If that workn, we could recalculate and report taxes here too.
 
         return this;
     }
@@ -508,8 +503,10 @@ export class MagnateGame extends GameBase {
         }
     }
     
-    private collectOn(rank: number, player: playerid): void {
-        //TODO: use this.credit instead.
+    private collectOn(rank: number, player: playerid): number[] {
+        //Credits the player for the rolled rank.
+        //Also returns the token string of credits for logging.
+        
         let tokens = Array(6).fill(0);
         const p = player - 1;
         //Special ranks:
@@ -550,7 +547,7 @@ export class MagnateGame extends GameBase {
         //TODO: test return condition to "log" gains?
         this.credit(tokens, player);
         
-        return;
+        return tokens;
     }
 
     private createDeed(card: string, district: string): void {
@@ -1043,7 +1040,6 @@ export class MagnateGame extends GameBase {
         try {
             let newmove = "";
             // clicking on hand pieces or token pieces.
-            //console.log(row, col, piece);
             if (row < 0 && col < 0) {
                 if ( piece?.startsWith("_btn_")) {
                     const type = piece.split("_")[2].charAt(0);
@@ -1172,7 +1168,6 @@ export class MagnateGame extends GameBase {
 
             //Parse.
             const pact = cloned.parseMove(action);
-            //console.log(pact);
             if (pact.valid === false) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.magnate.INVALID_MOVE", {move: action});
@@ -1397,7 +1392,10 @@ export class MagnateGame extends GameBase {
         this.results = [];
         //this.highlights = [];
 
-        //TODO!
+        if (this.stack.length === 1) {
+            //Need to log the initial roll.
+            this.results.push({type: "roll", values: [this.lastroll[0]], who: this.currplayer});
+        };
 
         const actions = m.split("/");
 
@@ -1478,35 +1476,69 @@ export class MagnateGame extends GameBase {
         // draw up
         this.drawUp();
 
-        // update currplayer
         this.lastmove = m;
         //this.lastroll = this.roll;
 
-        //reroll the dice
-        this.lastroll = this.roller();
-        //We don't report this roll until the beginning of the next turn.
-        if (this.lastroll.length > 1) {
-            //The taxman cometh.
-            for (let t = 1; t <= this.lastroll.length; t++) {
-                for (let p = 0; p < 2; p++) {
-                    if (this.tokens[p][this.lastroll[t] - 1] > 1)
-                        this.tokens[p][this.lastroll[t] - 1] = 1;
-                }
-            }
-        }
-        
-        for (let p = 1; p <= 2; p++) {
-            this.collectOn(this.lastroll[0], p as playerid);
-        }
-        
         // update currplayer
+        const oldplayer = this.currplayer;
         let newplayer = (this.currplayer as number) + 1;
         if (newplayer > this.numplayers) {
             newplayer = 1;
         }
-        this.currplayer = newplayer as playerid;
 
         this.checkEOG();
+
+        //Rolling the dice is simple.  Logging the roll is complicated.
+        if (! this.gameover ) {
+            //Roll the dice!
+
+            const payArray:string[] = [];
+            
+            this.lastroll = this.roller();
+
+            //We cannot report the roll as associated with the new player.
+            this.results.push({type: "roll", values: [this.lastroll[0]]});
+            
+            [oldplayer, newplayer].forEach((p) => {
+                let message = (p === newplayer) ? "The next player" : " ";
+
+                //The taxman cometh?
+                if (this.lastroll.length > 1) {
+                    let submessage = "";
+                    for (let t = 0; t < this.lastroll.length; t++) {
+                        const taxrollIdx = this.lastroll[t] - 1;
+                        if (this.tokens[p - 1][taxrollIdx] > 1) {
+                            const tax = this.tokens[p - 1][taxrollIdx] - 1;
+                            this.tokens[p - 1][taxrollIdx] = 1;
+
+                            submessage += (submessage === "" ? "" : " and ") + tax + " " + suitOrder[taxrollIdx];
+                        }
+                    }
+                    if (submessage)
+                        message += " was taxed " + submessage;
+                    else
+                        message += " was not taxed"
+                    
+                    message += ", and ";
+                } 
+
+                //Collecting tokens.
+                //message += message.length > 0 ?; //: (p === newplayer ? "The next player" : "");
+                const gains = this.collectOn(this.lastroll[0], p as playerid);
+                const gainStringArray: string[] = [];
+                gains.forEach( (value, index) => {
+                    if (value > 0)
+                        gainStringArray.push(value.toString() + " " + suitOrder[index]);
+                });
+                message += (gainStringArray.length === 0) ? " did not collect any tokens." : " collected " + gainStringArray.join(" and ") + ".";
+                payArray.push(message);
+            });
+
+            this.results.push({type: "announce", payload: payArray});
+        }
+
+        this.currplayer = newplayer as playerid;
+
         this.saveState();
         return this;
     }
@@ -1599,7 +1631,7 @@ export class MagnateGame extends GameBase {
         if (opacity === undefined) {
             opacity = 0;
         }
-        //console.log(fill);
+
         const glyph: [Glyph, ...Glyph[]] = [
             {
                 name: border ? "piece-square" : "piece-square-borderless",
@@ -2253,16 +2285,16 @@ export class MagnateGame extends GameBase {
         let resolved = false;
         switch (r.type) {
             case "roll":
-                // eslint-disable-next-line no-case-declarations
-                const or = [...r.values];
-                if (or.length === 1)
-                    node.push(i18next.t("apresults:ROLL.magnate", {player, values: or[0]}));
-                else 
-                    node.push(i18next.t("apresults:ROLL.magnate", {player, values: `${or.shift()} with taxation on ${or.map(digit => suits[digit].name).join(" and ")}.`}));
+                if (r.who && r.values[0] === 10) 
+                    node.push(i18next.t("apresults:ROLL.magnate_initial_ten", {player, values: r.values}));
+                else if (r.who)
+                    node.push(i18next.t("apresults:ROLL.magnate_initial", {player, values: r.values}));
+                else
+                    node.push(i18next.t("apresults:ROLL.magnate", {player, values: r.values}));
                 resolved = true;
                 break;
-            case "announce": //gains on roll?
-                node.push(i18next.t("apresults:ANNOUNCE.magnate", {player, payload: r.payload}));
+             case "announce": //gains on roll and taxation.
+                node.push(i18next.t("apresults:ANNOUNCE.magnate", {player, payload: r.payload.join(" ")}));
                 resolved = true;
                 break;
             case "place":

@@ -215,7 +215,7 @@ describe("Magnate", () => {
 
     it ("Plays along a bit", () => {
         const g = new MagnateGame();
-        for (let x = 0; x < 5; x++) {  //27
+        for (let x = 0; x < 27; x++) {  //27
             const mv = g.randomMove();
             //console.log(mv);
             g.move(mv);
