@@ -1033,7 +1033,7 @@ export class MagnateGame extends GameBase {
         // sell the real final card and then make this move.
         //For better results, clone the game instead.
         if ( this.variants.includes("mega") )
-            move = "S:" + sortedHand[5] + "/" + move;
+            move = "S:" + sortedHand[sortedHand.length - 1] + "/" + move;
 
         
         //In all cases, we also attempt to pay on a deed.
@@ -1042,24 +1042,18 @@ export class MagnateGame extends GameBase {
         for (let d = 1; d <= this.districts; d++) {
             if (submove === "") {
                 const deedCard = this.getDeedCard(this.coord2algebraic(d), this.currplayer);
-                console.log(deedCard);
+
                 if (deedCard) {
                     const spend = this.getRandomPayment(deedCard, false);
-                    console.log(spend);
                     submove = "A:" + deedCard + "," + spend;
                     //Manually validate here.
-                   // console.log("validation: ", this.validateMove(submove).valid);
                     if (! this.validateMove(submove).valid === true) {
-                     //   console.log("validation: ", this.validateMove(submove));
                         submove = "";
                     }
                 }
             }
         }
-
         move += "/" + submove;
-        
-        console.log(move);
 
         return move;
     }
@@ -1594,15 +1588,9 @@ export class MagnateGame extends GameBase {
         //May not be exactly equal in mega.
         if (this.deck.size === 0 && this.hands[0].length <= finalHandSize && this.hands[1].length <= finalHandSize) {
             this.gameover = true;
-            const scores: IScores[] = this.getPlayersScores();
-            if (scores[0] === scores[1]) {
-                //Evaluate tiebreaker.
-                this.winner = this.getTieWinner();
-            } else {
-                //Simple win.
-                const winner = scores[0] > scores[1] ? 1 : 2;
-                this.winner.push(winner as playerid);
-            }
+
+            //Evaluates main scores and tiebreakers.
+            this.winner = this.getWinner();
         }
 
         if (this.gameover) {
@@ -2233,6 +2221,7 @@ export class MagnateGame extends GameBase {
     }
 
     private getDistrictScoreForPlayer(district: string, player: playerid): number {
+        //Returns the raw score of a district for a player.
         const index = this.algebraic2coord(district);
         const myDistrict = this.board[player as number][index];
         let subscore = 0;
@@ -2247,13 +2236,13 @@ export class MagnateGame extends GameBase {
     }
 
     private getDistrictWinner(district: string): number {
-        //Determines district control.
+        //Returns (numeric) playerid of the controller of a single district, or 0 if tied.
         const control = this.getDistrictScoreForPlayer(district,1) - this.getDistrictScoreForPlayer(district,2);
-        return control > 0 ? 1 : (control < 0 ? 2 : 0); 
+        return control > 0 ? 1 : (control < 0 ? 2 : 0);
     }
 
     private getDistrictsTotals(): number[] {
-        //Determines district control.
+        //Returns total *number* of districts controlled per player, in an array of length 2.
         const controllers: number[] = [0,0,0];
         for (let d = 0; d < this.districts; d++) {
             const controller = this.getDistrictWinner(this.coord2algebraic(d));
@@ -2264,7 +2253,7 @@ export class MagnateGame extends GameBase {
     }
 
     private getDistrictsWinners(): number[] {
-        //Determines district control.
+        //Returns an array of length this.districts, indicating which player controls each one (for rendering).
         const controllers: number[] = [];
         for (let d = 0; d < this.districts; d++) {
             const controller = this.getDistrictWinner(this.coord2algebraic(d));
@@ -2273,8 +2262,38 @@ export class MagnateGame extends GameBase {
         return controllers;
     }
 
-    private getTieWinner(): playerid[] {
-        //Evaluate first tiebreaker.
+    public getPlayersScores(): IScores[] {
+        //Returns the district and total scores for display.
+        //Not to be used for determining the winner.
+        let scores: string[] = [];
+        const districts: number[] = this.getDistrictsTotals();
+        scores = districts.map((s, i) => 
+            s + " (" + this.getTotalScore((i + 1) as playerid) + ")"
+                              );
+        return [
+            { name: i18next.t("apgames:status.SCORES"), scores },
+        ];
+    }
+
+    private getTotalScore(player: playerid): number {
+        //Returns a player's overall total raw score, which is the first tiebreaker.
+        let total = 0;
+        for (let d = 0; d < this.districts; d++) {
+            const dist = this.coord2algebraic(d);
+            total += this.getDistrictScoreForPlayer(dist, player)
+        }
+        return total;
+    }
+ 
+    private getWinner(): playerid[] {
+        //Evaluate the primary endpoint.
+        const districts: number[] = this.getDistrictsTotals();
+        if (districts[0] !== districts[1]) {
+            const winner = (districts[0] > districts[1] ? 1 : 2) as playerid;
+            return [winner];
+        }
+
+        //Evaluate tiebreakers.
         let tieWinner: playerid[] = [];
         const tieArray: number[][] = [[],[]];
         for (let p = 1; p <=2; p++) {
@@ -2293,28 +2312,7 @@ export class MagnateGame extends GameBase {
         }
         return tieWinner;
     }
-
-    private getTotalScore(player: playerid): number {
-        //TODO.
-        let total = 0;
-        for (let d = 0; d < this.districts; d++) {
-            const dist = this.coord2algebraic(d);
-            total += this.getDistrictScoreForPlayer(dist, player)
-        }
-        return total;
-    }
-
-    public getPlayersScores(): IScores[] {
-        let scores: string[] = [];
-        const districts: number[] = this.getDistrictsTotals();
-        scores = districts.map((s, i) => 
-            s + " (" + this.getTotalScore((i + 1) as playerid) + ")"
-                              );
-        return [
-            { name: i18next.t("apgames:status.SCORES"), scores },
-        ];
-    }
-
+    
     /* end scoring functions */
 
 
