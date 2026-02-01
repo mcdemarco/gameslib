@@ -333,24 +333,33 @@ export class MagnateGame extends GameBase {
     
     /* helper functions for general gameplay */
 
-    private add2deed(card: string, spend: number[]): void {
+    private add2deed(card: string, spend: number[]): boolean {
         //Adds tokens to deeds.
         //Ideally should not be called when the deed is complete.
         const deed = this.deeds[this.currplayer - 1].get(card)!;
         const cardObj = Card.deserialize(card)!;
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
-
+        const price = this.getPriceFromRank(cardObj.rank.seq);
+        let paid = 0;
+        let test = true;
+        
         deed.suit1 += spend[suitIdxs[0]];
+        paid += deed.suit1;
+        test = (deed.suit1 > 0);
         if ( deed.suit2 !== undefined ) {
             deed.suit2 += spend[suitIdxs[1]];
+            paid += deed.suit2;
+            test = test && (deed.suit2 > 0);
             if ( deed.suit3 !== undefined ) {
                 deed.suit3 += spend[suitIdxs[2]];
+                paid += deed.suit3;
+                test = test && (deed.suit3 > 0);
             }
         }
-
+        
         this.deeds[this.currplayer - 1].set(card, deed);
 
-        return;
+        return (test && paid === price);
     }
 
     private canDeed(card: string): boolean {
@@ -983,46 +992,74 @@ export class MagnateGame extends GameBase {
     }
 
     public randomMove(): string {
-        //TODO: mega version requires cloning.
-
-        //We can generate a random move from the player's hand.
-        const handCount = (this.variants.includes("mega") ? 6 : 3);
-        const randomIndex = Math.floor(Math.random() * handCount);
-
-        const card = this.hands[this.currplayer - 1][randomIndex];
-        //The default is to sell it.
+        //TODO: do something more reasonable.
         let move: string = "";
 
-        const rando = Math.random();
-        if (rando < 0.8) {
+        const sortedHand = this.hands[this.currplayer - 1].slice().sort((a,b) => parseInt(b[0]) - parseInt(a[0]));
+        
+        //Don't pick a random index; try to build or deed a card.
+        //Failing that, sell a card and try to pay on a deed.
+
+        
+        //We can generate a random move from the player's hand.
+        const handCount = (this.variants.includes("mega") ? 5 : 3);
+        let card = "";
+        
+        for (let c = 0; c < handCount; c++) {
+            card = sortedHand[c];
+            
             //Test if the card can be placed. 
             for (let d = 0; d < this.districts; d++) {
-                const dist = this.coord2algebraic(d);
                 if (move === "") {
+                    const dist = this.coord2algebraic(d);
                     if (this.canPlace(card, dist)) {
                         //No economy testing:  40% buy, 40% deed, 20% sell.
-                        if ( ( rando < 0.4 && this.canPay(card) ) || card[0] === "2" ) //Can't deed a 2.
-                            move = "B:" + card + "," + dist + "," + this.getRandomPayment(card, true);//Need suits.
-                        else if (this.canDeed(card))
+                        if ( this.canPay(card) ) {
+                            // If we can deed a 2 we can pay for it, so doesn't try to deed one.
+                            move = "B:" + card + "," + dist + "," + this.getRandomPayment(card, true); //Need suits.
+                        } else if (this.canDeed(card)) {
                             move = "D:" + card + "," + dist;
+                        } //else move is unchanged and we continue.
                     }
                 }
             }
         }
-        /*
-        //Test if the card can be paid for outright. If so, play it.
-        if (this.canPay(card)) {
-        return card + d; //+ "payment here";
-        } else if (this.canDeed(card)) {
-        //If the card can be deeded, 50/50 chance of deeding it or selling it.                  
-        if (Math.random() < 0.5) {
-        return card; //+ "deed payment here";
-        }
-        } // else fall through
-        */
-        
+
+        //If we fell through, we sell the "final" card.
         if (move === "")
             move = "S:" + card;
+
+        //If mega, we hedged on the final card, so we could
+        // sell the real final card and then make this move.
+        //For better results, clone the game instead.
+        if ( this.variants.includes("mega") )
+            move = "S:" + sortedHand[5] + "/" + move;
+
+        
+        //In all cases, we also attempt to pay on a deed.
+        let submove: string = "";
+        
+        for (let d = 1; d <= this.districts; d++) {
+            if (submove === "") {
+                const deedCard = this.getDeedCard(this.coord2algebraic(d), this.currplayer);
+                console.log(deedCard);
+                if (deedCard) {
+                    const spend = this.getRandomPayment(deedCard, false);
+                    console.log(spend);
+                    submove = "A:" + deedCard + "," + spend;
+                    //Manually validate here.
+                   // console.log("validation: ", this.validateMove(submove).valid);
+                    if (! this.validateMove(submove).valid === true) {
+                     //   console.log("validation: ", this.validateMove(submove));
+                        submove = "";
+                    }
+                }
+            }
+        }
+
+        move += "/" + submove;
+        
+        console.log(move);
 
         return move;
     }
@@ -1440,11 +1477,14 @@ export class MagnateGame extends GameBase {
                     if (pact.type === "D") {
                         //Create a deed.
                         this.createDeed(pact.card, pact.district);
+                        this.debit(tokens, this.currplayer);
                     } else if (pact.type === "B") {
                         //Place the card.
                         this.placeCard(pact.card, pact.district);
+                        if (pact.spend !== undefined)
+                            this.debit(pact.spend, this.currplayer);
                     }
-
+                    
                     //Shared result type
                     this.results.push({
                         type: "place",
@@ -1465,8 +1505,14 @@ export class MagnateGame extends GameBase {
                 }
 
                 if (pact.type === "A" && pact.spend !== undefined) {
-                    this.add2deed(pact.card, pact.spend);
+                    const done = this.add2deed(pact.card, pact.spend);
                     this.debit(pact.spend,this.currplayer);
+                    //If the deed is done, remove it and place the card.
+                    if (done) {
+                        const district = this.deeds[this.currplayer - 1].get(pact.card)!.district;
+                        this.deeds[this.currplayer - 1].delete(pact.card);
+                        this.placeCard(pact.card, district!);
+                    }
                 }
             }
         }
@@ -1692,7 +1738,7 @@ export class MagnateGame extends GameBase {
                 opacity: opacity,
             });
 
-            if ( deed ) {
+            if ( deed && i === 0) 
                 //suit1 always present
                 glyph.push({
                     text: deed.suit1.toString(),
@@ -1705,30 +1751,30 @@ export class MagnateGame extends GameBase {
                     colour: "#000"
                 });
 
-                if ( deed.suit2 !== undefined )
-                    glyph.push({
-                        text: deed.suit2!.toString(),
-                        scale: 0.5,
-                        nudge: {
-                            dx: nudge[0],
-                            dy: nudge[1],
-                        },
-                        orientation: "vertical",
-                        colour: "#000"
-                    });
-                
-                if ( deed.suit3 !== undefined )
-                    glyph.push({
-                        text: deed.suit3!.toString(),
-                        scale: 0.5,
-                        nudge: {
-                            dx: nudge[0],
-                            dy: nudge[1],
-                        },
-                        orientation: "vertical",
-                        colour: "#000"
-                    });
-            }
+            if ( deed && deed.suit2 !== undefined && i === 1)
+                glyph.push({
+                    text: deed.suit2!.toString(),
+                    scale: 0.5,
+                    nudge: {
+                        dx: nudge[0],
+                        dy: nudge[1],
+                    },
+                    orientation: "vertical",
+                    colour: "#000"
+                });
+            
+            if ( deed && deed.suit3 !== undefined && i === 2 )
+                glyph.push({
+                    text: deed.suit3!.toString(),
+                    scale: 0.5,
+                    nudge: {
+                        dx: nudge[0],
+                        dy: nudge[1],
+                    },
+                    orientation: "vertical",
+                    colour: "#000"
+                });
+        
         }
         return glyph;
     }

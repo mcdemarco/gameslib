@@ -515,7 +515,7 @@
     "ROLL": {
         "magnate": "The next player rolled {{values}}.",
         "magnate_initial": "{{player}} rolled {{values}}.",
-        "magnate_initial_ten": "{{player}} rolled {{values}}.  Players collected their Crown values.",
+        "magnate_initial_ten": "{{player}} rolled {{values}}.  Players collected their Crown suits.",
         "single": "The die was rolled: {{values}}.",
         "tablero": "The dice were rolled: {{values}}."
     },
