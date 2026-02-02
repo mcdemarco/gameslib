@@ -19,11 +19,12 @@ describe("Decktets", () => {
     it ("Now makes a double decktet", () => {
         const mydeck = new Multideck([...cardsBasic, ...cardsExtended],2);
         expect(mydeck.size).eq(90);
-        expect(mydeck.draw(1).map(c => c.uid)[0]).eq("1M1");
-        //mydeck.draw();
+        const card = mydeck.draw(1);
+        console.log(card);
+        expect(card.map(c => c.uid)[0]).eq("1M");
+        expect(card.map(c => c.muid)[0]).eq("1M1");
         expect(mydeck.size).eq(89);
-       expect(mydeck.draw(1).map(c => c.plain)[0]).eq("Ace Suns");
-     //   mydeck.draw();
+        expect(mydeck.draw(1).map(c => c.plain)[0]).eq("Ace Suns");
         expect(mydeck.size).eq(88);
         
         mydeck.shuffle();

@@ -66,7 +66,7 @@ export class Multideck {
     
     public remove(muid: string): Multideck {
         
-        const idx = this._cards.findIndex(m => m.uid === muid);
+        const idx = this._cards.findIndex(m => m.muid === muid);
         if (idx < 0) {
             throw new Error(`Could not find a card in the deck with the uid "${muid}"`);
         }
