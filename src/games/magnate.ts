@@ -1672,6 +1672,7 @@ export class MagnateGame extends GameBase {
                 scale: border? 1.1 : 1,
                 colour: fill ? fill : "_context_background",
                 opacity: opacity/4,
+                orientation: "vertical",
             },
         ]
         
@@ -1684,8 +1685,8 @@ export class MagnateGame extends GameBase {
                     dx: 250,
                     dy: -250,
                 },
-                orientation: "vertical",
                 opacity: opacity,
+                orientation: "vertical",
             });
         }
 
@@ -1703,6 +1704,7 @@ export class MagnateGame extends GameBase {
                     },
                     colour: suitColors[suit.seq - 1],
                     opacity: opacity,
+                    orientation: "vertical",
                 });
             else if ( deed ) // && tokens[i] > 0)
                 glyph.push({
@@ -1714,6 +1716,7 @@ export class MagnateGame extends GameBase {
                     },
                     colour: suitColors[suit.seq - 1],
                     opacity: opacity,
+                    orientation: "vertical",
                 });
 
             glyph.push({
@@ -1723,8 +1726,8 @@ export class MagnateGame extends GameBase {
                     dx: nudge[0],
                     dy: nudge[1],
                 },
-                orientation: "vertical",
                 opacity: opacity,
+                orientation: "vertical",
             });
 
             if ( deed && i === 0) 
@@ -1736,8 +1739,8 @@ export class MagnateGame extends GameBase {
                         dx: nudge[0],
                         dy: nudge[1],
                     },
+                    colour: "#000",
                     orientation: "vertical",
-                    colour: "#000"
                 });
 
             if ( deed && deed.suit2 !== undefined && i === 1)
@@ -1748,8 +1751,8 @@ export class MagnateGame extends GameBase {
                         dx: nudge[0],
                         dy: nudge[1],
                     },
+                    colour: "#000",
                     orientation: "vertical",
-                    colour: "#000"
                 });
             
             if ( deed && deed.suit3 !== undefined && i === 2 )
@@ -1760,8 +1763,8 @@ export class MagnateGame extends GameBase {
                         dx: nudge[0],
                         dy: nudge[1],
                     },
+                    colour: "#000",
                     orientation: "vertical",
-                    colour: "#000"
                 });
         
         }
@@ -2006,6 +2009,7 @@ export class MagnateGame extends GameBase {
                     text: "10",
                     scale: 0.70,
                     colour: "_context_strokes",
+                    orientation: "vertical",
                 }
             ];
         }

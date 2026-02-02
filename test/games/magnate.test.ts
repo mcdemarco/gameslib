@@ -1,6 +1,7 @@
 import "mocha";
 import { expect } from "chai";
 import { MagnateGame } from '../../src/games';
+//import { Multicard } from '../../src/common/decktet';
 
 describe("Magnate", () => {
     const g = new MagnateGame();
@@ -231,6 +232,11 @@ describe("Magnate", () => {
             g.move(mv);
         }
         //console.log(g.status());
+    });
+
+    it ("Also...", () => {
+        const g = new MagnateGame(undefined, ["mega","taxtax"]);
+
     });
 
 });
