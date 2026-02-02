@@ -19,9 +19,9 @@ export class Multideck {
         this._decks = decks;
     }
 
-/*    public get cards(): Multicard[] {
-        return this._cards.map(m => new Multicard(m));
-    } */
+    public get cards(): Multicard[] {
+        return this._cards.map(m => new Multicard(new Card(m), m.deck));
+    }
 
     public get size(): number {
         return this._cards.length;
@@ -75,12 +75,10 @@ export class Multideck {
     }
 
     public removeAll(uid: string): Multideck {
-        for (let d=1; d <= this._decks; d++) {
-            const idx = this._cards.findIndex(c => c.uid === uid);
-            if (idx < 0) {
-                throw new Error(`Could not find a card in the deck with the uid "${uid}"`);
-            }
+        let idx = this._cards.findIndex(c => c.uid === uid);
+        while (idx > -1) {
             this._cards.splice(idx, 1);
+            idx = this._cards.findIndex(c => c.uid === uid);
         }
         return this;
     }
@@ -106,6 +104,18 @@ export class Multideck {
     public empty(): Multideck {
         this._cards = [];
         return this;
+    }
+
+    public clone(): Multideck {
+        const cloned = new Multideck([], this._decks);
+        cloned._cards = this._cards.map(m => new Multicard(new Card(m), m.deck));
+        return cloned;
+    }
+
+    public static deserialize(deck: Multideck): Multideck {
+        const des = new Multideck([], deck._decks);
+        des._cards = deck._cards.map(m => new Multicard(new Card(m), m.deck));
+        return des;
     }
 
 }
