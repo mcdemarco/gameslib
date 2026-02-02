@@ -1657,13 +1657,13 @@ export class MagnateGame extends GameBase {
         return max;
     }
 
-    private renderDecktetGlyph(card: Multicard, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
+    public renderDecktetGlyph(card: Multicard, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
         //Refactored from the toGlyph method of Card for opacity, verticality, deed tokens, etc.
         if (border === undefined) {
             border = false;
         }
         if (opacity === undefined) {
-            opacity = 0;
+            opacity = 1;
         }
 
         const glyph: [Glyph, ...Glyph[]] = [
@@ -1674,7 +1674,7 @@ export class MagnateGame extends GameBase {
                 opacity: opacity/4,
             },
         ]
-        // rank
+        
         if (card.rank.glyph !== undefined) {
             glyph.push({
                 name: card.rank.glyph,
@@ -1688,6 +1688,7 @@ export class MagnateGame extends GameBase {
                 opacity: opacity,
             });
         }
+
         const nudges: [number,number][] = [[-250, -250], [-250, 250], [250, 250]];
         for (let i = 0; i < card.suits.length; i++) {
             const suit = card.suits[i];
@@ -1764,6 +1765,7 @@ export class MagnateGame extends GameBase {
                 });
         
         }
+
         return glyph;
     }
     
@@ -1771,7 +1773,6 @@ export class MagnateGame extends GameBase {
         //Init draw deck and hands.
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
         const renderDeck = this.initDeck(deckCount, true);
-
         return renderDeck.cards;
     }
 
@@ -1831,7 +1832,6 @@ export class MagnateGame extends GameBase {
         pstrArray = pstrArray.concat(pstr1);
         
         const pstr = pstrArray.join("\n");
-
         
         // Mark live spots, deeds, and control.
         const markers: (MarkerOutline|MarkerFlood)[] = [];
@@ -1877,16 +1877,16 @@ export class MagnateGame extends GameBase {
         
         const legend: ILegendObj = {};
         for (const card of allcards) {
-            let glyph = card.toGlyph({border: true});
+            let glyph = this.renderDecktetGlyph(card, undefined, true);
 
             // the pawny pieces and the excuse (center row)
             if (card.rank.uid === this.pawnrank || card.rank.name === "Excuse") {
-                glyph = card.toGlyph({border: false, fill: {
+                glyph = this.renderDecktetGlyph(card); /*card.toGlyph({border: false, fill: {
                     func: "flatten",
                     fg: "_context_labels",
                     bg: "_context_background",
                     opacity: 0.2,
-                }});
+                }});*/
             } else if ( this.deeds[0].has(card.muid) ) {
                 //TODO: a function that also handles the suit counts.
                 glyph = this.renderDecktetGlyph(card, this.deeds[0].get(card.muid), true, 0.33, 1);
@@ -1922,7 +1922,8 @@ export class MagnateGame extends GameBase {
                         nudge: {
                             dx: 0,
                             dy: 100,
-                        }
+                        },
+                        orientation: "vertical",
                     },
                     {
                         name: suit.glyph!,
@@ -1931,7 +1932,8 @@ export class MagnateGame extends GameBase {
                         nudge: {
                             dx: 0,
                             dy: 125,
-                        }
+                        },
+                        orientation: "vertical",
                     },
                     {
                         text: pcount.toString(),
@@ -1940,7 +1942,8 @@ export class MagnateGame extends GameBase {
                         nudge: {
                             dx: 0,
                             dy: 100,
-                        }
+                        },
+                        orientation: "vertical",
                     }
                 ];
 
@@ -1954,7 +1957,8 @@ export class MagnateGame extends GameBase {
                             nudge: {
                                 dx: -275,
                                 dy: -625,
-                            }
+                            },
+                            orientation: "vertical",
                         }
                     );
                     legend[lname].push(
@@ -1965,7 +1969,8 @@ export class MagnateGame extends GameBase {
                             nudge: {
                                 dx: 275,
                                 dy: -625,
-                            }
+                            },
+                            orientation: "vertical",
                         }
                     );
                     
@@ -1979,7 +1984,8 @@ export class MagnateGame extends GameBase {
                             nudge: {
                                 dx: 0,
                                 dy: -650,
-                            }
+                            },
+                            orientation: "vertical",
                         }
                     );
                 
