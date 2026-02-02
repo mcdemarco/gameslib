@@ -8,7 +8,6 @@ export type Params = {
     personality?: boolean;
     event?: boolean;
     location?: boolean;
-    deck?: number;
 };
 
 export const cardSortAsc = (a: Card, b: Card): number => {
@@ -52,7 +51,6 @@ export class Card {
     private readonly _personality: boolean = false;
     private readonly _event: boolean = false;
     private readonly _location: boolean = false;
-    private readonly _deck: number = 0;
     private _plain: string|undefined;
 
     constructor(params: Params) {
@@ -67,9 +65,6 @@ export class Card {
         }
         if (params.location !== undefined) {
             this._location = params.location;
-        }
-        if (params.deck !== undefined) {
-            this._deck = params.deck;
         }
     }
 
@@ -91,12 +86,9 @@ export class Card {
     public get location(): boolean {
         return this._location;
     }
-    public get deck(): number {
-        return this._deck;
-    }
 
     public get uid(): string {
-        return [this.rank.uid, ...this.suits.map(s => s.uid), (this._deck > 0 ? this._deck : "")].join("");
+        return [this.rank.uid, ...this.suits.map(s => s.uid)].join("");
     }
 
     public setPlain(plain: string|undefined): Card {
@@ -153,8 +145,7 @@ export class Card {
                 nudge: {
                     dx: 250,
                     dy: -250,
-                },
-                orientation: "vertical",
+                }
             });
         }
         const nudges: [number,number][] = [[-250, -250], [-250, 250], [250, 250]];
@@ -167,49 +158,31 @@ export class Card {
                 nudge: {
                     dx: nudge[0],
                     dy: nudge[1],
-                },
-                orientation: "vertical",
+                }
             });
         }
         return glyph;
     }
 
     public clone(): Card {
-        return new Card({name: this.name, rank: this.rank, suits: [...this.suits.map(s => s.clone())], personality: this.personality, location: this.location, event: this.event, deck: this.deck});
-    }
-
-    public cloneForDeck(deck: number): Card {
-        return new Card({name: this.name, rank: this.rank, suits: [...this.suits.map(s => s.clone())], personality: this.personality, location: this.location, event: this.event, deck: deck});
+        return new Card({name: this.name, rank: this.rank, suits: [...this.suits.map(s => s.clone())], personality: this.personality, location: this.location, event: this.event});
     }
 
     public static deserialize(card: Card|string, allowCustom = false): Card|undefined {
-        let strDeck: number = 0;
         if (typeof card === "string") {
-            let found: Card|undefined;
-            if (card.length > 1 && card.charAt(card.length - 1).match(/\d/)) {
-                strDeck = parseInt(card.charAt(card.length - 1),10);
-                found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase().substring(0,card.length - 1));
-                if (found)
-                    return new Card({name: found._name, rank: Component.deserialize(found._rank)!, suits: [...found._suits.map(s => Component.deserialize(s)!)], personality: found._personality, location: found._location, event: found.event, deck: strDeck});
-            } else {
-                found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase());
-            }
+            const found = [...cardsBasic, ...cardsExtended].find(c => c.uid === card.toUpperCase());
             if (allowCustom && found === undefined) {
-                let [strRank, ...strSuits] = card.split("");
-                if (card.length > 1 && card.charAt(card.length - 1).match(/\d/)) {
-                    strDeck = parseInt(card.charAt(card.length - 1),10);
-                    [strRank, ...strSuits] = card.substring(0,card.length - 1).split("");
-                }
+                const [strRank, ...strSuits] = card.split("");
                 const rank = Component.deserialize(strRank);
                 const suits = strSuits.map(s => Component.deserialize(s));
                 if (rank === undefined || suits.includes(undefined)) {
                     return undefined;
                 }
-                return new Card({name: "_custom", rank, suits: (suits as Component[]).sort((a,b) => a.seq - b.seq), deck: strDeck});
+                return new Card({name: "_custom", rank, suits: (suits as Component[]).sort((a,b) => a.seq - b.seq)});
             }
             return found;
         }
-        return new Card({name: card._name, rank: Component.deserialize(card._rank)!, suits: [...card._suits.map(s => Component.deserialize(s)!)], personality: card._personality, location: card._location, event: card._event, deck: strDeck});
+        return new Card({name: card._name, rank: Component.deserialize(card._rank)!, suits: [...card._suits.map(s => Component.deserialize(s)!)], personality: card._personality, location: card._location, event: card._event});
     }
 }
 

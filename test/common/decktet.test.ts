@@ -36,17 +36,6 @@ describe("Decktets", () => {
     });
     
     it ("Doesn't blow up when the deck is out", () => {
-        const mydeck = new Deck([...cardsBasic, ...cardsExtended]);
-        expect(mydeck.size).eq(45);
-        mydeck.draw(44);
-        expect(mydeck.size).eq(1);
-        expect(mydeck.draw(1).map(c => c.plain)[0]).eq("Court Suns Waves Wyrms");
-        expect(mydeck.size).eq(0);
-        const [card] = mydeck.draw(1);
-        expect(card).eq(undefined);
-    });
-    
-    it ("Doesn't blow up when a multideck is out", () => {
         const mydeck = new Multideck([...cardsBasic, ...cardsExtended],3);
         expect(mydeck.size).eq(135);
         mydeck.draw(134);
@@ -55,22 +44,22 @@ describe("Decktets", () => {
         expect(mydeck.size).eq(0);
         const [card] = mydeck.draw(1);
         expect(card).eq(undefined);
+        
     });
     
     it ("Deserializes", () => {
         expect(Card.deserialize("0")).to.have.deep.property("name", "The Excuse");
         expect(Multicard.deserialize("01")).to.have.deep.property("_deck", 1);
-        expect(Multicard.deserialize("3LY1")).to.have.deep.property("_name", "The Savage");
+         expect(Multicard.deserialize("3LY1")).to.have.deep.property("_name", "The Savage");
         expect(Multicard.deserialize("PSVK5")).to.have.deep.property("_deck", 5);
     });
     
     it ("Handles a degenerate case in any deck size", () => {
-        expect(Card.deserialize("01")).to.have.deep.property("name", "The Excuse");
-        expect(Card.deserialize("3LY1")).to.have.deep.property("name", "The Savage");
-        expect(Card.deserialize("PSVK5")).to.have.deep.property("deck", 5);
-    });
-    
-    it ("Handles a degenerate case", () => {
+        const mydeck = new Deck([...cardsBasic, ...cardsExtended]);
+        mydeck.draw(4);
+        const [mycard] = mydeck.draw(1);
+        expect(mycard.sharesSuitWith(mycard)).eq(true);
+
         const myDeckCount = Math.ceil(Math.random() * 8) + 1;
         const mymultideck = new Multideck([...cardsBasic, ...cardsExtended], myDeckCount);
         expect(mymultideck.size).eq(45 * myDeckCount);
@@ -117,6 +106,6 @@ describe("Decktets", () => {
         expect(myotherdeck.cards.length).eq(74);
         myotherdeck.removeAll("PSVK");
         expect(myotherdeck.cards.length).eq(72);
-
+        
     });
 });
