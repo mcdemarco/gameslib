@@ -17,12 +17,21 @@ export class Multicard extends Card {
     }
 
     public static deserialize(mcard: string): Multicard|undefined {
-        const deck: number = parseInt(mcard.charAt(mcard.length - 1),10);
-        const card: string = mcard.substring(0, mcard.length - 1);
-        const cardObj: Card|undefined = Card.deserialize(card);
-        if (cardObj)
-            return new Multicard(cardObj, deck);
-        else
-            return undefined; 
+        mcard = mcard.trim();
+        if (mcard.length < 2)
+            return undefined;
+
+        const last = mcard.charAt(mcard.length - 1);
+        if (!/\d/.test(last))
+            return undefined;
+
+        const deck = parseInt(last, 10);
+        const cardStr = mcard.slice(0, -1);
+        
+        const cardObj = Card.deserialize(cardStr);
+        if (!cardObj)
+            return undefined;
+
+        return new Multicard(cardObj, deck);
     }
 }
