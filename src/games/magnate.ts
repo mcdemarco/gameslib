@@ -4,7 +4,7 @@ import { APRenderRep, AreaButtonBar, AreaPieces, AreaKey, Glyph, MarkerFlood, Ma
 import { APMoveResult } from "../schemas/moveresults";
 import { randomInt, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
-import { Card, Deck, cardSortAsc, cardsBasic, cardsExtended, suits } from "../common/decktet";
+import { Multicard, Multideck, cardSortAsc, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
@@ -127,7 +127,7 @@ export class MagnateGame extends GameBase {
     private pawnrank: string = "P";
     private courtrank: string = "T";
     private districts: number = 5;
-    private deck!: Deck;
+    private deck!: Multideck;
     //    private highlights: string[] = [];
 
     constructor(state?: IMagnateState | string, variants?: string[]) {
@@ -151,7 +151,7 @@ export class MagnateGame extends GameBase {
             const board: [string[], string[][], string[][]] = [[],[],[]];
 
             const districtCards = [...cardsExtended.filter(c => c.rank.uid === this.pawnrank)]
-            const districtDeck = new Deck(districtCards, deckCount);
+            const districtDeck = new Multideck(districtCards, deckCount);
             districtDeck.shuffle();
 
             for (let d = 0; d < this.districts; d++) {
@@ -159,7 +159,7 @@ export class MagnateGame extends GameBase {
                     board[0][d] = "01"; //the Excuse
                 } else {
                     const [card] = districtDeck.draw();
-                    board[0][d] = card.uid;
+                    board[0][d] = card.muid;
                 }
                 //Also init player boards.
                 board[1][d] = [];
@@ -171,7 +171,7 @@ export class MagnateGame extends GameBase {
             const tokens: [number[], number[]] = [[0,0,0,0,0,0],[0,0,0,0,0,0]];
             
             const crownCards = [...cardsBasic.filter(c => c.rank.name === "Crown")];
-            const crownDeck = new Deck(crownCards, deckCount);
+            const crownDeck = new Multideck(crownCards, deckCount);
             crownDeck.shuffle();
 
             //initial roll
@@ -201,7 +201,7 @@ export class MagnateGame extends GameBase {
             for (let h = 0; h < handCount; h++) {
                 for (let p = 0; p < 2; p++) {
                     const [card] = deck.draw();
-                    hands[p][h] = card.uid;
+                    hands[p][h] = card.muid;
                 }
             }
             
@@ -239,7 +239,7 @@ export class MagnateGame extends GameBase {
         this.load();
     }
 
-    private initDeck(deckCount: number, forRender?: boolean): Deck {
+    private initDeck(deckCount: number, forRender?: boolean): Multideck {
         //Init draw deck and hands.
 
         //Remove the crowns from the basic deck.
@@ -255,7 +255,7 @@ export class MagnateGame extends GameBase {
             cards.push([...cardsExtended.filter(c => c.rank.name === "Excuse")][0]);
         }
 
-        return new Deck(cards, deckCount);
+        return new Multideck(cards, deckCount);
     }
 
     private roller(): number[] {
@@ -309,14 +309,14 @@ export class MagnateGame extends GameBase {
         this.deck = this.initDeck(deckCount);
         
         // remove cards from the deck that are on the board, the discard, or in known hands
-        for (const uid of [...this.board[1].flat(), ...this.board[2].flat(), ...this.discards]) {
-            this.deck.remove(uid);
+        for (const muid of [...this.board[1].flat(), ...this.board[2].flat(), ...this.discards]) {
+            this.deck.remove(muid);
         }
 
         for (const hand of this.hands) {
-            for (const uid of hand) {
-                if (uid !== "") {
-                    this.deck.remove(uid);
+            for (const muid of hand) {
+                if (muid !== "") {
+                    this.deck.remove(muid);
                 }
             }
         }
@@ -337,7 +337,7 @@ export class MagnateGame extends GameBase {
         //Adds tokens to deeds.
         //Ideally should not be called when the deed is complete.
         const deed = this.deeds[this.currplayer - 1].get(card)!;
-        const cardObj = Card.deserialize(card)!;
+        const cardObj = Multicard.deserialize(card)!;
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         const price = this.getPriceFromRank(cardObj.rank.seq);
         let paid = 0;
@@ -367,7 +367,7 @@ export class MagnateGame extends GameBase {
         
         //We make the array version.
         const tokens = Array(6).fill(0);
-        const cardObj = Card.deserialize(card)!;
+        const cardObj = Multicard.deserialize(card)!;
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         suitIdxs.forEach(suitIdx => tokens[suitIdx]++);
 
@@ -382,7 +382,7 @@ export class MagnateGame extends GameBase {
             return false;
         }
 
-        const cardObj = Card.deserialize(card)!;
+        const cardObj = Multicard.deserialize(card)!;
         const price = this.getPriceFromRank(cardObj.rank.seq);
 
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
@@ -424,7 +424,7 @@ export class MagnateGame extends GameBase {
         //Interpret the card as a cost or payment in suit tokens.
         //Results can vary by rank and by action type.
         const tokens = Array(6).fill(0);
-        const cardObj = Card.deserialize(card)!;
+        const cardObj = Multicard.deserialize(card)!;
                   
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         suitIdxs.forEach(suitIdx => tokens[suitIdx]++);
@@ -460,7 +460,7 @@ export class MagnateGame extends GameBase {
         //  0 for partial payment,
         //  1 for any addition that completes the deed or buy.
 
-        const cardObj = Card.deserialize(card)!;
+        const cardObj = Multicard.deserialize(card)!;
         
         //Sets correct "Court" cost, with exception for Aces.
         const price = cardObj.rank.seq === 1 ? 3 : Math.ceil(cardObj.rank.seq);
@@ -567,7 +567,7 @@ export class MagnateGame extends GameBase {
         }
 
         //Need the other suits to finish the deed.
-        const cardObj = Card.deserialize(card)!;
+        const cardObj = Multicard.deserialize(card)!;
         if (cardObj.suits.length > 1) {
             deed.suit2 = 0;
             if (cardObj.suits.length === 3 ) 
@@ -619,7 +619,7 @@ export class MagnateGame extends GameBase {
     private drawUp(): void {
         //First, try to draw what we need from the deck.
         const toDraw = this.variants.includes("mega") ? 2 : 1;
-        let drawn = this.deck.draw(Math.min(this.deck.size, toDraw)).map(c => c.uid);
+        let drawn = this.deck.draw(Math.min(this.deck.size, toDraw)).map(c => c.muid);
 
         drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         
@@ -633,7 +633,7 @@ export class MagnateGame extends GameBase {
         } else {
             //Can shuffle the discards, once.
             this.discards.forEach( card => {
-                this.deck.addOne(card);
+                this.deck.add(card);
             });
             this.discards = [];
             this.deck.shuffle();
@@ -642,7 +642,7 @@ export class MagnateGame extends GameBase {
             this.results.push({type: "deckDraw"});
 
             //Draw the rest.
-            drawn = this.deck.draw(Math.min(this.deck.size, stillToDraw)).map(c => c.uid);
+            drawn = this.deck.draw(Math.min(this.deck.size, stillToDraw)).map(c => c.muid);
             drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         }
         return;
@@ -667,7 +667,7 @@ export class MagnateGame extends GameBase {
         return true;
     }
 
-    private getDeedAsTokens(card: Card, deed: DeedContents): number[] {
+    private getDeedAsTokens(card: Multicard, deed: DeedContents): number[] {
         //Convert deed format into a token payment array.
         const sheltered = Array(6).fill(0);
 
@@ -708,7 +708,7 @@ export class MagnateGame extends GameBase {
         //Construct a full or partial payment for use in random moves.
         //It may not qualify as a deed payment so don't rely on success.
         
-        const cardObj = Card.deserialize(card)!;
+        const cardObj = Multicard.deserialize(card)!;
         
         const payment: string[] = [];
         const resources = this.tokens[this.currplayer - 1];
@@ -750,8 +750,8 @@ export class MagnateGame extends GameBase {
     }
 
     private matched(card1: string, card2: string): boolean {
-        const c1 = Card.deserialize(card1);
-        const c2 = Card.deserialize(card2);
+        const c1 = Multicard.deserialize(card1);
+        const c2 = Multicard.deserialize(card2);
         
         //This shouldn't happen.
         if (c1 === undefined || c2 === undefined)
@@ -1657,7 +1657,7 @@ export class MagnateGame extends GameBase {
         return max;
     }
 
-    private renderDecktetGlyph(card: Card, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
+    private renderDecktetGlyph(card: Multicard, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
         //Refactored from the toGlyph method of Card for opacity, verticality, deed tokens, etc.
         if (border === undefined) {
             border = false;
@@ -1767,7 +1767,7 @@ export class MagnateGame extends GameBase {
         return glyph;
     }
     
-    private renderableCards(): Card[] {
+    private renderableCards(): Multicard[] {
         //Init draw deck and hands.
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
         const renderDeck = this.initDeck(deckCount, true);
@@ -1887,15 +1887,15 @@ export class MagnateGame extends GameBase {
                     bg: "_context_background",
                     opacity: 0.2,
                 }});
-            } else if ( this.deeds[0].has(card.uid) ) {
+            } else if ( this.deeds[0].has(card.muid) ) {
                 //TODO: a function that also handles the suit counts.
-                glyph = this.renderDecktetGlyph(card, this.deeds[0].get(card.uid), true, 0.33, 1);
-            } else if ( this.deeds[1].has(card.uid) ) {
+                glyph = this.renderDecktetGlyph(card, this.deeds[0].get(card.muid), true, 0.33, 1);
+            } else if ( this.deeds[1].has(card.muid) ) {
                 //TODO: a function that also handles the suit counts.
-                glyph = this.renderDecktetGlyph(card, this.deeds[1].get(card.uid), true, 0.33, 2);
+                glyph = this.renderDecktetGlyph(card, this.deeds[1].get(card.muid), true, 0.33, 2);
             }
             
-            legend["k" + card.uid] = glyph;
+            legend["k" + card.muid] = glyph;
         }
 
         //Suit tokens
@@ -2134,7 +2134,7 @@ export class MagnateGame extends GameBase {
             });
         }
 
-        const remaining = this.deck.clone().draw(this.deck.size).sort(cardSortAsc).map(c => "k" + c.uid) as [string, ...string[]];
+        const remaining = this.deck.clone().draw(this.deck.size).sort(cardSortAsc).map(c => "k" + c.muid) as [string, ...string[]];
 
         //const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "k" + c.uid)
         if (remaining.length > 0) {
@@ -2193,25 +2193,25 @@ export class MagnateGame extends GameBase {
 
     
     /* scoring functions */
-    private getAceScore(index: number, playernum: number, c1: Card): number {
+    private getAceScore(index: number, playernum: number, c1: Multicard): number {
         let acescore = 0;
         const myDistrict = this.board[playernum][index];
         for (let c = 0; c < myDistrict.length; c++) {
-            const c2 = Card.deserialize(myDistrict[c])!;
+            const c2 = Multicard.deserialize(myDistrict[c])!;
             if (c1.sharesSuitWith(c2))
                 acescore++;
         }
 
         if (this.variants.includes("deucey")) {
             //Ace variant with more matches.
-            const c2 = Card.deserialize(this.board[0][index])!;
+            const c2 = Multicard.deserialize(this.board[0][index])!;
             if (c1.sharesSuitWith(c2))
                 acescore++;
 
             const them = playernum === 1 ? 2 : 1; 
             const theirDistrict = this.board[them][index];
             for (let c = 0; c < theirDistrict.length; c++) {
-                const c2 = Card.deserialize(theirDistrict[c])!;
+                const c2 = Multicard.deserialize(theirDistrict[c])!;
                 if (c1.sharesSuitWith(c2))
                     acescore++;
             }
@@ -2226,7 +2226,7 @@ export class MagnateGame extends GameBase {
         const myDistrict = this.board[player as number][index];
         let subscore = 0;
         for (let c = 0; c < myDistrict.length; c++) {
-            const card = Card.deserialize(myDistrict[c])!;
+            const card = Multicard.deserialize(myDistrict[c])!;
             if (card.rank.name === "Ace")
                 subscore += this.getAceScore(index, player, card);
             else 
