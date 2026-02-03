@@ -931,10 +931,10 @@ export class MagnateGame extends GameBase {
         this.board[this.currplayer][col].push(card);
         return;
     }
-    
+    /*
     private reportCard(card: string): string {
         return card.substring(0,card.length - 1);
-    }
+    }*/
     
     private removeCard(card: string, arr: string[]): boolean {
         //Remove a card from an array.
@@ -1099,7 +1099,11 @@ export class MagnateGame extends GameBase {
                 } else if (piece?.startsWith("s")) {
                     //clicking a suit token.
                     const suit = piece.charAt(1);
-                    newmove = `${move}${suit},`;
+                    if ( move && move.endsWith(":") ) {
+                        //Assume it's a trade.
+                        newmove = `${move}${suit}3,`;
+                    } else
+                        newmove = `${move}${suit},`;
                 } 
             } else {
                 // otherwise, clicked on the board
@@ -1401,7 +1405,7 @@ export class MagnateGame extends GameBase {
 
         // we're good!
         result.valid = true;
-        result.complete = 0; //A turn is never complete, only submissible.
+        result.complete = usedCards < cards2use ? -1 : 0; //A turn is never complete, only submissible.
         result.message = i18next.t("apgames:validation._general.VALID_MOVE");
         return result;
     }
@@ -1501,11 +1505,25 @@ export class MagnateGame extends GameBase {
                 if (pact.type === "A" && pact.spend !== undefined) {
                     const done = this.add2deed(pact.card, pact.spend);
                     this.debit(pact.spend,this.currplayer);
+
+                    this.results.push({
+                        type: "add",
+                        where: pact.card,
+                        num: pact.spend.reduce( (cur, acc) => cur + acc, 0 )
+                    });
+
                     //If the deed is done, remove it and place the card.
                     if (done) {
                         const district = this.deeds[this.currplayer - 1].get(pact.card)!.district;
                         this.deeds[this.currplayer - 1].delete(pact.card);
                         this.placeCard(pact.card, district!);
+                        
+                        this.results.push({
+                            type: "place",
+                            what: pact.card,
+                            where: district,
+                            how: pact.type
+                        });
                     }
                 }
             }
@@ -2352,14 +2370,18 @@ export class MagnateGame extends GameBase {
                 resolved = true;
                 break;
             case "place":
-                // eslint-disable-next-line no-case-declarations
-                const whatCard = this.reportCard(r.what!);
                 if (r.where === "discards")
-                    node.push(i18next.t("apresults:PLACE.magnate_sell", {player, what: whatCard}));
+                    node.push(i18next.t("apresults:PLACE.magnate_sell", {player, what: r.what}));
                 else if (r.how === "D")
-                    node.push(i18next.t("apresults:PLACE.magnate_deed", {player, where: r.where, what: whatCard}));
+                    node.push(i18next.t("apresults:PLACE.magnate_deed_start", {player, where: r.where, what: r.what}));
+                else if (r.how === "A")
+                    node.push(i18next.t("apresults:PLACE.magnate_deed_end", {player, where: r.where, what: r.what}));
                 else
-                    node.push(i18next.t("apresults:PLACE.magnate_buy", {player, where: r.where,  what: whatCard}));
+                    node.push(i18next.t("apresults:PLACE.magnate_buy", {player, where: r.where, what: r.what}));
+                resolved = true;
+                break;
+            case "add": //to a deed
+                node.push(i18next.t("apresults:ADD.magnate", {player, where: r.where, count: r.num}));
                 resolved = true;
                 break;
             case "convert": //Complete deed.
