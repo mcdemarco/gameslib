@@ -12,7 +12,11 @@ export class Multicard extends Card {
         return this._deck;
     }
 
-    public get muid(): string {
+    public get cuid(): string {
+        return super.uid;
+    }
+
+    public get uid(): string {
         return [super.uid, this._deck].join("");
     }
 

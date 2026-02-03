@@ -21,8 +21,8 @@ describe("Decktets", () => {
         expect(mydeck.size).eq(90);
         const card = mydeck.draw(1);
         //console.log(card);
-        expect(card.map(c => c.uid)[0]).eq("1M");
-        expect(card.map(c => c.muid)[0]).eq("1M1");
+        expect(card.map(c => (c as Multicard).cuid)[0]).eq("1M");
+        expect(card.map(c => c.uid)[0]).eq("1M1");
         expect(mydeck.size).eq(89);
         expect(mydeck.draw(1).map(c => c.plain)[0]).eq("Ace Suns");
         expect(mydeck.size).eq(88);
