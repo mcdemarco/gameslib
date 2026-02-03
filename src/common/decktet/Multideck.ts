@@ -26,11 +26,11 @@ export class Multideck {
             }
     }
 
-    public get cards(): (Card[] | Multicard[]) {
-        return this._isSingle ? this._singleDeck!.cards : this._cards.map(m => new Multicard(new Card(m), m.deck)); 
+    public get cards(): (Card | Multicard)[] {
+        return this._isSingle ? this._singleDeck!.cards as Card[] : this._cards.map(m => new Multicard(new Card(m), m.deck)) as Multicard[]; 
     }
 
-    public get deckCount(): number {
+    public get decks(): number {
         return this._isSingle ? 1 : this._decks ;
     }
 
@@ -38,7 +38,7 @@ export class Multideck {
         return this._isSingle ? this._singleDeck!.size : this._cards.length ;
     }
 
-    public shuffle(): this {
+    public shuffle(): Multideck {
         if (this._isSingle)
             this._singleDeck!.shuffle();
         else
@@ -46,7 +46,8 @@ export class Multideck {
         return this;
     }
 
-    public add(uid: string): this {
+    public add(uid: string): Multideck {
+        //Add a card by multicard uid.
         if ( this._isSingle ) {
             this._singleDeck!.add(uid);
         } else {
@@ -60,7 +61,8 @@ export class Multideck {
         return this;
     }
     
-    public addAll(cuid: string): this {
+    public addAll(cuid: string): Multideck {
+        //Add all copies of a card by base card uid.
         if ( this._isSingle ) {
             this._singleDeck!.add(cuid);
         } else {
@@ -76,7 +78,8 @@ export class Multideck {
         return this;
     }
 
-    public addOne(cuid: string, deck: number): this {
+    public addOne(cuid: string, deck: number): Multideck {
+        //Add one copy of a card by base card uid and deck number.
         if ( this._isSingle ) {
             this._singleDeck!.add(cuid);
         } else {
@@ -90,7 +93,8 @@ export class Multideck {
         return this;
     }
     
-    public remove(uid: string): this {
+    public remove(uid: string): Multideck {
+        //Remove a card by multicard uid.
         if ( this._isSingle ) {
             this._singleDeck!.remove(uid);
         } else {
@@ -103,7 +107,8 @@ export class Multideck {
         return this;
     }
 
-    public removeAll(cuid: string): this {
+    public removeAll(cuid: string): Multideck {
+        //Remove all identical cards by card uid.
         if ( this._isSingle ) {
             this._singleDeck!.remove(cuid);
         } else {
@@ -116,7 +121,8 @@ export class Multideck {
         return this;
     }
 
-    public removeOne(cuid: string, deck: number): this {
+    public removeOne(cuid: string, deck: number): Multideck {
+        //Remove one card by base card uid and deck number.
         if ( this._isSingle ) {
             this._singleDeck!.remove(cuid);
         } else {
@@ -130,7 +136,7 @@ export class Multideck {
         return this;
     }
 
-    public draw(count = 1): (Card[] | Multicard[]) {
+    public draw(count = 1): (Card | Multicard)[] {
         if ( this._isSingle )
             return this._singleDeck!.draw(count);
 
@@ -142,7 +148,7 @@ export class Multideck {
         return drawn;
     }
 
-    public empty(): this {
+    public empty(): Multideck {
         if ( this._isSingle )
             this._singleDeck!.empty();
         else
@@ -151,8 +157,8 @@ export class Multideck {
     }
 
     public clone(): Multideck {
-        if (this.deckCount === 1)
-            return new Multideck(this.cards, this.deckCount);
+        if (this.decks === 1)
+            return new Multideck(this._singleDeck!.cards, this.decks);
 
         const cloned = new Multideck([], this._decks);
         cloned._cards = this._cards.map(m => new Multicard(new Card(m), m.deck));
@@ -160,10 +166,10 @@ export class Multideck {
     }
 
     public static deserialize(deck: Multideck): Multideck {
-        if ( deck.deckCount === 1 )
+        if ( deck.decks === 1 )
             return new Multideck(deck.cards, 1);
 
-        const des = new Multideck([], deck._decks);
+        const des = new Multideck([], deck.decks);
         des._cards = deck._cards.map(m => new Multicard(new Card(m), m.deck));
         return des;
     }
