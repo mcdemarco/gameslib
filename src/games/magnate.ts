@@ -4,7 +4,7 @@ import { APRenderRep, AreaButtonBar, AreaPieces, AreaKey, Glyph, MarkerFlood, Ma
 import { APMoveResult } from "../schemas/moveresults";
 import { randomInt, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
-import { Multicard, Multideck, cardSortAsc, cardsBasic, cardsExtended, suits } from "../common/decktet";
+import { Card, Multicard, Multideck, cardSortAsc, cardsBasic, cardsExtended, suits } from "../common/decktet";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
@@ -156,10 +156,10 @@ export class MagnateGame extends GameBase {
 
             for (let d = 0; d < this.districts; d++) {
                 if ( d === Math.round(this.districts / 2) - 1 ) {
-                    board[0][d] = "01"; //the Excuse
+                    board[0][d] = this.variants.includes("mega") ? "01" : "0"; //the Excuse
                 } else {
                     const [card] = districtDeck.draw();
-                    board[0][d] = card.muid;
+                    board[0][d] = card.uid;
                 }
                 //Also init player boards.
                 board[1][d] = [];
@@ -201,7 +201,7 @@ export class MagnateGame extends GameBase {
             for (let h = 0; h < handCount; h++) {
                 for (let p = 0; p < 2; p++) {
                     const [card] = deck.draw();
-                    hands[p][h] = card.muid;
+                    hands[p][h] = card.uid;
                 }
             }
             
@@ -309,14 +309,14 @@ export class MagnateGame extends GameBase {
         this.deck = this.initDeck(deckCount);
         
         // remove cards from the deck that are on the board, the discard, or in known hands
-        for (const muid of [...this.board[1].flat(), ...this.board[2].flat(), ...this.discards]) {
-            this.deck.remove(muid);
+        for (const uid of [...this.board[1].flat(), ...this.board[2].flat(), ...this.discards]) {
+            this.deck.remove(uid);
         }
 
         for (const hand of this.hands) {
-            for (const muid of hand) {
-                if (muid !== "") {
-                    this.deck.remove(muid);
+            for (const uid of hand) {
+                if (uid !== "") {
+                    this.deck.remove(uid);
                 }
             }
         }
@@ -619,7 +619,7 @@ export class MagnateGame extends GameBase {
     private drawUp(): void {
         //First, try to draw what we need from the deck.
         const toDraw = this.variants.includes("mega") ? 2 : 1;
-        let drawn = this.deck.draw(Math.min(this.deck.size, toDraw)).map(c => c.muid);
+        let drawn = this.deck.draw(Math.min(this.deck.size, toDraw)).map(c => c.uid);
 
         drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         
@@ -642,7 +642,7 @@ export class MagnateGame extends GameBase {
             this.results.push({type: "deckDraw"});
 
             //Draw the rest.
-            drawn = this.deck.draw(Math.min(this.deck.size, stillToDraw)).map(c => c.muid);
+            drawn = this.deck.draw(Math.min(this.deck.size, stillToDraw)).map(c => c.uid);
             drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         }
         return;
@@ -778,7 +778,7 @@ export class MagnateGame extends GameBase {
 
         //Because the Excuse and Crowns don't appear in moves, 
         // the card format is: 
-        const cardex = /^(\d?[A-Z]{1,2}[1-2]||[A-Z]{4}[1-2])$/;
+        const cardex = /^(\d?[A-Z]{1,2}[1-2]?||[A-Z]{4}[1-2]?)$/;
         //The cell format is: 
         const cellex = /^[a-j]$/;
         //The suit format is: 
@@ -822,7 +822,7 @@ export class MagnateGame extends GameBase {
             return mm;
         }
 
-        //Next, split the string on type.
+        //Next, test the type.
         const type = typed[0];
         if (moveTypes.indexOf(type) < 0) {
             //Malformed move string.  We require at least X:
@@ -1675,7 +1675,7 @@ export class MagnateGame extends GameBase {
         return max;
     }
 
-    public renderDecktetGlyph(card: Multicard, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
+    public renderDecktetGlyph(card: Card | Multicard, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
         //Refactored from the toGlyph method of Card for opacity, verticality, deed tokens, etc.
         if (border === undefined) {
             border = false;
@@ -1790,11 +1790,11 @@ export class MagnateGame extends GameBase {
         return glyph;
     }
     
-    private renderableCards(): Multicard[] {
+    private renderableCards(): Multideck {
         //Init draw deck and hands.
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
         const renderDeck = this.initDeck(deckCount, true);
-        return renderDeck.cards;
+        return renderDeck;
     }
 
     private renderPlayerPieces(player: number, maxRows: number): string[] {
@@ -1897,7 +1897,7 @@ export class MagnateGame extends GameBase {
         const allcards = this.renderableCards();
         
         const legend: ILegendObj = {};
-        for (const card of allcards) {
+        for (const card of allcards.cards) {
             let glyph = this.renderDecktetGlyph(card, undefined, true);
 
             // the pawny pieces and the excuse (center row)
@@ -1908,15 +1908,15 @@ export class MagnateGame extends GameBase {
                     bg: "_context_background",
                     opacity: 0.2,
                 }});*/
-            } else if ( this.deeds[0].has(card.muid) ) {
+            } else if ( this.deeds[0].has(card.uid) ) {
                 //TODO: a function that also handles the suit counts.
-                glyph = this.renderDecktetGlyph(card, this.deeds[0].get(card.muid), true, 0.33, 1);
-            } else if ( this.deeds[1].has(card.muid) ) {
+                glyph = this.renderDecktetGlyph(card, this.deeds[0].get(card.uid), true, 0.33, 1);
+            } else if ( this.deeds[1].has(card.uid) ) {
                 //TODO: a function that also handles the suit counts.
-                glyph = this.renderDecktetGlyph(card, this.deeds[1].get(card.muid), true, 0.33, 2);
+                glyph = this.renderDecktetGlyph(card, this.deeds[1].get(card.uid), true, 0.33, 2);
             }
             
-            legend["k" + card.muid] = glyph;
+            legend["k" + card.uid] = glyph;
         }
 
         //Suit tokens
@@ -2162,7 +2162,7 @@ export class MagnateGame extends GameBase {
             });
         }
 
-        const remaining = this.deck.clone().draw(this.deck.size).sort(cardSortAsc).map(c => "k" + c.muid) as [string, ...string[]];
+        const remaining = this.deck.clone().draw(this.deck.size).sort(cardSortAsc).map(c => "k" + c.uid) as [string, ...string[]];
 
         //const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "k" + c.uid)
         if (remaining.length > 0) {
