@@ -995,6 +995,9 @@ export class MagnateGame extends GameBase {
         //TODO: do something more reasonable.
         let move: string = "";
 
+        if (this.gameover)
+            return move;
+
         const sortedHand = this.hands[this.currplayer - 1].slice().sort((a,b) => parseInt(b[0]) - parseInt(a[0]));
         
         //Don't pick a random index; try to build or deed a card.
@@ -1602,9 +1605,11 @@ export class MagnateGame extends GameBase {
     }
 
     protected checkEOG(): MagnateGame {
-        const finalHandSize = (this.variants.includes("mega") ? 4 : 2);
-        //May not be exactly equal in mega.
-        if (this.deck.size === 0 && this.hands[0].length <= finalHandSize && this.hands[1].length <= finalHandSize) {
+        //The attempt to draw up has already happened, so we check hand size.
+        const handSize = (this.variants.includes("mega") ? 6 : 3);
+
+        //Final hand size may not be predictable in mega.
+        if (this.shuffled && this.deck.size === 0 && this.hands[0].length < handSize && this.hands[1].length < handSize ) {
             this.gameover = true;
 
             //Evaluates main scores and tiebreakers.
@@ -1664,18 +1669,21 @@ export class MagnateGame extends GameBase {
         };
     }
 
+    
+
+    /* render functions */
     private getMaxDistrictSize(player: number): number {
         //Gets max district size (disregarding deeds).
         let max = 0;
         const board = this.board[player];
         for (let d = 0; d < this.districts; d++) {
-            const districtLength = board ? (board[d] ? board[d].length : 0) : 0;
+            const districtLength = board ? ( board[d] ? board[d].length : 0 ) : 0;
             max = Math.max(districtLength, max);
         }
         return max;
     }
 
-    public renderDecktetGlyph(card: Card | Multicard, deed?: DeedContents, border?: boolean, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
+    public renderDecktetGlyph(card: Card | Multicard, border?: boolean, deed?: DeedContents, opacity?: number, fill?: string|number): [Glyph, ...Glyph[]] {
         //Refactored from the toGlyph method of Card for opacity, verticality, deed tokens, etc.
         if (border === undefined) {
             border = false;
@@ -1894,26 +1902,19 @@ export class MagnateGame extends GameBase {
         });
         
         // Build legend of most cards, including an Excuse.
-        const allcards = this.renderableCards();
+        const allcards = this.renderableCards().cards;
         
         const legend: ILegendObj = {};
-        for (const card of allcards.cards) {
-            let glyph = this.renderDecktetGlyph(card, undefined, true);
+        for (const card of allcards) {
+            let glyph = this.renderDecktetGlyph(card, true);
 
             // the pawny pieces and the excuse (center row)
             if (card.rank.uid === this.pawnrank || card.rank.name === "Excuse") {
-                glyph = this.renderDecktetGlyph(card); /*card.toGlyph({border: false, fill: {
-                    func: "flatten",
-                    fg: "_context_labels",
-                    bg: "_context_background",
-                    opacity: 0.2,
-                }});*/
+                glyph = this.renderDecktetGlyph(card); // no borders
             } else if ( this.deeds[0].has(card.uid) ) {
-                //TODO: a function that also handles the suit counts.
-                glyph = this.renderDecktetGlyph(card, this.deeds[0].get(card.uid), true, 0.33, 1);
+                glyph = this.renderDecktetGlyph(card, true, this.deeds[0].get(card.uid), 0.33, 1);
             } else if ( this.deeds[1].has(card.uid) ) {
-                //TODO: a function that also handles the suit counts.
-                glyph = this.renderDecktetGlyph(card, this.deeds[1].get(card.uid), true, 0.33, 2);
+                glyph = this.renderDecktetGlyph(card, true, this.deeds[1].get(card.uid), 0.33, 2);
             }
             
             legend["k" + card.uid] = glyph;
@@ -2055,11 +2056,6 @@ export class MagnateGame extends GameBase {
             }
         }
 
-        /* add glyph for empty discard
-           legend["discard"] = [
-           {name: "d6-empty", colour: "_context_background"},
-           {text: "$$", scale: 0.9}
-           ];*/
 
         // build pieces areas
         const areas: (AreaPieces|AreaKey|AreaButtonBar)[] = [];
