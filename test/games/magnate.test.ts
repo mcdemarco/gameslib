@@ -252,6 +252,8 @@ describe("Magnate", () => {
 
     it ("Renders without exploding", () => {
         g.render();
+        g.move(g.randomMove());
+        g.render();
     });
 
     it ("Plays along a bit", () => {

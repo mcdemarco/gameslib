@@ -1672,6 +1672,39 @@ export class MagnateGame extends GameBase {
     
 
     /* render functions */
+    private result2coords(district: string, card: string): number[] {
+        //We don't have the player id to check the correct element 
+        //of the board or deed array, so we check both.
+        let player: number;
+ 
+        //Only used for a deeded card or the last card bought, so...
+        const col = this.algebraic2coord(district);
+        
+        if ( this.board[1] && this.board[1][col].length && this.board[1][col].slice(-1)[0] === card || this.deeds[0].has(card) )
+            player = 1;
+        else if ( this.board[2] && this.board[2][col].length && this.board[2][col].slice(-1)[0] === card || this.deeds[1].has(card) )
+            player = 2;
+        else
+            throw new Error(`Could not highlight card ${card} from previous move.`);        
+
+        const centerrow = this.getBoardSize()[0];
+        const multiplier = player === 1 ? 1 : -1;
+        const colsize = this.board[player][col].length;
+        const rowAdjust =  ( this.deeds[player - 1].has(card) ) ? 1 : 0;
+
+        return [col, centerrow + ((colsize + rowAdjust) * multiplier)];
+    }
+    
+    private getBoardSize(): number[] {
+        //Calculate the unknown dimension of the board (rows),
+        //and the location of the center row.
+        const p1rows = this.getMaxDistrictSize(1);
+        const p2rows = this.getMaxDistrictSize(2);
+        const centerrow = p2rows + 1;
+        const rows = p1rows + p2rows + 3;
+        return [centerrow, rows];
+    }
+    
     private getMaxDistrictSize(player: number): number {
         //Gets max district size (disregarding deeds).
         let max = 0;
@@ -1805,8 +1838,9 @@ export class MagnateGame extends GameBase {
         return renderDeck;
     }
 
-    private renderPlayerPieces(player: number, maxRows: number): string[] {
+    private renderPlayerPieces(player: number): string[] {
         const pstra: string[] = [];
+        const maxRows = this.getMaxDistrictSize(player);
 
         //A player's tableau.
         const board = this.board[player];
@@ -1838,13 +1872,10 @@ export class MagnateGame extends GameBase {
     public render(): APRenderRep {
 
         //Need to determine the number of rows every time.
-        const p1rows = this.getMaxDistrictSize(1);
-        const p2rows = this.getMaxDistrictSize(2);
-        const centerrow = p2rows + 1;
-        const rows = p1rows + p2rows + 3;
+        const [centerrow, rows] = this.getBoardSize();
 
         //Player 2 on top.
-        let pstrArray = this.renderPlayerPieces(2, p2rows);
+        let pstrArray = this.renderPlayerPieces(2);
         //Invert here.
         pstrArray.reverse();
 
@@ -1857,7 +1888,7 @@ export class MagnateGame extends GameBase {
         pstrArray.push(row.join(","));
 
         //Player 1 below.
-        const pstr1 = this.renderPlayerPieces(1, p2rows);
+        const pstr1 = this.renderPlayerPieces(1);
         pstrArray = pstrArray.concat(pstr1);
         
         const pstr = pstrArray.join("\n");
@@ -2191,15 +2222,17 @@ export class MagnateGame extends GameBase {
             areas,
         };
 
-        // Add annotations
+        // Add annotations.
         if (this.results.length > 0) {
             rep.annotations = [];
-            /*
-              for (const move of this.results) {
-              if (move.type === "place") {
-              const [x, y] = this.algebraic2coord(move.where!);
-              rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
-              } else if (move.type === "move") {
+            for (const move of this.results) {
+                if (move.type === "place" && move.where !== "discards") {
+                    const [x, y] = this.result2coords(move.where!, move.what!);
+                    rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
+                } 
+            }
+            
+            /*else if (move.type === "move") {
               const [fromX, fromY] = this.algebraic2coord(move.from);
               const [toX, toY] = this.algebraic2coord(move.to);
               rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
