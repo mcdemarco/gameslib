@@ -335,8 +335,9 @@ export class MagnateGame extends GameBase {
 
     private add2deed(card: string, spend: number[]): boolean {
         //Adds tokens to deeds.
-        //Ideally should not be called when the deed is complete.
+        //Returns true if the deed is completed by the addition.
         const deed = this.deeds[this.currplayer - 1].get(card)!;
+        //console.log("in a2d with ", card, deed, spend);
         const cardObj = Multicard.deserialize(card)!;
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         const price = this.getPriceFromRank(cardObj.rank.seq);
@@ -357,7 +358,7 @@ export class MagnateGame extends GameBase {
             }
         }
         
-        this.deeds[this.currplayer - 1].set(card, deed);
+        //console.log(card, this.deeds[this.currplayer - 1].get(card));
 
         return (test && paid === price);
     }
@@ -411,14 +412,6 @@ export class MagnateGame extends GameBase {
         //Check for suit mismatch.
         return this.matched(card, matchMe);
     }
-
-    /*
-      private canTrade(suit: string): boolean {
-      //TODO: Test if this player can trade for a suit.
-      
-      return !!(suit);
-      }
-    */
 
     private card2tokens(card: string, type: string): number[] {
         //Interpret the card as a cost or payment in suit tokens.
@@ -759,13 +752,6 @@ export class MagnateGame extends GameBase {
         return c1.sharesSuitWith(c2);
     }
 
-    /*    private nameCard(card: string): string {
-    //Wrapper for the usual card stringifier.
-    const cardObj = Card.deserialize(card)!;
-    return cardObj.name;
-    }
-   */
-
     public parseMove(submove: string): IMagnateMove {
         //Parse a substring into an IMagnateMove object.
         //Does only structural validation.
@@ -835,6 +821,7 @@ export class MagnateGame extends GameBase {
         }
 
         //Split the remaining items.
+        
         const split = typed[1].split(",");
 
         if ( split[0] === "" ) {
@@ -926,10 +913,6 @@ export class MagnateGame extends GameBase {
         this.board[this.currplayer][col].push(card);
         return;
     }
-    /*
-    private reportCard(card: string): string {
-        return card.substring(0,card.length - 1);
-    }*/
     
     private removeCard(card: string, arr: string[]): boolean {
         //Remove a card from an array.
@@ -1121,7 +1104,7 @@ export class MagnateGame extends GameBase {
                 } else if ( piece?.startsWith("k") && move.endsWith(":") ) {
                     //clicking a hand card for buy/deed/sell.
                     const card = piece.split("k")[1];
-                    newmove = `${move}${card},`; 
+                    newmove = `${move}${card}`; 
                 } else if ( piece?.startsWith("k") ) {
                     //Too late to choose a hand card.
                     //Just ignore it.
@@ -1130,11 +1113,11 @@ export class MagnateGame extends GameBase {
                     const suit = piece.charAt(1);
                     if ( move && move.endsWith(":") ) {
                         //Assume it's a trade.
-                        newmove = `${move}${suit}3,`;
-                    } else if ( move && move.endsWith(",") && (new RegExp(`^,?${suit}\\d?$`)).test(move.substring(move.length - 3, move.length - 1)) ) {
-                        newmove = `${move.substring(0,move.lastIndexOf(",",move.length - 2))},${suit}${((parseInt(move.charAt(move.length - 2), 10)||1) + 1)},`;
+                        newmove = `${move}${suit}3`; 
+                    } else if ( move && (move.endsWith(suit) || (new RegExp(`^${suit}\\d$`)).test(move.substring(move.length - 2, move.length))) ) {
+                        newmove = `${move.substring(0,move.lastIndexOf(","))},${suit}${((parseInt(move.charAt(move.length - 1), 10)||1) + 1)}`;
                     } else {
-                        newmove = `${move}${suit},`;
+                        newmove = `${move},${suit}`;
                     }
                 } 
             } else {
@@ -1156,11 +1139,11 @@ export class MagnateGame extends GameBase {
                 } else if ( piece?.startsWith("k") && move.endsWith(":") ) {
                     //clicking a deed card
                     const card = piece.split("k")[1];
-                    newmove = `${move}${card},`;
+                    newmove = `${move}${card}`;
                 } else if ( piece?.startsWith("k") ) {
                     //clicking a board card, which in this case we interpret as its district.
                     const district = this.coord2algebraic(col);
-                    newmove = `${move}${district},`;
+                    newmove = `${move},${district}`;
                 } else if (move && move.endsWith(":")) {
                     //it's too early to click on a district,
                     //unless you misclicked a card.
@@ -1171,7 +1154,7 @@ export class MagnateGame extends GameBase {
                     }
                 } else {
                     const district = this.coord2algebraic(col);
-                    newmove = `${move}${district},`;
+                    newmove = `${move},${district}`;
                 }
             }
             
@@ -1345,7 +1328,7 @@ export class MagnateGame extends GameBase {
                             //We set the preference and display it.
                             const deed = cloned.deeds[cloned.currplayer - 1].get(pact.card)!;
                             deed.preferred = pact.suit;
-                            cloned.deeds[cloned.currplayer - 1].set(pact.card, deed)!;                   
+                            //cloned.deeds[cloned.currplayer - 1].set(pact.card, deed)!;                   
                         }
                     }
                 }
@@ -1393,13 +1376,20 @@ export class MagnateGame extends GameBase {
                     } else {
 
                         const success = cloned.checkSpend(pact.card, pact.spend, pact.type);
-                        
+
                         if ( success < 0 ) {
                             result.valid = false;
                             result.message = i18next.t("apgames:validation.magnate.INVALID_PAYMENT");
                             return result; 
                         } else {
-                           
+
+                            //Attempt to dock the spent tokens here.
+                            if (! cloned.debit(pact.spend, cloned.currplayer) ) {
+                                result.valid = false;
+                                result.message = i18next.t("apgames:validation.magnate.INVALID_OTHER_PAYMENT");
+                                return result;
+                            } //else spent successfully and can post-process.
+                            
                             if (success < 1) {
                             
                                 if ( pact.type === "B" ) {
@@ -1410,7 +1400,7 @@ export class MagnateGame extends GameBase {
                                     result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
                                     return result;
                                 } else if ( pact.type === "A" ) {
-                                    //Augment the deed for a deed.
+                                    //Augment the deed.
                                     cloned.add2deed(pact.card, pact.spend);                                }
                             
                             } else {//success === 1
@@ -1425,14 +1415,6 @@ export class MagnateGame extends GameBase {
                                     cloned.deeds[cloned.currplayer - 1].delete(pact.card);
                                 }
                             }
-
-                            //Attempt to dock the spent tokens here.
-                            if (! cloned.debit(pact.spend, cloned.currplayer) ) {
-                                result.valid = false;
-                                result.message = i18next.t("apgames:validation.magnate.INVALID_OTHER_PAYMENT");
-                                return result;
-                            } //else spent successfully.
-                            
                         }
    
                     }//end payment processing
@@ -1486,100 +1468,111 @@ export class MagnateGame extends GameBase {
 
         const actions = m.split("/");
 
-        for (let a = 0; a < actions.length; a++) {
-            const action = actions[a];
+        for (const action of actions) {
             const pact = this.parseMove(action);
 
-            //Low-hanging fruit.
-            if (pact.type === "T") {
-                if (pact.spend !== undefined) {
-                    this.debit(pact.spend,this.currplayer);
-
-                    if (pact.suit !== undefined) {
-                        this.credit1(pact.suit, this.currplayer);
-                        this.results.push({
-                            type: "convert",
-                            what: suitOrder[pact.spend.indexOf(3)],
-                            into: pact.suit
-                        });
-                    }
-                }
+            //Spend first, other stuff later.
+            if (pact.spend !== undefined) {
+                console.log("spending ", pact.spend);
+                this.debit(pact.spend, this.currplayer);
             }
             
-            if ( pact.card && ( pact.type === "B" || pact.type === "D" || pact.type === "S" ) ) {
-                this.removeCard(pact.card, this.hands[this.currplayer - 1]);
-                const tokens = this.card2tokens(pact.card, pact.type);
-
-                if (pact.type === "S") {
-                    this.discards.push(pact.card);
-
-                    //Profit!
-                    this.credit(tokens, this.currplayer);
-                    
+            //Low-hanging fruit.
+            if (pact.type === "T") {
+                if (pact.spend !== undefined && pact.suit !== undefined) {
+                    this.credit1(pact.suit, this.currplayer);
                     this.results.push({
-                        type: "place",
-                        what: pact.card,
-                        where: "discards"
+                        type: "convert",
+                        what: suitOrder[pact.spend.indexOf(3)],
+                        into: pact.suit
                     });
-
-                } else if (pact.district) {
-                    
-                    if (pact.type === "D") {
-                        //Create a deed.
-                        this.createDeed(pact.card, pact.district);
-                        this.debit(tokens, this.currplayer);
-                    } else if (pact.type === "B") {
-                        //Place the card.
-                        this.placeCard(pact.card, pact.district);
-                        if (pact.spend !== undefined)
-                            this.debit(pact.spend, this.currplayer);
-                    }
-                    
-                    //Shared result type
-                    this.results.push({
-                        type: "place",
-                        what: pact.card,
-                        where: pact.district,
-                        how: pact.type
-                    });
-                    
                 }
-            }
+            }//end trade type
+            
+            if ( pact.card ) {
 
-            if ( pact.card && ( pact.type === "A" || pact.type === "P" ) ) {
-                const deed = this.deeds[this.currplayer - 1].get(pact.card)!;
-                if (pact.type === "P" && pact.suit !== undefined) {
-                    deed.preferred = pact.suit;
-                    this.deeds[this.currplayer - 1].set(pact.card, deed);
-                    //Don't chatlog.
-                }
+                if ( pact.type === "B" || pact.type === "D" || pact.type === "S" ) {
+                    //Card consumption types.
+                    this.removeCard(pact.card, this.hands[this.currplayer - 1]);
+                    const tokens = this.card2tokens(pact.card, pact.type);
 
-                if (pact.type === "A" && pact.spend !== undefined) {
-                    const done = this.add2deed(pact.card, pact.spend);
-                    this.debit(pact.spend,this.currplayer);
+                    if (pact.type === "S") {
+                        this.discards.push(pact.card);
 
-                    this.results.push({
-                        type: "add",
-                        where: pact.card,
-                        num: pact.spend.reduce( (cur, acc) => cur + acc, 0 )
-                    });
-
-                    //If the deed is done, remove it and place the card.
-                    if (done) {
-                        const district = this.deeds[this.currplayer - 1].get(pact.card)!.district;
-                        this.deeds[this.currplayer - 1].delete(pact.card);
-                        this.placeCard(pact.card, district!);
+                        //Profit!
+                        this.credit(tokens, this.currplayer);
                         
                         this.results.push({
                             type: "place",
                             what: pact.card,
-                            where: district,
-                            how: pact.type
+                            where: "discards"
                         });
+
+                    } else if (pact.district) {
+                        
+                        if (pact.type === "D") {
+                            //Create a deed.
+                            this.createDeed(pact.card, pact.district);
+                            this.debit(tokens, this.currplayer);
+
+                            //Shared result type
+                            this.results.push({
+                                type: "place",
+                                what: pact.card,
+                                where: pact.district,
+                                how: pact.type
+                            });
+                            
+                        } else if (pact.type === "B") {
+                            //Place the card.
+                            this.placeCard(pact.card, pact.district);
+
+                            if (pact.spend !== undefined) {
+                                //Shared result type
+                                this.results.push({
+                                    type: "place",
+                                    what: pact.card,
+                                    where: pact.district,
+                                    how: pact.type
+                                });
+                            }
+                        }
                     }
-                }
-            }
-        }
+                                
+                } else if ( pact.type === "A" || pact.type === "P" ) {
+                    const deed = this.deeds[this.currplayer - 1].get(pact.card)!;
+                    if (pact.type === "P" && pact.suit !== undefined) {
+                        deed.preferred = pact.suit;
+                        //this.deeds[this.currplayer - 1].set(pact.card, deed);
+                        //Don't chatlog.
+                    }
+
+                    if (pact.type === "A" && pact.spend !== undefined) {
+                        const done = this.add2deed(pact.card, pact.spend);
+
+                        this.results.push({
+                            type: "add",
+                            where: pact.card,
+                            num: pact.spend.reduce( (cur, acc) => cur + acc, 0 )
+                        });
+
+                        //If the deed is done, remove it and place the card.
+                        if (done) {
+                            const district = this.deeds[this.currplayer - 1].get(pact.card)!.district;
+                            this.deeds[this.currplayer - 1].delete(pact.card);
+                            this.placeCard(pact.card, district!);
+                            
+                            this.results.push({
+                                type: "place",
+                                what: pact.card,
+                                where: district,
+                                how: pact.type
+                            });
+                        }
+                    }
+                }//end deed adjustment types
+            }//end card condition
+        }//end action loop
 
         if (partial) { return this; }
         
