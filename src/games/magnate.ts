@@ -448,7 +448,7 @@ export class MagnateGame extends GameBase {
     }
     
     private checkSpend(card: string, spend: number[], type: string): number {
-        // Checks that an intermediate or final addition to a deed is legal,
+        //Checks that an intermediate or final addition to a deed is legal,
         //or that an intermediate or final payment on a buy is legal.
         // Also prevent overpayment, addition of inapplicable suits,
         //  and additions that would prevent completing payment later.
@@ -606,15 +606,6 @@ export class MagnateGame extends GameBase {
         //Debits and credits are forumlated as arrays of 6 numbers.
         return this.edit(-1, tokenArray, player);
     }
-/*    
-    private debit3(suit: string, player: playerid): void {
-        //Wrapper function for trades.
-        const tokenArray: number[] = Array(6).fill(0);
-        tokenArray[suitOrder.indexOf(suit)] = 3;
-        this.debit(tokenArray, player);
-        return;
-    }
-*/
 
     private drawUp(): void {
         //First, try to draw what we need from the deck.
@@ -711,7 +702,7 @@ export class MagnateGame extends GameBase {
         const cardObj = Multicard.deserialize(card)!;
         
         const payment: string[] = [];
-        const resources = this.tokens[this.currplayer - 1];
+        const resources = this.tokens[this.currplayer - 1].slice();
 
         const price = this.getPriceFromRank(cardObj.rank.seq);
 
@@ -719,8 +710,10 @@ export class MagnateGame extends GameBase {
 
         //Guarantee of suit coverage for buys.
         suits.forEach(s => {
-            if (resources[suitOrder.indexOf(s)] > 0)
+            if (resources[suitOrder.indexOf(s)] > 0) {
                 payment.push(s);
+                resources[suitOrder.indexOf(s)]--;
+            }
         });
 
         if ( full && payment.length < price ) {
@@ -729,8 +722,10 @@ export class MagnateGame extends GameBase {
                 //Select a random suit and push if available.
                 const randi = randomInt(suits.length) - 1;
                 const suit = suits[randi];
-                if (resources[suitOrder.indexOf(suit)] > 0)
+                if (resources[suitOrder.indexOf(suit)] > 0) {
                     payment.push(suit);
+                    resources[suitOrder.indexOf(suit)]--;
+                }
             }
         }
 
@@ -948,6 +943,7 @@ export class MagnateGame extends GameBase {
     }
     
     private spender(values: string[]): number[] {
+        //Parses a pre-split spend into a token array.
         const spend: number[] = Array(6).fill(0);
 
         values.forEach(value => {
@@ -998,65 +994,96 @@ export class MagnateGame extends GameBase {
         if (this.gameover)
             return move;
 
-        const sortedHand = this.hands[this.currplayer - 1].slice().sort((a,b) => parseInt(b[0]) - parseInt(a[0]));
-        
-        //Don't pick a random index; try to build or deed a card.
-        //Failing that, sell a card and try to pay on a deed.
-        
-        //We can generate a random move from the player's hand.
-        const handCount = (this.variants.includes("mega") ? 5 : 3);
-        const leverage = this.districts - this.deeds[this.currplayer - 1].size;
+        const cloned = Object.assign(new MagnateGame(), deepclone(this) as MagnateGame);
+        const usedCardCount = (cloned.variants.includes("mega") ? 2 : 1);
+
+        //We can generate a sensible move from the player's hand, if we sort it.
+        const sortedHand = cloned.hands[this.currplayer - 1].slice().sort((a,b) => parseInt(b[0]) - parseInt(a[0]));
         
         let card = "";
-        for (let c = 0; c < handCount; c++) {
-            card = sortedHand[c];
+        for ( let m = 0; m < usedCardCount; m++ ) { 
+            //Don't pick a random index; try to build or deed a card.
+            //Failing that, sell a card and try to pay on a deed.
+            //But don't get over leveraged.
+            const leverage = cloned.districts - cloned.deeds[cloned.currplayer - 1].size;
             
-            //Test if the card can be placed. 
-            for (let d = 0; d < this.districts; d++) {
-                if (move === "") {
-                    const dist = this.coord2algebraic(d);
-                    if (this.canPlace(card, dist)) {
-                        if ( this.canPay(card) ) {
-                            // If we can deed a 2 we can pay for it, so doesn't try to deed one.
-                            move = "B:" + card + "," + dist + "," + this.getRandomPayment(card, true);
-                        } else if (this.canDeed(card) && leverage > 2) {
-                            move = "D:" + card + "," + dist;
-                        } //else move is unchanged and we continue.
+            let submove = "";
+            for (let c = 0; c < sortedHand.length; c++) {
+                card = sortedHand[c];
+                
+                //Test if the card can be placed.
+                for (let d = 0; d < cloned.districts; d++) {
+                    if (submove === "" && m === 0) {
+                        const dist = cloned.coord2algebraic(d);
+                        if (cloned.canPlace(card, dist)) {
+                            if ( cloned.canPay(card) ) {
+                                // If we can deed a 2 we can pay for it, so doesn't try to deed one.
+                                const payment = cloned.getRandomPayment(card, true);
+                                submove = "B:" + card + "," + dist + "," + payment;
+                                //Need to remove the card and spend the tokens for the next step.
+                                sortedHand.splice(c,1);
+
+                                const tokenArray = cloned.spender(payment.split(","));
+                                cloned.debit(tokenArray, cloned.currplayer);
+
+
+
+                                
+                            } else if (cloned.canDeed(card) && leverage > 2) {
+                                submove = "D:" + card + "," + dist;
+                                //Need to remove the card and spend the tokens for the next step.
+                                sortedHand.splice(c,1);
+                                const spend = cloned.card2tokens(card, "D");
+                                cloned.debit(spend, cloned.currplayer);
+
+                                
+                            } //else move is unchanged and we continue.
+                        }
                     }
                 }
             }
-        }
 
-        //If we fell through, we sell the "final" card.
-        if (move === "")
-            move = "S:" + card;
-
-        //If mega, we hedged on the final card, so we could
-        // sell the real final card and then make this move.
-        //For better results, clone the game instead.
-        if ( this.variants.includes("mega") )
-            move = "S:" + sortedHand[sortedHand.length - 1] + "/" + move;
-
-        
-        //In all cases, we also attempt to pay on a deed.
-        let submove: string = "";
-        
-        for (let d = 1; d <= this.districts; d++) {
+            //If we fell through, we sell the "final" card.
+            //We always sell for our second move in mega
+            //so we don't have to do extensive clone support.
             if (submove === "") {
-                const deedCard = this.getDeedCard(this.coord2algebraic(d), this.currplayer);
-
-                if (deedCard) {
-                    const spend = this.getRandomPayment(deedCard, false);
-                    submove = "A:" + deedCard + "," + spend;
-                    //Manually validate here.
-                    if (! this.validateMove(submove).valid === true) {
-                        submove = "";
+                card = sortedHand.pop()!;
+                submove = "S:" + card;
+                //Nice to collect on card for the next step.
+                const profit = cloned.card2tokens(card, "S");
+                cloned.credit(profit, cloned.currplayer);
+            }
+            
+            
+            //In all cases, we also attempt to pay on a deed.
+            let subsubmove = "";
+            
+            for (let d = 1; d <= cloned.districts; d++) {
+                if (subsubmove === "") {
+                    const deedCard = cloned.getDeedCard(cloned.coord2algebraic(d), cloned.currplayer);
+                    
+                    if (deedCard) {
+                        const spend = cloned.getRandomPayment(deedCard, false);
+                        subsubmove = "A:" + deedCard + "," + spend;
+                        
+                        //Manually validate here.
+                        const validationObj = cloned.validateMove(submove + "/" + subsubmove);
+                        const parsedSS = cloned.parseMove(subsubmove);
+                        if (validationObj.valid === false || parsedSS.incomplete === true) { 
+                            subsubmove = "";
+                        } else {
+                            const tokenArray = cloned.spender(spend.split(","));
+                            cloned.debit(tokenArray, cloned.currplayer);
+                            //Credit the cloned deed to prevent errors in mega.
+                            cloned.add2deed(deedCard, tokenArray);
+                        }
                     }
                 }
             }
+            
+            move += (move === "" || move.slice(-1) === "/" ? "" : "/") + submove + "/" + subsubmove;
         }
-        move += "/" + submove;
-
+        
         return move;
     }
 
@@ -1199,7 +1226,7 @@ export class MagnateGame extends GameBase {
             //Could also test that the last character of m is a /.
             moves.length--;
         }
-        
+
         for (let s = 0; s < moves.length; s++) {
             let action = moves[s];
             //Trim any dangling commas.
@@ -1315,8 +1342,7 @@ export class MagnateGame extends GameBase {
                             result.message = i18next.t("apgames:validation.magnate.INVALID_SUIT");
                             return result; 
                         } else {
-                            //We set the preference,
-                            //just in case we ever figure out a display for it.
+                            //We set the preference and display it.
                             const deed = cloned.deeds[cloned.currplayer - 1].get(pact.card)!;
                             deed.preferred = pact.suit;
                             cloned.deeds[cloned.currplayer - 1].set(pact.card, deed)!;                   
@@ -1346,7 +1372,7 @@ export class MagnateGame extends GameBase {
                         //Test if we're done.
                         if (! cloned.debit(tokens, cloned.currplayer) ) {
                             result.valid = false;
-                            result.message = i18next.t("apgames:validation.magnate.INVALID_DEED");
+                            result.message = i18next.t("apgames:validation.magnate.INVALID_DEED_PAYMENT");
                             return result; 
                         } else {
                             //Debited and districted.  Need a deed.
@@ -1372,36 +1398,43 @@ export class MagnateGame extends GameBase {
                             result.valid = false;
                             result.message = i18next.t("apgames:validation.magnate.INVALID_PAYMENT");
                             return result; 
-                        } else if (success < 1) {
+                        } else {
+                           
+                            if (success < 1) {
                             
-                            if ( pact.type === "B" ) {
-                                //Return incomplete for a buy.
-                                result.valid = true;
-                                result.complete = -1;
-                                result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
+                                if ( pact.type === "B" ) {
+                                    //Return incomplete for a buy.
+                                    result.valid = true;
+                                    result.complete = -1;
+                                    result.canrender = true;
+                                    result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
+                                    return result;
+                                } else if ( pact.type === "A" ) {
+                                    //Augment the deed for a deed.
+                                    cloned.add2deed(pact.card, pact.spend);                                }
+                            
+                            } else {//success === 1
+
+                                const district = pact.type === "B" ? pact.district : cloned.deeds[cloned.currplayer - 1].get(pact.card)!.district;
+
+                                // Place real card.
+                                cloned.placeCard(pact.card, district!);
+
+                                if ( pact.type === "A" ) {
+                                    // Remove deed.
+                                    cloned.deeds[cloned.currplayer - 1].delete(pact.card);
+                                }
+                            }
+
+                            //Attempt to dock the spent tokens here.
+                            if (! cloned.debit(pact.spend, cloned.currplayer) ) {
+                                result.valid = false;
+                                result.message = i18next.t("apgames:validation.magnate.INVALID_OTHER_PAYMENT");
                                 return result;
-                            } else if ( pact.type === "A" ) {
-                                //Augment the deed for a deed.
-                                cloned.add2deed(pact.card, pact.spend);
-                            }
-                            
-                        } else {//success === 1
-
-                            const district = pact.type === "B" ? pact.district : cloned.deeds[cloned.currplayer - 1].get(pact.card)!.district;
-
-                            // Place real card.
-                            cloned.placeCard(pact.card, district!);
-
-                            if ( pact.type === "A" ) {
-                                // Remove deed.
-                                cloned.deeds[cloned.currplayer - 1].delete(pact.card);
-                            }
+                            } //else spent successfully.
                             
                         }
-
-                        //If you get here, dock the tokens.
-                        cloned.debit(pact.spend, cloned.currplayer);
-
+   
                     }//end payment processing
 
                 }//end spend cases
@@ -1412,9 +1445,17 @@ export class MagnateGame extends GameBase {
 
         // we're good!
         result.valid = true;
-        result.complete = usedCards < cards2use ? -1 : 0; //A turn is never complete, only submissible.
         result.canrender = true;
-        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+        
+        if (usedCards < cards2use) {
+            result.complete = -1;
+            result.message = i18next.t("apgames:validation.magnate.BUTTON_INSTRUCTIONS");
+        } else {
+            //A turn is never complete, only submissible.
+            result.complete = 0;
+            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+        }
+        
         return result;
     }
 
@@ -1428,6 +1469,9 @@ export class MagnateGame extends GameBase {
         if (! trusted) {
             const result = this.validateMove(m);
             if (! result.valid) {
+                throw new UserFacingError("VALIDATION_GENERAL", result.message)
+            }
+            if (!partial && ( result.complete === undefined || result.complete < 0) ) {
                 throw new UserFacingError("VALIDATION_GENERAL", result.message)
             }
         }
@@ -1538,7 +1582,7 @@ export class MagnateGame extends GameBase {
         }
 
         if (partial) { return this; }
-
+        
         // draw up
         this.drawUp();
 
