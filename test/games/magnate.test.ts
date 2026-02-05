@@ -40,6 +40,14 @@ describe("Magnate", () => {
             type: "B",
             valid: true
         });
+        expect(g.parseMove("B:8MS,a,M,M,M")).to.deep.equal({
+            card: "8MS",
+            district: "a",
+            incomplete: false,
+            spend: [3,0,0,0,0,0],
+            type: "B",
+            valid: true
+        });
         expect(g.parseMove("B:8MS1,a,M3")).to.deep.equal({
             card: "8MS1",
             district: "a",

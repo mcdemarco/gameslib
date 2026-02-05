@@ -1002,12 +1002,12 @@ export class MagnateGame extends GameBase {
         
         //Don't pick a random index; try to build or deed a card.
         //Failing that, sell a card and try to pay on a deed.
-
         
         //We can generate a random move from the player's hand.
         const handCount = (this.variants.includes("mega") ? 5 : 3);
-        let card = "";
+        const leverage = this.districts - this.deeds[this.currplayer - 1].size;
         
+        let card = "";
         for (let c = 0; c < handCount; c++) {
             card = sortedHand[c];
             
@@ -1016,11 +1016,10 @@ export class MagnateGame extends GameBase {
                 if (move === "") {
                     const dist = this.coord2algebraic(d);
                     if (this.canPlace(card, dist)) {
-                        //No economy testing:  40% buy, 40% deed, 20% sell.
                         if ( this.canPay(card) ) {
                             // If we can deed a 2 we can pay for it, so doesn't try to deed one.
-                            move = "B:" + card + "," + dist + "," + this.getRandomPayment(card, true); //Need suits.
-                        } else if (this.canDeed(card)) {
+                            move = "B:" + card + "," + dist + "," + this.getRandomPayment(card, true);
+                        } else if (this.canDeed(card) && leverage > 2) {
                             move = "D:" + card + "," + dist;
                         } //else move is unchanged and we continue.
                     }
@@ -1105,8 +1104,11 @@ export class MagnateGame extends GameBase {
                     if ( move && move.endsWith(":") ) {
                         //Assume it's a trade.
                         newmove = `${move}${suit}3,`;
-                    } else
+                    } else if ( move && move.endsWith(",") && (new RegExp(`^,?${suit}\\d?$`)).test(move.substring(move.length - 3, move.length - 1)) ) {
+                        newmove = `${move.substring(0,move.lastIndexOf(",",move.length - 2))},${suit}${((parseInt(move.charAt(move.length - 2), 10)||1) + 1)},`;
+                    } else {
                         newmove = `${move}${suit},`;
+                    }
                 } 
             } else {
                 // otherwise, clicked on the board
@@ -1240,6 +1242,7 @@ export class MagnateGame extends GameBase {
                 if (pact.suit === undefined) {
                     result.valid = true;
                     result.complete = -1;
+                    result.canrender = true;
                     result.message = i18next.t("apgames:validation.magnate.TOKEN_TRADE_INSTRUCTIONS");
                     return result;
                 }
@@ -1358,6 +1361,7 @@ export class MagnateGame extends GameBase {
                     if ( pact.spend === undefined ) {
                         result.valid = true;
                         result.complete = -1;
+                        result.canrender = true;
                         result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
                         return result;
                     } else {
@@ -1409,6 +1413,7 @@ export class MagnateGame extends GameBase {
         // we're good!
         result.valid = true;
         result.complete = usedCards < cards2use ? -1 : 0; //A turn is never complete, only submissible.
+        result.canrender = true;
         result.message = i18next.t("apgames:validation._general.VALID_MOVE");
         return result;
     }

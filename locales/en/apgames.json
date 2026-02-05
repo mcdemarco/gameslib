@@ -4599,7 +4599,7 @@
             "INVALID_DEED_TWO": "You cannot deed a card of rank 2; just buy it.",
             "INVALID_MOVE": "The action '{{move}}' could not be parsed.",
             "INVALID_PAYMENT": "The selected token(s) cannot be used to buy or add to the selected card.",
-            "INVALID_PLACEMENT": "The selected card cannot be placed here because no suits match.",
+            "INVALID_PLACEMENT": "The selected card cannot be placed here because no suits match or a deed is already present.",
             "INVALID_SUIT": "The selected suit does not appear on the card.",
             "INVALID_TRADE": "You do not have three tokens of that suit available to trade.",
             "LABEL_BOTH": "Player {{playerNum}}'s hand and suit tokens",
