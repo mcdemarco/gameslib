@@ -1464,6 +1464,8 @@ export class MagnateGame extends GameBase {
         if (this.stack.length === 1) {
             //Need to log the initial roll.
             this.results.push({type: "roll", values: [this.lastroll[0]], who: this.currplayer});
+            if (this.lastroll[0] === 10)
+                this.results.push({type: "claim", how: "crowns"});
         };
 
         const actions = m.split("/");
@@ -1473,7 +1475,7 @@ export class MagnateGame extends GameBase {
 
             //Spend first, other stuff later.
             if (pact.spend !== undefined) {
-                console.log("spending ", pact.spend);
+                //console.log("spending ", pact.spend);
                 this.debit(pact.spend, this.currplayer);
             }
             
@@ -1583,7 +1585,6 @@ export class MagnateGame extends GameBase {
         //this.lastroll = this.roll;
 
         // update currplayer
-        const oldplayer = this.currplayer;
         let newplayer = (this.currplayer as number) + 1;
         if (newplayer > this.numplayers) {
             newplayer = 1;
@@ -1595,49 +1596,41 @@ export class MagnateGame extends GameBase {
         if (! this.gameover ) {
             //Roll the dice!
 
-            const payArray:string[] = [];
+            //const payArray:string[] = [];
             
             this.lastroll = this.roller();
 
             //We cannot report the roll as associated with the new player.
-            this.results.push({type: "roll", values: [this.lastroll[0]]});
+            this.results.push({type: "roll", values: [this.lastroll[0]], who: newplayer});
             
-            [oldplayer, newplayer].forEach((p) => {
-                let message = (p === newplayer) ? "The next player" : " ";
+            [1, 2].forEach((p) => {
 
                 //The taxman cometh?
                 if (this.lastroll.length > 1) {
-                    let submessage = "";
-                    for (let t = 0; t < this.lastroll.length; t++) {
+                    console.log("tax was rolled");
+                    for (let t = 1; t < this.lastroll.length; t++) {
                         const taxrollIdx = this.lastroll[t] - 1;
                         if (this.tokens[p - 1][taxrollIdx] > 1) {
+                            console.log("taxing " + this.lastroll[t]);
                             const tax = this.tokens[p - 1][taxrollIdx] - 1;
                             this.tokens[p - 1][taxrollIdx] = 1;
-
-                            submessage += (submessage === "" ? "" : " and ") + tax + " " + suitOrder[taxrollIdx];
+                            this.results.push({type: "damage", who: p.toString(), amount: tax, where: suitOrder[taxrollIdx]});
                         }
                     }
-                    if (submessage)
-                        message += " was taxed " + submessage;
-                    else
-                        message += " was not taxed"
-                    
-                    message += ", and ";
-                } 
+                }
 
                 //Collecting tokens.
-                //message += message.length > 0 ?; //: (p === newplayer ? "The next player" : "");
                 const gains = this.collectOn(this.lastroll[0], p as playerid);
                 const gainStringArray: string[] = [];
                 gains.forEach( (value, index) => {
                     if (value > 0)
                         gainStringArray.push(value.toString() + " " + suitOrder[index]);
                 });
-                message += (gainStringArray.length === 0) ? " did not collect any tokens." : " collected " + gainStringArray.join(" and ") + ".";
-                payArray.push(message);
+
+                const gainString = gainStringArray.length > 0 ? gainStringArray.join(" and ") : "0";
+                this.results.push({type: "claim", who: p, what: gainString});
             });
 
-            this.results.push({type: "announce", payload: payArray});
         }
 
         this.currplayer = newplayer as playerid;
@@ -2424,55 +2417,77 @@ export class MagnateGame extends GameBase {
         return status;
     }
 
-    public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
+/*    public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
         let resolved = false;
-        switch (r.type) {
-            case "roll":
-                if (r.who && r.values[0] === 10) 
-                    node.push(i18next.t("apresults:ROLL.magnate_initial_ten", {player, values: r.values}));
-                else if (r.who)
-                    node.push(i18next.t("apresults:ROLL.magnate_initial", {player, values: r.values}));
-                else
-                    node.push(i18next.t("apresults:ROLL.magnate", {player, values: r.values}));
-                resolved = true;
-                break;
-             case "announce": //gains on roll and taxation.
-                node.push(i18next.t("apresults:ANNOUNCE.magnate", {player, payload: r.payload.join(" ")}));
-                resolved = true;
-                break;
-            case "place":
-                if (r.where === "discards")
-                    node.push(i18next.t("apresults:PLACE.magnate_sell", {player, what: r.what}));
-                else if (r.how === "D")
-                    node.push(i18next.t("apresults:PLACE.magnate_deed_start", {player, where: r.where, what: r.what}));
-                else if (r.how === "A")
-                    node.push(i18next.t("apresults:PLACE.magnate_deed_end", {player, where: r.where, what: r.what}));
-                else
-                    node.push(i18next.t("apresults:PLACE.magnate_buy", {player, where: r.where, what: r.what}));
-                resolved = true;
-                break;
-            case "add": //to a deed
-                node.push(i18next.t("apresults:ADD.magnate", {player, where: r.where, count: r.num}));
-                resolved = true;
-                break;
-            case "convert": //Complete deed.
-                if (r.into) 
-                    node.push(i18next.t("apresults:CONVERT.magnate_trade", {player, what: r.what, into: r.into}));
-                else
-                    node.push(i18next.t("apresults:CONVERT.magnate_deed", {player, what: r.what, where: r.where}));
-                resolved = true;
-                break;
-            case "deckDraw": //For the single shuffle.
-                node.push(i18next.t("apresults:DECKDRAW.magnate"));
-                resolved = true;
-                break;
-            case "eog":
-                node.push(i18next.t("apresults:EOG.default"));
-                resolved = true;
-                break;
-        }
 
-        return resolved;
+
+*/
+
+    public chatLog(players: string[]): string[][] {
+        // chatLog to get players' names.
+        const result: string[][] = [];
+        for (const state of this.stack) {
+            if ( (state._results !== undefined) && (state._results.length > 0) ) {
+                const node: string[] = [(state._timestamp && new Date(state._timestamp).toISOString()) || "unknown"];
+                let otherPlayer = state.currplayer as number - 1;
+                if (otherPlayer < 1) {
+                    otherPlayer = this.numplayers;
+                }
+                let name = `Player ${otherPlayer}`;
+                if (otherPlayer <= players.length) {
+                    name = players[otherPlayer - 1];
+                }
+                for (const r of state._results) {
+                    if (!this.chat(node, name, state._results, r)) {
+
+                        switch (r.type) {
+                            case "roll":
+                                node.push(i18next.t("apresults:ROLL.magnate", {values: r.values, who: r.who !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
+                                break;
+                            case "claim":
+                                if (r.how)
+                                    node.push(i18next.t("apresults:CLAIM.magnate_initial"));
+                                else
+                                    node.push(i18next.t("apresults:CLAIM.magnate", {what: r.what, who: r.who !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
+                                break;
+                            case "damage": //taxation
+                                node.push(i18next.t("apresults:DAMAGE.magnate", {amount: r.amount, where: r.where, who: r.who as unknown as playerid !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
+                                break;
+                            case "announce": //gains on roll and taxation.
+                                node.push(i18next.t("apresults:ANNOUNCE.magnate", {player: name, payload: r.payload.join(" ")}));
+                                break;
+                            case "place":
+                                if (r.where === "discards")
+                                    node.push(i18next.t("apresults:PLACE.magnate_sell", {player: name, what: r.what}));
+                                else if (r.how === "D")
+                                    node.push(i18next.t("apresults:PLACE.magnate_deed_start", {player: name, where: r.where, what: r.what}));
+                                else if (r.how === "A")
+                                    node.push(i18next.t("apresults:PLACE.magnate_deed_end", {player: name, where: r.where, what: r.what}));
+                                else
+                                    node.push(i18next.t("apresults:PLACE.magnate_buy", {player: name, where: r.where, what: r.what}));
+                                break;
+                            case "add": //to a deed
+                                node.push(i18next.t("apresults:ADD.magnate", {player: name, where: r.where, count: r.num}));
+                                break;
+                            case "convert": //Complete deed.
+                                if (r.into) 
+                                    node.push(i18next.t("apresults:CONVERT.magnate_trade", {player: name, what: r.what, into: r.into}));
+                                else
+                                    node.push(i18next.t("apresults:CONVERT.magnate_deed", {player: name, what: r.what, where: r.where}));
+                                break;
+                            case "deckDraw": //For the single shuffle.
+                                node.push(i18next.t("apresults:DECKDRAW.magnate"));
+                                break;
+                            case "eog":
+                                node.push(i18next.t("apresults:EOG.default"));
+                                break;
+                        }
+                    }
+                }
+                result.push(node);
+            }
+        }
+        return result;
     }
 
     public clone(): MagnateGame {

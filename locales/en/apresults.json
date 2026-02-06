@@ -141,6 +141,8 @@
         "frogger": "{{player}} was blocked and drew {{card}} from the draw pool.",
         "jacynth": "{{player}} exerted influence at {{where}}.",
         "logger": "{{player}} claimed a protestor from the tree felled at {{where}}.",
+        "magnate": "{{who}} gained {{what}} token(s).",
+        "magnate_initial": "Players collected their Crown resource tokens.",
         "majorities_line": "{{player}} claimed the line {{where}}.",
         "majorities_H": "{{player}} claimed the horizontal direction.",
         "majorities_A": "{{player}} claimed the ascending direction.",
@@ -168,6 +170,7 @@
     },
     "DAMAGE": {
         "armadas": "{{player}}'s ship {{myName}} fired upon the enemy ship named {{theirName}}.",
+        "magnate": "{{who}} was taxed {{amount}} {{where}} tokens.",
         "pigs": "{{player}} struck {{opponent}} at {{where}}."
     },
     "DECKDRAW": {
@@ -516,7 +519,7 @@
     },
     "RESIGN": "{{player}} has resigned.",
     "ROLL": {
-        "magnate": "The next player rolled {{values}}.",
+        "magnate": "{{who}} rolled {{values}}.",
         "magnate_initial": "{{player}} rolled {{values}}.",
         "magnate_initial_ten": "{{player}} rolled {{values}}.  Players collected their Crown suits.",
         "single": "The die was rolled: {{values}}.",
