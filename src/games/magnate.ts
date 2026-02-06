@@ -1599,15 +1599,16 @@ export class MagnateGame extends GameBase {
             //const payArray:string[] = [];
             
             this.lastroll = this.roller();
+            const theDie = this.lastroll[0];
 
             //We cannot report the roll as associated with the new player.
-            this.results.push({type: "roll", values: [this.lastroll[0]], who: newplayer});
+            this.results.push({type: "roll", values: [theDie], who: newplayer});
             
             [1, 2].forEach((p) => {
 
                 //The taxman cometh?
                 if (this.lastroll.length > 1) {
-                    console.log("tax was rolled");
+                    //console.log("tax was rolled");
                     for (let t = 1; t < this.lastroll.length; t++) {
                         const taxrollIdx = this.lastroll[t] - 1;
                         if (this.tokens[p - 1][taxrollIdx] > 1) {
@@ -1620,17 +1621,27 @@ export class MagnateGame extends GameBase {
                 }
 
                 //Collecting tokens.
-                const gains = this.collectOn(this.lastroll[0], p as playerid);
-                const gainStringArray: string[] = [];
-                gains.forEach( (value, index) => {
-                    if (value > 0)
-                        gainStringArray.push(value.toString() + " " + suitOrder[index]);
-                });
+                const gains = this.collectOn(theDie, p as playerid); //Does the increments, returns tokenArray.
 
-                const gainString = gainStringArray.length > 0 ? gainStringArray.join(" and ") : "0";
-                this.results.push({type: "claim", who: p, what: gainString});
+                //Log individually unless it was crown tokens.
+                if (theDie !== 10) {
+                    const gainStringArray: string[] = [];
+                    gains.forEach( (value, index) => {
+                        if (value > 0)
+                            gainStringArray.push(value.toString() + " " + suitOrder[index]);
+                    });
+                    if (gainStringArray.length > 0) {
+                        //This test was for logging gains of 0 as well.  TODO: simplify.
+                        const gainString = gainStringArray.length > 0 ? gainStringArray.join(" and ") : "0";
+                        this.results.push({type: "claim", who: p, what: gainString});
+                    }
+                }
             });
 
+            if (theDie === 10) {
+                //Only one message for crown tokens.
+                this.results.push({type: "claim", how: "Crowns"});
+            }
         }
 
         this.currplayer = newplayer as playerid;
@@ -2442,7 +2453,10 @@ export class MagnateGame extends GameBase {
 
                         switch (r.type) {
                             case "roll":
-                                node.push(i18next.t("apresults:ROLL.magnate", {values: r.values, who: r.who !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
+                                if (r.values[0] === 8)
+                                    node.push(i18next.t("apresults:ROLL.magnate_eight", {values: r.values, who: r.who !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
+                                else
+                                    node.push(i18next.t("apresults:ROLL.magnate", {values: r.values, who: r.who !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
                                 break;
                             case "claim":
                                 if (r.how)
@@ -2452,9 +2466,6 @@ export class MagnateGame extends GameBase {
                                 break;
                             case "damage": //taxation
                                 node.push(i18next.t("apresults:DAMAGE.magnate", {amount: r.amount, where: r.where, who: r.who as unknown as playerid !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
-                                break;
-                            case "announce": //gains on roll and taxation.
-                                node.push(i18next.t("apresults:ANNOUNCE.magnate", {player: name, payload: r.payload.join(" ")}));
                                 break;
                             case "place":
                                 if (r.where === "discards")
@@ -2481,6 +2492,41 @@ export class MagnateGame extends GameBase {
                             case "eog":
                                 node.push(i18next.t("apresults:EOG.default"));
                                 break;
+                       /* boilerplate cases */
+                            case "resigned": {
+                                let rname = `Player ${r.player}`;
+                                if (r.player <= players.length) {
+                                    rname = players[r.player - 1];
+                                }
+                                node.push(i18next.t("apresults:RESIGN", {player: rname}));
+                                break;
+                            }
+                            case "timeout": {
+                                let tname = `Player ${r.player}`;
+                                if (r.player <= players.length) {
+                                    tname = players[r.player - 1];
+                                }
+                                node.push(i18next.t("apresults:TIMEOUT", {player: tname}));
+                                break;
+                            }
+                            case "gameabandoned":
+                                node.push(i18next.t("apresults:ABANDONED"));
+                                break;
+                            case "winners": {
+                                const names: string[] = [];
+                                for (const w of r.players) {
+                                    if (w <= players.length) {
+                                        names.push(players[w - 1]);
+                                    } else {
+                                        names.push(`Player ${w}`);
+                                    }
+                                }
+                                if (r.players.length === 0)
+                                    node.push(i18next.t("apresults:WINNERSNONE"));
+                                else
+                                    node.push(i18next.t("apresults:WINNERS", {count: r.players.length, winners: names.join(", ")}));
+                                break;
+                            }
                         }
                     }
                 }

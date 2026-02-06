@@ -25,7 +25,6 @@
         "biscuit": "The following cards were in opposing hands: {{cards}}.",
         "deckfish": "{{player}} was unable to move and must pass from now on.",
         "frogger": "{{player}} chose to refill the draw pool.  Other players must pass so he can take his {{moves}} remaining move(s).",
-        "magnate": "{{player}} {{payload}}",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}.",
         "stawvs": "{{player}} was unable to move and must pass from now on.  Their pieces remain on the following pyramids: {{pyramids}}."
     },
@@ -141,8 +140,8 @@
         "frogger": "{{player}} was blocked and drew {{card}} from the draw pool.",
         "jacynth": "{{player}} exerted influence at {{where}}.",
         "logger": "{{player}} claimed a protestor from the tree felled at {{where}}.",
-        "magnate": "{{who}} gained {{what}} token(s).",
-        "magnate_initial": "Players collected their Crown resource tokens.",
+        "magnate": "{{who}} gained {{what}}.",
+        "magnate_initial": "Players collected their Crown resources.",
         "majorities_line": "{{player}} claimed the line {{where}}.",
         "majorities_H": "{{player}} claimed the horizontal direction.",
         "majorities_A": "{{player}} claimed the ascending direction.",
@@ -519,9 +518,8 @@
     },
     "RESIGN": "{{player}} has resigned.",
     "ROLL": {
-        "magnate": "{{who}} rolled {{values}}.",
-        "magnate_initial": "{{player}} rolled {{values}}.",
-        "magnate_initial_ten": "{{player}} rolled {{values}}.  Players collected their Crown suits.",
+        "magnate": "{{who}} rolled a {{values}}.",
+        "magnate_eight": "{{who}} rolled an {{values}}.",
         "single": "The die was rolled: {{values}}.",
         "tablero": "The dice were rolled: {{values}}."
     },
