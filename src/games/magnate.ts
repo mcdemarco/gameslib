@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaButtonBar, AreaPieces, AreaKey, Glyph, MarkerFlood, MarkerOutline, RowCol } from "@abstractplay/renderer/src/schemas/schema";
+import { APRenderRep, AreaButtonBar, AreaPieces, AreaKey, ButtonBarButton, Glyph, MarkerFlood, MarkerOutline, RowCol } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { randomInt, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -11,7 +11,7 @@ const deepclone = require("rfdc/default");
 
 export type playerid = 1|2;
 //export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
-export type moveType = "B"|"D"|"S"|"A"|"T"|"P"|"E";
+export type moveType = "B"|"D"|"S"|"A"|"T"|"P"|"C"|"E";
 //Deeds: the column, an array of added resources, and a preferred suit (to simplify resource collection).
 export type DeedContents = {
     district: string,
@@ -22,7 +22,7 @@ export type DeedContents = {
 };
 
 const columnLabels = "abcdefghij".split("");
-const moveTypes = ["B","D","S","A","T","P"];
+const moveTypes = ["B","D","S","A","T","P","C"];
 const suitColors: string[] = ["#c7c8ca","#e08426","#6a9fcc","#bc8a5d","#6fc055","#d6dd40"];
 const suitOrder = suits.map(suit => suit.uid); //["M","S","V","L","Y","K"];
 
@@ -35,8 +35,8 @@ export interface IMoveState extends IIndividualState {
     hands: string[][];
     tokens: [number[], number[]];
     shuffled: boolean;
-    //roll: number[];
     roll: number[];
+    choose: string[];
     lastmove?: string;
 };
 
@@ -97,7 +97,7 @@ export class MagnateGame extends GameBase {
             { uid: "taxtax" }, //double taxation
         ],
         categories: ["goal>area", "goal>score>eog", "mechanic>place", "mechanic>economy", "mechanic>hidden", "mechanic>random>play", "board>none", "components>decktet"],
-        flags: ["no-explore", "perspective", "scores"],
+        flags: ["custom-randomization", "no-explore", "no-moves", "perspective", "random-start", "scores"],
     };
 
     //The UI is quite simple because we only need to specify a column.
@@ -118,6 +118,7 @@ export class MagnateGame extends GameBase {
     public tokens: [number[], number[]] = [[], []];
     //public roll: number[] = [];
     public roll: number[] = [];
+    public choose: string[] = [];
     public shuffled: boolean = false;
     public gameover: boolean = false;
     public winner: playerid[] = [];
@@ -216,8 +217,8 @@ export class MagnateGame extends GameBase {
                 discards: [],
                 hands,
                 tokens,
-                //roll,
                 roll,
+                choose: [],
                 shuffled: false
             };
             
@@ -292,8 +293,8 @@ export class MagnateGame extends GameBase {
         this.hands = state.hands.map(h => [...h]);
         this.tokens = [[...state.tokens[0]], [...state.tokens[1]]];
         this.shuffled = state.shuffled;
-        //this.roll = [...state.roll];
         this.roll = [...state.roll];
+        this.choose = [...state.choose];
         this.lastmove = state.lastmove;
 
         if (this.variants.includes("courtpawns")) {
@@ -502,7 +503,7 @@ export class MagnateGame extends GameBase {
         }
     }
     
-    private collectOn(rank: number, player: playerid): number[] {
+    private collectOn(rank: number, player: playerid, isRoller: boolean): number[] {
         //Credits the player for the rolled rank.
         //Also returns the token string of credits for logging.
         
@@ -534,6 +535,8 @@ export class MagnateGame extends GameBase {
                     //Correct rank, so collect a suit.
                     if (rank === 1) //Xtreme corner case.
                         tokens[suitOrder.indexOf(card[1])]++;
+                    else if (isRoller)
+                        this.choose.push(card);
                     else if (deed.preferred) //Player set a preference.
                         tokens[suitOrder.indexOf(deed.preferred)]++;
                     else {
@@ -867,7 +870,7 @@ export class MagnateGame extends GameBase {
             } else {
                 mm.district = district; 
             }
-        } else if ( type === "T" || type === "P" ) {
+        } else if ( type === "T" || type === "P" || type === "C" ) {
             //The suit cases har har.
             suit = split.shift()!;
             if (! suitex.test(suit) ) {
@@ -879,7 +882,7 @@ export class MagnateGame extends GameBase {
             }
         } //Skipping add for a minute.
 
-        if ( type === "D" || type === "T" || type === "P" ) {
+        if ( type === "D" || type === "T" || type === "P" || type === "C" ) {
             //These cases are now complete.
             mm.incomplete = false;
             return mm;
@@ -977,6 +980,14 @@ export class MagnateGame extends GameBase {
         const cloned = Object.assign(new MagnateGame(), deepclone(this) as MagnateGame);
         const usedCardCount = (cloned.variants.includes("mega") ? 2 : 1);
 
+        let premove = "";
+        for (const choice of cloned.choose) {
+            const suit = cloned.suitPicker(choice, cloned.currplayer);
+            cloned.tokens[cloned.currplayer - 1][suitOrder.indexOf(suit)]++;
+            premove += "C:" + choice + "," + suit + "/";
+        }
+        cloned.choose = [];
+
         //We can generate a sensible move from the player's hand, if we sort it.
         const sortedHand = cloned.hands[this.currplayer - 1].slice().sort((a,b) => parseInt(b[0]) - parseInt(a[0]));
         
@@ -1005,9 +1016,6 @@ export class MagnateGame extends GameBase {
 
                                 const tokenArray = cloned.spender(payment.split(","));
                                 cloned.debit(tokenArray, cloned.currplayer);
-
-
-
                                 
                             } else if (cloned.canDeed(card) && leverage > 2) {
                                 submove = "D:" + card + "," + dist;
@@ -1064,7 +1072,7 @@ export class MagnateGame extends GameBase {
             move += (move === "" || move.slice(-1) === "/" ? "" : "/") + submove + "/" + subsubmove;
         }
         
-        return move;
+        return premove + move;
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
@@ -1075,7 +1083,7 @@ export class MagnateGame extends GameBase {
         // * hand card (sales)
         // * deed card > add tokens
         // * token pile > token pile (for trades)
-        // * deed card > preferred suit
+        // * deed card > preferred or chosen suit
         
         try {
             let newmove = "";
@@ -1111,7 +1119,7 @@ export class MagnateGame extends GameBase {
                     if ( move && move.endsWith(":") ) {
                         //Assume it's a trade.
                         newmove = `${move}${suit}3`; 
-                    } else if ( move && (move.endsWith(suit) || (new RegExp(`^${suit}\\d$`)).test(move.substring(move.length - 2, move.length))) ) {
+                    } else if ( move && (new RegExp(`^(${suit}\\d|,${suit})$`)).test(move.substring(move.length - 2, move.length)) ) {
                         newmove = `${move.substring(0,move.lastIndexOf(","))},${suit}${((parseInt(move.charAt(move.length - 1), 10)||1) + 1)}`;
                     } else {
                         newmove = `${move},${suit}`;
@@ -1190,7 +1198,10 @@ export class MagnateGame extends GameBase {
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            result.message = i18next.t("apgames:validation.magnate.INITIAL_BUTTON_INSTRUCTIONS")
+            if (this.choose.length > 0)
+                result.message = i18next.t("apgames:validation.magnate.CHOICE_BUTTON_INSTRUCTIONS")
+            else
+                result.message = i18next.t("apgames:validation.magnate.INITIAL_BUTTON_INSTRUCTIONS")
             return result;
         }
 
@@ -1218,6 +1229,13 @@ export class MagnateGame extends GameBase {
             if (pact.valid === false) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.magnate.INVALID_MOVE", {move: action});
+                return result;
+            }
+
+            //New ordering requirement.
+            if (cloned.choose.length > 0 && pact.type !== "C") {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.magnate.MUST_CHOOSE");
                 return result;
             }
 
@@ -1262,15 +1280,17 @@ export class MagnateGame extends GameBase {
                     result.valid = true;
                     result.complete = -1;
                     
-                    if (pact.type ===  "A" || pact.type === "P" ) 
+                    if (pact.type ===  "A" || pact.type === "P")
                         result.message = i18next.t("apgames:validation.magnate.DEEDED_CARD_INSTRUCTIONS");
+                    else if (pact.type === "C")
+                        result.message = i18next.t("apgames:validation.magnate.CHOICE_BUTTON_INSTRUCTIONS");
                     else
                         result.message = i18next.t("apgames:validation.magnate.HAND_CARD_INSTRUCTIONS");
                        
                     return result;
                 }
 
-                if ( pact.type === "A" || pact.type === "P" ) {
+                if ( pact.type === "A" || pact.type === "P" || pact.type === "C" ) {
                     //Card must be already deeded.
                     if (! cloned.deeds[cloned.currplayer - 1].has(pact.card)) {
                         result.valid = false;
@@ -1307,12 +1327,15 @@ export class MagnateGame extends GameBase {
                 //We get them in an array format.
                 const tokens = cloned.card2tokens(pact.card, pact.type);
  
-                if ( pact.type === "P" ) {
+                if ( pact.type === "P" || pact.type === "C" ) {
                     if ( pact.suit === undefined ) {
                         result.valid = true;
                         result.complete = -1;
                         result.canrender = true;
-                        result.message = i18next.t("apgames:validation.magnate.PREFER_SUIT_INSTRUCTIONS");
+                        if (pact.type === "P")
+                            result.message = i18next.t("apgames:validation.magnate.PREFER_SUIT_INSTRUCTIONS");
+                        else
+                            result.message = i18next.t("apgames:validation.magnate.CHOOSE_SUIT_INSTRUCTIONS");
                         return result;
                     } else {
                         //Test suit against card using tokens.
@@ -1322,10 +1345,15 @@ export class MagnateGame extends GameBase {
                             result.message = i18next.t("apgames:validation.magnate.INVALID_SUIT");
                             return result; 
                         } else {
-                            //We set the preference and display it.
-                            const deed = cloned.deeds[cloned.currplayer - 1].get(pact.card)!;
-                            deed.preferred = pact.suit;
-                            //cloned.deeds[cloned.currplayer - 1].set(pact.card, deed)!;                   
+                            if (pact.type === "P") {
+                                //We set the preference and display it.
+                                const deed = cloned.deeds[cloned.currplayer - 1].get(pact.card)!;
+                                deed.preferred = pact.suit;
+                            } else {
+                                //We credit the chosen token for future validation.
+                                cloned.tokens[cloned.currplayer - 1][suitOrder.indexOf(pact.suit)]++;
+                                cloned.removeCard(pact.card, cloned.choose);
+                            }
                         }
                     }
                 }
@@ -1537,12 +1565,16 @@ export class MagnateGame extends GameBase {
                         }
                     }
                                 
-                } else if ( pact.type === "A" || pact.type === "P" ) {
+                } else if ( pact.type === "A" || pact.type === "P" || pact.type === "C" ) {
                     const deed = this.deeds[this.currplayer - 1].get(pact.card)!;
                     if (pact.type === "P" && pact.suit !== undefined) {
                         deed.preferred = pact.suit;
-                        //this.deeds[this.currplayer - 1].set(pact.card, deed);
                         //Don't chatlog.
+                    }
+                    
+                    if (pact.type === "C" && pact.suit !== undefined) {
+                        this.tokens[this.currplayer - 1][suitOrder.indexOf(pact.suit)]++;
+                        this.removeCard(pact.card,this.choose);
                     }
 
                     if (pact.type === "A" && pact.spend !== undefined) {
@@ -1615,7 +1647,8 @@ export class MagnateGame extends GameBase {
                 }
 
                 //Collecting tokens.
-                const gains = this.collectOn(theDie, p as playerid); //Does the increments, returns tokenArray.
+                const isRoller: boolean = p === (newplayer as playerid);
+                const gains = this.collectOn(theDie, p as playerid, isRoller); //Does the increments, returns tokenArray.
 
                 //Log individually unless it was crown tokens.
                 if (theDie !== 10) {
@@ -1625,8 +1658,8 @@ export class MagnateGame extends GameBase {
                             gainStringArray.push(value.toString() + " " + suitOrder[index]);
                     });
                     if (gainStringArray.length > 0) {
-                        //This test was for logging gains of 0 as well.  TODO: simplify.
-                        const gainString = gainStringArray.length > 0 ? gainStringArray.join(" and ") : "0";
+                        //Oxford gainString.
+                        const gainString = gainStringArray.reduce( (a, b, i, array) => a + ( i < array.length - 1 ? ', ' : (array.length > 2 ? ', and ' : ' and ') ) + b);
                         this.results.push({type: "claim", who: p, what: gainString});
                     }
                 }
@@ -1703,8 +1736,8 @@ export class MagnateGame extends GameBase {
             hands: this.hands.map(h => [...h]),
             tokens: [[...this.tokens[0]],[...this.tokens[1]]],
             shuffled: this.shuffled,
-            //roll: [...this.roll],
             roll: [...this.roll],
+            choose: [...this.choose],
             lastmove: this.lastmove,
         };
     }
@@ -1712,6 +1745,18 @@ export class MagnateGame extends GameBase {
     
 
     /* render functions */
+    private deed2coords(card: string, player: playerid): number[] {
+        const deed = this.deeds[player - 1].get(card);
+        const col = this.algebraic2coord(deed!.district);
+        
+        const centerrow = this.getBoardSize()[0];
+        const multiplier = player === 1 ? 1 : -1;
+        const colsize = this.board[player][col].length;
+        const rowAdjust =  ( this.deeds[player - 1].has(card) ) ? 1 : 0;
+
+        return [col, centerrow + ((colsize + rowAdjust) * multiplier)];
+    }
+    
     private result2coords(district: string, card: string): number[] {
         //We don't have the player id to check the correct element 
         //of the board or deed array, so we check both.
@@ -1733,6 +1778,35 @@ export class MagnateGame extends GameBase {
         const rowAdjust =  ( this.deeds[player - 1].has(card) ) ? 1 : 0;
 
         return [col, centerrow + ((colsize + rowAdjust) * multiplier)];
+    }
+    
+    private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] {
+        //Get the appropriate buttons.
+        let buttons:  [ButtonBarButton, ...ButtonBarButton[]] = [
+            {label: "Buy"},
+            {label: "Deed"},
+            {label: "Sell"}
+        ];
+
+        if ( this.choose.length > 0 ) {
+            buttons = [ 
+                {label: "Choose"}
+            ];
+            return buttons;
+        }
+
+        const deedy = this.deeds[this.currplayer - 1].size > 0;
+
+        if (deedy)
+            buttons.push({label: "Add"});
+
+        if (this.tokens[this.currplayer - 1].filter( v => v >= 3).length > 0)
+            buttons.push({label: "Trade"});
+
+        if (deedy)
+            buttons.push({label: "Prefer"});
+
+        return buttons;
     }
     
     private getBoardSize(): number[] {
@@ -1982,9 +2056,9 @@ export class MagnateGame extends GameBase {
             if (card.rank.uid === this.pawnrank || card.rank.name === "Excuse") {
                 glyph = this.renderDecktetGlyph(card); // no borders
             } else if ( this.deeds[0].has(card.uid) ) {
-                glyph = this.renderDecktetGlyph(card, true, this.deeds[0].get(card.uid), 0.33, 1);
+                glyph = this.renderDecktetGlyph(card, true, this.deeds[0].get(card.uid), 0.4, 1);
             } else if ( this.deeds[1].has(card.uid) ) {
-                glyph = this.renderDecktetGlyph(card, true, this.deeds[1].get(card.uid), 0.33, 2);
+                glyph = this.renderDecktetGlyph(card, true, this.deeds[1].get(card.uid), 0.4, 2);
             }
             
             legend["k" + card.uid] = glyph;
@@ -2088,12 +2162,14 @@ export class MagnateGame extends GameBase {
         if (this.roll[0] < 10) {
             legend["Die"] = {
                 name: `d6-${this.roll[0]}`,
+                colour: this.currplayer,
                 orientation: "vertical",
             };
         } else {
             legend["Die"] = [
                 {
                     name: "d6-empty",
+                    colour: this.currplayer,
                     orientation: "vertical",
                 },
                 {
@@ -2169,19 +2245,13 @@ export class MagnateGame extends GameBase {
             clickable: false,
             height: 1
         });
+
         //Button area.
         areas.push({                      
             type: "buttonBar",
             position: "left",
             height: 0.75,
-            buttons: [
-                {label: "Buy"},
-                {label: "Deed"},
-                {label: "Sell"},
-                {label: "Add"},
-                {label: "Trade"},
-                {label: "Prefer"},
-            ]
+            buttons: this.getActionButtons()
         });
 
         //discards
@@ -2229,16 +2299,21 @@ export class MagnateGame extends GameBase {
         };
 
         // Add annotations.
+        rep.annotations = [];
         if (this.results.length > 0) {
-            rep.annotations = [];
             for (const move of this.results) {
                 if (move.type === "place" && move.where !== "discards") {
                     const [x, y] = this.result2coords(move.where!, move.what!);
                     rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
                 } 
             }
-            
-            /*else if (move.type === "move") {
+        }
+        for (const choice of this.choose) {
+            const [x, y] = this.deed2coords(choice, this.currplayer);
+            rep.annotations.push({type: "enter", occlude: false, targets: [{row: y, col: x}], colour: this.currplayer});
+        }
+
+        /*else if (move.type === "move") {
               const [fromX, fromY] = this.algebraic2coord(move.from);
               const [toX, toY] = this.algebraic2coord(move.to);
               rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
@@ -2247,8 +2322,11 @@ export class MagnateGame extends GameBase {
               const [x, y] = this.algebraic2coord(move.where!);
               rep.annotations.push({type: "enter", occlude: false, dashed: [2,4], targets: [{row: y, col: x}]});
               }
-              }*/
-        }
+          }
+        */
+
+        if (rep.annotations.length === 0)
+            delete rep.annotations;
 
         return rep;
     }
