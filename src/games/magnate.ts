@@ -36,7 +36,7 @@ export interface IMoveState extends IIndividualState {
     tokens: [number[], number[]];
     shuffled: boolean;
     //roll: number[];
-    lastroll: number[];
+    roll: number[];
     lastmove?: string;
 };
 
@@ -117,7 +117,7 @@ export class MagnateGame extends GameBase {
     public hands: string[][] = [];
     public tokens: [number[], number[]] = [[], []];
     //public roll: number[] = [];
-    public lastroll: number[] = [];
+    public roll: number[] = [];
     public shuffled: boolean = false;
     public gameover: boolean = false;
     public winner: playerid[] = [];
@@ -175,7 +175,7 @@ export class MagnateGame extends GameBase {
             crownDeck.shuffle();
 
             //initial roll
-            const lastroll: number[] = this.roller();
+            const roll: number[] = this.roller();
 
             //Taxation and rank rolls have no impact on the first turn,
             //but we may have to process a Christmas roll.
@@ -187,7 +187,7 @@ export class MagnateGame extends GameBase {
                     crowns[p][suitOrder.indexOf(suit)]++;
                     //Could do this with the inappropriate function.
                     tokens[p][suitOrder.indexOf(suit)]++;
-                    if (lastroll[0] === 10) {//Christmas!
+                    if (roll[0] === 10) {//Christmas!
                         //Could do this with the appropriate function.
                         tokens[p][suitOrder.indexOf(suit)]++;
                     }
@@ -217,7 +217,7 @@ export class MagnateGame extends GameBase {
                 hands,
                 tokens,
                 //roll,
-                lastroll,
+                roll,
                 shuffled: false
             };
             
@@ -293,7 +293,7 @@ export class MagnateGame extends GameBase {
         this.tokens = [[...state.tokens[0]], [...state.tokens[1]]];
         this.shuffled = state.shuffled;
         //this.roll = [...state.roll];
-        this.lastroll = [...state.lastroll];
+        this.roll = [...state.roll];
         this.lastmove = state.lastmove;
 
         if (this.variants.includes("courtpawns")) {
@@ -1460,8 +1460,8 @@ export class MagnateGame extends GameBase {
 
         if (this.stack.length === 1) {
             //Need to log the initial roll.
-            this.results.push({type: "roll", values: [this.lastroll[0]], who: this.currplayer});
-            if (this.lastroll[0] === 10)
+            this.results.push({type: "roll", values: [this.roll[0]], who: this.currplayer});
+            if (this.roll[0] === 10)
                 this.results.push({type: "claim", how: "crowns"});
         };
 
@@ -1578,7 +1578,7 @@ export class MagnateGame extends GameBase {
         this.drawUp();
 
         this.lastmove = m;
-        //this.lastroll = this.roll;
+        //this.roll = this.roll;
 
         // update currplayer
         let newplayer = (this.currplayer as number) + 1;
@@ -1594,8 +1594,8 @@ export class MagnateGame extends GameBase {
 
             //const payArray:string[] = [];
             
-            this.lastroll = this.roller();
-            const theDie = this.lastroll[0];
+            this.roll = this.roller();
+            const theDie = this.roll[0];
 
             //We cannot report the roll as associated with the new player.
             this.results.push({type: "roll", values: [theDie], who: newplayer});
@@ -1603,9 +1603,9 @@ export class MagnateGame extends GameBase {
             [1, 2].forEach((p) => {
 
                 //The taxman cometh?
-                if (this.lastroll.length > 1) {
-                    for (let t = 1; t < this.lastroll.length; t++) {
-                        const taxrollIdx = this.lastroll[t] - 1;
+                if (this.roll.length > 1) {
+                    for (let t = 1; t < this.roll.length; t++) {
+                        const taxrollIdx = this.roll[t] - 1;
                         if (this.tokens[p - 1][taxrollIdx] > 1) {           //Taxable?
                             const tax = this.tokens[p - 1][taxrollIdx] - 1; //Save amount for logging.
                             this.tokens[p - 1][taxrollIdx] = 1;             //Taxing
@@ -1704,7 +1704,7 @@ export class MagnateGame extends GameBase {
             tokens: [[...this.tokens[0]],[...this.tokens[1]]],
             shuffled: this.shuffled,
             //roll: [...this.roll],
-            lastroll: [...this.lastroll],
+            roll: [...this.roll],
             lastmove: this.lastmove,
         };
     }
@@ -2085,9 +2085,9 @@ export class MagnateGame extends GameBase {
             } //end p
         } //end suit
     
-        if (this.lastroll[0] < 10) {
+        if (this.roll[0] < 10) {
             legend["Die"] = {
-                name: `d6-${this.lastroll[0]}`,
+                name: `d6-${this.roll[0]}`,
                 orientation: "vertical",
             };
         } else {
@@ -2114,18 +2114,18 @@ export class MagnateGame extends GameBase {
             orientation: "vertical",
         };
 
-        if (this.lastroll.length > 1) {
+        if (this.roll.length > 1) {
 
             legend["Tax"] = [
                 {name: "d6-empty", colour: "_context_background", orientation: "vertical"},
-                {name: suits[this.lastroll[1] - 1].glyph!, scale: 0.75, orientation: "vertical"}
+                {name: suits[this.roll[1] - 1].glyph!, scale: 0.75, orientation: "vertical"}
             ];
 
             //Note that the taxtax variant does not always result in double taxation.
-            if (this.lastroll.length > 2) {
+            if (this.roll.length > 2) {
                 legend["TaxTax"] = [
                     {name: "d6-empty", colour: "_context_background", orientation: "vertical"},
-                    {name: suits[this.lastroll[2] - 1].glyph!, scale: 0.75, orientation: "vertical"}
+                    {name: suits[this.roll[2] - 1].glyph!, scale: 0.75, orientation: "vertical"}
                 ];
             }
         }
