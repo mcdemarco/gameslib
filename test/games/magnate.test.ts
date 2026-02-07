@@ -259,7 +259,7 @@ describe("Magnate", () => {
     });
 
     it ("Renders without exploding", () => {
-        g.render();
+        console.log(JSON.stringify(g.render()));
         g.move(g.randomMove());
         g.render();
     });

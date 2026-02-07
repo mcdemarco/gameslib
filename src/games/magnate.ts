@@ -337,7 +337,6 @@ export class MagnateGame extends GameBase {
         //Adds tokens to deeds.
         //Returns true if the deed is completed by the addition.
         const deed = this.deeds[this.currplayer - 1].get(card)!;
-        //console.log("in a2d with ", card, deed, spend);
         const cardObj = Multicard.deserialize(card)!;
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         const price = this.getPriceFromRank(cardObj.rank.seq);
@@ -358,8 +357,6 @@ export class MagnateGame extends GameBase {
             }
         }
         
-        //console.log(card, this.deeds[this.currplayer - 1].get(card));
-
         return (test && paid === price);
     }
 
@@ -1475,7 +1472,6 @@ export class MagnateGame extends GameBase {
 
             //Spend first, other stuff later.
             if (pact.spend !== undefined) {
-                //console.log("spending ", pact.spend);
                 this.debit(pact.spend, this.currplayer);
             }
             
@@ -1608,14 +1604,12 @@ export class MagnateGame extends GameBase {
 
                 //The taxman cometh?
                 if (this.lastroll.length > 1) {
-                    //console.log("tax was rolled");
                     for (let t = 1; t < this.lastroll.length; t++) {
                         const taxrollIdx = this.lastroll[t] - 1;
-                        if (this.tokens[p - 1][taxrollIdx] > 1) {
-                            console.log("taxing " + this.lastroll[t]);
-                            const tax = this.tokens[p - 1][taxrollIdx] - 1;
-                            this.tokens[p - 1][taxrollIdx] = 1;
-                            this.results.push({type: "damage", who: p.toString(), amount: tax, where: suitOrder[taxrollIdx]});
+                        if (this.tokens[p - 1][taxrollIdx] > 1) {           //Taxable?
+                            const tax = this.tokens[p - 1][taxrollIdx] - 1; //Save amount for logging.
+                            this.tokens[p - 1][taxrollIdx] = 1;             //Taxing
+                            this.results.push({type: "capture", whose: p, count: tax, where: suitOrder[taxrollIdx]});
                         }
                     }
                 }
@@ -1777,7 +1771,6 @@ export class MagnateGame extends GameBase {
                 scale: border? 1.1 : 1,
                 colour: fill ? fill : "_context_background",
                 opacity: opacity/4,
-                orientation: "vertical",
             },
         ]
         
@@ -2094,12 +2087,14 @@ export class MagnateGame extends GameBase {
     
         if (this.lastroll[0] < 10) {
             legend["Die"] = {
-                name: `d6-${this.lastroll[0]}`
+                name: `d6-${this.lastroll[0]}`,
+                orientation: "vertical",
             };
         } else {
             legend["Die"] = [
                 {
-                    name: "d6-empty"
+                    name: "d6-empty",
+                    orientation: "vertical",
                 },
                 {
                     text: "10",
@@ -2111,24 +2106,26 @@ export class MagnateGame extends GameBase {
         }
         
         legend["Tax"] = {
-            name: "d6-empty"
+            name: "d6-empty",
+            orientation: "vertical",
         };
         legend["TaxTax"] = {
-            name: "d6-empty"
+            name: "d6-empty",
+            orientation: "vertical",
         };
 
         if (this.lastroll.length > 1) {
 
             legend["Tax"] = [
-                {name: "d6-empty", colour: "_context_background"},
-                {name: suits[this.lastroll[1] - 1].glyph!, scale: 0.75}
+                {name: "d6-empty", colour: "_context_background", orientation: "vertical"},
+                {name: suits[this.lastroll[1] - 1].glyph!, scale: 0.75, orientation: "vertical"}
             ];
 
             //Note that the taxtax variant does not always result in double taxation.
             if (this.lastroll.length > 2) {
                 legend["TaxTax"] = [
-                    {name: "d6-empty", colour: "_context_background"},
-                    {name: suits[this.lastroll[2] - 1].glyph!, scale: 0.75}
+                    {name: "d6-empty", colour: "_context_background", orientation: "vertical"},
+                    {name: suits[this.lastroll[2] - 1].glyph!, scale: 0.75, orientation: "vertical"}
                 ];
             }
         }
@@ -2154,44 +2151,19 @@ export class MagnateGame extends GameBase {
                     width: width,
                     ownerMark: p
                 });
-            }/*
-               if (tokens.length > 0) {
-               areas.push({
-               type: "pieces",
-               pieces: tokens as [string, ...string[]],
-               label: i18next.t("apgames:validation.magnate.LABEL_COLLECTION", {playerNum: p}) || `P${p} Tokens`,
-               spacing: 0.25,
-               width: 6
-               //ownerMark: p
-               });
-               }*/
+            }
         }
 
         //Build die roll area
         areas.push({
             type: "key",
             list: this.variants.includes("taxtax") ? [
-                {
-                    piece: "Die",
-                    name: ""
-                },
-                {
-                    piece: "Tax",
-                    name: ""
-                },
-                {
-                    piece: "TaxTax",
-                    name: ""
-                }
+                {piece: "Die", name: ""},
+                {piece: "Tax", name: ""},
+                {piece: "TaxTax", name: ""}
             ] : [
-                {
-                    piece: "Die",
-                    name: ""
-                },
-                {
-                    piece: "Tax",
-                    name: ""
-                }
+                {piece: "Die", name: ""},
+                {piece: "Tax", name: ""}
             ],
             position: "right",
             clickable: false,
@@ -2203,24 +2175,12 @@ export class MagnateGame extends GameBase {
             position: "left",
             height: 0.75,
             buttons: [
-                {
-                    label: "Buy"
-                },
-                {
-                    label: "Deed"
-                },
-                {
-                    label: "Sell"
-                },
-                {
-                    label: "Add"
-                },
-                {
-                    label: "Trade"
-                },
-                {
-                    label: "Prefer"
-                },
+                {label: "Buy"},
+                {label: "Deed"},
+                {label: "Sell"},
+                {label: "Add"},
+                {label: "Trade"},
+                {label: "Prefer"},
             ]
         });
 
@@ -2428,12 +2388,6 @@ export class MagnateGame extends GameBase {
         return status;
     }
 
-/*    public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
-        let resolved = false;
-
-
-*/
-
     public chatLog(players: string[]): string[][] {
         // chatLog to get players' names.
         const result: string[][] = [];
@@ -2464,8 +2418,8 @@ export class MagnateGame extends GameBase {
                                 else
                                     node.push(i18next.t("apresults:CLAIM.magnate", {what: r.what, who: r.who !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
                                 break;
-                            case "damage": //taxation
-                                node.push(i18next.t("apresults:DAMAGE.magnate", {amount: r.amount, where: r.where, who: r.who as unknown as playerid !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
+                            case "capture": //taxation
+                                node.push(i18next.t("apresults:CAPTURE.magnate", {count: r.count, where: r.where, whose: r.whose !== state.currplayer ? name : players.filter(p => p !== name)[0]}));
                                 break;
                             case "place":
                                 if (r.where === "discards")

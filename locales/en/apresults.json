@@ -69,6 +69,7 @@
         "lasca_officer": "{{player}} captured an officer at {{where}}.",
         "lasca_soldier": "{{player}} captured a soldier at {{where}}.",
         "lifeline": "Dead pieces were removed at {{where}}.",
+        "magnate": "{{whose}} was taxed {{count}} {{where}} tokens.",
         "majorities": "{{count}} pieces were removed.",
         "mancala_one": "{{player}} captured {{count}} stone from {{pit}}.",
         "mancala_other": "{{player}} captured {{count}} stones from {{pit}}.",
@@ -169,7 +170,6 @@
     },
     "DAMAGE": {
         "armadas": "{{player}}'s ship {{myName}} fired upon the enemy ship named {{theirName}}.",
-        "magnate": "{{who}} was taxed {{amount}} {{where}} tokens.",
         "pigs": "{{player}} struck {{opponent}} at {{where}}."
     },
     "DECKDRAW": {
