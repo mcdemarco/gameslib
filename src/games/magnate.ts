@@ -2039,7 +2039,7 @@ export class MagnateGame extends GameBase {
                         dx: nudge[0],
                         dy: nudge[1],
                     },
-                    colour: "#000",
+//                    colour: "#000",
                     orientation: "vertical",
                 });
 
@@ -2051,7 +2051,7 @@ export class MagnateGame extends GameBase {
                         dx: nudge[0],
                         dy: nudge[1],
                     },
-                    colour: "#000",
+//                    colour: "#000",
                     orientation: "vertical",
                 });
             
@@ -2063,7 +2063,7 @@ export class MagnateGame extends GameBase {
                         dx: nudge[0],
                         dy: nudge[1],
                     },
-                    colour: "#000",
+//                    colour: "#000",
                     orientation: "vertical",
                 });
         
@@ -2232,7 +2232,7 @@ export class MagnateGame extends GameBase {
                     {
                         text: pcount.toString(),
                         scale: 0.70,
-                        colour: "#000",
+//                        colour: "#000",
                         nudge: {
                             dx: 0,
                             dy: 100,
@@ -2303,7 +2303,7 @@ export class MagnateGame extends GameBase {
                 {
                     text: "10",
                     scale: 0.70,
-                    colour: "_context_strokes",
+//                    colour: "_context_strokes",
                     orientation: "vertical",
                 }
             ];
