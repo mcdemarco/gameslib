@@ -753,7 +753,7 @@ export class MagnateGame extends GameBase {
     }
 
     public parseMove(submove: string): IMagnateMove {
-        //Parse a substring into an IMagnateMove object.
+        //Parse a submove (single action) into an IMagnateMove object.
         //Does only structural validation.
         //Expects at leat a choice of move type (X:).
 
@@ -774,6 +774,7 @@ export class MagnateGame extends GameBase {
         // Add:    card, spend
         // Trade:  suit, suit
         // Prefer: card, suit
+        // Choose: card, suit
         // Error:  for internal use only
 
         const mm: IMagnateMove = {
@@ -907,6 +908,56 @@ export class MagnateGame extends GameBase {
         mm.incomplete = false;
         return mm;
     }
+    
+    public pickleMove(pact: IMagnateMove): string {
+        //Pickle is how the cool kids say "serialize".
+        //Cycling through parseMove and pickleMove is handy
+        // for making the submove string shorter.
+
+        //Expects a legal parsed move.
+        if (pact.valid === false) {
+            throw new Error("Cannot reserialize an invalid move object.");
+        }
+        
+        if (pact.type === undefined || moveTypes.indexOf(pact.type) < 0) {
+            throw new Error("Could not reserialize the move object: missing type.");
+        }
+
+        let move = pact.type + ":";
+
+        //The move formats depend on the main action:
+        // Buy:    card, district, spend
+        // Deed:   card, district
+        // Sell:   card
+        // Add:    card, spend
+        // Trade:  spend, suit
+        // Prefer: card, suit
+        // Choose: card, suit
+        // Error:  for internal use only
+        
+        if (pact.card)
+            move += pact.card;
+        else if (pact.spend) {
+            move += this.unspender(pact.spend).join(",");
+            if (pact.suit)
+                move += "," + pact.suit;
+            return move;
+        } else {
+            //assume incomplete rather than in error.
+            return move;
+        }
+
+        //If we're here, we have a card.
+        if (pact.district)
+            move += "," + pact.district;
+        
+        if (pact.spend)
+            move += "," + this.unspender(pact.spend).join(",");
+        else if (pact.suit) 
+            move += "," + pact.suit;
+
+        return move;
+    }
 
     private placeCard(card: string, district: string): void {
         const col = this.algebraic2coord(district);
@@ -953,6 +1004,20 @@ export class MagnateGame extends GameBase {
             return choices[1];
     }
     
+    private unspender(tokenArray: number[]): string[] {
+        //Parses a token array into a pre-split spend.
+        const spend: string[] = [];
+
+        tokenArray.forEach((value, index) => {
+            if (value > 0) {
+                const suit = suitOrder[index];
+                const quantity = (value === 1 ? "" : value.toString());
+                spend.push(`${suit}${quantity}`);
+            }
+        });
+ 
+        return spend;
+    }
 
     
     //Not autopassing (or passing) so don't need a moves function?

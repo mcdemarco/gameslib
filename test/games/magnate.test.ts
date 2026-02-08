@@ -74,6 +74,7 @@ describe("Magnate", () => {
             type: "E",
             valid: false
         });
+
     });
     it ("Parses deeds", () => {
 
@@ -238,6 +239,23 @@ describe("Magnate", () => {
             type: "C",
             valid: false
         });
+
+    });
+    it ("Unparses all", () => {
+        expect(g.pickleMove(g.parseMove("B:1L1,a,M3,S5"))).eq("B:1L1,a,M3,S5");
+        expect(g.pickleMove(g.parseMove("B:1L1,a,M,S4,M2,S"))).eq("B:1L1,a,M3,S5");
+        
+        expect(g.pickleMove(g.parseMove("D:TMLY2,h"))).eq("D:TMLY2,h");
+
+        expect(g.pickleMove(g.parseMove("S:9MS2,M5,"))).eq("S:9MS2");
+
+        expect(g.pickleMove(g.parseMove("A:4MS2,M5"))).eq("A:4MS2,M5");
+
+        expect(g.pickleMove(g.parseMove("T:Y3,M"))).eq("T:Y3,M");
+
+        expect(g.pickleMove(g.parseMove("P:4MS,K"))).eq("P:4MS,K");
+
+        expect(g.pickleMove(g.parseMove("C:4MS2"))).eq("C:4MS2");
 
     });
     
