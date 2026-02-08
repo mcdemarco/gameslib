@@ -438,6 +438,53 @@ export class MagnateGame extends GameBase {
         return tokens;
     }
     
+    private checkChange(card: string): string[] {
+        //Returns exactly the tokens currplayer must spend to buy card,
+        // that is, returns a partial or full payment for autocompletes.
+        //Assumes canPay.
+        
+        const cardObj = Multicard.deserialize(card)!;
+        
+        //Sets correct "Court" cost, with exception for Aces.
+        let price = this.getPriceFromRank(cardObj.rank.seq);
+
+        const suitIdxs = cardObj.suits.map(s => s.seq - 1);
+        const tokens = this.tokens[this.currplayer - 1].slice().map( (v, i) =>
+            suitIdxs.indexOf(i) === -1 ? 0 : v);
+        
+        if ( tokens.reduce( (cur, acc) => cur + acc, 0) === price ) {
+            return this.unspender(tokens);
+        }
+        
+        let spendy = Array(6).fill(0);
+
+        //Required diversification.
+        suitIdxs.forEach( (suitIdx) => {
+            tokens[suitIdx]--;
+            spendy[suitIdx]++;
+            price--;
+        });
+
+        //Special case of 2.
+        if (cardObj.rank.seq === 2) {
+            return this.unspender(spendy);
+        }
+        
+        let remaining = tokens.filter(v => v > 0);
+
+        //Special cases of ace or paying the rest from a single suit.
+        if (remaining.length === 1 || suitIdxs.length === 1) {
+            suitIdxs.forEach( (suitIdx) => {
+                spendy[suitIdx] += tokens[suitIdx];
+            });
+            return this.unspender(spendy);
+        }
+
+        //TODO: more useful partial payments.
+        
+        return this.unspender(spendy);
+    }
+    
     private checkSpend(card: string, spend: number[], type: string): number {
         //Checks that an intermediate or final addition to a deed is legal,
         //or that an intermediate or final payment on a buy is legal.
@@ -454,7 +501,7 @@ export class MagnateGame extends GameBase {
         const cardObj = Multicard.deserialize(card)!;
         
         //Sets correct "Court" cost, with exception for Aces.
-        const price = cardObj.rank.seq === 1 ? 3 : Math.ceil(cardObj.rank.seq);
+        const price = this.getPriceFromRank(cardObj.rank.seq);
 
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         const spendy = spend.slice();
@@ -1228,13 +1275,27 @@ export class MagnateGame extends GameBase {
                 }
             }
             
-            const result = this.validateMove(newmove) as IClickResult;
+            let result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
-                //TODO: Revert latest addition to newmove.
                 result.move = move;
-                //newmove.includes(",") ? newmove.substring(0,newmove.lastIndexOf(",")) : (newmove.includes(":") ? newmove.split(":")[0] : "");
+                //TODO: Revert latest addition to newmove.
+                //result.move = move + (newmove.includes(",") ? newmove.substring(0,newmove.lastIndexOf(",")) : (newmove.includes(":") ? newmove.split(":")[0] : ""));
             } else {
-                result.move = newmove;
+                if (result.autocomplete !== undefined) {
+                    //Internal autocompletion.
+                    let automove = result.autocomplete;
+                    result = this.validateMove(automove) as IClickResult;
+
+                    /*A double auto-completion may be needed?
+                      if (result.autocomplete !== undefined) {
+                      automove = result.autocomplete;
+                      result = this.validateMove(automove) as IClickResult;
+                      }*/
+                    result.move = automove;
+                } else {
+                    result.move = newmove;
+                }
+                return result;
             }
             return result;
         } catch (e) {
@@ -1461,6 +1522,8 @@ export class MagnateGame extends GameBase {
                         result.valid = true;
                         result.complete = -1;
                         result.canrender = true;
+                        if (pact.type === "B")
+                            result.autocomplete = m + "," + cloned.checkChange(pact.card).join(",");
                         result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
                         return result;
                     } else {
