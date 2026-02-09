@@ -128,7 +128,7 @@ export class MagnateGame extends GameBase {
     private pawnrank: string = "P";
     private courtrank: string = "T";
     private districts: number = 5;
-    private deck!: Multideck[];
+    private deck: Multideck[] = [];
     //    private highlights: string[] = [];
 
     constructor(state?: IMagnateState | string, variants?: string[]) {
@@ -195,7 +195,7 @@ export class MagnateGame extends GameBase {
                 }
             }
             
-            const deck = [this.initDeck(deckCount)];
+            let deck = this.initDeck(deckCount);
 
             if ( this.variants.includes("mega") && this.variants.includes("stacked") ) {
                 //The division process also shuffles (a lot).
@@ -264,7 +264,7 @@ export class MagnateGame extends GameBase {
         return;
     }
 
-    private initDeck(deckCount: number, forRender?: boolean): Multideck {
+    private initDeck(deckCount: number, forRender?: boolean): Multideck[] {
         //Init draw deck and hands.
 
         //Remove the crowns from the basic deck.
@@ -280,7 +280,7 @@ export class MagnateGame extends GameBase {
             cards.push([...cardsExtended.filter(c => c.rank.name === "Excuse")][0]);
         }
 
-        return new Multideck(cards, deckCount);
+        return [new Multideck(cards, deckCount), new Multideck([], deckCount), new Multideck([], deckCount)];
     }
 
     private roller(): number[] {
@@ -331,7 +331,7 @@ export class MagnateGame extends GameBase {
 
         // Deck is reset every time you load
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
-        this.deck = [this.initDeck(deckCount)];
+        this.deck = this.initDeck(deckCount);
         
         // remove cards from the deck that are on the board, the discard, or in known hands
         for (const uid of [...this.board[1].flat(), ...this.board[2].flat(), ...this.discards]) {
@@ -355,7 +355,7 @@ export class MagnateGame extends GameBase {
         } else {
             this.deck[0].shuffle();
         }
-        
+
         return this;
     }
 
@@ -680,9 +680,9 @@ export class MagnateGame extends GameBase {
         //First, try to draw what we need from the deck.
         const toDraw = this.variants.includes("mega") ? 2 : 1;
 
-        const drawDeckIdx = ( this.variants.includes("mega") && this.variants.includes("stacked") ) ? this.currplayer : 0;
+        const drawDeckIdx = ( (! this.shuffled) && this.variants.includes("mega") && this.variants.includes("stacked") ) ? this.currplayer : 0;
        
-        let drawn = this.deck[drawDeckIdx].draw(Math.min(this.deck[0].size, toDraw)).map(c => c.uid);
+        let drawn = this.deck[drawDeckIdx].draw(Math.min(this.deck[drawDeckIdx].size, toDraw)).map(c => c.uid);
 
         drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         
@@ -1115,7 +1115,6 @@ export class MagnateGame extends GameBase {
     }
 
     public randomMove(): string {
-        //TODO: do something more reasonable.
         let move: string = "";
 
         if (this.gameover)
@@ -1123,6 +1122,7 @@ export class MagnateGame extends GameBase {
 
         const cloned = Object.assign(new MagnateGame(), deepclone(this) as MagnateGame);
         const usedCardCount = (cloned.variants.includes("mega") ? 2 : 1);
+        const leverageCount = usedCardCount * 2 + 1;
 
         let premove = "";
         for (const choice of cloned.choose) {
@@ -1140,7 +1140,7 @@ export class MagnateGame extends GameBase {
             //Don't pick a random index; try to build or deed a card.
             //Failing that, sell a card and try to pay on a deed.
             //But don't get over leveraged.
-            const leverage = cloned.districts - cloned.deeds[cloned.currplayer - 1].size;
+            const leverage = leverageCount - cloned.deeds[cloned.currplayer - 1].size;
             
             let submove = "";
             for (let c = 0; c < sortedHand.length; c++) {
@@ -1161,7 +1161,7 @@ export class MagnateGame extends GameBase {
                                 const tokenArray = cloned.spender(payment.split(","));
                                 cloned.debit(tokenArray, cloned.currplayer);
                                 
-                            } else if (cloned.canDeed(card) && leverage > 2) {
+                            } else if (cloned.canDeed(card) && leverage > 0) {
                                 submove = "D:" + card + "," + dist;
                                 //Need to remove the card and spend the tokens for the next step.
                                 sortedHand.splice(c,1);
@@ -2111,7 +2111,7 @@ export class MagnateGame extends GameBase {
         //Init draw deck and hands.
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
         const renderDeck = this.initDeck(deckCount, forRender);
-        return renderDeck;
+        return renderDeck[0];
     }
 
     private renderPlayerPieces(player: number): string[] {
@@ -2146,9 +2146,6 @@ export class MagnateGame extends GameBase {
     }
     
     public render(): APRenderRep {
-        //Assemble the visible cards as we go.
-        const visibleCards: string[] = [];
-        
         //Need to determine the number of rows every time.
         const [centerrow, rows] = this.getBoardSize();
 
@@ -2162,7 +2159,6 @@ export class MagnateGame extends GameBase {
         for (let bc = 0; bc < this.districts; bc++) {
             const c = this.board[0][bc];
             row.push("k" + c);
-            visibleCards.push(c);
         }
         pstrArray.push(row.join(","));
 
@@ -2171,6 +2167,8 @@ export class MagnateGame extends GameBase {
         pstrArray = pstrArray.concat(pstr1);
         
         const pstr = pstrArray.join("\n");
+
+        
         
         // Mark live spots, deeds, and control.
         const markers: (MarkerOutline|MarkerFlood)[] = [];
@@ -2213,7 +2211,9 @@ export class MagnateGame extends GameBase {
         
         // Build legend of all cards, including an Excuse.
         const allcards = this.renderableCards(true).cards;
-        
+        //Assemble the visible cards as we go.
+        const visibleCards: string[] = [...this.board[1].flat(), ...this.board[2].flat()];
+              
         const legend: ILegendObj = {};
         for (const card of allcards) {
             let glyph = this.renderDecktetGlyph(card, true);
@@ -2441,16 +2441,33 @@ export class MagnateGame extends GameBase {
         //TODO: stacked deck changes
         //const remaining = this.deck[0].clone().draw(this.deck[0].size).sort(cardSortAsc).map(c => "k" + c.uid) as [string, ...string[]];
         const mostcards = this.renderableCards(false).cards;
-
         const remaining = mostcards.sort(cardSortAsc).filter(c => visibleCards.indexOf(c.uid) < 0).map(c => "k" + c.uid);
+
         if (remaining.length > 0) {
-            areas.push({
-                type: "pieces",
-                label: i18next.t("apgames:validation.magnate.LABEL_DECK") || "Cards in deck",
-                spacing: 0.25,
-                width: this.districts + 2,
-                pieces: remaining as [string, ...string[]]
-            });
+
+            if ( (!this.shuffled) && this.variants.includes("mega") && this.variants.includes("stacked") ) {
+                for (let p = 1; p <=2; p++) {
+                    const ps = p.toString();
+                    const pr = remaining.filter(c => c.endsWith(ps));
+                    if (pr.length > 0)
+                        areas.push({
+                            type: "pieces",
+                            label: i18next.t("apgames:validation.magnate.LABEL_STACKED_DECK", {playerNum: p}) || `Cards in P${p}'s deck`,
+                            spacing: 0.25,
+                            width: this.districts + 2,
+                            pieces: pr as [string, ...string[]]
+                        });
+                }
+            }  else {
+            
+                areas.push({
+                    type: "pieces",
+                    label: i18next.t("apgames:validation.magnate.LABEL_DECK") || "Cards in deck",
+                    spacing: 0.25,
+                    width: this.districts + 2,
+                    pieces: remaining as [string, ...string[]]
+                });
+            }
         }
 
         // Build rep

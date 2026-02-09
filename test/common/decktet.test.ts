@@ -32,7 +32,18 @@ describe("Decktets", () => {
         expect(mydeck.remove("1K1")).to.have.deep.property("size", 87);
         expect(mydeck.remove("1K2")).to.have.deep.property("size", 86);
         expect(mydeck.removeAll("1Y")).to.have.deep.property("size", 84);
-
+    });
+    
+    it ("Initializes an empty deck", () => {
+        const mydeck = new Deck([]);
+        expect(mydeck.size).eq(0);
+        mydeck.add("0");
+        expect(mydeck.size).eq(1);
+      
+        const mmdeck = new Multideck([],2);
+        expect(mmdeck.size).eq(0);
+        mmdeck.add("01");
+        expect(mmdeck.size).eq(1);
     });
     
     it ("Doesn't blow up when the deck is out", () => {
