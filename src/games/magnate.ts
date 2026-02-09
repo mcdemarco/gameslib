@@ -196,15 +196,20 @@ export class MagnateGame extends GameBase {
             }
             
             const deck = [this.initDeck(deckCount)];
-            
-            deck[0].shuffle();
 
-            //TODO: stacked deck additions.
-            
+            if ( this.variants.includes("mega") && this.variants.includes("stacked") ) {
+                //The division process also shuffles (a lot).
+                this.divideDeck(deck);
+            } else {
+                deck[0].shuffle();
+            }
+
             const hands: [string[], string[]] = [[],[]];
+
             for (let h = 0; h < handCount; h++) {
                 for (let p = 0; p < 2; p++) {
-                    const [card] = deck[0].draw();
+                    const drawDeckIdx = ( this.variants.includes("mega") && this.variants.includes("stacked") ) ? p + 1 : 0;
+                    const [card] = deck[drawDeckIdx].draw();
                     hands[p][h] = card.uid;
                 }
             }
@@ -241,6 +246,22 @@ export class MagnateGame extends GameBase {
             this.variants = state.variants;
         }
         this.load();
+    }
+
+    private divideDeck(deck: Multideck[]): void {
+        //Divides a double draw deck (for the stacked deck variant, pre-shuffle).
+        //Requires the deck argument because sometimes it's not yet this.deck.
+        deck[1] = new Multideck([], 2);
+        deck[2] = new Multideck([], 2);
+        
+        while (deck[0].size > 0) {
+            const [card] = deck[0].draw() as Multicard[];
+            if (card.deck === 1)
+                deck[1].add(card.uid);
+            else
+                deck[2].add(card.uid);
+        }
+        return;
     }
 
     private initDeck(deckCount: number, forRender?: boolean): Multideck {
@@ -328,10 +349,11 @@ export class MagnateGame extends GameBase {
         this.deeds[0].forEach((value, key) => this.deck[0].remove(key));
         this.deeds[1].forEach((value, key) => this.deck[0].remove(key));
 
-        this.deck[0].shuffle();
-
         if ( (!this.shuffled) && this.variants.includes("mega") && this.variants.includes("stacked") ) {
-            //TODO:  Split the main deck into two, deck[1] and deck[2];
+            //The division process also shuffles (a lot).
+            this.divideDeck(this.deck);
+        } else {
+            this.deck[0].shuffle();
         }
         
         return this;
@@ -658,9 +680,9 @@ export class MagnateGame extends GameBase {
         //First, try to draw what we need from the deck.
         const toDraw = this.variants.includes("mega") ? 2 : 1;
 
-        //TODO: use split deck for unshuffled/mega/stacked.
-
-        let drawn = this.deck[0].draw(Math.min(this.deck[0].size, toDraw)).map(c => c.uid);
+        const drawDeckIdx = ( this.variants.includes("mega") && this.variants.includes("stacked") ) ? this.currplayer : 0;
+       
+        let drawn = this.deck[drawDeckIdx].draw(Math.min(this.deck[0].size, toDraw)).map(c => c.uid);
 
         drawn.forEach(c => this.hands[this.currplayer - 1].push(c));
         
@@ -2085,10 +2107,10 @@ export class MagnateGame extends GameBase {
         return glyph;
     }
     
-    private renderableCards(): Multideck {
+    private renderableCards(forRender: boolean): Multideck {
         //Init draw deck and hands.
         const deckCount = (this.variants.includes("mega") ? 2 : 1);
-        const renderDeck = this.initDeck(deckCount, true);
+        const renderDeck = this.initDeck(deckCount, forRender);
         return renderDeck;
     }
 
@@ -2124,7 +2146,9 @@ export class MagnateGame extends GameBase {
     }
     
     public render(): APRenderRep {
-
+        //Assemble the visible cards as we go.
+        const visibleCards: string[] = [];
+        
         //Need to determine the number of rows every time.
         const [centerrow, rows] = this.getBoardSize();
 
@@ -2138,6 +2162,7 @@ export class MagnateGame extends GameBase {
         for (let bc = 0; bc < this.districts; bc++) {
             const c = this.board[0][bc];
             row.push("k" + c);
+            visibleCards.push(c);
         }
         pstrArray.push(row.join(","));
 
@@ -2186,8 +2211,8 @@ export class MagnateGame extends GameBase {
                 });
         });
         
-        // Build legend of most cards, including an Excuse.
-        const allcards = this.renderableCards().cards;
+        // Build legend of all cards, including an Excuse.
+        const allcards = this.renderableCards(true).cards;
         
         const legend: ILegendObj = {};
         for (const card of allcards) {
@@ -2198,8 +2223,10 @@ export class MagnateGame extends GameBase {
                 glyph = this.renderDecktetGlyph(card); // no borders
             } else if ( this.deeds[0].has(card.uid) ) {
                 glyph = this.renderDecktetGlyph(card, true, this.deeds[0].get(card.uid), 0.4, 1);
+                visibleCards.push(card.uid);
             } else if ( this.deeds[1].has(card.uid) ) {
                 glyph = this.renderDecktetGlyph(card, true, this.deeds[1].get(card.uid), 0.4, 2);
+                visibleCards.push(card.uid);
             } 
             
             legend["k" + card.uid] = glyph;
@@ -2316,7 +2343,7 @@ export class MagnateGame extends GameBase {
                 {
                     text: "10",
                     scale: 0.70,
-//                    colour: "_context_strokes",
+                    colour: "_context_fill",
                     orientation: "vertical",
                 }
             ];
@@ -2353,6 +2380,10 @@ export class MagnateGame extends GameBase {
 
         //hands
         for (let p = 1; p <= this.numplayers; p++) {
+            this.hands[p - 1].forEach(c => {
+                if (c !== "")
+                    visibleCards.push(c)
+            });
             const hand = this.hands[p - 1].map(c => "k" + (c === "" ? "UNKNOWN" : c));
             const tokens = this.tokens[p - 1].map((cnt, idx) => "s" + suitOrder[idx] + p.toString());
             const width = this.variants.includes("mega") ? 12 : 9;
@@ -2397,6 +2428,7 @@ export class MagnateGame extends GameBase {
 
         //discards
         if (this.discards.length > 0) {
+            this.discards.forEach(c => visibleCards.push(c));
             areas.push({
                 type: "pieces",
                 pieces: this.discards.map(c => "k" + c) as [string, ...string[]],
@@ -2407,16 +2439,17 @@ export class MagnateGame extends GameBase {
         }
 
         //TODO: stacked deck changes
-        const remaining = this.deck[0].clone().draw(this.deck[0].size).sort(cardSortAsc).map(c => "k" + c.uid) as [string, ...string[]];
+        //const remaining = this.deck[0].clone().draw(this.deck[0].size).sort(cardSortAsc).map(c => "k" + c.uid) as [string, ...string[]];
+        const mostcards = this.renderableCards(false).cards;
 
-        //const remaining = allcards.sort(cardSortAsc).filter(c => visibleCards.find(cd => cd!.uid === c.uid) === undefined).map(c => "k" + c.uid)
+        const remaining = mostcards.sort(cardSortAsc).filter(c => visibleCards.indexOf(c.uid) < 0).map(c => "k" + c.uid);
         if (remaining.length > 0) {
             areas.push({
                 type: "pieces",
-                label: i18next.t("apgames:validation.frogger.LABEL_REMAINING") || "Cards in deck",
+                label: i18next.t("apgames:validation.magnate.LABEL_DECK") || "Cards in deck",
                 spacing: 0.25,
                 width: this.districts + 2,
-                pieces: remaining,
+                pieces: remaining as [string, ...string[]]
             });
         }
 
