@@ -2362,7 +2362,7 @@ export class MagnateGame extends GameBase {
                 },
                 {
                     text: "10",
-                    scale: 0.70,
+                    scale: 0.75,
                     colour: {
                         func: "bestContrast",
                         fg: ["_context_background", "_context_fill", "_context_strokes"],
@@ -2380,24 +2380,28 @@ export class MagnateGame extends GameBase {
         
         legend["Tax"] = {
             name: "d6-empty",
+            colour: "_context_fill",
+            opacity: 0.15,
             orientation: "vertical",
         };
         legend["TaxTax"] = {
             name: "d6-empty",
+            colour: "_context_fill",
+            opacity: 0.15,
             orientation: "vertical",
         };
 
         if (this.roll.length > 1) {
 
             legend["Tax"] = [
-                {name: "d6-empty", colour: "_context_background", orientation: "vertical"},
+                {name: "d6-empty", colour: "_context_fill", opacity: 0.15, orientation: "vertical"},
                 {name: suits[this.roll[1] - 1].glyph!, scale: 0.75, orientation: "vertical"}
             ];
 
             //Note that the taxtax variant does not always result in double taxation.
             if (this.roll.length > 2) {
                 legend["TaxTax"] = [
-                    {name: "d6-empty", colour: "_context_background", orientation: "vertical"},
+                    {name: "d6-empty", colour: "_context_fill", opacity: 0.15, orientation: "vertical"},
                     {name: suits[this.roll[2] - 1].glyph!, scale: 0.75, orientation: "vertical"}
                 ];
             }
