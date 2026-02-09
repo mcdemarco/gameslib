@@ -2331,6 +2331,11 @@ export class MagnateGame extends GameBase {
             legend["Die"] = {
                 name: `d6-${this.roll[0]}`,
                 colour: this.currplayer,
+                colour2: {
+                    func: "bestContrast",
+                    fg: ["_context_background", "_context_fill", "_context_strokes"],
+                    bg: this.currplayer,
+                },
                 orientation: "vertical",
             };
         } else {
@@ -2343,7 +2348,11 @@ export class MagnateGame extends GameBase {
                 {
                     text: "10",
                     scale: 0.70,
-                    colour: "_context_fill",
+                    colour: {
+                        func: "bestContrast",
+                        fg: ["_context_background", "_context_fill", "_context_strokes"],
+                        bg: this.currplayer,
+                    },
                     orientation: "vertical",
                 }
             ];
@@ -2459,7 +2468,6 @@ export class MagnateGame extends GameBase {
                         });
                 }
             }  else {
-            
                 areas.push({
                     type: "pieces",
                     label: i18next.t("apgames:validation.magnate.LABEL_DECK") || "Cards in deck",
