@@ -2330,11 +2330,21 @@ export class MagnateGame extends GameBase {
         if (this.roll[0] < 10) {
             legend["Die"] = {
                 name: `d6-${this.roll[0]}`,
-                colour: this.currplayer,
+                colour: {
+                    func: "lighten",
+                    colour:  this.currplayer,
+                    ds: 5,
+                    dl: 2,
+                },          
                 colour2: {
                     func: "bestContrast",
                     fg: ["_context_background", "_context_fill", "_context_strokes"],
-                    bg: this.currplayer,
+                    bg: {
+                        func: "lighten",
+                        colour:  this.currplayer,
+                        ds: 5,
+                        dl: 2,
+                    },
                 },
                 orientation: "vertical",
             };
@@ -2342,7 +2352,12 @@ export class MagnateGame extends GameBase {
             legend["Die"] = [
                 {
                     name: "d6-empty",
-                    colour: this.currplayer,
+                    colour: {
+                        func: "lighten",
+                        colour:  this.currplayer,
+                        ds: 5,
+                        dl: 2,
+                    },
                     orientation: "vertical",
                 },
                 {
@@ -2351,7 +2366,12 @@ export class MagnateGame extends GameBase {
                     colour: {
                         func: "bestContrast",
                         fg: ["_context_background", "_context_fill", "_context_strokes"],
-                        bg: this.currplayer,
+                        bg: {
+                            func: "lighten",
+                            colour:  this.currplayer,
+                            ds: 5,
+                            dl: 2,
+                        },
                     },
                     orientation: "vertical",
                 }
