@@ -195,7 +195,7 @@ export class MagnateGame extends GameBase {
                 }
             }
             
-            let deck = this.initDeck(deckCount);
+            const deck = this.initDeck(deckCount);
 
             if ( this.variants.includes("mega") && this.variants.includes("stacked") ) {
                 //The division process also shuffles (a lot).
@@ -1263,10 +1263,30 @@ export class MagnateGame extends GameBase {
                     if ( move && move.endsWith(":") ) {
                         //Assume it's a trade.
                         newmove = `${move}${suit}3`; 
-                    } else if ( move && (new RegExp(`^(${suit}\\d|,${suit})$`)).test(move.substring(move.length - 2, move.length)) ) {
+                    } else {
+                        /*if ( move && (new RegExp(`^(${suit}\\d|,${suit})$`)).test(move.substring(move.length - 2, move.length)) ) {
                         newmove = `${move.substring(0,move.lastIndexOf(","))},${suit}${((parseInt(move.charAt(move.length - 1), 10)||1) + 1)}`;
                     } else {
                         newmove = `${move},${suit}`;
+                        }*/
+                        const submoves = move.split("/");
+                        const pmv = this.parseMove(`${submoves.pop()},${suit}`);
+                        if (pmv.valid === true)
+                            newmove = submoves.join("/") + (submoves.length > 0 ? "/" : "") + this.pickleMove(pmv);
+                        else {
+                            //Default message.
+                            let message = i18next.t("apgames:validation.magnate.INVALID_MOVE", {move: newmove});
+
+                            //Common mistake.
+                            if ( (pmv.type === "B" || pmv.type === "D") && pmv.district === undefined )
+                                message = i18next.t("apgames:validation.magnate.DISTRICT_INSTRUCTIONS");
+
+                            return {
+                                move,
+                                valid: false,
+                                message: message
+                            }
+                        }
                     }
                 } 
             } else {

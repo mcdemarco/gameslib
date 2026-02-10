@@ -4610,6 +4610,7 @@
             "LABEL_DECK": "Cards in deck",
             "LABEL_DISCARDS": "Discard pile",
             "LABEL_HAND": "Player {{playerNum}}'s hand",
+            "LABEL_STACKED_DECK": "Player {{playerNum}}'s deck",
             "MALFORMED_TRADE": "You must choose three tokens of the same suit to begin a trade.",
             "MUST_CHOOSE": "You must choose which deed resource(s) to receive before taking any other actions.",
             "NOT_DEEDED": "The card you selected does not appear to be among your deeded cards.",
