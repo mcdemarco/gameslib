@@ -482,20 +482,25 @@ export class MagnateGame extends GameBase {
             suitIdxs.indexOf(i) === -1 ? 0 : v);
         
         if ( tokens.reduce( (cur, acc) => cur + acc, 0) === price ) {
-            return this.unspender(tokens);
+            //Can pay the whole price, but check distribution.
+            if ( tokens.filter( v => v > 0 ).length === cardObj.suits.length )
+                return this.unspender(tokens);
         }
         
         const spendy = Array(6).fill(0);
 
         //Required diversification.
         suitIdxs.forEach( (suitIdx) => {
-            tokens[suitIdx]--;
-            spendy[suitIdx]++;
-            price--;
+            if ( tokens[suitIdx] > 0 ) {
+                tokens[suitIdx]--;
+                spendy[suitIdx]++;
+                price--;
+            } // else not a complete payment.
         });
 
         //Special case of 2.
-        if (cardObj.rank.seq === 2) {
+        if ( cardObj.rank.seq === 2 ) {
+            //May not be complete.
             return this.unspender(spendy);
         }
         
@@ -504,7 +509,7 @@ export class MagnateGame extends GameBase {
         //Special cases of ace or paying the rest from a single suit.
         if (remaining.length === 1 || suitIdxs.length === 1) {
             suitIdxs.forEach( (suitIdx) => {
-                spendy[suitIdx] += tokens[suitIdx];
+                spendy[suitIdx] += Math.min(price, tokens[suitIdx]);
             });
             return this.unspender(spendy);
         }
@@ -2553,8 +2558,10 @@ export class MagnateGame extends GameBase {
             }
         }
         for (const choice of this.choose) {
+            console.log(choice);
             const [x, y] = this.deed2coords(choice, this.currplayer);
-            rep.annotations.push({type: "enter", occlude: false, targets: [{row: y, col: x}], colour: this.currplayer});
+            console.log(x, y);
+            rep.annotations.push({type: "enter", dashed: [8,8], targets: [{row: y, col: x}], colour: this.currplayer});
         }
 
         /*else if (move.type === "move") {
