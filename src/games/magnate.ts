@@ -1952,14 +1952,14 @@ export class MagnateGame extends GameBase {
     private result2coords(district: string, card: string, player: number): number[] {
         //We pass the player in all relevant messages in order to 
         // check the correct element of the board or deed array.
-        const deed: boolean = this.deeds[player - 1].has(card);
+        if (this.deeds[player - 1].has(card))
+            return this.deed2coords(card, player as playerid);
  
         //The player can sometimes acquire two cards in the same column in the same turn,
         //so can't just use the terminal column space.
         const col = this.algebraic2coord(district);
         
-        const boardRow = deed ? this.board[player][col].length + 1 : this.board[player][col].indexOf(card) + 1;
-        
+        const boardRow = this.board[player][col].indexOf(card) + 1;
         const centerrow = this.getBoardSize()[0];
         const multiplier = player === 1 ? 1 : -1;
 
