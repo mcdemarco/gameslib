@@ -1719,7 +1719,8 @@ export class MagnateGame extends GameBase {
                         this.results.push({
                             type: "place",
                             what: pact.card,
-                            where: "discards"
+                            where: "discards",
+                            who: this.currplayer
                         });
 
                     } else if (pact.district) {
@@ -1734,7 +1735,8 @@ export class MagnateGame extends GameBase {
                                 type: "place",
                                 what: pact.card,
                                 where: pact.district,
-                                how: pact.type
+                                how: pact.type,
+                                who: this.currplayer
                             });
                             
                         } else if (pact.type === "B") {
@@ -1747,7 +1749,8 @@ export class MagnateGame extends GameBase {
                                     type: "place",
                                     what: pact.card,
                                     where: pact.district,
-                                    how: pact.type
+                                    how: pact.type,
+                                    who: this.currplayer
                                 });
                             }
                         }
@@ -1784,7 +1787,8 @@ export class MagnateGame extends GameBase {
                                 type: "place",
                                 what: pact.card,
                                 where: district,
-                                how: pact.type
+                                how: pact.type,
+                                who: this.currplayer
                             });
                         }
                     }
@@ -1945,27 +1949,21 @@ export class MagnateGame extends GameBase {
         return [col, centerrow + ((colsize + rowAdjust) * multiplier)];
     }
     
-    private result2coords(district: string, card: string): number[] {
-        //We don't have the player id to check the correct element 
-        //of the board or deed array, so we check both.
-        let player: number;
+    private result2coords(district: string, card: string, player: number): number[] {
+        //We pass the player in all relevant messages in order to 
+        // check the correct element of the board or deed array.
+        const deed: boolean = this.deeds[player - 1].has(card);
  
-        //Only used for a deeded card or the last card bought, so...
+        //The player can sometimes acquire two cards in the same column in the same turn,
+        //so can't just use the terminal column space.
         const col = this.algebraic2coord(district);
         
-        if ( this.board[1] && this.board[1][col].length && this.board[1][col].slice(-1)[0] === card || this.deeds[0].has(card) )
-            player = 1;
-        else if ( this.board[2] && this.board[2][col].length && this.board[2][col].slice(-1)[0] === card || this.deeds[1].has(card) )
-            player = 2;
-        else
-            throw new Error(`Could not highlight card ${card} from previous move.`);        
-
+        const boardRow = deed ? this.board[player][col].length + 1 : this.board[player][col].indexOf(card) + 1;
+        
         const centerrow = this.getBoardSize()[0];
         const multiplier = player === 1 ? 1 : -1;
-        const colsize = this.board[player][col].length;
-        const rowAdjust =  ( this.deeds[player - 1].has(card) ) ? 1 : 0;
 
-        return [col, centerrow + ((colsize + rowAdjust) * multiplier)];
+        return [col, centerrow + (boardRow * multiplier)];
     }
     
     private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] {
@@ -2552,7 +2550,7 @@ export class MagnateGame extends GameBase {
         if (this.results.length > 0) {
             for (const move of this.results) {
                 if (move.type === "place" && move.where !== "discards") {
-                    const [x, y] = this.result2coords(move.where!, move.what!);
+                    const [x, y] = this.result2coords(move.where!, move.what!, move.who!);
                     rep.annotations.push({type: "enter", occlude: false, dashed: [6,8], targets: [{row: y, col: x}]});
                 } 
             }
