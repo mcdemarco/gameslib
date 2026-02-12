@@ -10,9 +10,9 @@ import { Card, Multicard, Multideck, cardSortAsc, cardsBasic, cardsExtended, sui
 const deepclone = require("rfdc/default");
 
 export type playerid = 1|2;
-//export type Suit = "M"|"S"|"V"|"L"|"Y"|"K";
 export type moveType = "B"|"D"|"S"|"A"|"T"|"P"|"C"|"E";
-//Deeds: the column, an array of added resources, and a preferred suit (to simplify resource collection).
+
+//Deeds: the column, up to three counts of added resources, and a hidden preferred suit (for resource collection).
 export type DeedContents = {
     district: string,
     suit1: number,
@@ -811,14 +811,7 @@ export class MagnateGame extends GameBase {
 
     private hasDeed(district: string, player: playerid): boolean {
         //Check if a district has a deed.
-        let deeded = false;
-        this.deeds[player - 1].forEach((deed) => {
-            //We don't care about the keys.
-            if (deed.district === district)
-                deeded = true;
-        }); 
-
-        return deeded;
+        return (this.getDeedCard(district, player) !== "");
     }
 
     private matched(card1: string, card2: string): boolean {
@@ -1269,11 +1262,6 @@ export class MagnateGame extends GameBase {
                         //Assume it's a trade.
                         newmove = `${move}${suit}3`; 
                     } else {
-                        /*if ( move && (new RegExp(`^(${suit}\\d|,${suit})$`)).test(move.substring(move.length - 2, move.length)) ) {
-                        newmove = `${move.substring(0,move.lastIndexOf(","))},${suit}${((parseInt(move.charAt(move.length - 1), 10)||1) + 1)}`;
-                    } else {
-                        newmove = `${move},${suit}`;
-                        }*/
                         const submoves = move.split("/");
                         const pmv = this.parseMove(`${submoves.pop()},${suit}`);
                         if (pmv.valid === true)
@@ -1335,19 +1323,11 @@ export class MagnateGame extends GameBase {
             let result = this.validateMove(newmove) as IClickResult;
             if (! result.valid) {
                 result.move = move;
-                //TODO: Revert latest addition to newmove.
-                //result.move = move + (newmove.includes(",") ? newmove.substring(0,newmove.lastIndexOf(",")) : (newmove.includes(":") ? newmove.split(":")[0] : ""));
             } else {
                 if (result.autocomplete !== undefined) {
                     //Internal autocompletion.
                     const automove = result.autocomplete;
                     result = this.validateMove(automove) as IClickResult;
-
-                    /*A double auto-completion may be needed?
-                      if (result.autocomplete !== undefined) {
-                      automove = result.autocomplete;
-                      result = this.validateMove(automove) as IClickResult;
-                      }*/
                     result.move = automove;
                 } else {
                     result.move = newmove;
@@ -2628,7 +2608,10 @@ export class MagnateGame extends GameBase {
     private getDistrictWinner(district: string): number {
         //Returns (numeric) playerid of the controller of a single district, or 0 if tied.
         const control = this.getDistrictScoreForPlayer(district,1) - this.getDistrictScoreForPlayer(district,2);
-        return control > 0 ? 1 : (control < 0 ? 2 : 0);
+
+        if (control > 0) return 1;
+        if (control < 0) return 2;
+        return 0;
     }
 
     private getDistrictsTotals(): number[] {
