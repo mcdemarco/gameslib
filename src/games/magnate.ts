@@ -2468,7 +2468,7 @@ export class MagnateGame extends GameBase {
             areas.push({
                 type: "pieces",
                 pieces: this.discards.map(c => "k" + c) as [string, ...string[]],
-                label: i18next.t("apgames:validation.magnate.LABEL_DISCARDS") || "Discards",
+                label: this.shuffled ? i18next.t("apgames:validation.magnate.LABEL_DISCARDS_NONE") : i18next.t("apgames:validation.magnate.LABEL_DISCARDS_ONE") || "Discards",
                 spacing: 0.25,
                 width: this.districts + 2,
             });
