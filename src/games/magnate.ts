@@ -2005,6 +2005,14 @@ export class MagnateGame extends GameBase {
             opacity = 1;
         }
 
+        let preflight = "";
+        if (deed && this.deeds[this.currplayer - 1].has(card.uid)) {
+            if (deed.preferred)
+                preflight = deed.preferred;
+            else
+                preflight = this.suitPicker(card.uid, this.currplayer);
+        }
+
         const glyph: [Glyph, ...Glyph[]] = [
             {
                 name: border ? "piece-square" : "piece-square-borderless",
@@ -2032,7 +2040,7 @@ export class MagnateGame extends GameBase {
         for (let i = 0; i < card.suits.length; i++) {
             const suit = card.suits[i];
             const nudge = nudges[i];
-            if ( deed && deed.preferred && deed.preferred === suit.uid )
+            if ( preflight === suit.uid )
                 glyph.push({
                     name: "piece",
                     scale: 0.5,
