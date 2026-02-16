@@ -1235,11 +1235,21 @@ export class MagnateGame extends GameBase {
                     const type = piece.split("_")[2].charAt(0);
                     if ( move && move.endsWith(":") )  //Reset type.
                         newmove = `${move.substring(0,move.length - 2)}${type}:`;
-                    else if ( move && move.endsWith(",") ) //Trim and add next action.
-                        newmove = `${move.substring(0,move.length - 1)}/${type}:`;
-                    else if (move) //Next action.
-                        newmove = `${move}/${type}:`;
-                    else //First action.
+                    else if (move) {//Next action.
+                        const submove = move.substring(move.lastIndexOf("/") + 1);
+                        const subparse = this.parseMove(submove);
+                        if ( subparse.incomplete === true ) {
+                            return {
+                                move,
+                                valid: false,
+                                message: i18next.t("apgames:validation.magnate.UNFINISHED_ACTION")
+                            }
+                        } else {
+                            //Still can fail to be a complete buy payment,
+                            // but it's too difficult to detect.
+                            newmove = `${move}/${type}:`;
+                        }
+                    } else //First action.
                         newmove = `${type}:`;
                 } else if (!move) {
                     //it's too early to click on other stuff.
@@ -1372,7 +1382,7 @@ export class MagnateGame extends GameBase {
         const cloned = Object.assign(new MagnateGame(), deepclone(this) as MagnateGame);
 
         const moves: string[] = m.split("/");
-        const cards2use = this.variants.includes("mega") ? 2 : 1;
+        const cards2use = cloned.variants.includes("mega") ? 2 : 1;
         let usedCards = 0;
 
         if (moves[moves.length - 1] === "") {
@@ -1491,7 +1501,7 @@ export class MagnateGame extends GameBase {
 
                 //In all remaining cases we need to know the card's suits.
                 //We get them in an array format.
-                const tokens = cloned.card2tokens(pact.card, pact.type);
+                const tokens = this.card2tokens(pact.card, pact.type);
  
                 if ( pact.type === "P" || pact.type === "C" ) {
                     if ( pact.suit === undefined ) {
@@ -2009,7 +2019,7 @@ export class MagnateGame extends GameBase {
         if (deed && this.deeds[this.currplayer - 1].has(card.uid)) {
             if (deed.preferred)
                 preflight = deed.preferred;
-            else
+            else if (card.suits.length === 2)
                 preflight = this.suitPicker(card.uid, this.currplayer);
         }
 
@@ -2544,9 +2554,7 @@ export class MagnateGame extends GameBase {
             }
         }
         for (const choice of this.choose) {
-            console.log(choice);
             const [x, y] = this.deed2coords(choice, this.currplayer);
-            console.log(x, y);
             rep.annotations.push({type: "enter", dashed: [8,8], targets: [{row: y, col: x}], colour: this.currplayer});
         }
 
