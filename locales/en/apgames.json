@@ -4593,6 +4593,7 @@
             "DEEDED_CARD_INSTRUCTIONS": "Click an already deeded card to add tokens to it, or to select your preferred suit.",
             "DISTRICT_INSTRUCTIONS": "Click a district to add your card there.",
             "HAND_CARD_INSTRUCTIONS": "Click a hand card to buy, deed, or sell.",
+            "INCOMPLETE_ACTION": "Please complete the previous action before starting another.",
             "INITIAL_BUTTON_INSTRUCTIONS": "Click a button to select your first action.",
             "INITIAL_PLACEMENT_INSTRUCTIONS": "Click a hand card to deed, buy, or sell.",
             "INVALID_ACTION": "You cannot consume another card from your hand, so you may not take another Buy, Deed or Build action this turn.",

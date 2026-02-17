@@ -1396,6 +1396,7 @@ export class MagnateGame extends GameBase {
             //Trim any dangling commas.
             if (action[action.length - 1] === ",")
                 action = action.substring(0,action.length - 1);
+            const isLast = s === moves.length - 1;
 
             //Parse.
             const pact = cloned.parseMove(action);
@@ -1415,10 +1416,17 @@ export class MagnateGame extends GameBase {
             //Low-hanging fruit.
             if (pact.type === "T") {
                 if (pact.spend === undefined) {
-                    result.valid = true;
-                    result.complete = -1;
-                    result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
-                    return result;
+                    if (isLast) {
+                        result.valid = true;
+                        result.complete = -1;
+                        result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
+                        return result;
+                    } else {
+                        //Return error if this is not the final, incomplete action.
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION");
+                        return result;
+                    }
                 }
                 //TODO: Would be quicker to change debit to return success or failure.
                 //Credit should always succeed.
@@ -1438,32 +1446,47 @@ export class MagnateGame extends GameBase {
                 cloned.debit(pact.spend,cloned.currplayer);
 
                 if (pact.suit === undefined) {
-                    result.valid = true;
-                    result.complete = -1;
-                    result.canrender = true;
-                    result.message = i18next.t("apgames:validation.magnate.TOKEN_TRADE_INSTRUCTIONS");
-                    return result;
+                    if (isLast) {
+                        result.valid = true;
+                        result.complete = -1;
+                        result.canrender = true;
+                        result.message = i18next.t("apgames:validation.magnate.TOKEN_TRADE_INSTRUCTIONS");
+                        return result;
+                    } else {
+                        //Return error if this is not the final, incomplete action.
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION");
+                        return result;
+                    }
                 }
+                    
 
                 //Credit the user (for subsequent submove validation).
                 cloned.credit1(pact.suit, cloned.currplayer);
                 
             } else {//In all other cases we should have a card.
                 if (pact.card === undefined) {
-                    result.valid = true;
-                    result.complete = -1;
-                    
-                    if (pact.type ===  "A" || pact.type === "P") {
-                        result.message = i18next.t("apgames:validation.magnate.DEEDED_CARD_INSTRUCTIONS");
-                    } else if (pact.type === "C") {
-                        if (cloned.choose.length === 1)
-                            result.autocomplete = m + cloned.choose[0];
-                        result.message = i18next.t("apgames:validation.magnate.CHOICE_BUTTON_INSTRUCTIONS");
+                    if (isLast) {
+                        result.valid = true;
+                        result.complete = -1;
+                        
+                        if (pact.type ===  "A" || pact.type === "P") {
+                            result.message = i18next.t("apgames:validation.magnate.DEEDED_CARD_INSTRUCTIONS");
+                        } else if (pact.type === "C") {
+                            if (cloned.choose.length === 1)
+                                result.autocomplete = m + cloned.choose[0];
+                            result.message = i18next.t("apgames:validation.magnate.CHOICE_BUTTON_INSTRUCTIONS");
+                        } else {
+                            result.message = i18next.t("apgames:validation.magnate.HAND_CARD_INSTRUCTIONS");
+                        }
+                        
+                        return result;
                     } else {
-                        result.message = i18next.t("apgames:validation.magnate.HAND_CARD_INSTRUCTIONS");
+                        //Return error if this is not the final, incomplete action.
+                        result.valid = false;
+                        result.message = i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION");
+                        return result;
                     }
-                       
-                    return result;
                 }
 
                 if ( pact.type === "A" || pact.type === "P" || pact.type === "C" ) {
@@ -1505,14 +1528,21 @@ export class MagnateGame extends GameBase {
  
                 if ( pact.type === "P" || pact.type === "C" ) {
                     if ( pact.suit === undefined ) {
-                        result.valid = true;
-                        result.complete = -1;
-                        result.canrender = true;
-                        if (pact.type === "P")
-                            result.message = i18next.t("apgames:validation.magnate.PREFER_SUIT_INSTRUCTIONS");
-                        else
-                            result.message = i18next.t("apgames:validation.magnate.CHOOSE_SUIT_INSTRUCTIONS");
-                        return result;
+                        if (isLast) {
+                            result.valid = true;
+                            result.complete = -1;
+                            result.canrender = true;
+                            if (pact.type === "P")
+                                result.message = i18next.t("apgames:validation.magnate.PREFER_SUIT_INSTRUCTIONS");
+                            else
+                                result.message = i18next.t("apgames:validation.magnate.CHOOSE_SUIT_INSTRUCTIONS");
+                            return result;
+                        } else {
+                            //Return error if this is not the final, incomplete action.
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION");
+                            return result;
+                        }
                     } else {
                         //Test suit against card using tokens.
                         const suitIdx = suitOrder.indexOf(pact.suit);
@@ -1542,10 +1572,17 @@ export class MagnateGame extends GameBase {
                 if ( pact.type === "B" || pact.type === "D" ) {
                     //Need to check the district.
                     if (! pact.district ) {
-                        result.valid = true;
-                        result.complete = -1;
-                        result.message = i18next.t("apgames:validation.magnate.DISTRICT_INSTRUCTIONS");
-                        return result; 
+                        if (isLast) {
+                            result.valid = true;
+                            result.complete = -1;
+                            result.message = i18next.t("apgames:validation.magnate.DISTRICT_INSTRUCTIONS");
+                            return result;
+                        } else {
+                            //Return error if this is not the final, incomplete action.
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION");
+                            return result;
+                        }
                     } else if (! cloned.canPlace(pact.card, pact.district) ) {
                         result.valid = false;
                         result.message = i18next.t("apgames:validation.magnate.INVALID_PLACEMENT");
@@ -1569,13 +1606,20 @@ export class MagnateGame extends GameBase {
                 //Check there's a spend.
                 if ( pact.type === "A" || pact.type === "B" ) {
                     if ( pact.spend === undefined ) {
-                        result.valid = true;
-                        result.complete = -1;
-                        result.canrender = true;
-                        if (pact.type === "B")
-                            result.autocomplete = m + "," + cloned.checkChange(pact.card).join(",");
-                        result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
-                        return result;
+                        if (isLast) {
+                            result.valid = true;
+                            result.complete = -1;
+                            result.canrender = true;
+                            if (pact.type === "B")
+                                result.autocomplete = m + "," + cloned.checkChange(pact.card).join(",");
+                            result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
+                            return result;
+                        } else {
+                            //Return error if this is not the final, incomplete action.
+                            result.valid = false;
+                            result.message = i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION");
+                            return result;
+                        }
                     } else {
 
                         const success = cloned.checkSpend(pact.card, pact.spend, pact.type);
@@ -1596,12 +1640,19 @@ export class MagnateGame extends GameBase {
                             if (success < 1) {
                             
                                 if ( pact.type === "B" ) {
-                                    //Return incomplete for a buy.
-                                    result.valid = true;
-                                    result.complete = -1;
-                                    result.canrender = true;
-                                    result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
-                                    return result;
+                                    if (isLast) {
+                                        //Return incomplete for a buy.
+                                        result.valid = true;
+                                        result.complete = -1;
+                                        result.canrender = true;
+                                        result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
+                                        return result;
+                                    } else {
+                                        //Return error if this is not the final, incomplete action.
+                                        result.valid = false;
+                                        result.message = i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION");
+                                        return result;
+                                    }
                                 } else if ( pact.type === "A" ) {
                                     //Augment the deed.
                                     cloned.add2deed(pact.card, pact.spend);                                }
