@@ -1064,6 +1064,19 @@ export class MagnateGame extends GameBase {
  
         return spend;
     }
+
+    private splitMove(move: string): string[] {
+        //Parses a pre-split move into an action array without empties.
+        const actions = move.split("/");
+
+        if (actions[actions.length - 1] === "") {
+            //Trim the dummy move.
+            //Could also test that the last character of move first.
+            actions.length--;
+        }
+
+        return actions;
+    }
     
     private suitPicker(card: string, player: playerid): string {
         const choices = [card[1], card[2]];
@@ -1235,17 +1248,19 @@ export class MagnateGame extends GameBase {
                     if ( move && move.endsWith(":") )  //Reset type.
                         newmove = `${move.substring(0,move.length - 2)}${type}:`;
                     else if (move) {//Next action.
-                        const submove = move.substring(move.lastIndexOf("/") + 1);
-                        const subparse = this.parseMove(submove);
+                        const submoves = this.splitMove(move);
+                        const subparse = this.parseMove(submoves[submoves.length - 1]);
                         if ( subparse.incomplete === true ) {
                             return {
                                 move,
                                 valid: false,
-                                message: i18next.t("apgames:validation.magnate.UNFINISHED_ACTION")
+                                message: i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION")
                             }
-                        } else {
+                        } else if (move.slice(-1) === "/") {
                             //Still can fail to be a complete buy payment,
-                            // but it's too difficult to detect.
+                            // but it's too difficult to detect here.
+                            newmove = `${move}${type}:`;
+                        } else {
                             newmove = `${move}/${type}:`;
                         }
                     } else //First action.
@@ -1271,7 +1286,7 @@ export class MagnateGame extends GameBase {
                         //Assume it's a trade.
                         newmove = `${move}${suit}3`; 
                     } else {
-                        const submoves = move.split("/");
+                        const submoves = this.splitMove(move);
                         const pmv = this.parseMove(`${submoves.pop()},${suit}`);
                         if (pmv.valid === true)
                             newmove = submoves.join("/") + (submoves.length > 0 ? "/" : "") + this.pickleMove(pmv);
@@ -1380,21 +1395,16 @@ export class MagnateGame extends GameBase {
         //If the move is complicated, we need a clone here.
         const cloned = Object.assign(new MagnateGame(), deepclone(this) as MagnateGame);
 
-        const moves: string[] = m.split("/");
+        const moves: string[] = cloned.splitMove(m);
         const cards2use = cloned.variants.includes("mega") ? 2 : 1;
         let usedCards = 0;
 
-        if (moves[moves.length - 1] === "") {
-            //Trim the dummy move.
-            //Could also test that the last character of m is a /.
-            moves.length--;
-        }
-
         for (let s = 0; s < moves.length; s++) {
             let action = moves[s];
-            //Trim any dangling commas.
+/*            //Trim any dangling commas.
             if (action[action.length - 1] === ",")
                 action = action.substring(0,action.length - 1);
+*/
             const isLast = s === moves.length - 1;
 
             //Parse.
@@ -1721,7 +1731,7 @@ export class MagnateGame extends GameBase {
                 this.results.push({type: "claim", how: "crowns"});
         };
 
-        const actions = m.split("/");
+        const actions = this.splitMove(m);
 
         for (const action of actions) {
             const pact = this.parseMove(action);

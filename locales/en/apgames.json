@@ -4621,7 +4621,6 @@
             "SPEND_INSTRUCTIONS": "Click the suit tokens you want to use.",
             "TOKEN_ADD_INSTRUCTIONS": "Click the tokens to add to this deed.",
             "TOKEN_TRADE_INSTRUCTIONS": "Click the suit you want in exchange.",
-            "UNFINISHED_ACTION": "Please complete the previous action.",
             "VALID_PLACEMENT": "Looks like a good placement."
         },
         "majorities": {
