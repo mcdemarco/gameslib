@@ -64,8 +64,8 @@ export class MagnateGame extends GameBase {
         name: "Magnate",
         uid: "magnate",
         playercounts: [2],
-        version: "20260119",
-        dateAdded: "2026-01-19",
+        version: "20260217",
+        dateAdded: "2026-02-17",
         // i18next.t("apgames:descriptions.magnate")
         description: "apgames:descriptions.magnate",
         // i18next.t("apgames:notes.magnate")
@@ -73,7 +73,6 @@ export class MagnateGame extends GameBase {
         urls: [
             "http://wiki.decktet.com/game:magnate",
             "https://boardgamegeek.com/boardgame/41090/magnate",
-            "https://mcdemarco.net/games/decktet/magnate/",
         ],
         people: [
             {
@@ -93,11 +92,11 @@ export class MagnateGame extends GameBase {
             { uid: "courtpawns" }, //courts for pawns
             { uid: "deucey" }, //ace scoring variant
             { uid: "mega" }, //double deck double hand 
-            { uid: "stacked", experimental: true }, //stacking the deck(s)
+            { uid: "stacked" }, //stacking the deck(s)
             { uid: "taxtax" }, //double taxation
         ],
         categories: ["goal>area", "goal>score>eog", "mechanic>place", "mechanic>economy", "mechanic>hidden", "mechanic>random>play", "board>none", "components>decktet"],
-        flags: ["custom-randomization", "no-explore", "no-moves", "perspective", "random-start", "scores"],
+        flags: ["custom-randomization", "no-explore", "no-moves", "perspective", "scores"],
     };
 
     //The UI is quite simple because we only need to specify a column.
