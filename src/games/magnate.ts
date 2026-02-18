@@ -128,7 +128,7 @@ export class MagnateGame extends GameBase {
     private courtrank: string = "T";
     private districts: number = 5;
     private deck: Multideck[] = [];
-    private highlights: string[] = [];
+    private highlights: string[] = []; //A mix of suit uids, card uids, and districts.
 
     constructor(state?: IMagnateState | string, variants?: string[]) {
         super();
@@ -439,12 +439,15 @@ export class MagnateGame extends GameBase {
         return this.matched(card, matchMe);
     }
 
-    private card2tokens(card: string, type: string): number[] {
+    private card2tokens(card: string, type: string, highlight?: boolean): number[] {
         //Interpret the card as a cost or payment in suit tokens.
         //Results can vary by rank and by action type.
         const tokens = Array(6).fill(0);
         const cardObj = Multicard.deserialize(card)!;
-                  
+
+        if (highlight)
+            cardObj.suits.forEach(s => this.highlights.push(s.uid));
+        
         const suitIdxs = cardObj.suits.map(s => s.seq - 1);
         suitIdxs.forEach(suitIdx => tokens[suitIdx]++);
 
@@ -1761,7 +1764,7 @@ export class MagnateGame extends GameBase {
                 if ( pact.type === "B" || pact.type === "D" || pact.type === "S" ) {
                     //Card consumption types.
                     this.removeCard(pact.card, this.hands[this.currplayer - 1]);
-                    const tokens = this.card2tokens(pact.card, pact.type);
+                    const tokens = this.card2tokens(pact.card, pact.type, true);
 
                     if (pact.type === "S") {
                         this.discards.push(pact.card);
@@ -1810,25 +1813,27 @@ export class MagnateGame extends GameBase {
                     }
                                 
                 } else if ( pact.type === "A" || pact.type === "P" || pact.type === "C" ) {
+
+                    //Highlight the card suits in the player tokens.
+                    if (pact.suit === undefined) {
+                        this.highlights.push(pact.card[1]);
+                        if (pact.card[0] !== "1")
+                            this.highlights.push(pact.card[2]);
+                        if (pact.card[0] === this.courtrank)
+                            this.highlights.push(pact.card[3]);
+                    }
+                    
                     const deed = this.deeds[this.currplayer - 1].get(pact.card)!;
                     if (pact.type === "P" && pact.suit !== undefined) {
                         deed.preferred = pact.suit;
                         //Don't chatlog.
                     }
                     
-                    if (pact.type === "C") {
-                        if (pact.suit !== undefined) {
-                            this.tokens[this.currplayer - 1][suitOrder.indexOf(pact.suit)]++;
-                            this.removeCard(pact.card,this.choose);
-                        } else {
-                            console.log("the choose card is: ", pact.card);
-                            this.highlights.push(pact.card[1]);
-                            if (pact.card[0] !== "1")
-                                this.highlights.push(pact.card[2]);
-                            console.log(this.highlights);
-                        }
+                    if (pact.type === "C" && pact.suit !== undefined) {
+                        this.tokens[this.currplayer - 1][suitOrder.indexOf(pact.suit)]++;
+                        this.removeCard(pact.card,this.choose);
                     }
-
+                    
                     if (pact.type === "A" && pact.spend !== undefined) {
                         const done = this.add2deed(pact.card, pact.spend);
 
