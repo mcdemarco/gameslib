@@ -128,7 +128,7 @@ export class MagnateGame extends GameBase {
     private courtrank: string = "T";
     private districts: number = 5;
     private deck: Multideck[] = [];
-    //    private highlights: string[] = [];
+    private highlights: string[] = [];
 
     constructor(state?: IMagnateState | string, variants?: string[]) {
         super();
@@ -1428,6 +1428,7 @@ export class MagnateGame extends GameBase {
                     if (isLast) {
                         result.valid = true;
                         result.complete = -1;
+                        result.canrender = true;
                         result.message = i18next.t("apgames:validation.magnate.SPEND_INSTRUCTIONS");
                         return result;
                     } else {
@@ -1478,7 +1479,8 @@ export class MagnateGame extends GameBase {
                     if (isLast) {
                         result.valid = true;
                         result.complete = -1;
-                        
+                        result.canrender = true;
+
                         if (pact.type ===  "A" || pact.type === "P") {
                             result.message = i18next.t("apgames:validation.magnate.DEEDED_CARD_INSTRUCTIONS");
                         } else if (pact.type === "C") {
@@ -1584,6 +1586,7 @@ export class MagnateGame extends GameBase {
                         if (isLast) {
                             result.valid = true;
                             result.complete = -1;
+                            result.canrender = true;
                             result.message = i18next.t("apgames:validation.magnate.DISTRICT_INSTRUCTIONS");
                             return result;
                         } else {
@@ -1722,7 +1725,6 @@ export class MagnateGame extends GameBase {
         }
 
         this.results = [];
-        //this.highlights = [];
 
         if (this.stack.length === 1) {
             //Need to log the initial roll.
@@ -1735,6 +1737,7 @@ export class MagnateGame extends GameBase {
 
         for (const action of actions) {
             const pact = this.parseMove(action);
+            this.highlights = [];
 
             //Spend first, other stuff later.
             if (pact.spend !== undefined) {
@@ -1813,9 +1816,17 @@ export class MagnateGame extends GameBase {
                         //Don't chatlog.
                     }
                     
-                    if (pact.type === "C" && pact.suit !== undefined) {
-                        this.tokens[this.currplayer - 1][suitOrder.indexOf(pact.suit)]++;
-                        this.removeCard(pact.card,this.choose);
+                    if (pact.type === "C") {
+                        if (pact.suit !== undefined) {
+                            this.tokens[this.currplayer - 1][suitOrder.indexOf(pact.suit)]++;
+                            this.removeCard(pact.card,this.choose);
+                        } else {
+                            console.log("the choose card is: ", pact.card);
+                            this.highlights.push(pact.card[1]);
+                            if (pact.card[0] !== "1")
+                                this.highlights.push(pact.card[2]);
+                            console.log(this.highlights);
+                        }
                     }
 
                     if (pact.type === "A" && pact.spend !== undefined) {
@@ -2327,10 +2338,11 @@ export class MagnateGame extends GameBase {
             for (let p = 0; p < 2; p++) {
                 const pcount = this.tokens[p][s];
                 const lname = "s" + suit.uid + (p + 1).toString();
+                const border = (this.currplayer === p + 1 && this.highlights.indexOf(suit.uid) > - 1);
 
                 legend[lname] = [
                     {
-                        name: "piece",
+                        name: border ? "piece" : "piece-borderless",
                         scale: 0.75,
                         colour: color,
                         opacity: 0.75,
