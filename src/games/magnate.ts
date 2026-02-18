@@ -1403,7 +1403,7 @@ export class MagnateGame extends GameBase {
         let usedCards = 0;
 
         for (let s = 0; s < moves.length; s++) {
-            let action = moves[s];
+            const action = moves[s];
 /*            //Trim any dangling commas.
             if (action[action.length - 1] === ",")
                 action = action.substring(0,action.length - 1);
@@ -1762,7 +1762,7 @@ export class MagnateGame extends GameBase {
             if ( pact.card ) {
 
                 if ( pact.type === "B" || pact.type === "D" || pact.type === "S" ) {
-                    //Card consumption types.
+                    //Card consumption types.  TODO: move to appropriate time.
                     this.removeCard(pact.card, this.hands[this.currplayer - 1]);
                     const tokens = this.card2tokens(pact.card, pact.type, true);
 
@@ -1809,6 +1809,13 @@ export class MagnateGame extends GameBase {
                                     who: this.currplayer
                                 });
                             }
+                        }
+                    } else {
+                        //Highlight available districts.
+                        for (let d = 0; d < this.districts; d++) {
+                            const dist = this.coord2algebraic(d);
+                            if (this.canPlace(pact.card, dist))
+                                this.highlights.push(dist);
                         }
                     }
                                 
@@ -2269,12 +2276,15 @@ export class MagnateGame extends GameBase {
         
         // Mark live spots, deeds, and control.
         const markers: (MarkerOutline|MarkerFlood)[] = [];
+        const annotationPoints = [];
 
         let sideboard = this.board[1];
         const points1 = [];
         for (let col = 0; col < this.districts; col++) {
             const rawrow = sideboard[col] ? sideboard[col].length : 0;
             points1.push({col: col, row: rawrow + centerrow + 1} as RowCol);
+            if (this.currplayer === 1 && this.highlights.indexOf(this.coord2algebraic(col)) > -1)
+                annotationPoints.push({col: col, row: rawrow + centerrow + 1} as RowCol);
         }
         markers.push({
             type: "flood",
@@ -2288,6 +2298,8 @@ export class MagnateGame extends GameBase {
         for (let col = 0; col < this.districts; col++) {
             const rawrow = sideboard[col] ? sideboard[col].length : 0;
             points2.push({col: col, row: centerrow - rawrow - 1} as RowCol);
+            if (this.currplayer === 2 && this.highlights.indexOf(this.coord2algebraic(col)) > -1)
+                annotationPoints.push({col: col, row: centerrow - rawrow - 1} as RowCol);
         }
         markers.push({
             type: "flood",
@@ -2622,6 +2634,7 @@ export class MagnateGame extends GameBase {
 
         // Add annotations.
         rep.annotations = [];
+        
         if (this.results.length > 0) {
             for (const move of this.results) {
                 if (move.type === "place" && move.where !== "discards") {
@@ -2630,11 +2643,15 @@ export class MagnateGame extends GameBase {
                 } 
             }
         }
+        
         for (const choice of this.choose) {
             const [x, y] = this.deed2coords(choice, this.currplayer);
             rep.annotations.push({type: "enter", dashed: [8,8], targets: [{row: y, col: x}], colour: this.currplayer});
         }
-
+        
+        if (annotationPoints.length > 0)
+            rep.annotations.push({type: "dots", targets: annotationPoints as [RowCol, ...RowCol[]] });
+        
         /*else if (move.type === "move") {
               const [fromX, fromY] = this.algebraic2coord(move.from);
               const [toX, toY] = this.algebraic2coord(move.to);
