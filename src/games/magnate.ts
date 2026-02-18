@@ -64,8 +64,8 @@ export class MagnateGame extends GameBase {
         name: "Magnate",
         uid: "magnate",
         playercounts: [2],
-        version: "20260217",
-        dateAdded: "2026-02-17",
+        version: "20260218",
+        dateAdded: "2026-02-18",
         // i18next.t("apgames:descriptions.magnate")
         description: "apgames:descriptions.magnate",
         // i18next.t("apgames:notes.magnate")
@@ -1387,10 +1387,7 @@ export class MagnateGame extends GameBase {
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            if (this.choose.length > 0)
-                result.message = i18next.t("apgames:validation.magnate.CHOICE_BUTTON_INSTRUCTIONS")
-            else
-                result.message = i18next.t("apgames:validation.magnate.INITIAL_BUTTON_INSTRUCTIONS")
+            result.message = i18next.t("apgames:validation.magnate.INITIAL_BUTTON_INSTRUCTIONS")
             return result;
         }
 
@@ -1767,6 +1764,7 @@ export class MagnateGame extends GameBase {
                     if (pact.type === "S") {
                         this.discards.push(pact.card);
                         this.removeCard(pact.card, this.hands[this.currplayer - 1]);
+                        this.highlights.push(pact.card);
 
                         //Profit!
                         this.credit(tokens, this.currplayer);
@@ -1812,7 +1810,8 @@ export class MagnateGame extends GameBase {
                             }
                         }
                     } else {
-                        //Highlight available districts.
+                        this.highlights.push(pact.card);
+                        //Also highlight available districts.
                         for (let d = 0; d < this.districts; d++) {
                             const dist = this.coord2algebraic(d);
                             if (this.canPlace(pact.card, dist))
@@ -1821,8 +1820,9 @@ export class MagnateGame extends GameBase {
                     }
                                 
                 } else if ( pact.type === "A" || pact.type === "P" || pact.type === "C" ) {
-
-                    //Highlight the card suits in the player tokens.
+                    
+                    this.highlights.push(pact.card);
+                    //Also highlight the card suits in the player tokens.
                     if (pact.suit === undefined) {
                         this.highlights.push(pact.card[1]);
                         if (pact.card[0] !== "1")
@@ -1867,7 +1867,17 @@ export class MagnateGame extends GameBase {
                         }
                     }
                 }//end deed adjustment types
-            }//end card condition
+            } else {
+                //No card selected.
+                //If we need to burn a hand card, highlight the choices.
+                if ( pact.type === "B" || pact.type === "D" || pact.type === "S" ) {
+                    //Check for cards player can afford/use.
+                    this.hands[this.currplayer - 1].forEach(card => {
+                        if ( (pact.type === "S") || (pact.type === "B" && this.canPay(card)) || (pact.type === "D" && this.canDeed(card)) )
+                            this.highlights.push(card);
+                    });
+                }
+            }
         }//end action loop
 
         if (partial) { return this; }
@@ -2326,18 +2336,24 @@ export class MagnateGame extends GameBase {
               
         const legend: ILegendObj = {};
         for (const card of allcards) {
-            let glyph = this.renderDecktetGlyph(card, true);
+            let glyph = this.renderDecktetGlyph(card);
+            const isHighlighted: boolean = this.highlights.indexOf(card.uid) > -1;
 
-            // the pawny pieces and the excuse (center row)
-            if (card.rank.uid === this.pawnrank || card.rank.name === "Excuse") {
+            if ( visibleCards.indexOf(card.uid) > - 1 ) {
+                //Board cards get borders.
+                glyph = this.renderDecktetGlyph(card, true);
+            } else if ( card.rank.uid === this.pawnrank || card.rank.name === "Excuse" ) {
+                // the pawny pieces and the excuse (center row)
                 glyph = this.renderDecktetGlyph(card); // no borders
             } else if ( this.deeds[0].has(card.uid) ) {
-                glyph = this.renderDecktetGlyph(card, true, this.deeds[0].get(card.uid), 0.4, 1);
+                glyph = this.renderDecktetGlyph(card, isHighlighted, this.deeds[0].get(card.uid), 0.4, 1);
                 visibleCards.push(card.uid);
             } else if ( this.deeds[1].has(card.uid) ) {
-                glyph = this.renderDecktetGlyph(card, true, this.deeds[1].get(card.uid), 0.4, 2);
+                glyph = this.renderDecktetGlyph(card, isHighlighted, this.deeds[1].get(card.uid), 0.4, 2);
                 visibleCards.push(card.uid);
-            } 
+            } else if ( isHighlighted ) {
+                glyph = this.renderDecktetGlyph(card, true, undefined, 1, this.currplayer);
+            }
             
             legend["k" + card.uid] = glyph;
         }
@@ -2651,19 +2667,7 @@ export class MagnateGame extends GameBase {
         }
         
         if (annotationPoints.length > 0)
-            rep.annotations.push({type: "dots", targets: annotationPoints as [RowCol, ...RowCol[]] });
-        
-        /*else if (move.type === "move") {
-              const [fromX, fromY] = this.algebraic2coord(move.from);
-              const [toX, toY] = this.algebraic2coord(move.to);
-              rep.annotations.push({type: "move", targets: [{row: fromY, col: fromX}, {row: toY, col: toX}]});
-              rep.annotations.push({type: "enter", occlude: false, targets: [{row: toY, col: toX}]});
-              } else if (move.type === "swap") {
-              const [x, y] = this.algebraic2coord(move.where!);
-              rep.annotations.push({type: "enter", occlude: false, dashed: [2,4], targets: [{row: y, col: x}]});
-              }
-          }
-        */
+            rep.annotations.push({type: "dots", targets: annotationPoints as [RowCol, ...RowCol[]]});
 
         if (rep.annotations.length === 0)
             delete rep.annotations;
