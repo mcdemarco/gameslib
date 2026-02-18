@@ -516,7 +516,7 @@ export class MagnateGame extends GameBase {
             return this.unspender(spendy);
         }
 
-        //TODO: more useful partial payments.
+        //TODO: more partial payment improvements?
         
         return this.unspender(spendy);
     }
@@ -629,7 +629,6 @@ export class MagnateGame extends GameBase {
                 }
             }
         }
-        //TODO: test return condition to "log" gains?
         this.credit(tokens, player);
         
         return tokens;
@@ -1762,12 +1761,12 @@ export class MagnateGame extends GameBase {
             if ( pact.card ) {
 
                 if ( pact.type === "B" || pact.type === "D" || pact.type === "S" ) {
-                    //Card consumption types.  TODO: move to appropriate time.
-                    this.removeCard(pact.card, this.hands[this.currplayer - 1]);
+                    //Card consumption types.
                     const tokens = this.card2tokens(pact.card, pact.type, true);
 
                     if (pact.type === "S") {
                         this.discards.push(pact.card);
+                        this.removeCard(pact.card, this.hands[this.currplayer - 1]);
 
                         //Profit!
                         this.credit(tokens, this.currplayer);
@@ -1785,6 +1784,7 @@ export class MagnateGame extends GameBase {
                             //Create a deed.
                             this.createDeed(pact.card, pact.district);
                             this.debit(tokens, this.currplayer);
+                            this.removeCard(pact.card, this.hands[this.currplayer - 1]);
 
                             //Shared result type
                             this.results.push({
@@ -1798,6 +1798,7 @@ export class MagnateGame extends GameBase {
                         } else if (pact.type === "B") {
                             //Place the card.
                             this.placeCard(pact.card, pact.district);
+                            this.removeCard(pact.card, this.hands[this.currplayer - 1]);
 
                             if (pact.spend !== undefined) {
                                 //Shared result type
