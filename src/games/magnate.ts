@@ -1220,7 +1220,7 @@ export class MagnateGame extends GameBase {
                                 //Need to remove the card and spend the tokens for the next step.
                                 sortedHand.splice(c,1);
 
-                                const tokenArray = cloned.parseSplitSpend(payment.split("+"));
+                                const tokenArray = cloned.parseSpend(payment);
                                 cloned.debit(tokenArray, cloned.currplayer);
                                 
                             } else if (cloned.canDeed(card) && leverage > 0) {
@@ -1247,7 +1247,10 @@ export class MagnateGame extends GameBase {
             //so we don't have to do extensive clone support.
             if (submove === "") {
                 card = sortedHand.pop()!;
-                submove = "S:" + card;
+                submove = cloned.pickleMove({
+                    type: "S",
+                    card: card
+                } as IMagnateMove);
                 //Nice to collect on card for the next step.
                 const profit = cloned.card2tokens(card, "S");
                 cloned.credit(profit, cloned.currplayer);
@@ -1263,7 +1266,11 @@ export class MagnateGame extends GameBase {
                     
                     if (deedCard) {
                         const spend = cloned.getRandomPayment(deedCard, false);
-                        subsubmove = "A:" + deedCard + "+" + spend;
+                        subsubmove = cloned.pickleMove({
+                            type: "A",
+                            card: deedCard,
+                            spend: cloned.parseSpend(spend)
+                        } as IMagnateMove);
                         
                         //Manually validate here.
                         const validationObj = cloned.validateMove(submove + "," + subsubmove);
@@ -1271,7 +1278,7 @@ export class MagnateGame extends GameBase {
                         if (validationObj.valid === false || parsedSS.incomplete === true) { 
                             subsubmove = "";
                         } else {
-                            const tokenArray = cloned.parseSplitSpend(spend.split(","));
+                            const tokenArray = cloned.parseSpend(spend);
                             cloned.debit(tokenArray, cloned.currplayer);
                             //Credit the cloned deed to prevent errors in mega.
                             cloned.add2deed(deedCard, tokenArray);
