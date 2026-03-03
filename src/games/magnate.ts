@@ -835,7 +835,7 @@ export class MagnateGame extends GameBase {
         return c1.sharesSuitWith(c2);
     }
 
-    public parseMove(submove: string): IMagnateMove {
+    public parseMove(move: string): IMagnateMove {
         //Parse a submove (single action) into an IMagnateMove object.
         //Does only structural validation.
         //Expects at leat a choice of move type (X:).
@@ -870,6 +870,9 @@ export class MagnateGame extends GameBase {
         //Incomplete starts out undefined.
         //A partial submove that can't be submitted is set to incomplete.
 
+        //Upcase everything and downcase the districts later.
+        const submove = move.trim().toUpperCase();
+        
         //Check for legal characters.
         if (illegalChars.test(submove)) {
             mm.valid = false;
@@ -1127,13 +1130,8 @@ export class MagnateGame extends GameBase {
         //Parses an unsplit move into an action array without empties.
         const actions = move.split(",");
 
-        if (actions[actions.length - 1] === "") {
-            //Trim the dummy move.
-            //Could also test that the last character of move first.
-            actions.length--;
-        }
-
-        return actions;
+        //Trim any empty moves.
+        return actions.filter(a => a !== "");
     }
     
     private suitPicker(card: string, player: playerid): string {
@@ -1792,8 +1790,9 @@ export class MagnateGame extends GameBase {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
 
+        //Case and spacing are normalized in parseMove.
         //m = m.toLowerCase();
-        m = m.replace(/\s+/g, "");
+        //m = m.replace(/\s+/g, "");
         if (! trusted) {
             const result = this.validateMove(m);
             if (! result.valid) {
