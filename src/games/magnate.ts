@@ -373,6 +373,7 @@ export class MagnateGame extends GameBase {
         const price = this.getPriceFromRank(cardObj.rank.seq);
         let paid = 0;
         let test = true;
+        //console.log(card, spend);
         
         deed.suit1 += spend[suitIdxs[0]];
         paid += deed.suit1;
@@ -488,7 +489,7 @@ export class MagnateGame extends GameBase {
         if ( tokens.reduce( (cur, acc) => cur + acc, 0) === price ) {
             //Can pay the whole price, but check distribution.
             if ( tokens.filter( v => v > 0 ).length === cardObj.suits.length )
-                return this.unspender(tokens);
+                return this.pickleSpend(tokens);
         }
         
         const spendy = Array(6).fill(0);
@@ -505,7 +506,7 @@ export class MagnateGame extends GameBase {
         //Special case of 2.
         if ( cardObj.rank.seq === 2 ) {
             //May not be complete.
-            return this.unspender(spendy);
+            return this.pickleSpend(spendy);
         }
         
         const remaining = tokens.filter(v => v > 0);
@@ -515,12 +516,12 @@ export class MagnateGame extends GameBase {
             suitIdxs.forEach( (suitIdx) => {
                 spendy[suitIdx] += Math.min(price, tokens[suitIdx]);
             });
-            return this.unspender(spendy);
+            return this.pickleSpend(spendy);
         }
 
         //TODO: more partial payment improvements?
         
-        return this.unspender(spendy);
+        return this.pickleSpend(spendy);
     }
     
     private checkSpend(card: string, spend: number[], type: string): number {
@@ -584,6 +585,7 @@ export class MagnateGame extends GameBase {
             return 1;
         } else {
             //I don't know how you got here so...
+            //console.log("payment: ", payment, " spend: ", spendy, " sheltered: ", sheltered);
             throw new Error("Unexpected fallthrough in checkSpend().");
         }
     }
@@ -776,8 +778,9 @@ export class MagnateGame extends GameBase {
     }
     
     private getRandomPayment(card: string, full?: boolean): string {
-        //Construct a full or partial payment for use in random moves.
+        //Construct a full or partial payment (string) for use in random moves.
         //It may not qualify as a deed payment so don't rely on success.
+        //The caller no longer needs a string, so could be cleaned up.
         
         const cardObj = Multicard.deserialize(card)!;
         
@@ -809,7 +812,7 @@ export class MagnateGame extends GameBase {
             }
         }
 
-        return payment.join(",");
+        return payment.join("+");
     }
 
     private hasDeed(district: string, player: playerid): boolean {
@@ -937,7 +940,7 @@ export class MagnateGame extends GameBase {
                 mm.valid = false;
                 return mm;
             } else {
-                mm.spend = this.spender([value]);
+                mm.spend = this.parseSplitSpend([value]);
             }
         } else if (card === undefined) {
             card = split.shift()!;
@@ -1013,7 +1016,7 @@ export class MagnateGame extends GameBase {
         }
 
         //amalgamapping the spend
-        mm.spend = this.spender(split);
+        mm.spend = this.parseSplitSpend(split);
         
         //Finished buy and add cases.
         mm.incomplete = false;
@@ -1049,7 +1052,7 @@ export class MagnateGame extends GameBase {
         if (pact.card)
             move += pact.card;
         else if (pact.spend) {
-            move += this.unspender(pact.spend).join("+");
+            move += this.pickleSpend(pact.spend).join("+");
             if (pact.suit)
                 move += "+" + pact.suit;
             return move;
@@ -1063,11 +1066,44 @@ export class MagnateGame extends GameBase {
             move += "@" + pact.district;
         
         if (pact.spend)
-            move += "+" + this.unspender(pact.spend).join("+");
+            move += "+" + this.pickleSpend(pact.spend).join("+");
         else if (pact.suit) 
             move += "+" + pact.suit;
 
         return move;
+    }
+
+    private parseSpend(spend: string): number[] {
+        //Parses a raw spend into a token array.
+        return this.parseSplitSpend(spend.split("+"));
+    }
+
+    private parseSplitSpend(values: string[]): number[] {
+        //Parses a pre-split spend into a token array.
+        const spend: number[] = Array(6).fill(0);
+
+        values.forEach(value => {
+            const suit = value[0];
+            const quantity = value.length > 1 ? parseInt(value[1],10) : 1;
+            spend[suitOrder.indexOf(suit)] += quantity;
+        });
+ 
+        return spend;
+    }
+
+    private pickleSpend(tokenArray: number[]): string[] {
+        //Parses a token array into a pre-split spend.
+        const spend: string[] = [];
+
+        tokenArray.forEach((value, index) => {
+            if (value > 0) {
+                const suit = suitOrder[index];
+                const quantity = (value === 1 ? "" : value.toString());
+                spend.push(`${suit}${quantity}`);
+            }
+        });
+ 
+        return spend;
     }
 
     private placeCard(card: string, district: string): void {
@@ -1087,19 +1123,6 @@ export class MagnateGame extends GameBase {
         return false;
     }
     
-    private spender(values: string[]): number[] {
-        //Parses a pre-split spend into a token array.
-        const spend: number[] = Array(6).fill(0);
-
-        values.forEach(value => {
-            const suit = value[0];
-            const quantity = value.length > 1 ? parseInt(value[1],10) : 1;
-            spend[suitOrder.indexOf(suit)] += quantity;
-        });
- 
-        return spend;
-    }
-
     private splitMove(move: string): string[] {
         //Parses an unsplit move into an action array without empties.
         const actions = move.split(",");
@@ -1128,21 +1151,6 @@ export class MagnateGame extends GameBase {
             return choices[1];
     }
     
-    private unspender(tokenArray: number[]): string[] {
-        //Parses a token array into a pre-split spend.
-        const spend: string[] = [];
-
-        tokenArray.forEach((value, index) => {
-            if (value > 0) {
-                const suit = suitOrder[index];
-                const quantity = (value === 1 ? "" : value.toString());
-                spend.push(`${suit}${quantity}`);
-            }
-        });
- 
-        return spend;
-    }
-
     
     //Not autopassing (or passing) so don't need a moves function?
     public moves(player?: playerid): string[] {
@@ -1173,7 +1181,11 @@ export class MagnateGame extends GameBase {
         for (const choice of cloned.choose) {
             const suit = cloned.suitPicker(choice, cloned.currplayer);
             cloned.tokens[cloned.currplayer - 1][suitOrder.indexOf(suit)]++;
-            premove += "C:" + choice + "+" + suit + ",";
+            premove += cloned.pickleMove({
+                type: "C",
+                card: choice,
+                suit: suit
+            } as IMagnateMove) + ",";
         }
         cloned.choose = [];
 
@@ -1199,15 +1211,25 @@ export class MagnateGame extends GameBase {
                             if ( cloned.canPay(card) ) {
                                 // If we can deed a 2 we can pay for it, so doesn't try to deed one.
                                 const payment = cloned.getRandomPayment(card, true);
-                                submove = "B:" + card + "," + dist + "," + payment;
+                                submove = cloned.pickleMove({
+                                    type: "B",
+                                    card: card,
+                                    district: dist,
+                                    spend: cloned.parseSpend(payment)
+                                } as IMagnateMove);
                                 //Need to remove the card and spend the tokens for the next step.
                                 sortedHand.splice(c,1);
 
-                                const tokenArray = cloned.spender(payment.split(","));
+                                const tokenArray = cloned.parseSplitSpend(payment.split("+"));
                                 cloned.debit(tokenArray, cloned.currplayer);
                                 
                             } else if (cloned.canDeed(card) && leverage > 0) {
-                                submove = "D:" + card + "," + dist;
+                                submove = cloned.pickleMove({
+                                    type: "D",
+                                    card: card,
+                                    district: dist
+                                } as IMagnateMove);
+                                
                                 //Need to remove the card and spend the tokens for the next step.
                                 sortedHand.splice(c,1);
                                 const spend = cloned.card2tokens(card, "D");
@@ -1241,7 +1263,7 @@ export class MagnateGame extends GameBase {
                     
                     if (deedCard) {
                         const spend = cloned.getRandomPayment(deedCard, false);
-                        subsubmove = "A:" + deedCard + "," + spend;
+                        subsubmove = "A:" + deedCard + "+" + spend;
                         
                         //Manually validate here.
                         const validationObj = cloned.validateMove(submove + "," + subsubmove);
@@ -1249,7 +1271,7 @@ export class MagnateGame extends GameBase {
                         if (validationObj.valid === false || parsedSS.incomplete === true) { 
                             subsubmove = "";
                         } else {
-                            const tokenArray = cloned.spender(spend.split(","));
+                            const tokenArray = cloned.parseSplitSpend(spend.split(","));
                             cloned.debit(tokenArray, cloned.currplayer);
                             //Credit the cloned deed to prevent errors in mega.
                             cloned.add2deed(deedCard, tokenArray);
