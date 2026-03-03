@@ -845,7 +845,7 @@ export class MagnateGame extends GameBase {
         //The suit format is: 
         const suitex = /^[MSVLYK][2-8]?$/;
         //A regex to check for illegal characters is:
-        const illegalChars = /[^A-Za-n1-9:,]/;
+        const illegalChars = /[^A-Za-n1-9:@+]/;
 
         //The move formats depend on the main action:
         // Buy:    card, district, spend
@@ -872,7 +872,7 @@ export class MagnateGame extends GameBase {
             mm.valid = false;
             return mm;
         }
-
+        
         let card, district, suit: string;
 
         //Next, split the string on type.
@@ -903,16 +903,34 @@ export class MagnateGame extends GameBase {
 
         //Split the remaining items.
         
-        const split = typed[1].split(",");
-
-        if ( split[0] === "" ) {
-            //Malformed move string.  We require at least X:
-            mm.valid = false;
-            return mm;
-        }
+        let split = typed[1].split("@");
         
+        if ( split[0] === typed[1] ) {
+            //Found no districts so split on plus.
+            split = typed[1].split("+");
+
+            if ( split[0] === "" ) {
+                //Malformed move string.  We require at least X:
+                mm.valid = false;
+                return mm;
+            }
+            
+        } else {
+            //We set both card and district (untested).
+            card = split[0];
+            //Found a district and subsplit on +.
+            split = split[1].split("+");
+            district = split.shift()?.toLowerCase();
+        }
+
         //The only case without a card.
         if (type === "T") {
+            if (card) {
+                //Malformed move string.
+                mm.valid = false;
+                return mm;
+            }
+            
             const value = split.shift()!;
             if (! suitex.test(value) ) {
                 //Malformed suit string.
@@ -921,8 +939,11 @@ export class MagnateGame extends GameBase {
             } else {
                 mm.spend = this.spender([value]);
             }
-        } else {
+        } else if (card === undefined) {
             card = split.shift()!;
+        }
+
+        if (card) {
             if (! cardex.test(card) ) {
                 //Malformed card.
                 mm.valid = false;
@@ -930,29 +951,42 @@ export class MagnateGame extends GameBase {
             } else {
                 mm.card = card;
             }
+            if (district) {
+                if (! cellex.test(district) ) {
+                    //Malformed district.
+                    mm.valid = false;
+                    return mm;
+                } else {
+                    mm.district = district;
+                }
+            }
         }
 
-        //The only case without more info.
+        //The only case without more info beyond card.
         if ( type === "S" ) {
+            //We ignore any extra info in this case, though we could complain.
             mm.incomplete = false;
             return mm;
+        }
+
+        //The district is already parsed, if present.
+        if ( type === "D" || type === "B" ) {
+            if ( mm.district !== undefined )
+                mm.incomplete = false;
+            else
+                mm.incomplete = true;
+            if ( type === "D" || mm.incomplete === true ) {
+                //These cases are done (good deed, bad buy).
+                return mm;
+            }
         } else if ( split.length === 0 || split[0] === "" ) {
+            //In all other cases we need suits.
             mm.incomplete = true;
             return mm;
         }
-
-        //The district cases.
-        if ( type === "B" || type === "D" ) {
-            district = split.shift()!;
-            if (! cellex.test(district) ) {
-                //Malformed district.
-                mm.valid = false;
-                return mm;
-            } else {
-                mm.district = district; 
-            }
-        } else if ( type === "T" || type === "P" || type === "C" ) {
-            //The suit cases har har.
+               
+        if ( type === "T" || type === "P" || type === "C" ) {
+            //The single suit cases har har.
             suit = split.shift()!;
             if (! suitex.test(suit) ) {
                 //Malformed suit.
@@ -960,16 +994,13 @@ export class MagnateGame extends GameBase {
                 return mm;
             }  else {
                 mm.suit = suit; 
+                //These cases are now complete.
+                mm.incomplete = false;
+                return mm;
             }
-        } //Skipping add for a minute.
+        } 
 
-        if ( type === "D" || type === "T" || type === "P" || type === "C" ) {
-            //These cases are now complete.
-            mm.incomplete = false;
-            return mm;
-        }
-
-        //Only tokens left...if that.
+        //Only spend tokens left...if that.
         if ( split.length === 0 || split[0] === "" ) {
             mm.incomplete = true;
             return mm;
@@ -1006,21 +1037,21 @@ export class MagnateGame extends GameBase {
         let move = pact.type + ":";
 
         //The move formats depend on the main action:
-        // Buy:    card, district, spend
-        // Deed:   card, district
+        // Buy:    card @ district + spend
+        // Deed:   card @ district
         // Sell:   card
-        // Add:    card, spend
-        // Trade:  spend, suit
-        // Prefer: card, suit
-        // Choose: card, suit
+        // Add:    card + spend
+        // Trade:  spend + suit
+        // Prefer: card + suit
+        // Choose: card + suit
         // Error:  for internal use only
         
         if (pact.card)
             move += pact.card;
         else if (pact.spend) {
-            move += this.unspender(pact.spend).join(",");
+            move += this.unspender(pact.spend).join("+");
             if (pact.suit)
-                move += "," + pact.suit;
+                move += "+" + pact.suit;
             return move;
         } else {
             //assume incomplete rather than in error.
@@ -1029,12 +1060,12 @@ export class MagnateGame extends GameBase {
 
         //If we're here, we have a card.
         if (pact.district)
-            move += "," + pact.district;
+            move += "@" + pact.district;
         
         if (pact.spend)
-            move += "," + this.unspender(pact.spend).join(",");
+            move += "+" + this.unspender(pact.spend).join("+");
         else if (pact.suit) 
-            move += "," + pact.suit;
+            move += "+" + pact.suit;
 
         return move;
     }
@@ -1070,8 +1101,8 @@ export class MagnateGame extends GameBase {
     }
 
     private splitMove(move: string): string[] {
-        //Parses a pre-split move into an action array without empties.
-        const actions = move.split("/");
+        //Parses an unsplit move into an action array without empties.
+        const actions = move.split(",");
 
         if (actions[actions.length - 1] === "") {
             //Trim the dummy move.
@@ -1142,7 +1173,7 @@ export class MagnateGame extends GameBase {
         for (const choice of cloned.choose) {
             const suit = cloned.suitPicker(choice, cloned.currplayer);
             cloned.tokens[cloned.currplayer - 1][suitOrder.indexOf(suit)]++;
-            premove += "C:" + choice + "," + suit + "/";
+            premove += "C:" + choice + "+" + suit + ",";
         }
         cloned.choose = [];
 
@@ -1213,7 +1244,7 @@ export class MagnateGame extends GameBase {
                         subsubmove = "A:" + deedCard + "," + spend;
                         
                         //Manually validate here.
-                        const validationObj = cloned.validateMove(submove + "/" + subsubmove);
+                        const validationObj = cloned.validateMove(submove + "," + subsubmove);
                         const parsedSS = cloned.parseMove(subsubmove);
                         if (validationObj.valid === false || parsedSS.incomplete === true) { 
                             subsubmove = "";
@@ -1227,7 +1258,7 @@ export class MagnateGame extends GameBase {
                 }
             }
             
-            move += (move === "" || move.slice(-1) === "/" ? "" : "/") + submove + "/" + subsubmove;
+            move += (move === "" || move.slice(-1) === "," ? "" : ",") + submove + "," + subsubmove;
         }
         
         return premove + move;
@@ -1236,12 +1267,13 @@ export class MagnateGame extends GameBase {
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         //First click should be on a move button.
         //Subsequent clicks should be:
-        // * hand card > district > tokens (if not autocompleted)
-        // * hand card > district (deeds)
+        // * hand card @ district + tokens (if not autocompleted)
+        // * hand card @ district (deeds)
         // * hand card (sales)
-        // * deed card > add tokens
-        // * token pile > token pile (for trades)
-        // * deed card > preferred or chosen suit
+        // * deed card + add tokens
+        // * token pile + token pile (for trades)
+        // * deed card + preferred or chosen suit
+        //Moves are now separated by a comma; spaces will be inserted after the comma in post.
         
         try {
             let newmove = "";
@@ -1255,7 +1287,7 @@ export class MagnateGame extends GameBase {
                             //Remove one move.
                             submoves.length = submoves.length - 1;
                         }
-                        newmove = submoves.join("/");
+                        newmove = submoves.join(",");
                     } else if ( move && move.endsWith(":") ) { //Reset type.
                         newmove = `${move.substring(0,move.length - 2)}${type}:`;
                     } else if (move) {//Next action.
@@ -1267,12 +1299,12 @@ export class MagnateGame extends GameBase {
                                 valid: false,
                                 message: i18next.t("apgames:validation.magnate.INCOMPLETE_ACTION")
                             }
-                        } else if (move.slice(-1) === "/") {
+                        } else if (move.slice(-1) === ",") {
                             //Still can fail to be a complete buy payment,
                             // but it's too difficult to detect here.
                             newmove = `${move}${type}:`;
                         } else {
-                            newmove = `${move}/${type}:`;
+                            newmove = `${move},${type}:`;
                         }
                     } else //First action.
                         newmove = `${type}:`;
@@ -1299,9 +1331,9 @@ export class MagnateGame extends GameBase {
                         newmove = `${move}${suit}3`; 
                     } else {
                         const submoves = this.splitMove(move);
-                        const pmv = this.parseMove(`${submoves.pop()},${suit}`);
+                        const pmv = this.parseMove(`${submoves.pop()}+${suit}`);
                         if (pmv.valid === true)
-                            newmove = submoves.join("/") + (submoves.length > 0 ? "/" : "") + this.pickleMove(pmv);
+                            newmove = submoves.join(",") + (submoves.length > 0 ? "," : "") + this.pickleMove(pmv);
                         else {
                             //Default message.
                             let message = i18next.t("apgames:validation.magnate.INVALID_MOVE", {move: newmove});
@@ -1330,7 +1362,7 @@ export class MagnateGame extends GameBase {
                         valid: false,
                         message: i18next.t("apgames:validation.magnate.INITIAL_BUTTON_INSTRUCTIONS")
                     }
-                } else if (move && move.endsWith("/")) {
+                } else if (move && move.endsWith(",")) {
                     //it's too early to click on other stuff.
                     return {
                         move,
@@ -1350,11 +1382,11 @@ export class MagnateGame extends GameBase {
                         subparse.card = piece.split("k")[1];
                         submoves.length = submoves.length - 1;
                         submoves.push(this.pickleMove(subparse));
-                        newmove = submoves.join("/");
+                        newmove = submoves.join(",");
                     } else {
                         //Otherwise, interpret the card as its district
                         const district = this.coord2algebraic(col);
-                        newmove = `${move},${district}`;
+                        newmove = `${move}@${district}`;
                     }
                 } else if (move && move.endsWith(":")) {
                     //it's too early to click on a district,
@@ -1366,7 +1398,7 @@ export class MagnateGame extends GameBase {
                     }
                 } else {
                     const district = this.coord2algebraic(col);
-                    newmove = `${move},${district}`;
+                    newmove = `${move}@${district}`;
                 }
             }
             
