@@ -65,8 +65,8 @@ export class MagnateGame extends GameBase {
         name: "Magnate",
         uid: "magnate",
         playercounts: [2],
-        version: "20260218",
-        dateAdded: "2026-02-18",
+        version: "20260303",
+        dateAdded: "2026-03-03",
         // i18next.t("apgames:descriptions.magnate")
         description: "apgames:descriptions.magnate",
         // i18next.t("apgames:notes.magnate")
@@ -1131,7 +1131,7 @@ export class MagnateGame extends GameBase {
         const actions = move.split(",");
 
         //Trim any empty moves.
-        return actions.filter(a => a !== "");
+        return actions.filter(a => a.trim() !== "");
     }
     
     private suitPicker(card: string, player: playerid): string {
@@ -1150,40 +1150,25 @@ export class MagnateGame extends GameBase {
     }
     
     
-    //Not autopassing (or passing) so don't need a moves function?
-    public moves(player?: playerid): string[] {
-        if (this.gameover) {
-            return [];
-        }
-
-        if (player === undefined) {
-            player = this.currplayer;
-        }
-
-        const moves: string[] = [];
-
-        return moves.sort((a,b) => a.localeCompare(b));
-    }
-
+    //Not autopassing (or passing) so don't need a moves function.
+    
     public randomMove(): string {
-        let move: string = "";
-
         if (this.gameover)
-            return move;
+            return "";
 
         const cloned = Object.assign(new MagnateGame(), deepclone(this) as MagnateGame);
         const usedCardCount = (cloned.variants.includes("mega") ? 2 : 1);
         const leverageCount = usedCardCount * 2 + 1;
 
-        let premove = "";
+        const moves: string[] = [];
         for (const choice of cloned.choose) {
             const suit = cloned.suitPicker(choice, cloned.currplayer);
             cloned.tokens[cloned.currplayer - 1][suitOrder.indexOf(suit)]++;
-            premove += cloned.pickleMove({
+            moves.push(cloned.pickleMove({
                 type: "C",
                 card: choice,
                 suit: suit
-            } as IMagnateMove) + ",";
+            } as IMagnateMove));
         }
         cloned.choose = [];
 
@@ -1253,8 +1238,9 @@ export class MagnateGame extends GameBase {
                 const profit = cloned.card2tokens(card, "S");
                 cloned.credit(profit, cloned.currplayer);
             }
-            
-            
+
+            moves.push(submove);
+
             //In all cases, we also attempt to pay on a deed.
             let subsubmove = "";
             
@@ -1284,11 +1270,12 @@ export class MagnateGame extends GameBase {
                     }
                 }
             }
-            
-            move += (move === "" || move.slice(-1) === "," ? "" : ",") + submove + "," + subsubmove;
-        }
+
+            if (subsubmove)
+                moves.push(subsubmove);
+         }
         
-        return premove + move;
+        return moves.join(",");
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
@@ -2007,8 +1994,7 @@ export class MagnateGame extends GameBase {
         // draw up
         this.drawUp();
 
-        this.lastmove = m;
-        //this.roll = this.roll;
+        this.lastmove = m.split(",").join(", "); //thin space
 
         // update currplayer
         let newplayer = (this.currplayer as number) + 1;

@@ -14,6 +14,13 @@ describe("Magnate", () => {
             type: "B",
             valid: true
         });
+        expect(g.parseMove(" B:8MS@a ")).to.deep.equal({
+            card: "8MS",
+            district: "a",
+            incomplete: true,
+            type: "B",
+            valid: true
+        });
         expect(g.parseMove("B:8MS@A")).to.deep.equal({
             card: "8MS",
             district: "a",
@@ -252,7 +259,7 @@ describe("Magnate", () => {
 
     });
     it ("Unparses all", () => {
-        expect(g.pickleMove(g.parseMove("B:1L1@a+M3+S5"))).eq("B:1L1@a+M3+S5");
+        expect(g.pickleMove(g.parseMove(" B:1L1@a+M3+S5 "))).eq("B:1L1@a+M3+S5");
         expect(g.pickleMove(g.parseMove("B:1L1@a+M+S4+M2+S"))).eq("B:1L1@a+M3+S5");
         
         expect(g.pickleMove(g.parseMove("D:TMLY2@h"))).eq("D:TMLY2@h");
