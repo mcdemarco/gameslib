@@ -506,7 +506,7 @@ export class BttGame extends GameBase {
                         pieces.push("R");
                     } else {
                         const [player, size, dir] = contents;
-                        pieces.push(player.toString() + size.toString() + dir);
+                        pieces.push("P" + player.toString() + size.toString() + dir);
                     }
                 } else {
                     pieces.push("-");
@@ -565,12 +565,12 @@ export class BttGame extends GameBase {
         for (let player = 1; player <= this.numplayers; player++) {
             for (const size of [1, 2, 3]) {
                 for (const [dir, angle] of rotations.entries()) {
-                    const node: Glyph = {
+                    const pyraglyph: Glyph = {
                         name: "pyramid-flat-" + sizeNames[size - 1],
                         colour: player,
                         rotate: angle,
                     };
-                    myLegend[player.toString() + size.toString() + dir] = node;
+                    myLegend["P" + player.toString() + size.toString() + dir] = pyraglyph;
                 }
             }
         }
