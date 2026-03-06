@@ -10,6 +10,19 @@ describe("Branches and Twigs and Thorns", () => {
             
             const ga = new BTTGame(p, ["arcade"]);
             expect(ga.moves().length).eq(p * 10);
+
+            const gg = new BTTGame(p, ["martian-go"]);
+            if (p > 4) {
+                //No Martian Go setup in these cases.
+                expect(gg.moves().length).eq(p * 16);
+            } else if (p === 2 || p === 4) {
+                //These two cases are symmetric.  (No nulls.)
+                //(2 spots per player, three pyramid types)
+                expect(gg.moves().length).eq(p * 2 * 3);
+            } else {
+                //Three players get a funky root.  (No nulls.)
+                expect(gg.moves().length).eq(8 * 3);
+            }
         }
     });
 

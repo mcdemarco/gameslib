@@ -41,13 +41,14 @@ export class BTTGame extends GameBase {
         // i18next.t("apgames:descriptions.btt")
         description: "apgames:descriptions.btt",
         urls: [
-            "https://boardgamegeek.com/boardgame/17298/branches-and-twigs-and-thorns"
+            "https://boardgamegeek.com/boardgame/17298/branches-and-twigs-and-thorns",
+            "https://www.eblong.com/zarf/barsoom-go.html"
         ],
         people: [
             {
                 type: "designer",
                 name: "Andrew Plotkin",
-                urls: ["https://www.eblong.com/zarf/barsoom-go.html/"]
+                urls: ["https://www.eblong.com"]
             },
             {
                 type: "coder",
@@ -92,7 +93,17 @@ export class BTTGame extends GameBase {
                 scores: [],
                 stashes: new Map()
             };
-            //TODO: variants
+            if ( this.variants.includes("martian-go") && this.numplayers < 5 ) {
+                //There are no nulls, and the roots are prefab.
+                fresh.board.set("d4", "ROOT");
+                fresh.board.set("e4", "ROOT");
+                if (this.numplayers === 3) {
+                    fresh.board.set("d3", "ROOT");
+                } else if (this.numplayers === 4) {
+                    fresh.board.set("d5", "ROOT");
+                    fresh.board.set("e5", "ROOT");
+                }
+            }
 
             for (let pid = 1; pid <= state; pid++) {
                 fresh.scores.push(0);
@@ -161,12 +172,15 @@ export class BTTGame extends GameBase {
 
     /* helper functions */
 
+    //TODO: this becomes more complicated with 3 nulls (6 players).
     private checkNull(cell: string): boolean {
         //Determine whether a second null is legal (doesn't isolate any squares).
-        //It is the responsibility of the caller to ensure there was a first null.
-        const firstNull = [...this.board.values()].filter(c => c === "NULL")[0];
-        console.log("first null: ", firstNull);
-        const firstXY = this.algebraic2coords(firstNull);
+        //Also returns true if there is no first null.
+        const firstNull = [...this.board.values()].filter(c => c === "NULL");
+        if ( firstNull === undefined || firstNull.length === 0 )
+            return true;
+
+        const firstXY = this.algebraic2coords([...this.board.keys()][0]);
         const secondXY = this.algebraic2coords(cell);
         //The first condition on cutting off squares: the cells are diagonally adjacent.
         if ( (Math.abs(firstXY[0] - secondXY[0]) !== 1)
@@ -175,6 +189,7 @@ export class BTTGame extends GameBase {
         //The second condition is that both cells are on (different) edges of the board.
         if ( firstXY[0] !== 0 && firstXY[0] !== this.boardWidth - 1 &&
             firstXY[1] !== 0 && firstXY[1] !== this.boardHeight - 1 )
+            return true;
         if ( secondXY[0] !== 0 && secondXY[0] !== this.boardWidth - 1 &&
             secondXY[1] !== 0 && secondXY[1] !== this.boardHeight - 1 )
             return true;
@@ -182,17 +197,17 @@ export class BTTGame extends GameBase {
         return false;
     }
 
-    //TODO: these get called alot; add to the state instead?
+    //TODO: these get called alot; add a list of nulls/roots to the state instead?
     private needNull(): boolean {
-        if (this.variants.includes("martian-go"))
+        if ( this.variants.includes("martian-go") && this.numplayers < 5 )
             return false;
         const nulls = [...this.board.values()].filter(c => c === "NULL").length;
-        return nulls < this.numplayers / 2;
+        return nulls < Math.floor(this.numplayers / 2);
     }
 
     private needRoot(): boolean {
         const roots = [...this.board.values()].filter(c => c === "ROOT").length;
-        return roots < this.numplayers / 2;
+        return roots < Math.ceil(this.numplayers / 2);
     }
 
 
@@ -206,23 +221,11 @@ export class BTTGame extends GameBase {
         const moves: string[] = [];
 
         if ( this.needNull() ) {
-            //TODO: Need a function for this.
-            const badnulls = new Map<string, string>();
-            if (this.numplayers === 4) {
-                badnulls.set("a2", "b1"); badnulls.set("b1", "a2");
-                badnulls.set("a7", "b8"); badnulls.set("b8", "a7");
-                badnulls.set("g1", "h2"); badnulls.set("h2", "g1");
-                badnulls.set("h7", "g8"); badnulls.set("g8", "h7");
-            }
-
-            const existingNull = [...this.board.entries()].find(e => e[1] === "NULL")?.[0];
-
             for (let y = 0; y < this.boardHeight; y++) {
                 for (let x = 0; x < this.boardWidth; x++) {
                     const cell = this.coords2algebraic(x, y);
                     if (this.board.has(cell)) continue;
-                    if (existingNull !== undefined && badnulls.get(existingNull) === cell) {
-                        console.log(cell, ": ", this.checkNull(cell));
+                    if ( ! this.checkNull(cell) ) {
                         continue;
                     }
                     moves.push(`NULL-${cell}`);

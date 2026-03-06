@@ -703,7 +703,7 @@
                 "name": "Arcade"
             },
             "martian-go": {
-                "description": "The original game used a slightly different setup (no null squares) and scoring (penalties only).",
+                "description": "The original game used slightly different setup (large central roots with no null squares) and scoring (penalties only) rules.  When playing with more than 4 players, setup will instead be as in the standard game, but scoring will be as in Martian Go.",
                 "name": "Martian Go"
             }
         },
