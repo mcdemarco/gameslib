@@ -56,8 +56,12 @@ export class BttGame extends GameBase {
                 apid: "4bd8317d-fb04-435f-89e0-2557c3f2e66c",
             },
         ],
+        variants: [
+            { uid: "arcade" },
+            { uid: "martian-go" }
+        ],
         categories: ["goal>score>maximize", "mechanic>place", "board>shape>rect", "board>connect>rect", "components>pyramids", "other>2+players"],
-        flags: ["player-stashes", "scores"]
+        flags: ["player-stashes", "scores", "experimental"]
     };
 
     public numplayers!: number;
@@ -85,9 +89,8 @@ export class BttGame extends GameBase {
                 scores: [],
                 stashes: new Map()
             };
-            if ( (variants !== undefined) && (variants.length === 1) && (variants[0] === "arcade") ) {
-                this.variants = ["arcade"];
-            }
+            //TODO: variants
+
             for (let pid = 1; pid <= state; pid++) {
                 fresh.scores.push(0);
                 fresh.stashes.set(pid as playerid, [5,5,5]);
@@ -262,6 +265,7 @@ export class BttGame extends GameBase {
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
+            //Move format: 
             const cell = BttGame.coords2algebraic(col, row, this.numplayers);
 
             let newmove = "";
@@ -270,7 +274,7 @@ export class BttGame extends GameBase {
 
             if ( nulls < this.numplayers / 2 ) {
                 newmove = `NULL-${cell}`;
-            } else if ((this.numplayers === 2 && roots === 0) || (this.numplayers === 4 && roots < 2)) {
+            } else if ( roots < this.numplayers / 2 ) {
                 newmove = `ROOT-${cell}`;
             } else {
                 if (move === "") {
@@ -438,17 +442,15 @@ export class BttGame extends GameBase {
     }
 
     protected checkEOG(): BttGame {
-        let gameEnded = false;
-        const maxPieces = this.numplayers === 2 ? 32 : 64;
+        const maxPieces = this.numplayers * 16;
 
         if (this.board.size === maxPieces) {
-            gameEnded = true;
+            this.gameover = true;
         } else if (this.moves().length === 0) {
-            gameEnded = true;
+            this.gameover = true;
         }
 
-        if (gameEnded) {
-            this.gameover = true;
+        if (this.gameover = true) {
             const maxScore = Math.max(...this.scores);
             for (let i = 0; i < this.numplayers; i++) {
                 if (this.scores[i] === maxScore) {
