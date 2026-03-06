@@ -26,16 +26,16 @@ export interface IMoveState extends IIndividualState {
     stashes: Map<playerid, [number, number, number]>; // index 0 is size 1, index 1 is size 2, index 2 is size 3
 };
 
-export interface IBttState extends IAPGameState {
+export interface IBTTState extends IAPGameState {
     winner: playerid[];
     stack: Array<IMoveState>;
 };
 
-export class BttGame extends GameBase {
+export class BTTGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
         name: "Branches and Twigs and Thorns",
         uid: "btt",
-        playercounts: [2, 4],
+        playercounts: [2, 3, 4, 5, 6],
         version: "20260305",
         dateAdded: "2026-03-05",
         // i18next.t("apgames:descriptions.btt")
@@ -57,8 +57,8 @@ export class BttGame extends GameBase {
             },
         ],
         variants: [
-            { uid: "arcade" },
-            { uid: "martian-go" }
+            { uid: "arcade", group: "setup" },
+            { uid: "martian-go", group: "setup" }
         ],
         categories: ["goal>score>maximize", "mechanic>place", "board>shape>rect", "board>connect>rect", "components>pyramids", "other>2+players"],
         flags: ["player-stashes", "scores", "experimental"]
@@ -75,13 +75,16 @@ export class BttGame extends GameBase {
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
 
-    constructor(state: number | IBttState | string, variants?: string[]) {
+    constructor(state: number | IBTTState | string, variants?: string[]) {
         super();
         if (typeof state === "number") {
             this.numplayers = state;
+            if (variants !== undefined) {
+                this.variants = [...variants];
+            }
             
             const fresh: IMoveState = {
-                _version: BttGame.gameinfo.version,
+                _version: BTTGame.gameinfo.version,
                 _results: [],
                 _timestamp: new Date(),
                 currplayer: 1,
@@ -93,15 +96,18 @@ export class BttGame extends GameBase {
 
             for (let pid = 1; pid <= state; pid++) {
                 fresh.scores.push(0);
-                fresh.stashes.set(pid as playerid, [5,5,5]);
+                if ( this.variants.includes("arcade") )
+                    fresh.stashes.set(pid as playerid, [3,3,3]);
+                else
+                    fresh.stashes.set(pid as playerid, [5,5,5]);
             }
 
             this.stack = [fresh];
         } else {
             if (typeof state === "string") {
-                state = JSON.parse(state, reviver) as IBttState;
+                state = JSON.parse(state, reviver) as IBTTState;
             }
-            if (state.game !== BttGame.gameinfo.uid) {
+            if (state.game !== BTTGame.gameinfo.uid) {
                 throw new Error(`The BTT engine cannot process a game of '${state.game}'.`);
             }
             this.numplayers = state.numplayers;
@@ -113,7 +119,7 @@ export class BttGame extends GameBase {
         this.load();
     }
 
-    public load(idx = -1): BttGame {
+    public load(idx = -1): BTTGame {
         if (idx < 0) {
             idx += this.stack.length;
         }
@@ -132,27 +138,75 @@ export class BttGame extends GameBase {
     }
 
     public get boardHeight(): number {
-        return this.numplayers === 2 ? 4 : 8;
+        if (this.variants.includes("arcade"))
+            return this.numplayers < 6 ? 5 : 10;
+        else 
+            return this.numplayers * 2;
     }
 
-    public static coords2algebraic(x: number, y: number, playercount: number): string {
-        return GameBase.coords2algebraic(x, y, playercount === 2 ? 4 : 8);
+    public get boardWidth(): number {
+        if (this.variants.includes("arcade"))
+            return this.numplayers < 6 ? this.numplayers * 2 : 6;
+        else
+            return 8;
     }
-    public static algebraic2coords(cell: string, playercount: number): [number, number] {
-        return GameBase.algebraic2coords(cell, playercount === 2 ? 4 : 8);
+
+    public coords2algebraic(x: number, y: number): string {
+        return GameBase.coords2algebraic(x, y, this.numplayers * 2);
     }
+    public algebraic2coords(cell: string): [number, number] {
+        return GameBase.algebraic2coords(cell, this.numplayers * 2);
+    }
+
+
+    /* helper functions */
+
+    private checkNull(cell: string): boolean {
+        //Determine whether a second null is legal (doesn't isolate any squares).
+        //It is the responsibility of the caller to ensure there was a first null.
+        const firstNull = [...this.board.values()].filter(c => c === "NULL")[0];
+        console.log("first null: ", firstNull);
+        const firstXY = this.algebraic2coords(firstNull);
+        const secondXY = this.algebraic2coords(cell);
+        //The first condition on cutting off squares: the cells are diagonally adjacent.
+        if ( (Math.abs(firstXY[0] - secondXY[0]) !== 1)
+            || (Math.abs(firstXY[1] - secondXY[1]) !== 1) )
+            return true;
+        //The second condition is that both cells are on (different) edges of the board.
+        if ( firstXY[0] !== 0 && firstXY[0] !== this.boardWidth - 1 &&
+            firstXY[1] !== 0 && firstXY[1] !== this.boardHeight - 1 )
+        if ( secondXY[0] !== 0 && secondXY[0] !== this.boardWidth - 1 &&
+            secondXY[1] !== 0 && secondXY[1] !== this.boardHeight - 1 )
+            return true;
+        
+        return false;
+    }
+
+    //TODO: these get called alot; add to the state instead?
+    private needNull(): boolean {
+        if (this.variants.includes("martian-go"))
+            return false;
+        const nulls = [...this.board.values()].filter(c => c === "NULL").length;
+        return nulls < this.numplayers / 2;
+    }
+
+    private needRoot(): boolean {
+        const roots = [...this.board.values()].filter(c => c === "ROOT").length;
+        return roots < this.numplayers / 2;
+    }
+
+
+    /* end helper functions */
 
     public moves(player?: playerid): string[] {
         if (this.gameover) { return []; }
         if (player === undefined) {
             player = this.currplayer;
         }
-        const allmoves: string[] = [];
+        const moves: string[] = [];
 
-        const nulls = [...this.board.values()].filter(c => c === "NULL").length;
-        const roots = [...this.board.values()].filter(c => c === "ROOT").length;
-
-        if ((this.numplayers === 2 && nulls === 0) || (this.numplayers === 4 && nulls < 2)) {
+        if ( this.needNull() ) {
+            //TODO: Need a function for this.
             const badnulls = new Map<string, string>();
             if (this.numplayers === 4) {
                 badnulls.set("a2", "b1"); badnulls.set("b1", "a2");
@@ -164,19 +218,22 @@ export class BttGame extends GameBase {
             const existingNull = [...this.board.entries()].find(e => e[1] === "NULL")?.[0];
 
             for (let y = 0; y < this.boardHeight; y++) {
-                for (let x = 0; x < 8; x++) {
-                    const cell = BttGame.coords2algebraic(x, y, this.numplayers);
+                for (let x = 0; x < this.boardWidth; x++) {
+                    const cell = this.coords2algebraic(x, y);
                     if (this.board.has(cell)) continue;
-                    if (existingNull !== undefined && badnulls.get(existingNull) === cell) continue;
-                    allmoves.push(`NULL-${cell}`);
+                    if (existingNull !== undefined && badnulls.get(existingNull) === cell) {
+                        console.log(cell, ": ", this.checkNull(cell));
+                        continue;
+                    }
+                    moves.push(`NULL-${cell}`);
                 }
             }
-        } else if ((this.numplayers === 2 && roots === 0) || (this.numplayers === 4 && roots < 2)) {
+        } else if ( this.needRoot() ) {
             for (let y = 0; y < this.boardHeight; y++) {
-                for (let x = 0; x < 8; x++) {
-                    const cell = BttGame.coords2algebraic(x, y, this.numplayers);
+                for (let x = 0; x < this.boardWidth; x++) {
+                    const cell = this.coords2algebraic(x, y);
                     if (!this.board.has(cell)) {
-                        allmoves.push(`ROOT-${cell}`);
+                        moves.push(`ROOT-${cell}`);
                     }
                 }
             }
@@ -188,93 +245,96 @@ export class BttGame extends GameBase {
             if (stashes[1] > 0) sizes.push(2);
             if (stashes[2] > 0) sizes.push(3);
 
-            const grid = new RectGrid(8, this.boardHeight);
+            const grid = new RectGrid(this.boardWidth, this.boardHeight);
 
             for (const [cell, contents] of this.board.entries()) {
                 if (contents === "NULL") continue;
 
-                const [x, y] = BttGame.algebraic2coords(cell, this.numplayers);
+                const [x, y] = this.algebraic2coords(cell);
 
                 for (const dir of orientations) {
                     const ray = grid.ray(x, y, dir);
                     if (ray.length > 0) {
                         const [nx, ny] = ray[0];
-                        const nextCell = BttGame.coords2algebraic(nx, ny, this.numplayers);
+                        const nextCell = this.coords2algebraic(nx, ny);
                         if (!this.board.has(nextCell)) {
                             const oppDir = dir === "N" ? "S" : dir === "S" ? "N" : dir === "E" ? "W" : "E";
                             for (const size of sizes) {
-                                allmoves.push(`${size}-${nextCell}-${oppDir}`);
+                                moves.push(`${size}-${nextCell}-${oppDir}`);
                             }
                         }
                     }
                 }
             }
-
-            // Cull "stupid" moves
-            // If the move points to an opponent's piece, but the piece ALSO has an adjacent friendly piece, it is forbidden.
-            const filteredMoves = [];
-            for (const move of allmoves) {
-                const parts = move.split("-");
-                if (parts.length !== 3) continue;
-                const [, cell, oppDir] = parts;
-
-                let adjFriendlies = false;
-                const [cx, cy] = BttGame.algebraic2coords(cell, this.numplayers);
-                for (const d of orientations) {
-                    const ray = grid.ray(cx, cy, d);
-                    if (ray.length > 0) {
-                        const [nx, ny] = ray[0];
-                        const nc = BttGame.coords2algebraic(nx, ny, this.numplayers);
-                        if (this.board.has(nc)) {
-                            const c = this.board.get(nc)!;
-                            if (Array.isArray(c) && c[0] === player) {
-                                adjFriendlies = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                const dir = oppDir === "N" ? "S" : oppDir === "S" ? "N" : oppDir === "E" ? "W" : "E";
-                const ray = grid.ray(cx, cy, dir);
-                if (ray.length > 0) {
-                    const [px, py] = ray[0];
-                    const pointedCell = BttGame.coords2algebraic(px, py, this.numplayers);
-                    const pointedContents = this.board.get(pointedCell);
-                    if (pointedContents && Array.isArray(pointedContents)) {
-                        const nextColor = pointedContents[0];
-                        if (nextColor !== player && adjFriendlies) {
-                            continue; // Culling this move
-                        }
-                    }
-                }
-
-                filteredMoves.push(move);
-            }
-
-            return filteredMoves;
         }
 
-        return allmoves;
+        return moves;
     }
 
     public randomMove(): string {
-        const moves = this.moves();
-        return moves[Math.floor(Math.random() * moves.length)];
+        const allmoves = this.moves();
+        const grid = new RectGrid(this.boardWidth, this.boardHeight);
+        
+        //Omit the "stupid" moves.
+        // If the move points to an opponent's piece, but the piece ALSO has an adjacent friendly piece, it is forbidden.
+        const filteredMoves = [];
+        for (const move of allmoves) {
+            const parts = move.split("-");
+            if (parts.length !== 3) continue;
+            const [, cell, oppDir] = parts;
+
+            let adjFriendlies = false;
+            const [cx, cy] = this.algebraic2coords(cell);
+            for (const d of orientations) {
+                const ray = grid.ray(cx, cy, d);
+                if (ray.length > 0) {
+                    const [nx, ny] = ray[0];
+                    const nc = this.coords2algebraic(nx, ny);
+                    if (this.board.has(nc)) {
+                        const c = this.board.get(nc)!;
+                        if (Array.isArray(c) && c[0] === this.currplayer) {
+                            adjFriendlies = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            const dir = oppDir === "N" ? "S" : oppDir === "S" ? "N" : oppDir === "E" ? "W" : "E";
+            const ray = grid.ray(cx, cy, dir);
+            if (ray.length > 0) {
+                const [px, py] = ray[0];
+                const pointedCell = this.coords2algebraic(px, py);
+                const pointedContents = this.board.get(pointedCell);
+                if (pointedContents && Array.isArray(pointedContents)) {
+                    const nextColor = pointedContents[0];
+                    if (nextColor !== this.currplayer && adjFriendlies) {
+                        continue; // Culling this move
+                    }
+                }
+            }
+            filteredMoves.push(move);
+        }
+
+        if (filteredMoves.length > 0)
+            return filteredMoves[Math.floor(Math.random() * filteredMoves.length)];
+        else
+            return allmoves[Math.floor(Math.random() * allmoves.length)];
+        //Or emit an error, because the latter case shouldn't happen.
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
-            //Move format: 
-            const cell = BttGame.coords2algebraic(col, row, this.numplayers);
+            //Preliminary move format: cell-NULL|ROOT
+            //Preliminary move format: cell|cell|cell-size-direction
+            //Final move format: cell-size-direction
+            const cell = this.coords2algebraic(col, row);
 
             let newmove = "";
-            const nulls = [...this.board.values()].filter(c => c === "NULL").length;
-            const roots = [...this.board.values()].filter(c => c === "ROOT").length;
-
-            if ( nulls < this.numplayers / 2 ) {
+ 
+            if ( this.needNull() ) {
                 newmove = `NULL-${cell}`;
-            } else if ( roots < this.numplayers / 2 ) {
+            } else if ( this.needRoot() ) {
                 newmove = `ROOT-${cell}`;
             } else {
                 if (move === "") {
@@ -287,7 +347,7 @@ export class BttGame extends GameBase {
                     newmove = cell;
                 } else {
                     // if move is a cell, and we clicked an adjacent piece
-                    const [cx, cy] = BttGame.algebraic2coords(move as string, this.numplayers);
+                    const [cx, cy] = this.algebraic2coords(move as string);
                     const bearing = RectGrid.bearing(cx, cy, col, row);
                     if (bearing) {
                         newmove = `${move}-${bearing}`;
@@ -319,7 +379,12 @@ export class BttGame extends GameBase {
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            result.message = i18next.t("apgames:validation.btt.INITIAL_INSTRUCTIONS");
+            if ( this.needNull() )
+                result.message = i18next.t("apgames:validation.btt.NULL_INSTRUCTIONS");
+            else if ( this.needRoot() )
+                result.message = i18next.t("apgames:validation.btt.ROOT_INSTRUCTIONS");
+            else
+                result.message = i18next.t("apgames:validation.btt.ROOT_INSTRUCTIONS");
             return result;
         }
 
@@ -361,7 +426,7 @@ export class BttGame extends GameBase {
         return result;
     }
 
-    public move(m: string, { partial = false, trusted = false } = {}): BttGame {
+    public move(m: string, { partial = false, trusted = false } = {}): BTTGame {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
@@ -410,12 +475,12 @@ export class BttGame extends GameBase {
             this.results.push({ type: "orient", where: cell, facing: dir });
 
             // Handle pointing penalties
-            const grid = new RectGrid(8, this.boardHeight);
-            const [cx, cy] = BttGame.algebraic2coords(cell, this.numplayers);
+            const grid = new RectGrid(this.boardWidth, this.boardHeight);
+            const [cx, cy] = this.algebraic2coords(cell);
             const ray = grid.ray(cx, cy, dir);
             if (ray.length > 0) {
                 const [px, py] = ray[0];
-                const pcell = BttGame.coords2algebraic(px, py, this.numplayers);
+                const pcell = this.coords2algebraic(px, py);
                 const pcontents = this.board.get(pcell);
                 if (pcontents && Array.isArray(pcontents)) {
                     const oppPlayer = pcontents[0];
@@ -441,7 +506,7 @@ export class BttGame extends GameBase {
         return this;
     }
 
-    protected checkEOG(): BttGame {
+    protected checkEOG(): BTTGame {
         const maxPieces = this.numplayers * 16;
 
         if (this.board.size === maxPieces) {
@@ -450,7 +515,7 @@ export class BttGame extends GameBase {
             this.gameover = true;
         }
 
-        if (this.gameover = true) {
+        if (this.gameover === true) {
             const maxScore = Math.max(...this.scores);
             for (let i = 0; i < this.numplayers; i++) {
                 if (this.scores[i] === maxScore) {
@@ -466,9 +531,9 @@ export class BttGame extends GameBase {
         return this;
     }
 
-    public state(): IBttState {
+    public state(): IBTTState {
         return {
-            game: BttGame.gameinfo.uid,
+            game: BTTGame.gameinfo.uid,
             numplayers: this.numplayers,
             variants: this.variants,
             gameover: this.gameover,
@@ -479,7 +544,7 @@ export class BttGame extends GameBase {
 
     public moveState(): IMoveState {
         return {
-            _version: BttGame.gameinfo.version,
+            _version: BTTGame.gameinfo.version,
             _results: [...this.results],
             _timestamp: new Date(),
             currplayer: this.currplayer,
@@ -498,8 +563,8 @@ export class BttGame extends GameBase {
                 pstr += "\n";
             }
             const pieces: string[] = [];
-            for (let col = 0; col < 8; col++) {
-                const cell = BttGame.coords2algebraic(col, row, this.numplayers);
+            for (let col = 0; col < this.boardWidth; col++) {
+                const cell = this.coords2algebraic(col, row);
                 if (this.board.has(cell)) {
                     const contents = this.board.get(cell)!;
                     if (contents === "NULL") {
@@ -581,7 +646,7 @@ export class BttGame extends GameBase {
         const rep: APRenderRep = {
             board: {
                 style: "squares-checkered",
-                width: 8,
+                width: this.boardWidth,
                 height: this.boardHeight,
             },
             legend: myLegend,
@@ -594,7 +659,7 @@ export class BttGame extends GameBase {
             for (const move of this.results) {
                 if (move.type === "place" || move.type === "move") {
                     const mSafe = move as { where?: string; to?: string };
-                    const [x, y] = BttGame.algebraic2coords(mSafe.where || mSafe.to!, this.numplayers);
+                    const [x, y] = this.algebraic2coords(mSafe.where || mSafe.to!);
                     rep.annotations.push({ type: "enter", targets: [{ row: y, col: x }] });
                 }
             }
@@ -651,7 +716,7 @@ export class BttGame extends GameBase {
         return this.scores[player - 1];
     }
 
-    public clone(): BttGame {
-        return new BttGame(this.serialize());
+    public clone(): BTTGame {
+        return new BTTGame(this.serialize());
     }
 }

@@ -1,10 +1,20 @@
 import "mocha";
 import { expect } from "chai";
-import { BttGame } from "../../src/games";
+import { BTTGame } from "../../src/games";
 
 describe("Branches and Twigs and Thorns", () => {
+    it("Does initial board config", () => {
+        for (let p = 2; p <= 6; p++) {
+            const g = new BTTGame(p);
+            expect(g.moves().length).eq(p * 16);
+            
+            const ga = new BTTGame(p, ["arcade"]);
+            expect(ga.moves().length).eq(p * 10);
+        }
+    });
+
     it("Does initial setup moves (2P)", () => {
-        const g = new BttGame(2);
+        const g = new BTTGame(2);
 
         let moves = g.moves();
         expect(moves.length).eq(32); // 4x8 board
@@ -25,7 +35,7 @@ describe("Branches and Twigs and Thorns", () => {
     });
 
     it("Does initial setup moves (4P)", () => {
-        const g = new BttGame(4);
+        const g = new BTTGame(4);
 
         // P1 places Null
         let moves = g.moves();
@@ -62,7 +72,7 @@ describe("Branches and Twigs and Thorns", () => {
     });
 
     it("Scores and validates", () => {
-        const g = new BttGame(2);
+        const g = new BTTGame(2);
 
         g.move("NULL-h4");
         g.move("ROOT-g4");

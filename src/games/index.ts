@@ -231,7 +231,7 @@ import { MagnateGame, IMagnateState } from "./magnate";
 import { ProductGame, IProductState } from "./product";
 import { GoGame, IGoState } from "./go";
 import { StilettoGame, IStilettoState } from "./stiletto";
-import { BttGame, IBttState } from "./btt";
+import { BTTGame, IBTTState } from "./btt";
 
 export {
     APGamesInformation, GameBase, GameBaseSimultaneous, IAPGameState,
@@ -466,7 +466,7 @@ export {
     ProductGame, IProductState,
     GoGame, IGoState,
     StilettoGame, IStilettoState,
-    BttGame, IBttState
+    BTTGame, IBTTState
 };
 
 const games = new Map<string, typeof AmazonsGame | typeof BlamGame | typeof CannonGame |
@@ -547,7 +547,7 @@ const games = new Map<string, typeof AmazonsGame | typeof BlamGame | typeof Cann
                               typeof RincalaGame | typeof WaldMeisterGame | typeof WunchunkGame |
                               typeof BambooGame | typeof PluralityGame | typeof CrosshairsGame |
                               typeof MagnateGame | typeof ProductGame | typeof OonpiaGame |
-                              typeof GoGame | typeof StilettoGame | typeof BttGame
+                              typeof GoGame | typeof StilettoGame | typeof BTTGame
                 >();
 // Manually add each game to the following array
 [
@@ -583,7 +583,7 @@ const games = new Map<string, typeof AmazonsGame | typeof BlamGame | typeof Cann
     SiegeOfJGame, StairsGame, EmuGame, DeckfishGame, BluestoneGame, SunspotGame, StawvsGame,
     LascaGame, EmergoGame, FroggerGame, ArimaaGame, RampartGame, KrypteGame, EnsoGame, RincalaGame,
     WaldMeisterGame, WunchunkGame, BambooGame, PluralityGame, CrosshairsGame, MagnateGame, ProductGame,
-    OonpiaGame, GoGame, StilettoGame, BttGame
+    OonpiaGame, GoGame, StilettoGame, BTTGame
 ].forEach((g) => {
     if (games.has(g.gameinfo.uid)) {
         throw new Error("Another game with the UID '" + g.gameinfo.uid + "' has already been used. Duplicates are not allowed.");
@@ -1058,7 +1058,7 @@ export const GameFactory = (game: string, ...args: any[]): GameBase|GameBaseSimu
         case "stiletto":
             return new StilettoGame(...args);
         case "btt":
-            return new BttGame(args[0], ...args.slice(1));
+            return new BTTGame(args[0], ...args.slice(1));
     }
     return;
 }

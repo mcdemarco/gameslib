@@ -243,6 +243,7 @@
         "bao": "Moves in Bao can be very complex, involving multiple laps around the board and changing directions. The annotations are, therefore, sparse. The initial cell and direction are highlighted, and captured cells are also marked. But detailed annotation of movement is not possible. If you believe you have encountered a bug, please let us know in Discord.",
         "biscuit": "Game ends when, at the end of a round, someone has reached or surpassed the target score. Highest score wins. Draws are possible.\n\nWhen calculating biscuits, a single card cannot be counted more than once. For example, if the root card is a 6, and the end of the main line is also a 6 (a cross card), and you play a 6 above that cross card, you score the \"hot cross biscuit\" (top and bottom of the cross line match) but you don't *also* get a regular \"biscuit\" for matching the end of the main line (they're both the same card). Furthermore, cross lines don't get counted at all unless there are at least two cards in the line. So playing a new cross card (in our example, a 6) does not automatically score you a \"biscuit\" (playing a card on the main line that matches a cross line).\n\nMore information on the Decktet system can be found on the [official Decktet website](https://www.decktet.com). Cards in players' hands are hidden from observers and opponents.",
         "blooms": "The threshold value is X(n) = 5n, where n is the base of the hexhex board (e.g., the default board is base 6, so the threshold is 30).",
+        "btt": "Unusual numbers of players (3, 5, or 6) are supported, but on a normal rectangular board of an appropriate size rather than a Martian Chessboard.",
         "bug": "In this implementation, after the initial placement, if the player has bugs that must eat, the edible bugs will be highlighted. Eating and bonus grow will be performed simultaneously, so performing a bonus grow on a bug by selecting a legal space next to it will cause all highlighted edible bugs adjacent to it to disappear. It is possible to bonus grow onto a space that an edible bug is on. Note that this implies that when selecting a bug to perform the eating action, ALL edible bugs of the same shape next to it will be removed, and this might differ from some other implementations where there a separate edible bug selection phase, which may allow some edible bugs to be left behind for another bug to eat.",
         "calculus": "Click on an existing piece to move it, or click on a free point to place a new piece. There must be a sufficiently wide path from some edge of the board to the placement point. If your placed piece would overlap existing pieces, the system will try to \"snap\" the placed piece so it is touching all overlapped pieces.\n\nDashed lines show pieces that are touching. Solid lines show perimeters around legal areas. Pieces connected by solid lines may not be moved.",
         "chase": "Currently, most exchange moves will need to be hand edited. We're working on fixing this.",
@@ -702,7 +703,7 @@
                 "name": "Arcade"
             },
             "martian-go": {
-                "description": "The original game used a slightly different setup (no nulls) and scoring (penalties only).",
+                "description": "The original game used a slightly different setup (no null squares) and scoring (penalties only).",
                 "name": "Martian Go"
             }
         },
@@ -3950,8 +3951,10 @@
             "TOOFAR": "Pieces can only move one space at a time."
         },
         "btt": {
-            "INITIAL_INSTRUCTIONS": "Select one of your pyramids.",
-            "PARTIAL_MOVE": "Do more stuff.",
+            "INITIAL_INSTRUCTIONS": "Select a cell to point at or to place one of your pyramids.",
+            "NULL_INSTRUCTIONS": "Select a null square.",
+            "ROOT_INSTRUCTIONS": "Select a root square.",
+            "PARTIAL_MOVE": "Do more stuff."
         },
         "bug": {
             "BAD_GROW": "Placement at {{where}} does not result in a valid bonus grow.",
