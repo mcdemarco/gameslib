@@ -4,6 +4,8 @@ import { APRenderRep, Glyph } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { RectGrid, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
+import { SquareOrthGraph } from "../common/graphs";
+import {connectedComponents} from 'graphology-components';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const deepclone = require("rfdc/default");
 
@@ -163,38 +165,40 @@ export class BTTGame extends GameBase {
     }
 
     public coords2algebraic(x: number, y: number): string {
-        return GameBase.coords2algebraic(x, y, this.numplayers * 2);
+        return GameBase.coords2algebraic(x, y, this.boardHeight);
     }
     public algebraic2coords(cell: string): [number, number] {
-        return GameBase.algebraic2coords(cell, this.numplayers * 2);
+        return GameBase.algebraic2coords(cell, this.boardHeight);
     }
 
 
     /* helper functions */
 
-    //TODO: this becomes more complicated with 3 nulls (6 players).
     private checkNull(cell: string): boolean {
-        //Determine whether a second null is legal (doesn't isolate any squares).
+        //Determine whether a second (or third) null is legal
+        // (that is, it doesn't isolate any squares).
         //Also returns true if there is no first null.
         const firstNull = [...this.board.values()].filter(c => c === "NULL");
         if ( firstNull === undefined || firstNull.length === 0 )
             return true;
 
-        const firstXY = this.algebraic2coords([...this.board.keys()][0]);
-        const secondXY = this.algebraic2coords(cell);
-        //The first condition on cutting off squares: the cells are diagonally adjacent.
-        if ( (Math.abs(firstXY[0] - secondXY[0]) !== 1)
-            || (Math.abs(firstXY[1] - secondXY[1]) !== 1) )
-            return true;
-        //The second condition is that both cells are on (different) edges of the board.
-        if ( firstXY[0] !== 0 && firstXY[0] !== this.boardWidth - 1 &&
-            firstXY[1] !== 0 && firstXY[1] !== this.boardHeight - 1 )
-            return true;
-        if ( secondXY[0] !== 0 && secondXY[0] !== this.boardWidth - 1 &&
-            secondXY[1] !== 0 && secondXY[1] !== this.boardHeight - 1 )
-            return true;
-        
-        return false;
+        //Because of the 6p case, make a graph in order to check
+        // that there aren't multiple connected components.
+        const gEmpties = this.getGraph();
+        for (const node of gEmpties.graph.nodes()) {
+            if (this.board.has(node))
+                gEmpties.graph.dropNode(node);
+            if (node === cell)
+                gEmpties.graph.dropNode(node);
+        }
+
+        const emptyAreas : Array<Array<string>> = connectedComponents(gEmpties.graph);
+
+        return emptyAreas.length < 2;
+    }
+
+    private getGraph(): SquareOrthGraph { // just orthogonal connections
+        return new SquareOrthGraph(this.boardWidth, this.boardHeight);
     }
 
     //TODO: these get called alot; add a list of nulls/roots to the state instead?
