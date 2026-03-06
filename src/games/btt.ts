@@ -474,8 +474,7 @@ export class BTTGame extends GameBase {
             stash[size - 1]--;
             this.stashes.set(this.currplayer, stash);
             this.board.set(cell, [this.currplayer, size, dir]);
-            this.results.push({ type: "place", where: cell, what: size.toString() });
-            this.results.push({ type: "orient", where: cell, facing: dir });
+            this.results.push({ type: "place", where: cell, what: size.toString(), how: dir });
 
             // Handle pointing penalties
             const grid = new RectGrid(this.boardWidth, this.boardHeight);
@@ -490,7 +489,8 @@ export class BTTGame extends GameBase {
                     if (oppPlayer !== this.currplayer) {
                         const oppSize = pcontents[1];
                         this.scores[this.currplayer - 1] -= oppSize;
-                        this.scores[oppPlayer - 1] += size;
+                        if (! this.variants.includes("martian-go") )
+                            this.scores[oppPlayer - 1] += size;
                         this.results.push({ type: "deltaScore", delta: -oppSize });
                     }
                 }
@@ -717,6 +717,37 @@ export class BTTGame extends GameBase {
 
     public getPlayerScore(player: number): number {
         return this.scores[player - 1];
+    }
+
+    public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
+        let resolved = false;
+        switch (r.type) {
+            case "deltaScore":
+                if ( this.variants.includes("martian-go") && r.delta === -1 )
+                    node.push(i18next.t("apresults:DELTASCORE.btt_go_one", {player, delta: r.delta! * -1}));
+                else if ( this.variants.includes("martian-go") )
+                    node.push(i18next.t("apresults:DELTASCORE.btt_go", {player, delta: r.delta! * -1}));
+                else if ( r.delta === -1 )
+                    node.push(i18next.t("apresults:DELTASCORE.btt_default_one", {player, delta: r.delta! * -1}));         
+                else 
+                    node.push(i18next.t("apresults:DELTASCORE.btt_default", {player, delta: r.delta! * -1}));         
+                resolved = true;
+                break;
+        }
+        switch (r.type) {
+            case "place":
+                if (r.what === "1")
+                    node.push(i18next.t("apresults:PLACE.btt_small", {player, what: r.what, where: r.where, how: r.how}));
+                else if (r.what === "2")
+                    node.push(i18next.t("apresults:PLACE.btt_medium", {player, what: r.what, where: r.where, how: r.how}));
+                else if (r.what === "3")
+                    node.push(i18next.t("apresults:PLACE.btt_large", {player, what: r.what, where: r.where, how: r.how}));
+                else
+                    node.push(i18next.t("apresults:PLACE.btt", {player, what: r.what!.toLowerCase(), where: r.where, how: r.how}));
+                resolved = true;
+                break;
+        }
+        return resolved;
     }
 
     public clone(): BTTGame {
