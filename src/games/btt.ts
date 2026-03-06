@@ -201,6 +201,16 @@ export class BTTGame extends GameBase {
         return new SquareOrthGraph(this.boardWidth, this.boardHeight);
     }
 
+    private getNextPyramid(previous: number): number {
+        //Gets the next size from the player's stash.
+        //The weirdness comes from size vs. stash index.
+        const stash = this.stashes.get(this.currplayer)!;
+        if (stash[previous % 3] > 0)
+            return previous + 1;
+        else
+            return this.getNextPyramid( previous + 1 )
+    }
+
     //TODO: these get called alot; add a list of nulls/roots to the state instead?
     private needNull(): boolean {
         if ( this.variants.includes("martian-go") && this.numplayers < 5 )
@@ -232,7 +242,7 @@ export class BTTGame extends GameBase {
                     if ( ! this.checkNull(cell) ) {
                         continue;
                     }
-                    moves.push(`NULL-${cell}`);
+                    moves.push(`${cell}-NULL`);
                 }
             }
         } else if ( this.needRoot() ) {
@@ -240,7 +250,7 @@ export class BTTGame extends GameBase {
                 for (let x = 0; x < this.boardWidth; x++) {
                     const cell = this.coords2algebraic(x, y);
                     if (!this.board.has(cell)) {
-                        moves.push(`ROOT-${cell}`);
+                        moves.push(`${cell}-ROOT`);
                     }
                 }
             }
@@ -267,7 +277,7 @@ export class BTTGame extends GameBase {
                         if (!this.board.has(nextCell)) {
                             const oppDir = dir === "N" ? "S" : dir === "S" ? "N" : dir === "E" ? "W" : "E";
                             for (const size of sizes) {
-                                moves.push(`${size}-${nextCell}-${oppDir}`);
+                                moves.push(`${nextCell}-${size}-${oppDir}`);
                             }
                         }
                     }
@@ -288,7 +298,7 @@ export class BTTGame extends GameBase {
         for (const move of allmoves) {
             const parts = move.split("-");
             if (parts.length !== 3) continue;
-            const [, cell, oppDir] = parts;
+            const [cell,, oppDir] = parts;
 
             let adjFriendlies = false;
             const [cx, cy] = this.algebraic2coords(cell);
@@ -340,26 +350,27 @@ export class BTTGame extends GameBase {
             let newmove = "";
  
             if ( this.needNull() ) {
-                newmove = `NULL-${cell}`;
+                newmove = `${cell}-NULL`;
             } else if ( this.needRoot() ) {
-                newmove = `ROOT-${cell}`;
+                newmove = `${cell}-ROOT`;
             } else {
                 if (move === "") {
-                    // Start of a piece placement. Wait for piece size string, or click again to infer.
-                    // Actually, a piece placement needs a size and an orientation.
-                    // Typically, we'd construct something like `1-${cell}` then wait for orientation. But we have no UI.
-                    // AP standard is to just return partial.
-                    // Let's just say we can't fully construct pieces by clicks easily down to the size without a specific UI,
-                    // but we can start with the cell.
-                    newmove = cell;
+                    // Always start with the cell and the player's smallest pyramid size.
+                    newmove = `${cell}-${this.getNextPyramid(0)}`;
                 } else {
-                    // if move is a cell, and we clicked an adjacent piece
-                    const [cx, cy] = this.algebraic2coords(move as string);
-                    const bearing = RectGrid.bearing(cx, cy, col, row);
-                    if (bearing) {
-                        newmove = `${move}-${bearing}`;
+                    const movingParts = move.split("-");
+                    if ( movingParts[0] === cell) {
+                        // We clicked on the same cell, change pyramid size.
+                        newmove = `${cell}-${this.getNextPyramid(Number(movingParts[1]))}`;
                     } else {
-                        newmove = move; // just keep it
+                        // if move is a cell, and we clicked an adjacent piece.
+                        const [cx, cy] = this.algebraic2coords(move as string);
+                        const bearing = RectGrid.bearing(cx, cy, col, row);
+                        if (bearing) {
+                            newmove = `${move}-${bearing}`;
+                        } else {
+                            newmove = move; // just keep it
+                        }
                     }
                 }
             }
@@ -460,18 +471,18 @@ export class BTTGame extends GameBase {
 
         this.results = [];
 
-        if (m.startsWith("NULL-")) {
-            const cell = m.substring(5);
+        if (m.endsWith("-NULL")) {
+            const cell = m.substring(0,2);
             this.board.set(cell, "NULL");
             this.results.push({ type: "place", where: cell, what: "NULL" });
-        } else if (m.startsWith("ROOT-")) {
-            const cell = m.substring(5);
+        } else if (m.endsWith("-ROOT")) {
+            const cell = m.substring(0,2);
             this.board.set(cell, "ROOT");
             this.results.push({ type: "place", where: cell, what: "ROOT" });
         } else {
             const parts = m.split("-");
-            const size = parseInt(parts[0], 10) as Size;
-            const cell = parts[1];
+            const size = parseInt(parts[1], 10) as Size;
+            const cell = parts[0];
             const dir = parts[2] as Facing;
 
             const stash = this.stashes.get(this.currplayer)!;
