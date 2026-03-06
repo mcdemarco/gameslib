@@ -1058,7 +1058,7 @@ export const GameFactory = (game: string, ...args: any[]): GameBase|GameBaseSimu
         case "stiletto":
             return new StilettoGame(...args);
         case "btt":
-            return new BttGame(...args);
+            return new BttGame(args[0], ...args.slice(1));
     }
     return;
 }

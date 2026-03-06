@@ -4,7 +4,7 @@ import { BttGame } from "../../src/games";
 
 describe("Branches and Twigs and Thorns", () => {
     it("Does initial setup moves (2P)", () => {
-        const g = new BttGame();
+        const g = new BttGame(2);
 
         let moves = g.moves();
         expect(moves.length).eq(32); // 4x8 board
@@ -21,11 +21,11 @@ describe("Branches and Twigs and Thorns", () => {
         moves = g.moves();
         // The ROOT placed allows placement of pieces facing it
         // A root has up to 4 empty neighbors, and for each we can place size 1, 2, or 3.
-        expect(moves[0].match(/^[123]-[a-h][1-4]-[NESW]$/)).eq(true);
+        expect(moves[0]).match(/^[123]-[a-h][1-4]-[NESW]$/);
     });
 
     it("Does initial setup moves (4P)", () => {
-        const g = new BttGame(undefined, ["4player"]);
+        const g = new BttGame(4);
 
         // P1 places Null
         let moves = g.moves();
@@ -58,11 +58,11 @@ describe("Branches and Twigs and Thorns", () => {
         g.move("ROOT-h2"); // Place ROOT
 
         moves = g.moves();
-        expect(moves[0].match(/^[123]-[a-h][1-8]-[NESW]$/)).eq(true);
+        expect(moves[0]).match(/^[123]-[a-h][1-8]-[NESW]$/);
     });
 
     it("Scores and validates", () => {
-        const g = new BttGame();
+        const g = new BttGame(2);
 
         g.move("NULL-h4");
         g.move("ROOT-g4");

@@ -1,4 +1,4 @@
-import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult } from "./_base";
+import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult, IStashEntry } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, Glyph } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
@@ -23,9 +23,7 @@ export interface IMoveState extends IIndividualState {
     board: Map<string, CellContents>;
     lastmove?: string;
     scores: number[];
-    stashes: {
-        [key in playerid]?: [number, number, number]; // index 0 is size 1, index 1 is size 2, index 2 is size 3
-    };
+    stashes: Map<playerid, [number, number, number]>; // index 0 is size 1, index 1 is size 2, index 2 is size 3
 };
 
 export interface IBttState extends IAPGameState {
@@ -38,65 +36,63 @@ export class BttGame extends GameBase {
         name: "Branches and Twigs and Thorns",
         uid: "btt",
         playercounts: [2, 4],
-        version: "20240415",
-        dateAdded: "2024-04-15",
+        version: "20260305",
+        dateAdded: "2026-03-05",
         // i18next.t("apgames:descriptions.btt")
         description: "apgames:descriptions.btt",
         urls: [
-            "https://boardgamegeek.com/boardgame/1765/branches-twigs-and-thorns",
+            "https://boardgamegeek.com/boardgame/17298/branches-and-twigs-and-thorns"
         ],
         people: [
             {
                 type: "designer",
-                name: "Kory Heath",
-                urls: ["http://www.koryheath.com/games/branches-twigs-and-thorns/"]
+                name: "Andrew Plotkin",
+                urls: ["https://www.eblong.com/zarf/barsoom-go.html/"]
+            },
+            {
+                type: "coder",
+                name: "mcd",
+                urls: ["https://mcdemarco.net/games/"],
+                apid: "4bd8317d-fb04-435f-89e0-2557c3f2e66c",
             },
         ],
-        categories: ["goal>score>maximize", "mechanic>place", "board>shape>rect", "board>connect>rect", "components>pyramids"],
-        flags: ["scores", "perspective"]
+        categories: ["goal>score>maximize", "mechanic>place", "board>shape>rect", "board>connect>rect", "components>pyramids", "other>2+players"],
+        flags: ["player-stashes", "scores"]
     };
 
-    public numplayers = 2;
+    public numplayers!: number;
     public currplayer: playerid = 1;
     public board!: Map<string, CellContents>;
     public gameover = false;
     public winner: playerid[] = [];
+    public variants: string[] = [];
     public scores!: number[];
-    public stashes!: {
-        [key in playerid]?: [number, number, number];
-    };
+    public stashes!: Map<playerid, [number, number, number]>;
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
-    public variants: string[] = [];
 
-    constructor(state?: IBttState | string, variants?: string[]) {
+    constructor(state: number | IBttState | string, variants?: string[]) {
         super();
-        if (state === undefined) {
-            let stashes: { [key in playerid]?: [number, number, number] };
-            if ((variants !== undefined) && (variants.includes("4player"))) {
-                this.numplayers = 4;
-                stashes = {
-                    1: [5, 5, 5],
-                    2: [5, 5, 5],
-                    3: [5, 5, 5],
-                    4: [5, 5, 5],
-                };
-            } else {
-                this.numplayers = 2;
-                stashes = {
-                    1: [5, 5, 5],
-                    2: [5, 5, 5],
-                };
-            }
+        if (typeof state === "number") {
+            this.numplayers = state;
+            
             const fresh: IMoveState = {
                 _version: BttGame.gameinfo.version,
                 _results: [],
                 _timestamp: new Date(),
                 currplayer: 1,
                 board: new Map(),
-                scores: this.numplayers === 2 ? [0, 0] : [0, 0, 0, 0],
-                stashes
+                scores: [],
+                stashes: new Map()
             };
+            if ( (variants !== undefined) && (variants.length === 1) && (variants[0] === "arcade") ) {
+                this.variants = ["arcade"];
+            }
+            for (let pid = 1; pid <= state; pid++) {
+                fresh.scores.push(0);
+                fresh.stashes.set(pid as playerid, [5,5,5]);
+            }
+
             this.stack = [fresh];
         } else {
             if (typeof state === "string") {
@@ -105,9 +101,10 @@ export class BttGame extends GameBase {
             if (state.game !== BttGame.gameinfo.uid) {
                 throw new Error(`The BTT engine cannot process a game of '${state.game}'.`);
             }
+            this.numplayers = state.numplayers;
+            this.variants = state.variants;
             this.gameover = state.gameover;
             this.winner = [...state.winner];
-            this.variants = state.variants;
             this.stack = [...state.stack];
         }
         this.load();
@@ -126,7 +123,7 @@ export class BttGame extends GameBase {
         this.board = deepclone(state.board) as Map<string, CellContents>;
         this.lastmove = state.lastmove;
         this.scores = [...state.scores];
-        this.stashes = deepclone(state.stashes);
+        this.stashes = deepclone(state.stashes) as Map<playerid, [number, number, number]>;
         this.results = [...state._results];
         return this;
     }
@@ -182,7 +179,7 @@ export class BttGame extends GameBase {
             }
         } else {
             // Normal placement phase
-            const stashes = this.stashes[player]!;
+            const stashes = this.stashes.get(player)!;
             const sizes: Size[] = [];
             if (stashes[0] > 0) sizes.push(1);
             if (stashes[1] > 0) sizes.push(2);
@@ -271,7 +268,7 @@ export class BttGame extends GameBase {
             const nulls = [...this.board.values()].filter(c => c === "NULL").length;
             const roots = [...this.board.values()].filter(c => c === "ROOT").length;
 
-            if ((this.numplayers === 2 && nulls === 0) || (this.numplayers === 4 && nulls < 2)) {
+            if ( nulls < this.numplayers / 2 ) {
                 newmove = `NULL-${cell}`;
             } else if ((this.numplayers === 2 && roots === 0) || (this.numplayers === 4 && roots < 2)) {
                 newmove = `ROOT-${cell}`;
@@ -401,7 +398,9 @@ export class BttGame extends GameBase {
             const cell = parts[1];
             const dir = parts[2] as Facing;
 
-            this.stashes[this.currplayer]![size - 1]--;
+            const stash = this.stashes.get(this.currplayer)!;
+            stash[size - 1]--;
+            this.stashes.set(this.currplayer, stash);
             this.board.set(cell, [this.currplayer, size, dir]);
             this.results.push({ type: "place", where: cell, what: size.toString() });
             this.results.push({ type: "orient", where: cell, facing: dir });
@@ -485,7 +484,7 @@ export class BttGame extends GameBase {
             lastmove: this.lastmove,
             board: deepclone(this.board) as Map<string, CellContents>,
             scores: [...this.scores],
-            stashes: deepclone(this.stashes)
+            stashes: deepclone(this.stashes) as Map<playerid, [number, number, number]>
         };
     }
 
@@ -516,10 +515,46 @@ export class BttGame extends GameBase {
             pstr += pieces.join(",");
         }
 
+        const token: [Glyph, ...Glyph[]] =  [
+            { name: "piece", colour: "#000", scale: 0.5 },
+            { name: "piece", colour: "#fff", scale: 0.3 }
+        ]
+
+        const tokens: [Glyph, ...Glyph[]] = [
+            {
+                name: "piece-square-borderless",
+                colour: "_context_background",
+            }
+        ];
+
+        const nudges: [number,number][] = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+        nudges.forEach( nudge => {
+            tokens.push({
+                name: "piece",
+                colour: "#000",
+                scale: 0.5,
+                nudge: {
+                    dx: nudge[0] * 225,
+                    dy: nudge[1] * 225,
+                }
+            });
+            tokens.push({
+                name: "piece",
+                colour: "#fff",
+                scale: 0.3,
+                nudge: {
+                    dx: nudge[0] * 375,
+                    dy: nudge[1] * 375,
+                }
+             });
+        });
+
         const myLegend: ILegendObj = {
-            "X": { name: "piece", colour: "_black" },
-            "R": { name: "piece", colour: "_white" }
+            "X": token,
+            "R": tokens
         };
+        
         const rotations: Map<string, number> = new Map([
             ["N", 0],
             ["E", 90],
@@ -573,6 +608,14 @@ export class BttGame extends GameBase {
             status += "**Variants**: " + this.variants.join(", ") + "\n\n";
         }
 
+        status += "**Stashes**\n\n";
+        for (let n = 1; n <= this.numplayers; n++) {
+            const stash = this.stashes.get(n as playerid);
+            if (stash) {
+                status += `Player ${n}: ${stash[0]} small, ${stash[1]} medium, ${stash[2]} large\n\n`;
+            }
+        }
+
         status += "**Scores**\n\n";
         for (let n = 1; n <= this.numplayers; n++) {
             const score = this.scores[n - 1];
@@ -584,6 +627,18 @@ export class BttGame extends GameBase {
 
     public getPlayersScores(): IScores[] {
         return [{ name: i18next.t("apgames:status.SCORES"), scores: this.scores }]
+    }
+
+    public getPlayerStash(player: number): IStashEntry[] | undefined {
+        const stash = this.stashes.get(player as playerid);
+        if (stash !== undefined) {
+            return [
+                { count: stash[0], glyph: { name: "pyramid-flat-small", colour: player }, movePart: "1" },
+                { count: stash[1], glyph: { name: "pyramid-flat-medium", colour: player }, movePart: "2" },
+                { count: stash[2], glyph: { name: "pyramid-flat-large", colour: player }, movePart: "3" }
+            ];
+        }
+        return;
     }
 
     protected getMoveList(): APMoveResult[] {
