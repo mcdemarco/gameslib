@@ -699,11 +699,11 @@
         },
         "btt": {
             "arcade": {
-                "description": "Scaled down to 9 pyramids per player (from 15) for Pyramid Arcade.",
+                "description": "Scaled down to 9 pyramids per player (from 15) for Pyramid Arcade and/or a quicker game.",
                 "name": "Arcade"
             },
             "martian-go": {
-                "description": "The original game used slightly different setup (large central roots with no null squares) and scoring (penalties only) rules.  When playing with more than 4 players, setup will instead be as in the standard game, but scoring will be as in Martian Go.",
+                "description": "The original game used slightly different rules for setup (large central roots with no null squares) and scoring (penalties only).  When playing with more than 4 players, setup will instead be as in the standard game, but scoring will be as in Martian Go.",
                 "name": "Martian Go"
             }
         },

@@ -609,6 +609,7 @@ export class BTTGame extends GameBase {
             {
                 name: "piece-square-borderless",
                 colour: "_context_background",
+                opacity: 0
             }
         ];
 
