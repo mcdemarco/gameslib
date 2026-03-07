@@ -3951,10 +3951,12 @@
             "TOOFAR": "Pieces can only move one space at a time."
         },
         "btt": {
-            "INITIAL_INSTRUCTIONS": "Select a cell to point at or to place one of your pyramids.",
+            "INITIAL_INSTRUCTIONS": "Select a cell to place one of your pyramids there.",
             "NULL_INSTRUCTIONS": "Select a null square.",
             "ROOT_INSTRUCTIONS": "Select a root square.",
-            "PARTIAL_MOVE": "Do more stuff."
+            "MALFORMED_MOVE": "The move \"{{move}}\" could not be parsed.",
+            "OCCUPIED": "The cell \"{{cell}}\" is already occupied.",
+            "PARTIAL_MOVE": "Select a neighboring cell to point at."
         },
         "bug": {
             "BAD_GROW": "Placement at {{where}} does not result in a valid bonus grow.",

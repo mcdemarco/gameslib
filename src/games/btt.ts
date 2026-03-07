@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, Glyph } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { RectGrid, reviver, UserFacingError } from "../common";
+import { DirectionCardinal, RectGrid, reviver, orthDirections, UserFacingError } from "../common";
 import i18next from "i18next";
 import { SquareOrthGraph } from "../common/graphs";
 import {connectedComponents} from 'graphology-components';
@@ -15,10 +15,10 @@ interface ILegendObj {
 
 export type playerid = 1 | 2 | 3 | 4;
 export type Size = 1 | 2 | 3;
-export type Facing = "N" | "E" | "S" | "W";
-export type CellContents = [playerid, Size, Facing] | "NULL" | "ROOT";
+//export type Facing = "N" | "E" | "S" | "W";
+export type CellContents = [playerid, Size, DirectionCardinal] | "NULL" | "ROOT";
 
-const orientations: Facing[] = ["N", "E", "S", "W"];
+//const orientations: Facing[] = ["N", "E", "S", "W"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -201,6 +201,23 @@ export class BTTGame extends GameBase {
         return new SquareOrthGraph(this.boardWidth, this.boardHeight);
     }
 
+    private getNeighborDirs(cell: string): DirectionCardinal[] {
+        const grid = new RectGrid(this.boardWidth, this.boardHeight);
+        const [x, y] = this.algebraic2coords(cell);
+        const neighdirs: DirectionCardinal[] = [];
+
+        orthDirections.forEach((d) => {
+            const [xNext, yNext] = RectGrid.move(x, y, d);
+            if (grid.inBounds(xNext, yNext)) {
+                const neicell = this.coords2algebraic(xNext, yNext);
+                if ( this.board.has(neicell) && this.board.get(neicell) !== "NULL" )
+                    neighdirs.push(d);
+            }
+        });
+
+        return neighdirs;
+    }
+
     private getNextPyramid(previous: number): number {
         //Gets the next size from the player's stash.
         //The weirdness comes from size vs. stash index.
@@ -269,7 +286,7 @@ export class BTTGame extends GameBase {
 
                 const [x, y] = this.algebraic2coords(cell);
 
-                for (const dir of orientations) {
+                for (const dir of orthDirections) {
                     const ray = grid.ray(x, y, dir);
                     if (ray.length > 0) {
                         const [nx, ny] = ray[0];
@@ -293,7 +310,7 @@ export class BTTGame extends GameBase {
         const grid = new RectGrid(this.boardWidth, this.boardHeight);
         
         //Omit the "stupid" moves.
-        // If the move points to an opponent's piece, but the piece ALSO has an adjacent friendly piece, it is forbidden.
+        // If the move points to an opponent's piece, but the piece ALSO has an adjacent friendly piece, omit it.
         const filteredMoves = [];
         for (const move of allmoves) {
             const parts = move.split("-");
@@ -302,7 +319,7 @@ export class BTTGame extends GameBase {
 
             let adjFriendlies = false;
             const [cx, cy] = this.algebraic2coords(cell);
-            for (const d of orientations) {
+            for (const d of orthDirections) {
                 const ray = grid.ray(cx, cy, d);
                 if (ray.length > 0) {
                     const [nx, ny] = ray[0];
@@ -355,21 +372,35 @@ export class BTTGame extends GameBase {
                 newmove = `${cell}-ROOT`;
             } else {
                 if (move === "") {
-                    // Always start with the cell and the player's smallest pyramid size.
+                    // Test if the cell is empty.
+                    if ( this.board.has(cell) )
+                        return {
+                            move,
+                            valid: false,
+                            message: i18next.t("apgames:validation.btt.OCCUPIED", { cell: cell })
+                        }
+                    //Else start with the cell and the player's smallest pyramid size.
                     newmove = `${cell}-${this.getNextPyramid(0)}`;
+
+                    //If we can guess the direction, don't make him click for it.
+                    const nadirs = this.getNeighborDirs(cell);
+                    console.log(nadirs);
+                    if (nadirs.length === 1)
+                        newmove += "-" + nadirs[0];
+                       
                 } else {
                     const movingParts = move.split("-");
                     if ( movingParts[0] === cell) {
                         // We clicked on the same cell, change pyramid size.
                         newmove = `${cell}-${this.getNextPyramid(Number(movingParts[1]))}`;
                     } else {
-                        // if move is a cell, and we clicked an adjacent piece.
-                        const [cx, cy] = this.algebraic2coords(move as string);
+                        // We clicked on an adjacent piece (at col, row).
+                        const [cx, cy] = this.algebraic2coords(movingParts[0]);
                         const bearing = RectGrid.bearing(cx, cy, col, row);
                         if (bearing) {
                             newmove = `${move}-${bearing}`;
                         } else {
-                            newmove = move; // just keep it
+                            newmove = move; // Do nothing.
                         }
                     }
                 }
@@ -402,16 +433,25 @@ export class BTTGame extends GameBase {
             else if ( this.needRoot() )
                 result.message = i18next.t("apgames:validation.btt.ROOT_INSTRUCTIONS");
             else
-                result.message = i18next.t("apgames:validation.btt.ROOT_INSTRUCTIONS");
+                result.message = i18next.t("apgames:validation.btt.INITIAL_INSTRUCTIONS");
             return result;
         }
 
         m = m.toLowerCase();
         m = m.replace(/\s+/g, "");
+
+        //First, sanity test.
+        const movex = /^[a-j][1-9]?[0-2]?-?([123]-?[nesw]?|null|root)?$/;
+        if (!movex.test(m)) {
+            result.valid = false;
+            result.message = i18next.t("apgames:validation.btt.MALFORMED_MOVE", { move: m });
+            return result;
+        }
+        
         const validMoves = this.moves();
 
-        // Let's rely heavily on the moves() generator since it accurately produces all legal moves
-        // We'll match partials
+        // Match partials against the list of legal moves.
+        // TODO: actually test, it's not hard and will yield useful messages.
         let isComplete = false;
         let isPartial = false;
         for (const v of validMoves) {
@@ -434,6 +474,7 @@ export class BTTGame extends GameBase {
         if (isPartial) {
             result.valid = true;
             result.complete = -1;
+            result.canrender = true;
             result.message = i18next.t("apgames:validation.btt.PARTIAL_MOVE");
             return result;
         }
@@ -449,7 +490,7 @@ export class BTTGame extends GameBase {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
 
-        m = m.toLowerCase();
+        m = m.toUpperCase();
         m = m.replace(/\s+/g, "");
 
         if (!trusted) {
@@ -457,33 +498,36 @@ export class BTTGame extends GameBase {
             if (!result.valid) {
                 throw new UserFacingError("VALIDATION_GENERAL", result.message);
             }
-            if (!partial && !this.moves().map(x => x.toLowerCase()).includes(m)) {
+            if (!partial && !this.moves().map(x => x.toUpperCase()).includes(m)) {
                 throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", { move: m }));
             }
         }
 
         if (partial) { return this; }
 
-        const canon = this.moves().find(v => v.toLowerCase() === m);
+        const canon = this.moves().find(v => v.toUpperCase() === m);
         if (canon !== undefined) {
             m = canon;
         }
 
         this.results = [];
 
-        if (m.endsWith("-NULL")) {
-            const cell = m.substring(0,2);
-            this.board.set(cell, "NULL");
-            this.results.push({ type: "place", where: cell, what: "NULL" });
-        } else if (m.endsWith("-ROOT")) {
-            const cell = m.substring(0,2);
-            this.board.set(cell, "ROOT");
-            this.results.push({ type: "place", where: cell, what: "ROOT" });
+        if ( m === "" )
+            return this;
+
+        const parts = m.split("-");
+        const cell = parts.shift()!.toLowerCase();
+        if ( parts.length === 0 )
+            return this;
+        
+        if ( parts[0] === "NULL" || parts[0] === "ROOT") {
+            
+            this.board.set(cell, parts[0]);
+            this.results.push({ type: "place", where: cell, what: parts[0] });
         } else {
-            const parts = m.split("-");
-            const size = parseInt(parts[1], 10) as Size;
-            const cell = parts[0];
-            const dir = parts[2] as Facing;
+            const size = parseInt(parts[0], 10) as Size;
+            //IF
+            const dir = parts[1] as DirectionCardinal;
 
             const stash = this.stashes.get(this.currplayer)!;
             stash[size - 1]--;
