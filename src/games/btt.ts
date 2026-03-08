@@ -158,7 +158,7 @@ export class BTTGame extends GameBase {
     }
 
     public get boardHeight(): number {
-        if (this.variants.includes("arcade"))
+        if ( this.variants.includes("arcade") )
             return this.numplayers < 6 ? 5 : 10;
         else 
             return this.numplayers * 2;
@@ -294,6 +294,7 @@ export class BTTGame extends GameBase {
         const cell = parts.shift()!.toLowerCase();
         if (! cellex.test(cell) ) {
             //Malformed cell.
+            console.log("malformed? " ,cell);
             mm.valid = false;
             return mm;
         } else {
@@ -370,33 +371,41 @@ export class BTTGame extends GameBase {
     /* end helper functions */
 
     public moves(player?: playerid): string[] {
-        if (this.gameover) { return []; }
-        if (player === undefined) {
-            player = this.currplayer;
-        }
         const moves: string[] = [];
-
+        
+        if (this.gameover) {
+            return moves;
+        }
+        
         if ( this.needNull() ) {
+            
             for (let y = 0; y < this.boardHeight; y++) {
                 for (let x = 0; x < this.boardWidth; x++) {
                     const cell = this.coords2algebraic(x, y);
-                    if (this.board.has(cell)) continue;
-                    if ( ! this.checkNull(cell) ) {
+                    if ( this.board.has(cell) )
+                        continue;
+                    if (! this.checkNull(cell) ) {
                         continue;
                     }
                     moves.push(`${cell}-NULL`);
                 }
             }
+            return moves;
+            
         } else if ( this.needRoot() ) {
+            
             for (let y = 0; y < this.boardHeight; y++) {
                 for (let x = 0; x < this.boardWidth; x++) {
                     const cell = this.coords2algebraic(x, y);
-                    if (!this.board.has(cell)) {
+                    if (! this.board.has(cell) ) {
                         moves.push(`${cell}-ROOT`);
                     }
                 }
             }
+            return moves;
+
         } else {
+            
             // Normal placement phase
             const stashes = this.stashes.get(player)!;
             const sizes: Size[] = [];
@@ -413,6 +422,7 @@ export class BTTGame extends GameBase {
                 const [x, y] = this.algebraic2coords(cell);
 
                 for (const dir of orthDirections) {
+
                     const [nx, ny] = RectGrid.move(x, y, dir);
                     if ( grid.inBounds(nx, ny) ) {
                         const nextCell = this.coords2algebraic(nx, ny);
@@ -431,56 +441,8 @@ export class BTTGame extends GameBase {
     }
 
     public randomMove(): string {
-        const allmoves = this.moves();
-        const grid = new RectGrid(this.boardWidth, this.boardHeight);
-        
-        //Omit the "stupid" moves.
-        // If the move points to an opponent's piece, but the piece ALSO has an adjacent friendly piece, omit it.
-        const filteredMoves = [];
-        for (const move of allmoves) {
-            const pm = this.parseMove(move);
-            if ( pm.piece ) continue; //the null/root moves.
-                
-            const cell = pm.cell;
-            const oppDir = pm.direction;
-
-            let adjFriendlies = false;
-            const [cx, cy] = this.algebraic2coords(cell);
-            for (const d of orthDirections) {
-                const [nx, ny] = RectGrid.move(cx, cy, d);
-                if ( grid.inBounds(nx, ny) ) {
-                    const nc = this.coords2algebraic(nx, ny);
-                    if (this.board.has(nc)) {
-                        const c = this.board.get(nc)!;
-                        if (Array.isArray(c) && c[0] === this.currplayer) {
-                            adjFriendlies = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            const dir = oppositeDirections.get(oppDir as Direction) as Direction;
-
-            const [px, py] = RectGrid.move(cx, cy, dir);
-            if ( grid.inBounds(px, py) ) {
-                const pointedCell = this.coords2algebraic(px, py);
-                const pointedContents = this.board.get(pointedCell);
-                if (pointedContents && Array.isArray(pointedContents)) {
-                    const nextColor = pointedContents[0];
-                    if (nextColor !== this.currplayer && adjFriendlies) {
-                        continue; // Culling this move
-                    }
-                }
-            }
-            filteredMoves.push(move);
-        }
-
-        if (filteredMoves.length > 0)
-            return filteredMoves[Math.floor(Math.random() * filteredMoves.length)];
-        else
-            return allmoves[Math.floor(Math.random() * allmoves.length)];
-        //Or emit an error, because the latter case shouldn't happen.
+        const moves = this.moves();
+        return moves[Math.floor(Math.random() * moves.length)];
     }
 
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
