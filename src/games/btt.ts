@@ -668,16 +668,10 @@ export class BTTGame extends GameBase {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
 
-        m = m.toUpperCase();
-        m = m.replace(/\s+/g, "");
-
         if (!trusted) {
             const result = this.validateMove(m);
             if (!result.valid) {
                 throw new UserFacingError("VALIDATION_GENERAL", result.message);
-            }
-            if (!partial && !this.moves().map(x => x.toUpperCase()).includes(m)) {
-                throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", { move: m }));
             }
         }
 
@@ -686,39 +680,32 @@ export class BTTGame extends GameBase {
         //Reset highlight here.
         this.highlight = undefined;
 
-        const canon = this.moves().find(v => v.toUpperCase() === m);
-        if (canon !== undefined) {
-            m = canon;
-        }
-
         this.results = [];
 
         if ( m === "" )
             return this;
 
-        const parts = m.split("-");
-        const cell = parts.shift()!.toLowerCase();
-        if ( parts.length === 0 )
+        const mm = this.parseMove(m);
+        if ( mm.valid === false )
             return this;
         
-        if ( parts[0] === "NULL" || parts[0] === "ROOT") {
-            
-            this.board.set(cell, parts[0]);
-            this.results.push({ type: "place", where: cell, what: parts[0] });
+        if ( mm.piece ) {// === "NULL" || parts[0] === "ROOT") {
+            this.board.set(mm.cell, mm.piece as CellContents);
+            this.results.push({ type: "place", where: mm.cell, what: mm.piece });
         } else {
-            const size = parseInt(parts[0], 10) as Size;
+            const size = mm.size as Size;
             //IF
-            const dir = parts[1] as DirectionCardinal;
+            const dir = mm.direction as DirectionCardinal;
 
             const stash = this.stashes.get(this.currplayer)!;
             stash[size - 1]--;
             this.stashes.set(this.currplayer, stash);
-            this.board.set(cell, [this.currplayer, size, dir]);
-            this.results.push({ type: "place", where: cell, what: size.toString(), how: dir });
+            this.board.set(mm.cell, [this.currplayer, size, dir]);
+            this.results.push({ type: "place", where: mm.cell, what: size.toString(), how: dir });
 
             // Handle pointing penalties
             const grid = new RectGrid(this.boardWidth, this.boardHeight);
-            const [cx, cy] = this.algebraic2coords(cell);
+            const [cx, cy] = this.algebraic2coords(mm.cell);
             const ray = grid.ray(cx, cy, dir);
             if (ray.length > 0) {
                 const [px, py] = ray[0];
