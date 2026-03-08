@@ -88,8 +88,13 @@ describe("Branches and Twigs and Thorns", () => {
             size: 1,
             valid: true
         });
-        
-        
+        expect(g.parseMove("b2-1-SW")).to.deep.equal({
+            cell: "b2",
+            direction: "SW",
+            incomplete: false,
+            size: 1,
+            valid: false
+        });
     });
 
     it("Pickles moves", () => {

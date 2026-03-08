@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, Glyph } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { DirectionCardinal, RectGrid, reviver, orthDirections, UserFacingError } from "../common";
+import { Direction, DirectionCardinal, RectGrid, reviver, orthDirections, UserFacingError } from "../common";
 import i18next from "i18next";
 import { SquareOrthGraph } from "../common/graphs";
 import {connectedComponents} from 'graphology-components';
@@ -85,7 +85,7 @@ export class BTTGame extends GameBase {
     public stashes!: Map<playerid, [number, number, number]>;
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
-    private highlight: string = "";
+    private highlight?: IBTTMove;
 
     constructor(state: number | IBTTState | string, variants?: string[]) {
         super();
@@ -210,6 +210,15 @@ export class BTTGame extends GameBase {
         return new SquareOrthGraph(this.boardWidth, this.boardHeight);
     }
 
+    private getNeighborDir(cell: string): Direction {
+        //Returns a single direction if the move is unambiguous.
+        const nadirs = this.getNeighborDirs(cell);
+        if (nadirs.length === 1)
+            return nadirs[0];
+        else
+            return "NE";
+    }
+
     private getNeighborDirs(cell: string): DirectionCardinal[] {
         const grid = new RectGrid(this.boardWidth, this.boardHeight);
         const [x, y] = this.algebraic2coords(cell);
@@ -314,12 +323,16 @@ export class BTTGame extends GameBase {
 
         if ( parts.length > 0 ) {
             const dir = parts.shift();
-            if (dir !== "" && direx.test(dir!) ) {
+            if (dir !== "") {
                 mm.direction = dir;
                 mm.incomplete = false;
+                if (! direx.test(dir!) ) {
+                    //We permit a bad direction for highlights.
+                    mm.valid = false;
+                }
                 return mm;
-            } else {
-                //Malformed direction.
+            } else  {
+                //Malformed (empty) direction.
                 mm.valid = false;
                 return mm;
             }
@@ -493,13 +506,7 @@ export class BTTGame extends GameBase {
 
                     //We always make the user click a direction to show that the pyramid is the intended size.
                     //But we guess the direction for display purposes.
-                    const nadirs = this.getNeighborDirs(cell);
-                    if (nadirs.length === 1) {
-                        //We can add a direction.
-                        this.highlight = newmove + "-" + nadirs[0];
-                    } else {
-                        this.highlight = newmove;
-                    }
+                    this.highlight = this.parseMove(newmove + "-" + this.getNeighborDir(cell));
                 } else {
                     const mm = this.parseMove(move);
                     if ( mm.cell === cell ) {
@@ -508,13 +515,7 @@ export class BTTGame extends GameBase {
                         mm.size = newsize;
                         //This should work regardless of whether the move was already complete:
                         newmove = this.pickleMove(mm);
-                        const nadirs = this.getNeighborDirs(cell);
-                        if (nadirs.length === 1) {
-                            //We can add a direction.
-                            this.highlight = newmove + "-" + nadirs[0];
-                        } else {
-                            this.highlight = newmove;
-                        }
+                        this.highlight = this.parseMove(newmove + "-" + this.getNeighborDir(cell));
                      } else {
                         // We clicked on an adjacent piece (at col, row).
                         const [cx, cy] = this.algebraic2coords(mm.cell);
@@ -555,10 +556,12 @@ export class BTTGame extends GameBase {
         }
     }
 
-    public validateMove(m: string): IValidationResult {
+    public validateMove(mo: string): IValidationResult {
         const result: IValidationResult = { valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
 
-        if (m.length === 0) {
+        mo = mo.replace(/\s+/g, "");
+
+        if (mo.length === 0) {
             result.valid = true;
             result.complete = -1;
             if ( this.needNull() )
@@ -570,14 +573,13 @@ export class BTTGame extends GameBase {
             return result;
         }
 
-        m = m.toLowerCase();
-        m = m.replace(/\s+/g, "");
+        const m = mo.toLowerCase();
 
         //First, sanity test.
         const movex = /^[a-j][1-9]?[0-2]?-?([123]-?[nesw]?|null|root)?$/;
         if (!movex.test(m)) {
             result.valid = false;
-            result.message = i18next.t("apgames:validation.btt.MALFORMED_MOVE", { move: m });
+            result.message = i18next.t("apgames:validation.btt.MALFORMED_MOVE", { move: mo });
             return result;
         }
         
@@ -614,7 +616,7 @@ export class BTTGame extends GameBase {
 
         // Failsafe error
         result.valid = false;
-        result.message = i18next.t("apgames:validation._general.INVALID_MOVE", { move: m });
+        result.message = i18next.t("apgames:validation._general.INVALID_MOVE", { move: mo });
         return result;
     }
 
@@ -639,7 +641,7 @@ export class BTTGame extends GameBase {
         if (partial) { return this; }
 
         //Reset highlight here.
-        this.highlight = "";
+        this.highlight = undefined;
 
         const canon = this.moves().find(v => v.toUpperCase() === m);
         if (canon !== undefined) {
@@ -758,21 +760,9 @@ export class BTTGame extends GameBase {
         let pstr = "";
         let hX = -1;
         let hY = -1;
-        let hsize = 1;
-        let hdir = "NE";
-        if (this.highlight !== "") {
-            //Could use a parseMove function to unify this process.
-            console.log("highlight: ", this.highlight);
-            const hm = this.parseMove(this.highlight);
-            console.log("highlit cell: ", hm.cell, hm.direction);
-            [hX, hY] = this.algebraic2coords(hm.cell);
-            if (hm.size)
-                hsize = hm.size;
-            if (hm.direction)
-                hdir = hm.direction;
-        }
-        console.log("computed highlights: ", hX, hY, hsize, hdir);
-        
+        if (this.highlight !== undefined)
+            [hX, hY] = this.algebraic2coords(this.highlight.cell);
+
         for (let row = 0; row < this.boardHeight; row++) {
             if (pstr.length > 0) {
                 pstr += "\n";
@@ -791,7 +781,7 @@ export class BTTGame extends GameBase {
                         pieces.push("P" + player.toString() + size.toString() + dir);
                     }
                 } else if (hX === col && hY === row) {
-                    pieces.push("H" + hsize + hdir);
+                    pieces.push("H" + this.highlight!.size + this.highlight!.direction);
                 } else {
                     pieces.push("-");
                 }
@@ -839,6 +829,9 @@ export class BTTGame extends GameBase {
             "X": token,
             "R": tokens
         };
+
+
+        
         
         const rotations: Map<string, number> = new Map([
             ["N", 0],
@@ -856,29 +849,19 @@ export class BTTGame extends GameBase {
                         rotate: angle,
                     };
                     myLegend["P" + player.toString() + size.toString() + dir] = pyraglyph;
-                    if (dir === hdir && size === hsize) {
-                        //Also make the highlighting pyramids.
-                
-                        myLegend["H" + size.toString() + hdir] = {
-                            name: "pyramid-flat-" + sizeNames[size - 1],
-                            colour: this.currplayer,
-                            rotate: angle,
-                            opacity: 0.2
-                        };
-                    }
                 }
             }
         }
 
-        //If the shadow pyramid didn't have an orthogonal direction...
-        if (hdir === "NE")
-            myLegend["H" + hsize.toString() + hdir] = {
-                name: "pyramid-flat-" + sizeNames[hsize - 1],
+        if (this.highlight !== undefined) {
+            //The shadow pyramid knows...
+            myLegend["H" + this.highlight.size!.toString() + this.highlight.direction] = {
+                name: "pyramid-flat-" + sizeNames[this.highlight.size! - 1],
                 colour: this.currplayer,
-                rotate: 45,
+                rotate: rotations.has(this.highlight.direction!) ? rotations.get(this.highlight.direction!) : 45,
                 opacity: 0.2
             };
-
+        }
 
         // Build rep
         const rep: APRenderRep = {
