@@ -17,8 +17,6 @@ export type playerid = 1 | 2 | 3 | 4;
 export type Size = 1 | 2 | 3;
 //export type Facing = "N" | "E" | "S" | "W";
 export type CellContents = [playerid, Size, DirectionCardinal] | "NULL" | "ROOT";
-export type moveType = "N"|"R"|"P"|"U"|"E";
-//const moveTypes = ["N","R","P","U"];
 //const orientations: DirectionCardinal[] = ["N", "E", "S", "W"];
 
 export interface IMoveState extends IIndividualState {
@@ -35,7 +33,6 @@ export interface IBTTState extends IAPGameState {
 };
 
 interface IBTTMove {
-    type: moveType;
     cell: string;
     piece?: string;
     size?: number;
@@ -266,10 +263,9 @@ export class BTTGame extends GameBase {
         const illegalChars = /[^A-JLNORSTUW1-9-]/;
         const cellex = /^[a-j][1-9][0-2]?$/;
         const sizex = /^[123]$/;
-        const direx = /^[nesw]$/;
+        const direx = /^[NESW]$/;
         
         const mm: IBTTMove = {
-            type: "E",
             cell: "",
             incomplete: true,
             valid: false
@@ -282,7 +278,6 @@ export class BTTGame extends GameBase {
         }
 
         const parts = move.split("-");
-
         //Test for length.
         if (parts.length > 3) {
             mm.valid = false;
@@ -334,6 +329,11 @@ export class BTTGame extends GameBase {
     }
     
     public pickleMove(pm: IBTTMove): string {
+        if ( ! pm.cell || pm.cell === "" ) {
+            //Trouble with highlights.
+            throw new Error("Could not pickle the move because it included no cell.");
+        }
+        
         const move = [pm.cell];
         
         if (pm.piece)
@@ -381,9 +381,10 @@ export class BTTGame extends GameBase {
             // Normal placement phase
             const stashes = this.stashes.get(player)!;
             const sizes: Size[] = [];
-            if (stashes[0] > 0) sizes.push(1);
-            if (stashes[1] > 0) sizes.push(2);
-            if (stashes[2] > 0) sizes.push(3);
+
+            for (let n = 0; n < 3; n++)
+                if (stashes[n] > 0)
+                    sizes.push((n + 1) as Size);
 
             const grid = new RectGrid(this.boardWidth, this.boardHeight);
 
@@ -469,9 +470,9 @@ export class BTTGame extends GameBase {
             //Preliminary move format: cell|cell|cell-size-direction
             //Final move format: cell-size-direction
             const cell = this.coords2algebraic(col, row);
+            console.log("clicked: ", cell);
 
             let newmove = "";
-            this.highlight = "";
 
             if ( this.needNull() ) {
                 newmove = `${cell}-NULL`;
@@ -500,17 +501,23 @@ export class BTTGame extends GameBase {
                         this.highlight = newmove;
                     }
                 } else {
-                    const movingParts = move.split("-");
-                    if ( movingParts[0] === cell) {
+                    const mm = this.parseMove(move);
+                    if ( mm.cell === cell ) {
                         // We clicked on the same cell, change pyramid size.
-                        const newsize = this.getNextPyramid(Number(movingParts[1]));
-                        movingParts[1] = newsize.toString();
+                        const newsize = mm.size ? this.getNextPyramid(mm.size) : 1;
+                        mm.size = newsize;
                         //This should work regardless of whether the move was already complete:
-                        newmove = movingParts.join("-");
-                        this.highlight = newmove;
-                    } else {
+                        newmove = this.pickleMove(mm);
+                        const nadirs = this.getNeighborDirs(cell);
+                        if (nadirs.length === 1) {
+                            //We can add a direction.
+                            this.highlight = newmove + "-" + nadirs[0];
+                        } else {
+                            this.highlight = newmove;
+                        }
+                     } else {
                         // We clicked on an adjacent piece (at col, row).
-                        const [cx, cy] = this.algebraic2coords(movingParts[0]);
+                        const [cx, cy] = this.algebraic2coords(mm.cell);
                         const bearing = RectGrid.bearing(cx, cy, col, row);
                         if (bearing && bearing.length === 2) {
                             return {
@@ -520,8 +527,8 @@ export class BTTGame extends GameBase {
                             }
                         } else if (bearing) {
                             //This should work regardless of whether the move was already complete:
-                            movingParts[2] = bearing;
-                            newmove = movingParts.join("-");
+                            mm.direction = bearing;
+                            newmove = this.pickleMove(mm);
                         } else {
                             console.log("in the noop");
                             newmove = move; // Do nothing.
@@ -529,6 +536,8 @@ export class BTTGame extends GameBase {
                     }
                 }
             }
+
+            console.log("newmove: ", newmove);
 
             const result = this.validateMove(newmove) as IClickResult;
             if (!result.valid) {
@@ -628,6 +637,9 @@ export class BTTGame extends GameBase {
         }
 
         if (partial) { return this; }
+
+        //Reset highlight here.
+        this.highlight = "";
 
         const canon = this.moves().find(v => v.toUpperCase() === m);
         if (canon !== undefined) {
@@ -750,13 +762,16 @@ export class BTTGame extends GameBase {
         let hdir = "NE";
         if (this.highlight !== "") {
             //Could use a parseMove function to unify this process.
-            const highlights = this.highlight.split("-");
-            [hX, hY] = this.algebraic2coords(this.highlight[0]);
-            if (highlights.length > 1)
-                hsize = Number(highlights[1]);
-            if (highlights.length === 3)
-                hdir = highlights[2];
+            console.log("highlight: ", this.highlight);
+            const hm = this.parseMove(this.highlight);
+            console.log("highlit cell: ", hm.cell, hm.direction);
+            [hX, hY] = this.algebraic2coords(hm.cell);
+            if (hm.size)
+                hsize = hm.size;
+            if (hm.direction)
+                hdir = hm.direction;
         }
+        console.log("computed highlights: ", hX, hY, hsize, hdir);
         
         for (let row = 0; row < this.boardHeight; row++) {
             if (pstr.length > 0) {

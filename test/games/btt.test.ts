@@ -3,6 +3,7 @@ import { expect } from "chai";
 import { BTTGame } from "../../src/games";
 
 describe("Branches and Twigs and Thorns", () => {
+    
     it("Does initial board config", () => {
         for (let p = 2; p <= 6; p++) {
             const g = new BTTGame(p);
@@ -24,6 +25,76 @@ describe("Branches and Twigs and Thorns", () => {
                 expect(gg.moves().length).eq(8 * 3);
             }
         }
+    });
+
+    const g = new BTTGame(4);
+    it("Parses moves", () => {
+        //The parser is structural so don't need to layout or conform to 
+        // any particular board setup.
+        
+        expect(g.parseMove("d4-NULL")).to.deep.equal({
+            cell: "d4",
+            incomplete: false,
+            piece: "NULL",
+            valid: true
+        });
+        expect(g.parseMove("f3-ROOT")).to.deep.equal({
+            cell: "f3",
+            incomplete: false,
+            piece: "ROOT",
+            valid: true
+        });
+        
+        expect(g.parseMove("c2-2-W")).to.deep.equal({
+            cell: "c2",
+            direction: "W",
+            incomplete: false,
+            size: 2,
+            valid: true
+        });
+        
+        
+        expect(g.parseMove("")).to.deep.equal({
+            cell: "",
+            incomplete: true,
+            valid: false
+        });
+        expect(g.parseMove("b2")).to.deep.equal({
+            cell: "b2",
+            incomplete: true,
+            valid: true
+        });
+        expect(g.parseMove("b2-")).to.deep.equal({
+            cell: "b2",
+            incomplete: true,
+            valid: false
+        });
+        expect(g.parseMove("b2-1")).to.deep.equal({
+            cell: "b2",
+            incomplete: true,
+            size: 1,
+            valid: true
+        });
+        expect(g.parseMove("b2-1-")).to.deep.equal({
+            cell: "b2",
+            incomplete: true,
+            size: 1,
+            valid: false
+        });
+        expect(g.parseMove("b2-1-S")).to.deep.equal({
+            cell: "b2",
+            direction: "S",
+            incomplete: false,
+            size: 1,
+            valid: true
+        });
+        
+        
+    });
+
+    it("Pickles moves", () => {
+        expect(g.pickleMove(g.parseMove(" a1-null "))).eq("a1-NULL");
+        expect(g.pickleMove(g.parseMove(" B2- 1 -s "))).eq("b2-1-S");
     });
 
     it("Does initial setup moves (2P)", () => {
