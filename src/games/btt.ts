@@ -17,8 +17,9 @@ export type playerid = 1 | 2 | 3 | 4;
 export type Size = 1 | 2 | 3;
 //export type Facing = "N" | "E" | "S" | "W";
 export type CellContents = [playerid, Size, DirectionCardinal] | "NULL" | "ROOT";
-
-//const orientations: Facing[] = ["N", "E", "S", "W"];
+export type moveType = "N"|"R"|"P"|"U"|"E";
+//const moveTypes = ["N","R","P","U"];
+//const orientations: DirectionCardinal[] = ["N", "E", "S", "W"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
@@ -32,6 +33,16 @@ export interface IBTTState extends IAPGameState {
     winner: playerid[];
     stack: Array<IMoveState>;
 };
+
+interface IBTTMove {
+    type: moveType;
+    cell: string;
+    piece?: string;
+    size?: number;
+    direction?: string;
+    incomplete?: boolean;
+    valid: boolean;
+}
 
 export class BTTGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
@@ -77,6 +88,7 @@ export class BTTGame extends GameBase {
     public stashes!: Map<playerid, [number, number, number]>;
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
+    private highlight: string = "";
 
     constructor(state: number | IBTTState | string, variants?: string[]) {
         super();
@@ -223,7 +235,7 @@ export class BTTGame extends GameBase {
         //The weirdness comes from size vs. stash index.
         const stash = this.stashes.get(this.currplayer)!;
         if (stash[previous % 3] > 0)
-            return previous + 1;
+            return previous % 3 + 1;
         else
             return this.getNextPyramid( previous + 1 )
     }
@@ -239,6 +251,100 @@ export class BTTGame extends GameBase {
     private needRoot(): boolean {
         const roots = [...this.board.values()].filter(c => c === "ROOT").length;
         return roots < Math.ceil(this.numplayers / 2);
+    }
+
+    public parseMove(move: string): IBTTMove {
+        //Parse a move into an IBTTMove object.
+        //Does only structural validation.
+        //Expects at leat a cell.
+
+        //Pretreat.
+        move = move.toUpperCase();
+        move = move.replace(/\s+/g, "");
+     
+        //Regexes.
+        const illegalChars = /[^A-JLNORSTUW1-9-]/;
+        const cellex = /^[a-j][1-9][0-2]?$/;
+        const sizex = /^[123]$/;
+        const direx = /^[nesw]$/;
+        
+        const mm: IBTTMove = {
+            type: "E",
+            cell: "",
+            incomplete: true,
+            valid: false
+        }
+
+        //Check for legal characters.
+        if (move === "" || illegalChars.test(move)) {
+            mm.valid = false;
+            return mm;
+        }
+
+        const parts = move.split("-");
+
+        //Test for length.
+        if (parts.length > 3) {
+            mm.valid = false;
+            return mm;
+        }
+
+        const cell = parts.shift()!.toLowerCase();
+        if (! cellex.test(cell) ) {
+            //Malformed cell.
+            mm.valid = false;
+            return mm;
+        } else {
+            mm.cell = cell;
+            mm.valid = true;
+        }
+
+        if ( parts.length > 0 ) {
+            const pisces = parts.shift();
+            if ( pisces === "ROOT" || pisces === "NULL" ) {
+                mm.piece = pisces;
+                mm.incomplete = false;
+                return mm;
+            } else if ( sizex.test(pisces!) ) {
+                mm.size = Number(pisces);
+            } else {
+                //Malformed piece.
+                mm.valid = false;
+                return mm;
+            }
+        } else {
+            mm.incomplete = true;
+            return mm;
+        }
+
+        if ( parts.length > 0 ) {
+            const dir = parts.shift();
+            if (dir !== "" && direx.test(dir!) ) {
+                mm.direction = dir;
+                mm.incomplete = false;
+                return mm;
+            } else {
+                //Malformed direction.
+                mm.valid = false;
+                return mm;
+            }
+        }
+
+        return mm;
+    }
+    
+    public pickleMove(pm: IBTTMove): string {
+        const move = [pm.cell];
+        
+        if (pm.piece)
+            move.push(pm.piece);
+        else if (pm.size)
+            move.push(pm.size.toString());
+
+        if (pm.direction)
+            move.push(pm.direction);
+        
+        return move.join("-");
     }
 
 
@@ -365,7 +471,8 @@ export class BTTGame extends GameBase {
             const cell = this.coords2algebraic(col, row);
 
             let newmove = "";
- 
+            this.highlight = "";
+
             if ( this.needNull() ) {
                 newmove = `${cell}-NULL`;
             } else if ( this.needRoot() ) {
@@ -380,26 +487,43 @@ export class BTTGame extends GameBase {
                             message: i18next.t("apgames:validation.btt.OCCUPIED", { cell: cell })
                         }
                     //Else start with the cell and the player's smallest pyramid size.
-                    newmove = `${cell}-${this.getNextPyramid(0)}`;
+                    const firstsize = this.getNextPyramid(0);
+                    newmove = `${cell}-${firstsize}`;
 
-                    //If we can guess the direction, don't make him click for it.
+                    //We always make the user click a direction to show that the pyramid is the intended size.
+                    //But we guess the direction for display purposes.
                     const nadirs = this.getNeighborDirs(cell);
-                    console.log(nadirs);
-                    if (nadirs.length === 1)
-                        newmove += "-" + nadirs[0];
-                       
+                    if (nadirs.length === 1) {
+                        //We can add a direction.
+                        this.highlight = newmove + "-" + nadirs[0];
+                    } else {
+                        this.highlight = newmove;
+                    }
                 } else {
                     const movingParts = move.split("-");
                     if ( movingParts[0] === cell) {
                         // We clicked on the same cell, change pyramid size.
-                        newmove = `${cell}-${this.getNextPyramid(Number(movingParts[1]))}`;
+                        const newsize = this.getNextPyramid(Number(movingParts[1]));
+                        movingParts[1] = newsize.toString();
+                        //This should work regardless of whether the move was already complete:
+                        newmove = movingParts.join("-");
+                        this.highlight = newmove;
                     } else {
                         // We clicked on an adjacent piece (at col, row).
                         const [cx, cy] = this.algebraic2coords(movingParts[0]);
                         const bearing = RectGrid.bearing(cx, cy, col, row);
-                        if (bearing) {
-                            newmove = `${move}-${bearing}`;
+                        if (bearing && bearing.length === 2) {
+                            return {
+                                move,
+                                valid: false,
+                                message: i18next.t("apgames:validation.btt.NO_DIAGONALS", { cell: cell })
+                            }
+                        } else if (bearing) {
+                            //This should work regardless of whether the move was already complete:
+                            movingParts[2] = bearing;
+                            newmove = movingParts.join("-");
                         } else {
+                            console.log("in the noop");
                             newmove = move; // Do nothing.
                         }
                     }
@@ -408,7 +532,7 @@ export class BTTGame extends GameBase {
 
             const result = this.validateMove(newmove) as IClickResult;
             if (!result.valid) {
-                result.move = "";
+                result.move = move;
             } else {
                 result.move = newmove;
             }
@@ -620,6 +744,20 @@ export class BTTGame extends GameBase {
     public render(): APRenderRep {
         // Build piece string
         let pstr = "";
+        let hX = -1;
+        let hY = -1;
+        let hsize = 1;
+        let hdir = "NE";
+        if (this.highlight !== "") {
+            //Could use a parseMove function to unify this process.
+            const highlights = this.highlight.split("-");
+            [hX, hY] = this.algebraic2coords(this.highlight[0]);
+            if (highlights.length > 1)
+                hsize = Number(highlights[1]);
+            if (highlights.length === 3)
+                hdir = highlights[2];
+        }
+        
         for (let row = 0; row < this.boardHeight; row++) {
             if (pstr.length > 0) {
                 pstr += "\n";
@@ -637,6 +775,8 @@ export class BTTGame extends GameBase {
                         const [player, size, dir] = contents;
                         pieces.push("P" + player.toString() + size.toString() + dir);
                     }
+                } else if (hX === col && hY === row) {
+                    pieces.push("H" + hsize + hdir);
                 } else {
                     pieces.push("-");
                 }
@@ -645,8 +785,8 @@ export class BTTGame extends GameBase {
         }
 
         const token: [Glyph, ...Glyph[]] =  [
-            { name: "piece", colour: "#000", scale: 0.5 },
-            { name: "piece", colour: "#fff", scale: 0.3 }
+            { name: "piece-borderless", colour: "_context_fill", scale: 0.5 },
+            { name: "piece-borderless", colour: "_context_background", scale: 0.3 }
         ]
 
         const tokens: [Glyph, ...Glyph[]] = [
@@ -661,8 +801,8 @@ export class BTTGame extends GameBase {
 
         nudges.forEach( nudge => {
             tokens.push({
-                name: "piece",
-                colour: "#000",
+                name: "piece-borderless",
+                colour: "_context_fill",
                 scale: 0.5,
                 nudge: {
                     dx: nudge[0] * 225,
@@ -670,8 +810,8 @@ export class BTTGame extends GameBase {
                 }
             });
             tokens.push({
-                name: "piece",
-                colour: "#fff",
+                name: "piece-borderless",
+                colour: "_context_background",
                 scale: 0.3,
                 nudge: {
                     dx: nudge[0] * 375,
@@ -701,9 +841,29 @@ export class BTTGame extends GameBase {
                         rotate: angle,
                     };
                     myLegend["P" + player.toString() + size.toString() + dir] = pyraglyph;
+                    if (dir === hdir && size === hsize) {
+                        //Also make the highlighting pyramids.
+                
+                        myLegend["H" + size.toString() + hdir] = {
+                            name: "pyramid-flat-" + sizeNames[size - 1],
+                            colour: this.currplayer,
+                            rotate: angle,
+                            opacity: 0.2
+                        };
+                    }
                 }
             }
         }
+
+        //If the shadow pyramid didn't have an orthogonal direction...
+        if (hdir === "NE")
+            myLegend["H" + hsize.toString() + hdir] = {
+                name: "pyramid-flat-" + sizeNames[hsize - 1],
+                colour: this.currplayer,
+                rotate: 45,
+                opacity: 0.2
+            };
+
 
         // Build rep
         const rep: APRenderRep = {

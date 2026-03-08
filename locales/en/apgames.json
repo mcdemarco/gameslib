@@ -3955,6 +3955,7 @@
             "NULL_INSTRUCTIONS": "Select a null square.",
             "ROOT_INSTRUCTIONS": "Select a root square.",
             "MALFORMED_MOVE": "The move \"{{move}}\" could not be parsed.",
+            "NO_DIAGONALS": "The pyramid cannot point at the cell \"{{cell}}\" because it is only diagonally adjacent.",
             "OCCUPIED": "The cell \"{{cell}}\" is already occupied.",
             "PARTIAL_MOVE": "Select a neighboring cell to point at."
         },
