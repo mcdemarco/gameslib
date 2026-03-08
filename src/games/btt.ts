@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValid
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, Glyph } from "@abstractplay/renderer/src/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { Direction, DirectionCardinal, RectGrid, reviver, orthDirections, UserFacingError } from "../common";
+import { Direction, DirectionCardinal, RectGrid, reviver, oppositeDirections, orthDirections, UserFacingError } from "../common";
 import i18next from "i18next";
 import { SquareOrthGraph } from "../common/graphs";
 import {connectedComponents} from 'graphology-components';
@@ -15,16 +15,14 @@ interface ILegendObj {
 
 export type playerid = 1 | 2 | 3 | 4;
 export type Size = 1 | 2 | 3;
-//export type Facing = "N" | "E" | "S" | "W";
 export type CellContents = [playerid, Size, DirectionCardinal] | "NULL" | "ROOT";
-//const orientations: DirectionCardinal[] = ["N", "E", "S", "W"];
 
 export interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: Map<string, CellContents>;
     lastmove?: string;
     scores: number[];
-    stashes: Map<playerid, [number, number, number]>; // index 0 is size 1, index 1 is size 2, index 2 is size 3
+    stashes: Map<playerid, [number, number, number]>; // sizes 1,2,3
 };
 
 export interface IBTTState extends IAPGameState {
@@ -46,8 +44,8 @@ export class BTTGame extends GameBase {
         name: "Branches and Twigs and Thorns",
         uid: "btt",
         playercounts: [2, 3, 4, 5, 6],
-        version: "20260305",
-        dateAdded: "2026-03-05",
+        version: "20260308",
+        dateAdded: "2026-03-08",
         // i18next.t("apgames:descriptions.btt")
         description: "apgames:descriptions.btt",
         urls: [
@@ -415,12 +413,11 @@ export class BTTGame extends GameBase {
                 const [x, y] = this.algebraic2coords(cell);
 
                 for (const dir of orthDirections) {
-                    const ray = grid.ray(x, y, dir);
-                    if (ray.length > 0) {
-                        const [nx, ny] = ray[0];
+                    const [nx, ny] = RectGrid.move(x, y, dir);
+                    if ( grid.inBounds(nx, ny) ) {
                         const nextCell = this.coords2algebraic(nx, ny);
                         if (!this.board.has(nextCell)) {
-                            const oppDir = dir === "N" ? "S" : dir === "S" ? "N" : dir === "E" ? "W" : "E";
+                            const oppDir = oppositeDirections.get(dir);
                             for (const size of sizes) {
                                 moves.push(`${nextCell}-${size}${oppDir}`);
                             }
@@ -441,20 +438,17 @@ export class BTTGame extends GameBase {
         // If the move points to an opponent's piece, but the piece ALSO has an adjacent friendly piece, omit it.
         const filteredMoves = [];
         for (const move of allmoves) {
-            const parts = move.split("-");
-            if (parts.length !== 2) continue; //No longer a case.
-            parts[2] = parts[1].substring(1);
-            parts[1] = parts[1].charAt(0);
-            if (! /^[123]$/.test(parts[1]) ) continue;
+            const pm = this.parseMove(move);
+            if ( pm.piece ) continue; //the null/root moves.
                 
-            const [cell,, oppDir] = parts;
+            const cell = pm.cell;
+            const oppDir = pm.direction;
 
             let adjFriendlies = false;
             const [cx, cy] = this.algebraic2coords(cell);
             for (const d of orthDirections) {
-                const ray = grid.ray(cx, cy, d);
-                if (ray.length > 0) {
-                    const [nx, ny] = ray[0];
+                const [nx, ny] = RectGrid.move(cx, cy, d);
+                if ( grid.inBounds(nx, ny) ) {
                     const nc = this.coords2algebraic(nx, ny);
                     if (this.board.has(nc)) {
                         const c = this.board.get(nc)!;
@@ -466,10 +460,10 @@ export class BTTGame extends GameBase {
                 }
             }
 
-            const dir = oppDir === "N" ? "S" : oppDir === "S" ? "N" : oppDir === "E" ? "W" : "E";
-            const ray = grid.ray(cx, cy, dir);
-            if (ray.length > 0) {
-                const [px, py] = ray[0];
+            const dir = oppositeDirections.get(oppDir as Direction) as Direction;
+
+            const [px, py] = RectGrid.move(cx, cy, dir);
+            if ( grid.inBounds(px, py) ) {
                 const pointedCell = this.coords2algebraic(px, py);
                 const pointedContents = this.board.get(pointedCell);
                 if (pointedContents && Array.isArray(pointedContents)) {
@@ -495,7 +489,6 @@ export class BTTGame extends GameBase {
             //Preliminary move format: cell|cell|cell-size-direction
             //Final move format: cell-size-direction
             const cell = this.coords2algebraic(col, row);
-            console.log("clicked: ", cell);
 
             let newmove = "";
 
@@ -543,14 +536,11 @@ export class BTTGame extends GameBase {
                             mm.direction = bearing;
                             newmove = this.pickleMove(mm);
                         } else {
-                            console.log("in the noop");
                             newmove = move; // Do nothing.
                         }
                     }
                 }
             }
-
-            console.log("newmove: ", newmove);
 
             const result = this.validateMove(newmove) as IClickResult;
             if (!result.valid) {
@@ -706,18 +696,18 @@ export class BTTGame extends GameBase {
             // Handle pointing penalties
             const grid = new RectGrid(this.boardWidth, this.boardHeight);
             const [cx, cy] = this.algebraic2coords(mm.cell);
-            const ray = grid.ray(cx, cy, dir);
-            if (ray.length > 0) {
-                const [px, py] = ray[0];
+            const [px, py] = RectGrid.move(cx, cy, dir);
+            
+            if ( grid.inBounds(px, py) ) {
                 const pcell = this.coords2algebraic(px, py);
                 const pcontents = this.board.get(pcell);
                 if (pcontents && Array.isArray(pcontents)) {
-                    const oppPlayer = pcontents[0];
-                    if (oppPlayer !== this.currplayer) {
+                    const opponent = pcontents[0];
+                    if (opponent !== this.currplayer) {
                         const oppSize = pcontents[1];
                         this.scores[this.currplayer - 1] -= oppSize;
                         if (! this.variants.includes("martian-go") )
-                            this.scores[oppPlayer - 1] += size;
+                            this.scores[opponent - 1] += size;
                         this.results.push({ type: "deltaScore", delta: -oppSize });
                     }
                 }
