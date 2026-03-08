@@ -288,7 +288,7 @@ export class BTTGame extends GameBase {
 
         const parts = move.split("-");
         //Test for length.
-        if (parts.length > 3) {
+        if (parts.length > 2) {
             mm.valid = false;
             return mm;
         }
@@ -305,37 +305,44 @@ export class BTTGame extends GameBase {
 
         if ( parts.length > 0 ) {
             const pisces = parts.shift();
-            if ( pisces === "ROOT" || pisces === "NULL" ) {
-                mm.piece = pisces;
-                mm.incomplete = false;
-                return mm;
-            } else if ( sizex.test(pisces!) ) {
-                mm.size = Number(pisces);
-            } else {
+            if (! pisces || pisces === "") {
                 //Malformed piece.
                 mm.valid = false;
                 return mm;
+            } else if ( pisces === "ROOT" || pisces === "NULL" ) {
+                mm.piece = pisces;
+                mm.incomplete = false;
+                return mm;
+            } else {
+                //Pisces has a length and is not root/null.
+                const size = pisces.charAt(0);
+                if (! sizex.test(size) ) {
+                    //Malformed piece.
+                    mm.valid = false;
+                    return mm;
+                } else {
+                    mm.size = Number(size);
+                }
+                if ( pisces.length > 1 ) {
+                    //Pisces has a direction.
+                    const dir = pisces.substring(1);
+                    mm.direction = dir;
+                    mm.incomplete = false;
+                    if (! direx.test(dir) ) {
+                        //We permit a bad direction for highlights.
+                        mm.valid = false;
+                    }
+                    return mm;
+                } else {
+                    //No direction.
+                    mm.incomplete = true;
+                    return mm;
+                }
             }
         } else {
+            //No piece.
             mm.incomplete = true;
             return mm;
-        }
-
-        if ( parts.length > 0 ) {
-            const dir = parts.shift();
-            if (dir !== "") {
-                mm.direction = dir;
-                mm.incomplete = false;
-                if (! direx.test(dir!) ) {
-                    //We permit a bad direction for highlights.
-                    mm.valid = false;
-                }
-                return mm;
-            } else  {
-                //Malformed (empty) direction.
-                mm.valid = false;
-                return mm;
-            }
         }
 
         return mm;
@@ -351,11 +358,12 @@ export class BTTGame extends GameBase {
         
         if (pm.piece)
             move.push(pm.piece);
-        else if (pm.size)
-            move.push(pm.size.toString());
-
-        if (pm.direction)
-            move.push(pm.direction);
+        else if (pm.size) {
+            if ( pm.direction )
+                move.push(pm.size.toString() + pm.direction);
+            else
+                move.push(pm.size.toString());
+        }
         
         return move.join("-");
     }
@@ -414,7 +422,7 @@ export class BTTGame extends GameBase {
                         if (!this.board.has(nextCell)) {
                             const oppDir = dir === "N" ? "S" : dir === "S" ? "N" : dir === "E" ? "W" : "E";
                             for (const size of sizes) {
-                                moves.push(`${nextCell}-${size}-${oppDir}`);
+                                moves.push(`${nextCell}-${size}${oppDir}`);
                             }
                         }
                     }
@@ -434,7 +442,11 @@ export class BTTGame extends GameBase {
         const filteredMoves = [];
         for (const move of allmoves) {
             const parts = move.split("-");
-            if (parts.length !== 3) continue;
+            if (parts.length !== 2) continue; //No longer a case.
+            parts[2] = parts[1].substring(1);
+            parts[1] = parts[1].charAt(0);
+            if (! /^[123]$/.test(parts[1]) ) continue;
+                
             const [cell,, oppDir] = parts;
 
             let adjFriendlies = false;
@@ -506,7 +518,7 @@ export class BTTGame extends GameBase {
 
                     //We always make the user click a direction to show that the pyramid is the intended size.
                     //But we guess the direction for display purposes.
-                    this.highlight = this.parseMove(newmove + "-" + this.getNeighborDir(cell));
+                    this.highlight = this.parseMove(newmove + this.getNeighborDir(cell));
                 } else {
                     const mm = this.parseMove(move);
                     if ( mm.cell === cell ) {
@@ -515,7 +527,7 @@ export class BTTGame extends GameBase {
                         mm.size = newsize;
                         //This should work regardless of whether the move was already complete:
                         newmove = this.pickleMove(mm);
-                        this.highlight = this.parseMove(newmove + "-" + this.getNeighborDir(cell));
+                        this.highlight = this.parseMove(newmove + this.getNeighborDir(cell));
                      } else {
                         // We clicked on an adjacent piece (at col, row).
                         const [cx, cy] = this.algebraic2coords(mm.cell);
@@ -576,7 +588,7 @@ export class BTTGame extends GameBase {
         const m = mo.toLowerCase();
 
         //First, sanity test.
-        const movex = /^[a-j][1-9]?[0-2]?-?([123]-?[nesw]?|null|root)?$/;
+        const movex = /^[a-j][1-9]?[0-2]?-?([123]?[nesw]?|null|root)?$/;
         if (!movex.test(m)) {
             result.valid = false;
             result.message = i18next.t("apgames:validation.btt.MALFORMED_MOVE", { move: mo });
