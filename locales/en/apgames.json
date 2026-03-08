@@ -3951,11 +3951,12 @@
             "TOOFAR": "Pieces can only move one space at a time."
         },
         "btt": {
+            "BAD_NULL": "A null square may not isolate a part of the board.",
             "INITIAL_INSTRUCTIONS": "Select a cell to place one of your pyramids there.",
             "NULL_INSTRUCTIONS": "Select a null square.",
             "ROOT_INSTRUCTIONS": "Select a root square.",
             "MALFORMED_MOVE": "The move \"{{move}}\" could not be parsed.",
-            "NO_DIAGONALS": "The pyramid cannot point at the cell \"{{cell}}\" because it is only diagonally adjacent.",
+            "NO_DIAGONALS": "The pyramid cannot point at the cell \"{{cell}}\" because it is not orthogonally adjacent.",
             "NO_STASH": "The requested pyramid is not in your stash.",
             "NO_TARGET": "The pyramid is pointing at an empty cell.",
             "NULL_TARGET": "The pyramid is pointing at a null square.",

@@ -52,6 +52,13 @@ describe("Branches and Twigs and Thorns", () => {
             size: 2,
             valid: true
         });
+         expect(g.parseMove("d12-3E")).to.deep.equal({
+            cell: "d12",
+            direction: "E",
+            incomplete: false,
+            size: 3,
+            valid: true
+        });
         
         
         expect(g.parseMove("")).to.deep.equal({
@@ -189,6 +196,16 @@ describe("Branches and Twigs and Thorns", () => {
         // if they ALSO have a friendly piece adjacent.
         // Let's verify standard validity
         expect(g.validateMove("f2-1N").valid).eq(true);
+    });
+
+    it("Goes to eleven", () => {
+        const g = new BTTGame(6);
+        g.parseMove("b11-NULL");
+        g.validateMove("b11-NULL");
+        for (let i = 0; i < 96; i++)
+            g.move(g.randomMove());
+        
+        expect(g.gameover).eq(true);
     });
 
 });

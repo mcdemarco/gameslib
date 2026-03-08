@@ -267,7 +267,7 @@ export class BTTGame extends GameBase {
         move = move.replace(/\s+/g, "");
      
         //Regexes.
-        const illegalChars = /[^A-JLNORSTUW1-9-]/;
+        const illegalChars = /[^A-JLNORSTUW0-9-]/;
         const cellex = /^[a-j][1-9][0-2]?$/;
         const sizex = /^[123]$/;
         const direx = /^[NESW]$/;
@@ -294,7 +294,6 @@ export class BTTGame extends GameBase {
         const cell = parts.shift()!.toLowerCase();
         if (! cellex.test(cell) ) {
             //Malformed cell.
-            console.log("malformed? " ,cell);
             mm.valid = false;
             return mm;
         } else {
@@ -405,6 +404,9 @@ export class BTTGame extends GameBase {
             return moves;
 
         } else {
+
+            if (player === undefined)
+                player = this.currplayer;
             
             // Normal placement phase
             const stashes = this.stashes.get(player)!;
@@ -525,12 +527,15 @@ export class BTTGame extends GameBase {
 
         mo = mo.replace(/\s+/g, "");
 
+        const nn = this.needNull();
+        const nr = this.needRoot();
+
         if (mo.length === 0) {
             result.valid = true;
             result.complete = -1;
-            if ( this.needNull() )
+            if ( nn )
                 result.message = i18next.t("apgames:validation.btt.NULL_INSTRUCTIONS");
-            else if ( this.needRoot() )
+            else if ( nr )
                 result.message = i18next.t("apgames:validation.btt.ROOT_INSTRUCTIONS");
             else
                 result.message = i18next.t("apgames:validation.btt.INITIAL_INSTRUCTIONS");
@@ -551,7 +556,7 @@ export class BTTGame extends GameBase {
 
         if (! mm.valid ) {
             result.valid = false;
-            result.message = i18next.t("apgames:validation._general.INVALID_MOVE", { cell: mm.cell });
+            result.message = i18next.t("apgames:validation._general.INVALID_MOVE", { move: mo });
             return result;
         }
 
@@ -561,6 +566,39 @@ export class BTTGame extends GameBase {
             return result;
         }
 
+        if ( nn ) {
+            if (! mm.piece || mm.piece !== "NULL" ) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.btt.NULL_INSTRUCTIONS");
+                return result;
+            } else if (! this.checkNull(mm.cell) ) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.btt.BAD_NULL");
+                return result;                
+            } else {
+                result.valid = true;
+                result.complete = 1;
+                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                return result;
+            }
+        } else if ( nr ) {
+            if (! mm.piece || mm.piece !== "ROOT" ) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.btt.ROOT_INSTRUCTIONS");
+                return result;
+            } else {
+                result.valid = true;
+                result.complete = 1;
+                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                return result;
+            }
+        } else if ( mm.piece !== undefined ) {
+            //Too unlikely an error for its own message.
+            result.valid = false;
+            result.message = i18next.t("apgames:validation._general.INVALID_MOVE", { move: mo });
+            return result;
+        }
+        
         if (! mm.size ) {
             result.valid = true;
             result.complete = -1;
@@ -586,6 +624,7 @@ export class BTTGame extends GameBase {
 
         //Now we can check for an appropriate target in the direction.
         const grid = new RectGrid(this.boardWidth, this.boardHeight);
+
         const [cx, cy] = this.algebraic2coords(mm.cell);
         const [tx, ty] = RectGrid.move(cx, cy, mm.direction as Direction);
         if ( grid.inBounds(tx, ty) ) {
@@ -627,54 +666,52 @@ export class BTTGame extends GameBase {
             }
         }
 
-        if (partial) { return this; }
-
-        //Reset highlight here.
-        this.highlight = undefined;
-
         this.results = [];
-
-        if ( m === "" )
-            return this;
 
         const mm = this.parseMove(m);
         if ( mm.valid === false )
             return this;
         
-        if ( mm.piece ) {// === "NULL" || parts[0] === "ROOT") {
+        if ( mm.piece ) {// "NULL" || "ROOT"
             this.board.set(mm.cell, mm.piece as CellContents);
             this.results.push({ type: "place", where: mm.cell, what: mm.piece });
         } else {
             const size = mm.size as Size;
-            //IF
-            const dir = mm.direction as DirectionCardinal;
+            if ( mm.direction ) {
+                const dir = mm.direction as DirectionCardinal;
 
-            const stash = this.stashes.get(this.currplayer)!;
-            stash[size - 1]--;
-            this.stashes.set(this.currplayer, stash);
-            this.board.set(mm.cell, [this.currplayer, size, dir]);
-            this.results.push({ type: "place", where: mm.cell, what: size.toString(), how: dir });
+                const stash = this.stashes.get(this.currplayer)!;
+                stash[size - 1]--;
+                this.stashes.set(this.currplayer, stash);
+                this.board.set(mm.cell, [this.currplayer, size, dir]);
+                this.results.push({ type: "place", where: mm.cell, what: size.toString(), how: dir });
 
-            // Handle pointing penalties
-            const grid = new RectGrid(this.boardWidth, this.boardHeight);
-            const [cx, cy] = this.algebraic2coords(mm.cell);
-            const [px, py] = RectGrid.move(cx, cy, dir);
-            
-            if ( grid.inBounds(px, py) ) {
-                const pcell = this.coords2algebraic(px, py);
-                const pcontents = this.board.get(pcell);
-                if (pcontents && Array.isArray(pcontents)) {
-                    const opponent = pcontents[0];
-                    if (opponent !== this.currplayer) {
-                        const oppSize = pcontents[1];
-                        this.scores[this.currplayer - 1] -= oppSize;
-                        if (! this.variants.includes("martian-go") )
-                            this.scores[opponent - 1] += size;
-                        this.results.push({ type: "deltaScore", delta: -oppSize });
+                // Handle pointing penalties
+                const grid = new RectGrid(this.boardWidth, this.boardHeight);
+                const [cx, cy] = this.algebraic2coords(mm.cell);
+                const [px, py] = RectGrid.move(cx, cy, dir);
+                
+                if ( grid.inBounds(px, py) ) {
+                    const pcell = this.coords2algebraic(px, py);
+                    const pcontents = this.board.get(pcell);
+                    if (pcontents && Array.isArray(pcontents)) {
+                        const opponent = pcontents[0];
+                        if (opponent !== this.currplayer) {
+                            const oppSize = pcontents[1];
+                            this.scores[this.currplayer - 1] -= oppSize;
+                            if (! this.variants.includes("martian-go") )
+                                this.scores[opponent - 1] += size;
+                            this.results.push({ type: "deltaScore", delta: -oppSize });
+                        }
                     }
                 }
             }
         }
+
+        if (partial) { return this; }
+
+        //Reset highlight here.
+        this.highlight = undefined;
 
         this.lastmove = m;
         let newplayer = (this.currplayer as number) + 1;
