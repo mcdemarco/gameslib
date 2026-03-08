@@ -595,30 +595,36 @@ export class BTTGame extends GameBase {
             return result;
         }
         
-        const validMoves = this.moves();
+        const mm = this.parseMove(m);
 
-        // Match partials against the list of legal moves.
-        // TODO: actually test, it's not hard and will yield useful messages.
-        let isComplete = false;
-        let isPartial = false;
-        for (const v of validMoves) {
-            if (v.toLowerCase() === m) {
-                isComplete = true;
-                break;
-            }
-            if (v.toLowerCase().startsWith(m) || (m.length > 0 && v.toLowerCase().includes(m))) { // rough partial
-                isPartial = true;
-            }
-        }
-
-        if (isComplete) {
-            result.valid = true;
-            result.complete = 1;
-            result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+        if (! mm.valid ) {
+            result.valid = false;
+            result.message = i18next.t("apgames:validation._general.INVALID_MOVE", { cell: mm.cell });
             return result;
         }
 
-        if (isPartial) {
+        if ( this.board.has(mm.cell) ) {
+            result.valid = false;
+            result.message = i18next.t("apgames:validation._general.OCCUPIED", { cell: mm.cell });
+            return result;
+        }
+
+        if (! mm.size ) {
+            result.valid = true;
+            result.complete = -1;
+            //Don't think we can render this case, but it doesn't happen IRL.
+            result.message = i18next.t("apgames:validation.btt.PARTIAL_MOVE");
+            return result;
+        } else {
+            const stash = this.stashes.get(this.currplayer)!;
+            if ( stash[mm.size - 1] === 0 ) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.btt.NO_STASH");
+                return result;
+            }
+        }
+
+        if (! mm.direction ) {
             result.valid = true;
             result.complete = -1;
             result.canrender = true;
@@ -626,10 +632,35 @@ export class BTTGame extends GameBase {
             return result;
         }
 
-        // Failsafe error
-        result.valid = false;
-        result.message = i18next.t("apgames:validation._general.INVALID_MOVE", { move: mo });
-        return result;
+        //Now we can check for an appropriate target in the direction.
+        const grid = new RectGrid(this.boardWidth, this.boardHeight);
+        const [cx, cy] = this.algebraic2coords(mm.cell);
+        const [tx, ty] = RectGrid.move(cx, cy, mm.direction as Direction);
+        if ( grid.inBounds(tx, ty) ) {
+            const tcell = this.coords2algebraic(tx, ty);
+            if ( this.board.has(tcell) ) {
+                const target = this.board.get(tcell);
+                if ( target === "NULL" ) {
+                    result.valid = false;
+                    result.message = i18next.t("apgames:validation.btt.NULL_TARGET");
+                    return result;
+                } else {
+                    //valid!
+                    result.valid = true;
+                    result.complete = 1;
+                    result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                    return result;
+                }
+            } else {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.btt.NO_TARGET");
+                return result;
+            }
+        } else {
+            result.valid = false;
+            result.message = i18next.t("apgames:validation.btt.OUT_OF_BOUNDS");
+            return result;
+        }
     }
 
     public move(m: string, { partial = false, trusted = false } = {}): BTTGame {

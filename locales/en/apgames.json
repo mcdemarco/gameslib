@@ -3956,7 +3956,11 @@
             "ROOT_INSTRUCTIONS": "Select a root square.",
             "MALFORMED_MOVE": "The move \"{{move}}\" could not be parsed.",
             "NO_DIAGONALS": "The pyramid cannot point at the cell \"{{cell}}\" because it is only diagonally adjacent.",
+            "NO_STASH": "The requested pyramid is not in your stash.",
+            "NO_TARGET": "The pyramid is pointing at an empty cell.",
+            "NULL_TARGET": "The pyramid is pointing at a null square.",
             "OCCUPIED": "The cell \"{{cell}}\" is already occupied.",
+            "OUT_OF_BOUNDS": "The pyramid is pointing off the board.",
             "PARTIAL_MOVE": "Click again to change pyramid size, or select a neighboring cell to point at."
         },
         "bug": {
