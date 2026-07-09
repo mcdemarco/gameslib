@@ -10,13 +10,9 @@ import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 
 type playerid = 1 | 2;
 const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
-// A: 2+2 player 1 vertical
-// B: 1+1 player 1 horizontal
-// C: 1/2 player 1 top-left
-// D: 2/1 player 1 bottom-right
-// E: 1\2 player 1 bottom-left
-// F: 2\1 player 1 top-right
-// X: Blocked
+const moreColLabels = colLabels.map(l => l + l);
+const extraColLabels = colLabels.map(l => l + l + l);
+
 type TileID = "A" | "B" | "C" | "D" | "E" | "F" | "X";
 type PieceID = "+" | "/" | "\\";
 const tile2piece: Record<TileID, PieceID> = {
@@ -74,24 +70,35 @@ export class KnightLineGame extends GameBase {
             { uid: "wildcard" },
         ],
         categories: ["goal>arrange", "mechanic>merge", "board>dynamic", "board>shape>rect", "board>connect>rect", "other>2+players"],
-        flags: [],
+        flags: ["experimental"],
         displays: [{ uid: "show-origin" }],
     };
 
     public renCoords2algebraic(x: number, y: number): string {
-        // In knightline, the rows go from top to bottom.
-        // The top-left cell of the expanded board is at (1, 1).
-        // This means the top-left rendered cell is at (0, 0).
-        // The top-most rendered row rendered is labelled 0.
-        // The left-most rendered column rendered is labelled @.
-        if (x === 0) {
-            return "@" + y.toString();
+        // In knightline, the y axis uses cartesian coordinates, 
+        // and the x axis is lettered.
+        // The origin and first placement is at (m, 0).
+        // Cells retain the same algebraic coordinates thoughout the game.
+        let xval: string;
+        if (x > 65 || x < -64) {
+            throw new Error(`An out-of-range x value '${x}' was passed to renCoords2algebraic.`);
         }
-        return GameBase.coords2algebraic(x - 1, y - 1, 0, true);
+        if (x > 39) {
+            xval = extraColLabels[x - 40];
+        } else if (x < -38) {
+            xval = "-" + extraColLabels[x + 64];
+        } else if (x > 13) {
+            xval = moreColLabels[x - 14];
+        } else if (x < -12) {
+            xval = "-" + moreColLabels[x + 38];
+        } else {
+            xval = colLabels[x + 12];
+        }
+        return xval + y.toString();
     }
 
     public algebraic2renCoords(cell: string): [number, number] {
-        // In knightline, the rows go from top to bottom.
+        // In knightline, the y axis uses cartesian coordinates,
         // The top-left cell of the expanded board is at (1, 1).
         // This means the top-left rendered cell is at (0, 0).
         // The top-most rendered row rendered is labelled 0.
