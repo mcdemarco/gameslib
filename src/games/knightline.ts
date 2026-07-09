@@ -10,8 +10,7 @@ import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 
 type playerid = 1 | 2;
 const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
-const moreColLabels = colLabels.map(l => l + l);
-const extraColLabels = colLabels.map(l => l + l + l);
+const revColLabels = "abcdefghijklmnopqrstuvwxyz".split("").reverse();
 
 type TileID = "A" | "B" | "C" | "D" | "E" | "F" | "X";
 type PieceID = "+" | "/" | "\\";
@@ -80,17 +79,12 @@ export class KnightLineGame extends GameBase {
         // The origin and first placement is at (m, 0).
         // Cells retain the same algebraic coordinates thoughout the game.
         let xval: string;
-        if (x > 65 || x < -64) {
-            throw new Error(`An out-of-range x value '${x}' was passed to renCoords2algebraic.`);
-        }
-        if (x > 39) {
-            xval = extraColLabels[x - 40];
-        } else if (x < -38) {
-            xval = "-" + extraColLabels[x + 64];
-        } else if (x > 13) {
-            xval = moreColLabels[x - 14];
+        if (x > 13) {
+            x = x - 14;
+            xval = colLabels[Math.floor(x/26)] + colLabels[x % 26];
         } else if (x < -12) {
-            xval = "-" + moreColLabels[x + 38];
+            x = Math.abs(x) - 13;
+            xval = revColLabels[Math.floor(x/26)] + revColLabels[x % 26];
         } else {
             xval = colLabels[x + 12];
         }
@@ -99,15 +93,36 @@ export class KnightLineGame extends GameBase {
 
     public algebraic2renCoords(cell: string): [number, number] {
         // In knightline, the y axis uses cartesian coordinates,
-        // The top-left cell of the expanded board is at (1, 1).
-        // This means the top-left rendered cell is at (0, 0).
-        // The top-most rendered row rendered is labelled 0.
-        // The left-most rendered column rendered is labelled @.
-        if (cell[0] === "@") {
-            return [0, parseInt(cell.slice(1), 10)];
+        // and the x axis is lettered.
+        // The origin and first placement is at (m, 0).
+        // The double indices are divided at m,
+        // which is assigned the positive value.
+        const temp = cell.match(/[a-z]+|-?[0-9]+/g);
+        let x = 0;
+        if (!temp || !temp[0] || temp[0].length > 2 || (!temp[1] && temp[1] !== "0"))
+            throw new Error(`An invalid cell '${cell}' was passed to algebraic2renCoords.`);
+        const y = parseInt(temp[1],10);
+        console.log(temp);
+        if (temp[0].length === 1) {
+            //All the single letter cases.
+            x = colLabels.indexOf(temp[0]) - 12;
+        } else {
+            const let1 = temp[0][0];
+            const let2 = temp[0][1];
+            let let1val = colLabels.indexOf(let1);
+            console.log("index of letter 1, ", let1, " is ", let1val);
+            if (let1val < 13) {
+                const let2val = colLabels.indexOf(let2);
+                x = let1val * 26 + let2val + 14;
+            } else {
+                let1val = revColLabels.indexOf(let1);
+                const let2val = revColLabels.indexOf(let2);
+                //console.log("revIndex of " + let1 + " = " + let1val);
+                //console.log("revIndex of " + let2 + " = " + let2val);
+                x = -(let1val * 26 + let2val + 13);
+            }
         }
-        const [x, y] = GameBase.algebraic2coords(cell, 0, true);
-        return [x + 1, y + 1];
+        return [x, y];
     }
 
     public algebraic2absCoords(cell: string, board?: UnboundedSquareBoard<TileID>): [number, number] {
