@@ -447,6 +447,8 @@ export class KnightLineGame extends GameBase {
             return result;
         }
 
+        console.log(m + " has a valid stack.");
+
         const count = cellContent[1];
 
         if ( moves.length === 1 ) {
@@ -458,7 +460,7 @@ export class KnightLineGame extends GameBase {
         }
 
         //Validate target cell.
-        //moves[1] should be an unoccupied cell with neighbors.
+        //moves[1] should be an unoccupied cell a knight move away, with neighbors.
         const targetCell = moves[1];
         const [tabsX, tabsY] = this.algebraic2absCoords(targetCell);
         if (this.board.has(tabsX,tabsY)) {
@@ -469,8 +471,18 @@ export class KnightLineGame extends GameBase {
             result.valid = false;
             result.message = i18next.t("apgames:validation.knightline.NO_NEIGHBORS", { cell: targetCell });
             return result;
+        } else {
+            const dx = Math.abs(absX - tabsX);
+            const dy = Math.abs(absY - tabsY);
+            if (! ( (dx === 1 && dy === 2) || (dx === 2 && dy === 1) )) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.knightline.NO_KNIGHT", { cell: targetCell });
+                return result;
+            }
         }
 
+        console.log(m + " has a valid target.");
+        
         if ( moves.length === 2 ) {
             result.valid = true;
             result.complete = -1;
@@ -502,6 +514,8 @@ export class KnightLineGame extends GameBase {
             }
         }
 
+        console.log(m + " has a valid count.");
+        
         //In most cases the restack quantity can be adjusted,
         //so the move is only provisionally complete.
         result.valid = true;

@@ -5719,6 +5719,7 @@
             "INVALID_NOTATION": "The move notation '{{move}}' is invalid.",
             "INVALID_STACK": "The stack at '{{cell}}' is not yours.",
             "INVALID_TARGET": "The cell '{{cell}}' is occupied.",
+            "NO_KNIGHT": "The selected cell '{{cell}}' is not a knight's move away.",
             "NO_NEIGHBORS": "The selected cell '{{cell}}' is not connected to the board.",
             "NO_STACK": "There is no stack at '{{cell}}'.",
             "SELECT_CELL": "Select a target cell.",

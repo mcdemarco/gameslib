@@ -82,9 +82,12 @@ describe("KnightLine", () => {
         expect(result.valid).to.be.true;
 
         result = g.validateMove("m0,n1");
+        expect(result.valid).to.be.false;
+
+        result = g.validateMove("m0,o1");
         expect(result.valid).to.be.true;
 
-        result = g.validateMove("m0,n1,");
+        result = g.validateMove("m0,o1,");
         expect(result.valid).to.be.true;
     });
 
