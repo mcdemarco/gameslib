@@ -68,6 +68,28 @@ describe("KnightLine", () => {
         expect(g.algebraic2absCoords("m-3")).to.deep.equal([0,3]);
         
     });
+
+    it ("Converts to/from relative coordinates", () => {
+        //These are the relative coordinates of the initial board.
+        expect(g.abs2relCoords(0,0)).to.deep.equal([1,1]);
+        expect(g.rel2absCoords(1,1)).to.deep.equal([0,0]);
+        
+        expect(g.algebraic2relCoords("m0")).to.deep.equal([1,1]);
+        expect(g.relCoords2algebraic(1,1)).to.equal("m0");
+        
+        expect(g.abs2relCoords(1,0)).to.deep.equal([2,1]);
+        expect(g.rel2absCoords(2,1)).to.deep.equal([1,0]);
+  
+        expect(g.algebraic2relCoords("n0")).to.deep.equal([2,1]);
+        expect(g.relCoords2algebraic(2,1)).to.equal("n0");
+        
+        expect(g.abs2relCoords(1,1)).to.deep.equal([2,2]);
+        expect(g.rel2absCoords(2,2)).to.deep.equal([1,1]);
+        
+        expect(g.algebraic2relCoords("n1")).to.deep.equal([2,2]);
+        expect(g.relCoords2algebraic(2,2)).to.equal("n1");
+
+    });
     
     it ("Renders the starting board", () => {
         g.render();
@@ -105,6 +127,13 @@ describe("KnightLine", () => {
         result = g.validateMove("m0,o1,1");
         expect(result.valid).to.be.true;
 
+    });
+
+    it ("Makes moves", () => {
+        g.move("m0,o1,1");
+        g.move("n0,o2,10");
+        g.move("m0,n2,13");
+        g.move("o2,m1,5");
     });
 
 });

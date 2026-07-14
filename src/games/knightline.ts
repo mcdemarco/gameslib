@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, Glyph, MarkerGlyph, RowCol } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, Glyph, MarkerGlyph } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -72,7 +72,7 @@ export class KnightLineGame extends GameBase {
     public absCoords2algebraic(x: number, y: number): string {
         // In knightline, the y axis uses cartesian coordinates, 
         // and the x axis is lettered.
-        // The origin and first placement is at (m, 0).
+        // The origin and first placement is at m0, aka (0,0).
         // Cells retain the same algebraic coordinates thoughout the game.
         let xval: string;
         if (x > 13) {
@@ -136,24 +136,27 @@ export class KnightLineGame extends GameBase {
         return this.renCoords2algebraic(relx + 1, rely + 1);
     }
 */
-    public absCoords2relCoords(x: number, y: number): [number, number] {
-        // Convert from absCoords to relCoords, then feed to method.
+    public abs2relCoords(x: number, y: number): [number, number] {
+        //The relative coordinates provided by unbounded-square-board
+        // merely move the origin.
+        //We need to move the origin one more square down and right
+        // in order to leave blank spaces around the board.
         const [relx, rely] = this.board.abs2rel(x, y);
         return [relx + 1, rely + 1];
     }
 
-    public relCoords2absCoords(x: number, y: number): [number, number] {
+    public rel2absCoords(x: number, y: number): [number, number] {
         // Convert from relCoords to absCoords.
-        return this.board.rel2abs(x, y);
+        return this.board.rel2abs(x - 1, y - 1);
     }
 
     public algebraic2relCoords(cell: string): [number, number] {
         const coords = this.algebraic2absCoords(cell);
-        return this.absCoords2relCoords(coords[0],coords[1]);
+        return this.abs2relCoords(coords[0],coords[1]);
     }
 
     public relCoords2algebraic(x: number, y: number): string {
-        const coords = this.relCoords2absCoords(x, y);
+        const coords = this.rel2absCoords(x, y);
         return this.absCoords2algebraic(coords[0],coords[1]);
     }
     
@@ -407,8 +410,6 @@ export class KnightLineGame extends GameBase {
             return result;
         }
 
-        console.log(m + " has valid characters.");
-        
         const moves = m.split(",").filter(move => move.length > 0);
         
         //Validate structure.
@@ -421,8 +422,6 @@ export class KnightLineGame extends GameBase {
             return result;
         }
 
-        console.log(m + " has valid structure.");
-
         //Validate content.
 
         //Validate starting stack.
@@ -431,23 +430,19 @@ export class KnightLineGame extends GameBase {
         const [absX, absY] = this.algebraic2absCoords(cell);
         const cellContent = this.board.get(absX,absY);
 
-        console.log(cell, " is at ", absX, absY);
-        
         if (cellContent === undefined) {
             result.valid = false;
-            result.message = i18next.t("apgames:validation.knightline.INVALID_STACK", { cell: cell });
+            result.message = i18next.t("apgames:validation.knightline.NO_STACK", { cell: cell });
             return result;
         } else if ( cellContent[0] !== this.currplayer ) {
             result.valid = false;
-            result.message = i18next.t("apgames:validation.knightline.NO_STACK", { cell: cell });
+            result.message = i18next.t("apgames:validation.knightline.INVALID_STACK", { cell: cell });
             return result;
         } else if ( cellContent[1] < 2 ) {
             result.valid = false;
             result.message = i18next.t("apgames:validation.knightline.SHORT_STACK", { cell: cell });
             return result;
         }
-
-        console.log(m + " has a valid stack.");
 
         const count = cellContent[1];
 
@@ -481,8 +476,6 @@ export class KnightLineGame extends GameBase {
             }
         }
 
-        console.log(m + " has a valid target.");
-        
         if ( moves.length === 2 ) {
             result.valid = true;
             result.complete = -1;
@@ -514,8 +507,6 @@ export class KnightLineGame extends GameBase {
             }
         }
 
-        console.log(m + " has a valid count.");
-        
         //In most cases the restack quantity can be adjusted,
         //so the move is only provisionally complete.
         result.valid = true;
@@ -554,17 +545,37 @@ export class KnightLineGame extends GameBase {
             if (!result.valid) {
                 throw new UserFacingError("VALIDATION_GENERAL", result.message);
             }
-/*            if (!partial && !this.moves().includes(m)) {
-                throw new UserFacingError("VALIDATION_FAILSAFE", i18next.t("apgames:validation._general.FAILSAFE", { move: m }));
-            }
-*/        }
+        }
         if (m.length === 0) { return this; }
         this.results = [];
-        if (m === "+" || m === "/" || m === "\\") {
+
+        const moves = m.split(",").filter(move => move.length > 0);
+        const cell = moves[0];
+        const [absX, absY] = this.algebraic2absCoords(cell);
+        const cellContent = this.board.get(absX,absY);
+        const count = cellContent![1];
+
+        if ( moves.length === 1 ) {
+//            this.results = [{type: "move", from: cell}];
             return this;
-        } else {
+        }
+        
+        const targetCell = moves[1];
+        const [tabsX, tabsY] = this.algebraic2absCoords(targetCell);
+
+        if ( moves.length === 2 ) {
+//            this.results = [{type: "move", from: cell, to: targetCell}];
+            return this;
         }
 
+        const restack = parseInt(moves[2],10);
+        const destack = count - restack;
+
+        this.board.set(absX, absY, [this.currplayer, destack]);
+        this.board.set(tabsX, tabsY, [this.currplayer, restack]);
+        this.results = [{type: "move", from: cell, to: targetCell, what: restack.toString()}];
+
+        
         this.lastmove = m;
         this.currplayer = this.currplayer % 2 + 1 as playerid;
 
@@ -662,67 +673,56 @@ export class KnightLineGame extends GameBase {
         };
     }
 
-    private getRelXRange(): [number, number] {
-        // Get the x range of the relative coordinates.
-        if (this.board.size === 0) { return [0, 0]; }
-        return [-1, this.board.width + 1];
-    }
-
-    private getRelYRange(): [number, number] {
-        // Get the y range of the relative coordinates.
-        if (this.board.size === 0) { return [0, 0]; }
-        return [-1, this.board.height + 1];
-    }
-
     private getRenderWidthHeight(): [number, number] {
         // Get the width and height of the board for rendering.
-        if (this.board.size === 0) { return [1, 1]; }
-        const relXRange = this.getRelXRange();
-        const relYRange = this.getRelYRange();
-        return [relXRange[1] - relXRange[0], relYRange[1] - relYRange[0]];
+        if (this.board.size === 0) {
+            //This case should not occur.  Error trap it?
+            return [1, 1];
+        } else
+            return [this.board.width + 2, this.board.height + 2];
     }
 
     public render(): APRenderRep {
         // Build piece string
         const pieces: string[] = [];
-        let blocked: RowCol[] | undefined = [];
         const legend: ILegendObj = {};
-        let firstX = 0, firstY = 0;
-        if (this.board.size > 0) {
-            const relXRange = this.getRelXRange();
-            const relYRange = this.getRelYRange();
-            [firstX, firstY] = this.relCoords2absCoords(relXRange[0], relYRange[0]);
-            for (let y = relYRange[0]; y <= relYRange[1]; y++) {
-                const pstr: String[] = [];
-                for (let x = relXRange[0]; x <= relXRange[1]; x++) {
-                    const [absX, absY] = this.relCoords2absCoords(x, y);
-                    const cellContent = this.board.get(absX, absY);
-                    if (cellContent === undefined) {
-                        pstr.push("-");
-                        blocked.push({ row: y + 1, col: x + 1 });
-                    } else {
-                        const name = this.encodePiece(cellContent);
-                        pstr.push(name);
-                        //We may occasionally overwrite an identical legend element.
-                        legend[name] = this.createPiece(cellContent);
-                    }
+        let firstAX = -1, firstAY = -1;
+        const [width, height] = this.getRenderWidthHeight();
+        for (let y = 0; y <= height; y++) {
+            const pstr: String[] = [];
+            for (let x = 0; x <= width; x++) {
+                const [absX, absY] = this.rel2absCoords(x, y);
+                
+                if ( x === 0 && y === 0 )
+                    [firstAX, firstAY] = [absX, absY];
+
+                const cellContent = this.board.get(absX, absY);
+                if (cellContent === undefined) {
+                    pstr.push("-");
+                } else {
+                    const name = this.encodePiece(cellContent);
+                    pstr.push(name);
+                    //We may occasionally overwrite an identical legend element.
+                    legend[name] = this.createPiece(cellContent);
                 }
-                pieces.push(pstr.join(","));
             }
-        } else {
-            pieces.push("_");
+            pieces.push(pstr.join(","));
         }
-        if (blocked.length === 0) { blocked = undefined; }
+
         let markers: MarkerGlyph[] | undefined = [];
 
         if (markers.length === 0) { markers = undefined; }
 
-        const [width, height] = this.getRenderWidthHeight();
-        const rowLabels = [...Array(height).keys()].map(l => (l + firstY).toString());
+        console.log("first vals: ", firstAX, firstAY);
+        
+        const rowLabels = [...Array(height).keys()].map(l => (l + firstAY).toString());
 
         //TODO: This needs to account for aa, ab, ac, ...
-        let columnLabels = colLabels.slice(firstX + 12);
-        columnLabels.length = width;
+        let columnLabels = (Array.from(Array(width).keys())).map(c =>
+            this.absCoords2algebraic(firstAX + c,0).slice(0, -1));
+        
+        //let columnLabels = colLabels.slice(firstX + 12);
+        //columnLabels.length = width;
         
         // Build rep
         const rep: APRenderRep =  {
@@ -732,7 +732,6 @@ export class KnightLineGame extends GameBase {
                 height,
                 columnLabels,
                 rowLabels,
-                blocked: blocked as [RowCol, ...RowCol[]] | undefined,
                 markers,
                 strokeColour: {
                     func: "flatten",
@@ -751,7 +750,7 @@ export class KnightLineGame extends GameBase {
             for (const move of this.results) {
                 if (move.type === "place") {
                     const [absX, absY] = this.board.notation2abs(move.where!);
-                    const [col, row] = this.absCoords2relCoords(absX, absY);
+                    const [col, row] = this.abs2relCoords(absX, absY);
                     rep.annotations.push({ type: "enter", targets: [{ row, col }] });
                 }
             }
