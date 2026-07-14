@@ -34,6 +34,14 @@ export interface IKnightLineState extends IAPGameState {
     stack: Array<IMoveState>;
 };
 
+interface IKLMove {
+    cell: string;
+    targetCell?: string;
+    restack?: number;
+    incomplete?: boolean;
+    errorID?: string;
+}
+
 export class KnightLineGame extends GameBase {
     public static readonly gameinfo: APGamesInformation = {
         name: "Knight Line",
@@ -69,7 +77,7 @@ export class KnightLineGame extends GameBase {
         flags: ["experimental"],
     };
 
-    public absCoords2algebraic(x: number, y: number): string {
+    private absXCoord2algebraic(x: number): string {
         // In knightline, the y axis uses cartesian coordinates, 
         // and the x axis is lettered.
         // The origin and first placement is at m0, aka (0,0).
@@ -84,6 +92,15 @@ export class KnightLineGame extends GameBase {
         } else {
             xval = colLabels[x + 12];
         }
+        return xval;
+    }
+
+    public absCoords2algebraic(x: number, y: number): string {
+        // In knightline, the y axis uses cartesian coordinates, 
+        // and the x axis is lettered.
+        // The origin and first placement is at m0, aka (0,0).
+        // Cells retain the same algebraic coordinates thoughout the game.
+        const xval = this.absXCoord2algebraic(x);
         const yval = y === 0 ? 0 : -y;
         return xval + yval.toString();
     }
@@ -352,29 +369,123 @@ export class KnightLineGame extends GameBase {
         return false;
     }
 
+    public parseMove(m: string): IKLMove {
+        //Parse a move into an IKLMove object.
+        //Does only structural validation.
+
+        //Pretreat.
+        m = m.toLowerCase();
+        m = m.replace(/\s+/g, "");
+
+        //Regexes.
+        const legalChars = /^([a-z]|\d|-|,)+$/;
+        const legalCell = /^([a-z][a-z]?-?\d+$)/;
+        const legalSize = /^([1-9][0-9]?$)/;
+
+        const mm: IKLMove = {
+            cell: "",
+            incomplete: true
+        }
+
+        if (m === "")
+            return mm;
+
+        if (! legalChars.test(m)) {
+            mm.errorID = "INVALID_NOTATION";
+            return mm;
+        }
+
+        const moves = m.split(",").filter(move => move.length > 0);
+
+        if ( moves.length === 0
+            || moves.length > 3 
+            || (! legalCell.test(moves[0]) )
+            || ( moves[1] !== undefined && (! legalCell.test(moves[1])) )
+            || ( moves[2] !== undefined && (! legalSize.test(moves[2])) ) 
+           ) {
+            mm.errorID = "INVALID_NOTATION";
+            return mm;
+        }
+
+        mm.cell = moves[0];
+        
+        if ( moves[1] !== undefined )
+            mm.targetCell = moves[1];
+
+        if ( moves[2] !== undefined ) {
+            mm.incomplete = false;
+            mm.restack = parseInt(moves[2],10);
+        }
+        
+        return mm;
+    }
+
+    public pickleMove(pm: IKLMove): string {
+        if ( ! pm.cell || pm.cell === "" ) {
+            throw new Error("Could not pickle the move because it included no cell.");
+        }
+
+        const move = [pm.cell];
+
+        if (pm.targetCell) {
+            move.push(pm.targetCell);
+            if (pm.restack)
+                move.push(pm.restack.toString());
+        }
+
+        return move.join(",");
+    }
+
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             let newmove = "";
-            const cell = this.relCoords2algebraic(col, row);
-            console.log(cell);
+            const newcell = this.relCoords2algebraic(col, row);
+            const mm = this.parseMove(move);
+            console.log("rel: ", col, row, " alg: ", newcell, " abs: ", this.algebraic2absCoords(newcell));
+
             if (piece !== undefined && piece !== "") {
-                //Reset the move when clicking on a piece.
-                if (move !== "")
+                //Clicked on a piece.
+                //If it's not the current source cell, it overrides.
+                if (newcell !== mm.cell) {
+                    //Set, or reset mid-move when clicking on an uninvolved piece.
                     move = "";
-                const [color, height] = this.decodePiece(piece);
-                if (color !== this.currplayer)
-                    newmove = "";
-                else if (height === 1)
-                    newmove = "";
-                else {
-                    newmove = cell;
+                    const [color, height] = this.decodePiece(piece);
+                    
+                    //It's not legal to click another player's stack or a short stack,
+                    // so ignore.
+                    if (color !== this.currplayer)
+                        newmove = "";
+                    else if (height === 1)
+                        newmove = "";
+                    else {
+                        newmove = newcell;
+                    }
+                } else if (mm.restack !== undefined && mm.restack > 1) {
+                    //Re-clicked the source cell, so deduct from restack.
+                    mm.restack--;
+                    newmove = this.pickleMove(mm);
                 }
             } else if (move === "") {
-                //Need a piece to move.
+                //If there is no move, must click a piece.
                 newmove = "";
+            } else if (newcell === mm.targetCell && mm.restack !== undefined) {
+                //If there's already a target cell, we're clicking it again for stacking.
+                mm.restack++
+                newmove = this.pickleMove(mm);
             } else {
-                newmove = move + "," + cell;
+                //Else there's a source cell and we're choosing a target cell.
+                mm.targetCell = newcell;
+                //We also auto-populate restack.
+                const [absX, absY] = this.algebraic2absCoords(mm.cell);
+                const cellContent = this.board.get(absX, absY);
+                if ( cellContent && cellContent.length > 1 )
+                    mm.restack = this.stack.length > 1 ? Math.ceil(cellContent[1] / 2) : 1;
+                
+                newmove = this.pickleMove(mm);
             }
+
+            console.log("newmove: ", newmove);
+            
             const result = this.validateMove(newmove) as IClickResult;
             if (!result.valid) {
                 result.move = move;
@@ -400,25 +511,12 @@ export class KnightLineGame extends GameBase {
             result.message = i18next.t("apgames:validation.knightline.INITIAL_INSTRUCTIONS");
             return result;
         }
-        m = m.toLowerCase();
-        m = m.replace(/\s+/g, "");
 
-        //Validate characters.
-        if (!/^([a-z]|\d|-|,)+$/.test(m)) {
-            result.valid = false;
-            result.message = i18next.t("apgames:validation.knightline.INVALID_NOTATION", { move: m });
-            return result;
-        }
+        const mm = this.parseMove(m);
 
-        const moves = m.split(",").filter(move => move.length > 0);
-        
-        //Validate structure.
-        if ( moves.length === 0 || moves.length > 3
-            || !/^([a-z][a-z]?-?\d+$)/.test(moves[0])
-            || (moves[1] !== undefined && !/^([a-z][a-z]?-?\d+$)/.test(moves[1]))
-            || (moves[2] !== undefined && !/^([1-9][0-9]?$)/.test(moves[2])) ) {
+        if (mm.errorID !== undefined) {
             result.valid = false;
-            result.message = i18next.t("apgames:validation.knightline.INVALID_NOTATION", { move: m });
+            result.message = i18next.t("apgames:validation.knightline." + mm.errorID, { move: m });
             return result;
         }
 
@@ -426,7 +524,7 @@ export class KnightLineGame extends GameBase {
 
         //Validate starting stack.
         //moves[0] should be a stack of size > 1 owned by the player.
-        const cell = moves[0];
+        const cell = mm.cell;
         const [absX, absY] = this.algebraic2absCoords(cell);
         const cellContent = this.board.get(absX,absY);
 
@@ -446,7 +544,7 @@ export class KnightLineGame extends GameBase {
 
         const count = cellContent[1];
 
-        if ( moves.length === 1 ) {
+        if ( mm.targetCell === undefined ) {
             result.valid = true;
             result.complete = -1;
             result.canrender = true;
@@ -456,7 +554,7 @@ export class KnightLineGame extends GameBase {
 
         //Validate target cell.
         //moves[1] should be an unoccupied cell a knight move away, with neighbors.
-        const targetCell = moves[1];
+        const targetCell = mm.targetCell;
         const [tabsX, tabsY] = this.algebraic2absCoords(targetCell);
         if (this.board.has(tabsX,tabsY)) {
             result.valid = false;
@@ -476,7 +574,7 @@ export class KnightLineGame extends GameBase {
             }
         }
 
-        if ( moves.length === 2 ) {
+        if ( mm.restack === undefined ) {
             result.valid = true;
             result.complete = -1;
             result.canrender = true;
@@ -486,7 +584,7 @@ export class KnightLineGame extends GameBase {
 
         //Validate stacked quantity.
         //moves[2] should be a legal value to pop off the original stack.
-        const restack = parseInt(moves[2],10);
+        const restack = mm.restack;
         if ( restack < 0 || restack > count - 1 ) {
             result.valid = false;
             result.message = i18next.t("apgames:validation.knightline.BAD_VALUE", { what: restack });
@@ -549,31 +647,28 @@ export class KnightLineGame extends GameBase {
         if (m.length === 0) { return this; }
         this.results = [];
 
-        const moves = m.split(",").filter(move => move.length > 0);
-        const cell = moves[0];
-        const [absX, absY] = this.algebraic2absCoords(cell);
+        const mm = this.parseMove(m);
+        const [absX, absY] = this.algebraic2absCoords(mm.cell);
         const cellContent = this.board.get(absX,absY);
         const count = cellContent![1];
 
-        if ( moves.length === 1 ) {
+        if ( mm.targetCell === undefined ) {
 //            this.results = [{type: "move", from: cell}];
             return this;
         }
         
-        const targetCell = moves[1];
-        const [tabsX, tabsY] = this.algebraic2absCoords(targetCell);
+        const [tabsX, tabsY] = this.algebraic2absCoords(mm.targetCell);
 
-        if ( moves.length === 2 ) {
+        if ( mm.restack === undefined ) {
 //            this.results = [{type: "move", from: cell, to: targetCell}];
             return this;
         }
 
-        const restack = parseInt(moves[2],10);
-        const destack = count - restack;
+        const destack = count - mm.restack;
 
         this.board.set(absX, absY, [this.currplayer, destack]);
-        this.board.set(tabsX, tabsY, [this.currplayer, restack]);
-        this.results = [{type: "move", from: cell, to: targetCell, what: restack.toString()}];
+        this.board.set(tabsX, tabsY, [this.currplayer, mm.restack]);
+        this.results = [{type: "move", from: mm.cell, to: mm.targetCell, what: mm.restack.toString()}];
 
         
         this.lastmove = m;
@@ -696,6 +791,8 @@ export class KnightLineGame extends GameBase {
                 if ( x === 0 && y === 0 )
                     [firstAX, firstAY] = [absX, absY];
 
+                console.log("corner: ", firstAX, firstAY);
+
                 const cellContent = this.board.get(absX, absY);
                 if (cellContent === undefined) {
                     pstr.push("-");
@@ -713,13 +810,11 @@ export class KnightLineGame extends GameBase {
 
         if (markers.length === 0) { markers = undefined; }
 
-        console.log("first vals: ", firstAX, firstAY);
-        
-        const rowLabels = [...Array(height).keys()].map(l => (l + firstAY).toString());
+        const rowLabels = [...Array(height).keys()].map(l => ( -(l + firstAY) ).toString()).reverse();
 
         //TODO: This needs to account for aa, ab, ac, ...
         let columnLabels = (Array.from(Array(width).keys())).map(c =>
-            this.absCoords2algebraic(firstAX + c,0).slice(0, -1));
+            this.absXCoord2algebraic(firstAX + c) );
         
         //let columnLabels = colLabels.slice(firstX + 12);
         //columnLabels.length = width;
@@ -727,7 +822,7 @@ export class KnightLineGame extends GameBase {
         // Build rep
         const rep: APRenderRep =  {
             board: {
-                style: "squares",
+                style: "squares-checkered",
                 width,
                 height,
                 columnLabels,
@@ -737,7 +832,7 @@ export class KnightLineGame extends GameBase {
                     func: "flatten",
                     fg: "_context_strokes",
                     bg: "_context_board",
-                    opacity: 0.15,
+                    opacity: 0,
                 },
             },
             legend: legend,
