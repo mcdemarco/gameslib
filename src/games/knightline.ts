@@ -7,6 +7,7 @@ import i18next from "i18next";
 //import { UndirectedGraph } from "graphology";
 //import { bidirectional } from "graphology-shortest-path";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
+const deepclone = require("rfdc/default");
 
 const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
 const revColLabels = "abcdefghijklmnopqrstuvwxyz".split("").reverse();
@@ -185,6 +186,7 @@ export class KnightLineGame extends GameBase {
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
     public variants: string[] = [];
+    private highlight?: IKLMove;
 
     constructor(state: number | IKnightLineState | string, variants?: string[]) {
         super();
@@ -248,7 +250,7 @@ export class KnightLineGame extends GameBase {
         }
         this.results = [...state._results];
         this.currplayer = state.currplayer;
-        this.board = state.board.clone();
+        this.board = state.board.deepClone();
         this.lastmove = state.lastmove;
         return this;
     }
@@ -267,46 +269,6 @@ export class KnightLineGame extends GameBase {
         return true;
     }
 */
-
-    private createPiece(cell: CellContents): Glyph {
-        if (!cell || cell.length < 2)
-            throw new Error("Bad cellContents passed to createPiece.");
-
-        const color = cell[0];
-        const count = cell[1];
-        return [
-            {
-                name: "piece-square",
-                opacity: 1,
-                colour: color
-            },
-            {
-                text: count.toString(),
-                colour: "#000",
-                scale: 0.75
-            }
-        ] as Glyph;
-    }
-
-    private decodePiece(pstr: string): CellContents {
-        if (pstr.length < 2)
-            throw new Error("Bad piece string passed to decodePiece.");
-
-        const initial = pstr.substring(0,1);
-        const color = pieceInitials.indexOf(initial);
-        const height = parseInt(pstr.substring(1),10);
-
-        return [color, height] as CellContents;
-    }
-
-    private encodePiece(cell: CellContents): string {
-        if (!cell || cell.length < 2)
-            throw new Error("Bad cellContents passed to encodePiece.");
-        
-        const color = cell[0];
-        const count = cell[1];
-        return `${pieceInitials[color]}${count}`;
-    }
 
     public getKnightMoves(absX: number, absY:number): string[] {
         //Takes an absolute board location.
@@ -449,17 +411,7 @@ export class KnightLineGame extends GameBase {
                 if (newcell !== mm.cell) {
                     //Set, or reset mid-move when clicking on an uninvolved piece.
                     move = "";
-                    const [color, height] = this.decodePiece(piece);
-                    
-                    //It's not legal to click another player's stack or a short stack,
-                    // so ignore.
-                    if (color !== this.currplayer)
-                        newmove = "";
-                    else if (height === 1)
-                        newmove = "";
-                    else {
-                        newmove = newcell;
-                    }
+                    newmove = newcell;
                 } else if (mm.restack !== undefined && mm.restack > 1) {
                     //Re-clicked the source cell, so deduct from restack.
                     mm.restack--;
@@ -609,6 +561,7 @@ export class KnightLineGame extends GameBase {
         //so the move is only provisionally complete.
         result.valid = true;
         result.complete = 0;
+        result.canrender = true;
         result.message = i18next.t("apgames:validation._general.VALID_MOVE");
         return result;
     }
@@ -652,24 +605,23 @@ export class KnightLineGame extends GameBase {
         const cellContent = this.board.get(absX,absY);
         const count = cellContent![1];
 
-        if ( mm.targetCell === undefined ) {
-//            this.results = [{type: "move", from: cell}];
+        if (partial) {
+            if (mm.targetCell)
+                this.results = [{type: "move", from: mm.cell, to: mm.targetCell, what: mm.restack ? mm.restack.toString() : undefined}];
+            else
+                this.results = [{type: "select", what: mm.cell}];
+
+            this.highlight = deepclone(mm);
+            
             return this;
         }
-        
-        const [tabsX, tabsY] = this.algebraic2absCoords(mm.targetCell);
 
-        if ( mm.restack === undefined ) {
-//            this.results = [{type: "move", from: cell, to: targetCell}];
-            return this;
-        }
-
-        const destack = count - mm.restack;
-
+        const destack = count - mm.restack!;
+        const [tabsX, tabsY] = this.algebraic2absCoords(mm.targetCell!);
+            
         this.board.set(absX, absY, [this.currplayer, destack]);
-        this.board.set(tabsX, tabsY, [this.currplayer, mm.restack]);
-        this.results = [{type: "move", from: mm.cell, to: mm.targetCell, what: mm.restack.toString()}];
-
+        this.board.set(tabsX, tabsY, [this.currplayer, mm.restack!]);
+        this.results = [{type: "move", from: mm.cell, to: mm.targetCell!, what: mm.restack!.toString()}];
         
         this.lastmove = m;
         this.currplayer = this.currplayer % 2 + 1 as playerid;
@@ -764,8 +716,37 @@ export class KnightLineGame extends GameBase {
             _timestamp: new Date(),
             currplayer: this.currplayer,
             lastmove: this.lastmove,
-            board: this.board.clone(),
+            board: this.board.deepClone(),
         };
+    }
+
+    private createPiece(cell: CellContents, forHighlight?: boolean): Glyph {
+        if (!cell || cell.length < 2)
+            throw new Error("Bad cellContents passed to createPiece.");
+
+        const color = cell[0];
+        const count = cell[1];
+        return [
+            {
+                name: "piece-square",
+                opacity: forHighlight? 0.66 : 1,
+                colour: color
+            },
+            {
+                text: count.toString(),
+                colour: "#000",
+                scale: 0.75
+            }
+        ] as Glyph;
+    }
+
+    private encodePiece(cell: CellContents): string {
+        if (!cell || cell.length < 2)
+            throw new Error("Bad cellContents passed to encodePiece.");
+        
+        const color = cell[0];
+        const count = cell[1];
+        return `${pieceInitials[color]}${count}`;
     }
 
     private getRenderWidthHeight(): [number, number] {
@@ -783,6 +764,20 @@ export class KnightLineGame extends GameBase {
         const legend: ILegendObj = {};
         let firstAX = -1, firstAY = -1;
         const [width, height] = this.getRenderWidthHeight();
+
+        console.log("rendering highlight: ", this.highlight);
+        
+        let sX = -1, sY = -1, tX = -1, tY = -1;
+        if ( this.highlight !== undefined ) {
+            [sX, sY] = this.algebraic2relCoords(this.highlight.cell);
+            if ( this.highlight.targetCell !== undefined ) {
+                [tX, tY] = this.algebraic2relCoords(this.highlight.targetCell);
+                legend["H"] = this.createPiece([this.currplayer, this.highlight.restack || 1], true);
+            }
+        }
+
+        console.log(sX, sY, tX, tY);
+        
         for (let y = 0; y <= height; y++) {
             const pstr: String[] = [];
             for (let x = 0; x <= width; x++) {
@@ -791,11 +786,17 @@ export class KnightLineGame extends GameBase {
                 if ( x === 0 && y === 0 )
                     [firstAX, firstAY] = [absX, absY];
 
-                console.log("corner: ", firstAX, firstAY);
-
                 const cellContent = this.board.get(absX, absY);
-                if (cellContent === undefined) {
+
+                if (x === tX && y === tY) {
+                    pstr.push("H");
+                } else if (cellContent === undefined) {
                     pstr.push("-");
+                } else if (x === sX && y === sY && this.highlight && this.highlight.restack) {
+                    const name = this.encodePiece(cellContent) + "H";
+                    pstr.push(name);
+                    //We may occasionally overwrite an identical legend element.
+                    legend[name] = this.createPiece([cellContent[0], cellContent[1] - this.highlight.restack]);
                 } else {
                     const name = this.encodePiece(cellContent);
                     pstr.push(name);
@@ -843,10 +844,15 @@ export class KnightLineGame extends GameBase {
         rep.annotations = [];
         if (this.results.length > 0) {
             for (const move of this.results) {
-                if (move.type === "place") {
-                    const [absX, absY] = this.board.notation2abs(move.where!);
-                    const [col, row] = this.abs2relCoords(absX, absY);
-                    rep.annotations.push({ type: "enter", targets: [{ row, col }] });
+                if ( move.type === "select" ) {
+                    const [col, row] = this.algebraic2relCoords(move.what!);
+                    rep.annotations.push({ type: "exit", targets: [{ row, col }] });
+                } else if ( move.type === "move" ) {
+                    const [col, row] = this.algebraic2relCoords(move.from!);
+                    rep.annotations.push({ type: "exit", targets: [{ row, col }] });
+
+                    const [tcol, trow] = this.algebraic2relCoords(move.to!);
+                    rep.annotations.push({ type: "enter", colour: "#f00", targets: [{ row: trow, col: tcol }] });
                 }
             }
         }
