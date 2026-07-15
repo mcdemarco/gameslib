@@ -9,16 +9,15 @@ import i18next from "i18next";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 const deepclone = require("rfdc/default");
 
-const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
-const revColLabels = "abcdefghijklmnopqrstuvwxyz".split("").reverse();
-const pieceInitials = ["X","A","B","C"];
-
 type playerid = 1 | 2 | 3;
 type ColorID = 0 | 1 | 2 | 3;
 
 type CellContents = [ColorID, number];
 
-//const allDirections: [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
+const revColLabels = "abcdefghijklmnopqrstuvwxyz".split("").reverse();
+const pieceInitials = ["X","A","B","C"];
+const allDirections: [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 
 interface ILegendObj {
     [key: string]: Glyph|[Glyph, ...Glyph[]];
@@ -71,8 +70,8 @@ export class KnightLineGame extends GameBase {
             },
         ],
         variants: [
-            { uid: "blocker" },
-            { uid: "wildcard" },
+            { uid: "blocker", group: "setup" },
+            { uid: "wildcard", group: "setup" },
         ],
         categories: ["goal>arrange", "mechanic>merge", "board>dynamic", "board>shape>rect", "board>connect>rect", "other>2+players"],
         flags: ["experimental"],
@@ -212,7 +211,7 @@ export class KnightLineGame extends GameBase {
                 board.set(0,0,[1,20]);
                 board.set(1,0,[2,20]);
                 if (this.numplayers > 2) {
-                    board.set(0,-1,[3,20]);
+                    board.set(0,1,[3,20]);
                 }
             }
             
@@ -309,6 +308,15 @@ export class KnightLineGame extends GameBase {
         return false;
     }
 
+    private isOpeningMove(): boolean {
+        //Opening moves (placements) are only made in variant games.
+        if (! (this.variants.includes("blocker") || this.variants.includes("wildcard") ) )
+            return false;
+        if ( this.stack.length > this.numplayers )
+            return false;
+        return true;
+    }
+
     public parseMove(m: string): IKLMove {
         //Parse a move into an IKLMove object.
         //Does only structural validation.
@@ -389,7 +397,11 @@ export class KnightLineGame extends GameBase {
             const mm = this.parseMove(move);
             //console.log("rel: ", col, row, " alg: ", newcell, " abs: ", this.algebraic2absCoords(newcell));
 
-            if (move && mm.targetCell && newcell === mm.targetCell && mm.restack !== undefined) {
+            //There are some setup moves in the variants.
+            if ( this.isOpeningMove() ) {
+                //This is an initial placement.
+                newmove = newcell + "," + newcell + ",20";
+            } else if (move && mm.targetCell && newcell === mm.targetCell && mm.restack !== undefined) {
                 //If there's already a target cell, we're clicking it again for stack splitting.
                 mm.restack++;
                 newmove = this.pickleMove(mm);
@@ -445,7 +457,10 @@ export class KnightLineGame extends GameBase {
             result.valid = true;
             result.complete = -1;
             result.canrender = true;
-            result.message = i18next.t("apgames:validation.knightline.INITIAL_INSTRUCTIONS");
+            if ( this.isOpeningMove() )
+                result.message = i18next.t("apgames:validation.knightline.INITIAL_INSTRUCTIONS_VARIANTS");
+            else
+                result.message = i18next.t("apgames:validation.knightline.INITIAL_INSTRUCTIONS");
             return result;
         }
 
@@ -458,11 +473,35 @@ export class KnightLineGame extends GameBase {
         }
 
         //Validate content.
-
-        //Validate starting stack.
-        //moves[0] should be a stack of size > 1 owned by the player.
         const cell = mm.cell;
         const [absX, absY] = this.algebraic2absCoords(cell);
+
+        //Validate variant openings.
+        if ( this.isOpeningMove() ) {
+            //Move must be an initial placement of a stack.
+            console.log("game stack: ", this.stack.length, " players: ", this.numplayers);
+            if (mm.restack !== 20) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.knightline.BAD_START_STACK", { what: mm.restack });
+                return result;
+            } else if (mm.targetCell === undefined || cell !== mm.targetCell) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.knightline.BAD_START_PLACE", { what: cell });
+                return result;
+            } else if (! this.hasNeighbors(absX, absY) ) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.knightline.BAD_START_PLACE", { what: cell });
+                return result;
+            } else {
+                result.valid = true;
+                result.complete = 1;
+                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                return result;
+            }
+        }
+
+        //Validate source stack.
+        //moves[0] should be a stack of size > 1 owned by the player.
         const cellContent = this.board.get(absX,absY);
 
         if (cellContent === undefined) {
@@ -480,7 +519,7 @@ export class KnightLineGame extends GameBase {
         }
 
         const count = cellContent[1];
-
+             
         if ( mm.targetCell === undefined ) {
             result.valid = true;
             result.complete = -1;
@@ -494,6 +533,7 @@ export class KnightLineGame extends GameBase {
         const targetCell = mm.targetCell;
         const [tabsX, tabsY] = this.algebraic2absCoords(targetCell);
         if (this.board.has(tabsX,tabsY)) {
+            //This also handles the case of cell === targetCell.
             result.valid = false;
             result.message = i18next.t("apgames:validation.knightline.INVALID_TARGET", { cell: targetCell });
             return result;
@@ -528,7 +568,7 @@ export class KnightLineGame extends GameBase {
             return result;
         }
         
-        if (this.stack.length === 1 && this.numplayers === 2) {
+        if ( this.stack.length === 1 && this.numplayers === 2 && !this.isOpeningMove() ) {
             if (restack === 1) {
                 //One of our few complete moves.
                 result.valid = true;
@@ -547,27 +587,10 @@ export class KnightLineGame extends GameBase {
         result.valid = true;
         result.complete = mm.complete ? 1 : 0;
         result.canrender = true;
-        result.message = i18next.t("apgames:validation._general.SPLIT_STACK");
+        result.message = i18next.t("apgames:validation.knightline.SPLIT_STACK");
         return result;
     }
-
-/*    
-    private getNeighboursDir(absX: number, absY: number, board?: UnboundedSquareBoard<CellContents>): [number, number, CellContents][] {
-        // Get the directions where the cell at (absX, absY) has neighbours.
-        board ??= this.board;
-        const neighbours: [number, number, CellContents][] = [];
-        for (const [dx, dy] of allDirections) {
-            const x = absX + dx;
-            const y = absY + dy;
-            const tile = board.get(x, y);
-            if (tile !== undefined) {
-                neighbours.push([dx, dy, tile]);
-            }
-        }
-        return neighbours;
-    }
-*/
-
+ 
     public move(m: string, { partial = false, trusted = false } = {}): KnightLineGame {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
@@ -587,11 +610,11 @@ export class KnightLineGame extends GameBase {
 
         const mm = this.parseMove(m);
         const [absX, absY] = this.algebraic2absCoords(mm.cell);
-        const cellContent = this.board.get(absX,absY);
-        const count = cellContent![1];
 
-        if (partial) {
-            if (mm.targetCell)
+        if ( partial ) {
+            if ( mm.targetCell === mm.cell )
+                this.results = [{type: "place", where: mm.cell, what: mm.restack ? mm.restack.toString() : undefined}];
+            else if ( mm.targetCell )
                 this.results = [{type: "move", from: mm.cell, to: mm.targetCell, what: mm.restack ? mm.restack.toString() : undefined}];
             else
                 this.results = [{type: "select", what: mm.cell}];
@@ -601,12 +624,18 @@ export class KnightLineGame extends GameBase {
             return this;
         }
 
-        const destack = count - mm.restack!;
-        const [tabsX, tabsY] = this.algebraic2absCoords(mm.targetCell!);
-            
-        this.board.set(absX, absY, [this.currplayer, destack]);
-        this.board.set(tabsX, tabsY, [this.currplayer, mm.restack!]);
-        this.results = [{type: "move", from: mm.cell, to: mm.targetCell!, what: mm.restack!.toString()}];
+        if ( mm.targetCell === mm.cell ) {
+            this.board.set(absX, absY, [this.currplayer, mm.restack!]);
+            this.results = [{type: "place", where: mm.cell, what: mm.restack!.toString() }];
+        } else {
+            const cellContent = this.board.get(absX,absY);
+            const count = cellContent![1];
+            const destack = count - mm.restack!;
+            const [tabsX, tabsY] = this.algebraic2absCoords(mm.targetCell!);     
+            this.board.set(absX, absY, [this.currplayer, destack]);
+            this.board.set(tabsX, tabsY, [this.currplayer, mm.restack!]);
+            this.results = [{type: "move", from: mm.cell, to: mm.targetCell!, what: mm.restack!.toString()}];
+        }
         
         this.lastmove = m;
         this.currplayer = this.currplayer % 2 + 1 as playerid;
@@ -646,17 +675,42 @@ export class KnightLineGame extends GameBase {
     }
 */
 
+    private goodNeighbors(absX: number, absY: number, board?: UnboundedSquareBoard<CellContents>): [number, number][] {
+        // Get the directions where the cell at (absX, absY) has neighbours.
+        board ??= this.board;
+        const neighbours: [number, number][] = [];
+        for (const [dx, dy] of allDirections) {
+            const x = absX + dx;
+            const y = absY + dy;
+            const cellContent = board.get(x, y);
+            if (cellContent !== undefined) {
+                if ( cellContent[0] === this.currplayer || (this.variants.includes("wildcard") && cellContent[0] === 0) )
+                    neighbours.push([x, y]);
+            }
+        }
+        return neighbours;
+    }
+
     protected checkEOG(): KnightLineGame {
         let winner: playerid | undefined;
         const allPositions = this.board.getAllPositions();
-//        const allPositionsNotation = allPositions.map(([x, y]) => this.board.abs2notation(x, y));
         
-        //Check that enough moves have been made to make a 4-in-a-row.
-        if (allPositions.length < this.numplayers * 3 + 1)
+        //Check that enough stacks are split to make a 4-in-a-row.
+        //Since someone might be forced to pass, we don't just count the (game) stack.
+        const numPlayedPerPlayer = 4 - 1 - (this.variants.includes("wildcard") ? 1 : 0); //not including this play
+        if ( allPositions.length < this.numplayers * numPlayedPerPlayer + 1 ) //including this play
             return this;
         
         //Check for 4-in-a-row.
+        //We only need to check the current placement (because positions never go away).
+        //If it was not adjacent to any compatriots or the wildcard, it's a no-go.
+        const [absX, absY] = this.algebraic2absCoords(this.parseMove(this.lastmove!).targetCell!);
+        const firstNeighbors = this.goodNeighbors(absX, absY);
+        if (firstNeighbors.length === 0)
+            return this;
+        
         if (true) {
+            //Need to expand firstNeighbors to find 4-in-a-row.
             this.gameover = true;
             //It's not possible to make 4 in a row for another player, so we know it's you.
             winner = this.currplayer;
@@ -711,18 +765,35 @@ export class KnightLineGame extends GameBase {
 
         const color = cell[0];
         const count = cell[1];
-        return [
-            {
-                name: "piece-square",
-                opacity: forHighlight? 0.66 : 1,
-                colour: color
-            },
-            {
-                text: count.toString(),
-                colour: "#000",
-                scale: 0.75
-            }
-        ] as Glyph;
+        const character = this.variants.includes("blocker") ? "\u2718": "\u2731" ;
+
+        if (color === 0 && count === 1) {
+            return [
+                {
+                    name: "piece-square",
+                    opacity: 1,
+                    colour: "#888"
+                },
+                {
+                    text: character,
+                    colour: "#000",
+                    scale: 0.75
+                }
+            ] as Glyph;
+        } else {
+            return [
+                {
+                    name: "piece-square",
+                    opacity: forHighlight? 0.66 : 1,
+                    colour: color
+                },
+                {
+                    text: count.toString(),
+                    colour: "#000",
+                    scale: 0.75
+                }
+            ] as Glyph;
+        }
     }
 
     private encodePiece(cell: CellContents): string {
@@ -848,8 +919,12 @@ export class KnightLineGame extends GameBase {
     public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
         let resolved = false;
         switch (r.type) {
+            case "move":
+                node.push(i18next.t("apresults:MOVE.knightline", { player, from: r.from, to: r.to, what: r.what }));
+                resolved = true;
+                break;
             case "place":
-                node.push(i18next.t("apresults:PLACE.knightline", { player, where: r.where, piece: r.what, algebraic: r.how }));
+                node.push(i18next.t("apresults:PLACE.knightline", { player, where: r.where }));
                 resolved = true;
                 break;
             case "eog":

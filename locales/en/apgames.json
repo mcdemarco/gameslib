@@ -5711,11 +5711,13 @@
             "PARTIAL_orientation": "Select a neighbouring cell to orient the piece."
         },
         "knightline": {
+            "BAD_START_PLACE": "The cell {{cell}} is not a legal initial placement.",
+            "BAD_START_STACK": "The value {{what}} is not a legal initial stack quantity.",
             "BAD_VALUE": "The value {{what}} is not a legal split of your stack.",
-            "CANNOT_PLACE_PIECE": "The piece cannot jump to {{where}}.",
-            "INITIAL_INSTRUCTIONS": "Select a stack, then select a space to place it.",
+            "INITIAL_INSTRUCTIONS": "Select a stack, then select a cell to jump to.",
+            "INITIAL_INSTRUCTIONS_VARIANTS": "Select a cell to place your initial stack.",
             "INVALID_FIRST_MOVE": "In the first move of a two-player game, you may only split one piece off your stack.",
-            "INVALID_MOVE": "You must select a piece that can jump to an unoccupied space.",
+            "INVALID_MOVE": "You must select a stack with a jump to an unoccupied space.",
             "INVALID_NOTATION": "The move notation '{{move}}' is invalid.",
             "INVALID_STACK": "The stack at '{{cell}}' is not yours.",
             "INVALID_TARGET": "The cell '{{cell}}' is occupied.",
@@ -5724,7 +5726,7 @@
             "NO_STACK": "There is no stack at '{{cell}}'.",
             "SELECT_CELL": "Select a target cell.",
             "SHORT_STACK": "The stack at '{{cell}}' cannot be split.",
-            "SPLIT_STACK": "Click either cell to redistribute the split of the stack."
+            "SPLIT_STACK": "Click either cell to redistribute the split of the stack.  Click an empty cell or the Complete Move button to finish your turn."
         },
         "konane": {
             "FIRST_MOVE": "Remove one of your pieces from the center 2x2 or from a corner.",
