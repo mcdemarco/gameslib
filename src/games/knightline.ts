@@ -39,7 +39,7 @@ interface IKLMove {
     cell: string;
     targetCell?: string;
     restack?: number;
-    incomplete?: boolean;
+    complete?: boolean;
     errorID?: string;
 }
 
@@ -275,18 +275,17 @@ export class KnightLineGame extends GameBase {
         //Returns an array of unoccupied cells that are connected to the board,
         // in RowCol format because this function is only used by the renderer.
         const [absX, absY] = this.rel2absCoords(relX, relY);
-        console.log("checking: ", absX, absY);
         const knightMoves: RowCol[] = [];
         const knightAdjust = [[-1,-2],[-1,2],[1,-2],[1,2],[-2,-1],[-2,1],[2,-1],[2,1]];
+
         for (const [dx,dy] of knightAdjust) {
             const [newX, newY] = [absX + dx, absY + dy];
             if ((! this.board.has(newX, newY) ) && this.hasNeighbors(newX, newY)) {
-                console.log("precalculated: ", newX, newY);
                 const [col, row] = this.abs2relCoords(newX, newY);
                 knightMoves.push({row, col});
             }
         }
-        console.log("calculated: ", knightMoves);
+
         return knightMoves;
     }
 
@@ -302,34 +301,7 @@ export class KnightLineGame extends GameBase {
         }
         return false;
     }
-/*
-    public moves(player?: playerid): string[] {
-        if (player === undefined) {
-            player = this.currplayer;
-        }
-        
-        const moves: string[] = [];
-        if (!this.gameover && this.board.size > 0) {
-            const relXRange = this.getRelXRange();
-            const relYRange = this.getRelYRange();
-            for (let y = relYRange[0]; y <= relYRange[1]; y++) {
-                for (let x = relXRange[0]; x <= relXRange[1]; x++) {
-                    const [absX, absY] = this.relCoords2absCoords(x, y);
-                    const cellContent = this.board.get(absX, absY);
-                    if (cellContent !== undefined) {
-                        if (cellContent[0] === player && cellContent[1] > 1) {
-                            const kmoves = this.getKnightMoves(absX, absY);
-                            moves.push(...kmoves);
-                        }
-                    }
-                }
-            }
-        }
-        console.log(moves);
-        
-        return moves;
-    }
-*/
+
     private hasMoves(): boolean {
         // Check if the player has any moves left.
         // Useful for finite board variants.
@@ -340,6 +312,8 @@ export class KnightLineGame extends GameBase {
     public parseMove(m: string): IKLMove {
         //Parse a move into an IKLMove object.
         //Does only structural validation.
+
+        //Complete is a special flag for validation.
 
         //Pretreat.
         m = m.toLowerCase();
@@ -352,7 +326,7 @@ export class KnightLineGame extends GameBase {
 
         const mm: IKLMove = {
             cell: "",
-            incomplete: true
+            complete: false
         }
 
         if (m === "")
@@ -363,7 +337,12 @@ export class KnightLineGame extends GameBase {
             return mm;
         }
 
-        const moves = m.split(",").filter(move => move.length > 0);
+        let moves = m.split(",");
+
+        if (moves.length === 4 && moves[3] === "")
+            mm.complete = true;
+
+        moves = moves.filter(move => move.length > 0);
 
         if ( moves.length === 0
             || moves.length > 3 
@@ -381,7 +360,6 @@ export class KnightLineGame extends GameBase {
             mm.targetCell = moves[1];
 
         if ( moves[2] !== undefined ) {
-            mm.incomplete = false;
             mm.restack = parseInt(moves[2],10);
         }
         
@@ -409,9 +387,16 @@ export class KnightLineGame extends GameBase {
             let newmove = "";
             const newcell = this.relCoords2algebraic(col, row);
             const mm = this.parseMove(move);
-            console.log("rel: ", col, row, " alg: ", newcell, " abs: ", this.algebraic2absCoords(newcell));
+            //console.log("rel: ", col, row, " alg: ", newcell, " abs: ", this.algebraic2absCoords(newcell));
 
-            if (piece !== undefined && piece !== "") {
+            if (move && mm.targetCell && newcell === mm.targetCell && mm.restack !== undefined) {
+                //If there's already a target cell, we're clicking it again for stack splitting.
+                mm.restack++;
+                newmove = this.pickleMove(mm);
+            } else if (move && mm.targetCell && newcell !== mm.cell && mm.restack !== undefined) {
+                //This is the special shortcut to end splitting.
+                newmove = this.pickleMove(mm) + ",";
+            } else if (piece !== undefined && piece !== "") {
                 //Clicked on a piece.
                 //If it's not the current source cell, it overrides.
                 if (newcell !== mm.cell) {
@@ -424,12 +409,8 @@ export class KnightLineGame extends GameBase {
                     newmove = this.pickleMove(mm);
                 }
             } else if (move === "") {
-                //If there is no move, must click a piece.
+                //If there is no move, must click a piece and didn't, so no-op.
                 newmove = "";
-            } else if (newcell === mm.targetCell && mm.restack !== undefined) {
-                //If there's already a target cell, we're clicking it again for stacking.
-                mm.restack++
-                newmove = this.pickleMove(mm);
             } else {
                 //Else there's a source cell and we're choosing a target cell.
                 mm.targetCell = newcell;
@@ -442,8 +423,6 @@ export class KnightLineGame extends GameBase {
                 newmove = this.pickleMove(mm);
             }
 
-            console.log("newmove: ", newmove);
-            
             const result = this.validateMove(newmove) as IClickResult;
             if (!result.valid) {
                 result.move = move;
@@ -566,9 +545,9 @@ export class KnightLineGame extends GameBase {
         //In most cases the restack quantity can be adjusted,
         //so the move is only provisionally complete.
         result.valid = true;
-        result.complete = 0;
+        result.complete = mm.complete ? 1 : 0;
         result.canrender = true;
-        result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+        result.message = i18next.t("apgames:validation._general.SPLIT_STACK");
         return result;
     }
 
@@ -782,8 +761,6 @@ export class KnightLineGame extends GameBase {
             }
         }
 
-        console.log(sX, sY, tX, tY);
-        
         for (let y = 0; y <= height; y++) {
             const pstr: String[] = [];
             for (let x = 0; x <= width; x++) {
@@ -845,7 +822,6 @@ export class KnightLineGame extends GameBase {
             legend: legend,
             pieces: pieces.join("\n"),
         };
-        //console.log(JSON.stringify(rep));
 
         rep.annotations = [];
         if (this.results.length > 0) {
