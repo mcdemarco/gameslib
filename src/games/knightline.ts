@@ -177,7 +177,7 @@ export class KnightLineGame extends GameBase {
         return this.absCoords2algebraic(coords[0],coords[1]);
     }
     
-    public numplayers = 2;
+    public numplayers!: number;
     public currplayer!: playerid;
     public board!: UnboundedSquareBoard<CellContents>;
     public gameover = false;
@@ -223,9 +223,10 @@ export class KnightLineGame extends GameBase {
             if (state.game !== KnightLineGame.gameinfo.uid) {
                 throw new Error(`The KnightLine game code cannot process a game of '${state.game}'.`);
             }
+            this.numplayers = state.numplayers;
+            this.variants = state.variants;
             this.gameover = state.gameover;
             this.winner = [...state.winner];
-            this.variants = state.variants;
             this.stack = [...state.stack];
             this.stack.map((s) => {
                 s.board = UnboundedSquareBoard.from(s.board);
@@ -740,7 +741,7 @@ export class KnightLineGame extends GameBase {
     public state(): IKnightLineState {
         return {
             game: KnightLineGame.gameinfo.uid,
-            numplayers: 2,
+            numplayers: this.numplayers,
             variants: this.variants,
             gameover: this.gameover,
             winner: [...this.winner],
