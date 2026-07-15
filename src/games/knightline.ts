@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, Glyph, MarkerGlyph } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, Glyph, MarkerGlyph, RowCol } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -270,17 +270,23 @@ export class KnightLineGame extends GameBase {
     }
 */
 
-    public getKnightMoves(absX: number, absY:number): string[] {
-        //Takes an absolute board location.
-        //Returns an array of cell names of unoccupied cells that are connected to the board.
-        const knightMoves: string[] = [];
+    public getKnightMoves(relX: number, relY:number): RowCol[] {
+        //Takes a relative board location.
+        //Returns an array of unoccupied cells that are connected to the board,
+        // in RowCol format because this function is only used by the renderer.
+        const [absX, absY] = this.rel2absCoords(relX, relY);
+        console.log("checking: ", absX, absY);
+        const knightMoves: RowCol[] = [];
         const knightAdjust = [[-1,-2],[-1,2],[1,-2],[1,2],[-2,-1],[-2,1],[2,-1],[2,1]];
         for (const [dx,dy] of knightAdjust) {
-            if ((! this.board.has(absX + dx, absY + dy) ) && this.hasNeighbors(absX + dx, absY + dy)) {
-                const cellname = this.absCoords2algebraic(absX + dx, absY + dy);
-                knightMoves.push(cellname);
+            const [newX, newY] = [absX + dx, absY + dy];
+            if ((! this.board.has(newX, newY) ) && this.hasNeighbors(newX, newY)) {
+                console.log("precalculated: ", newX, newY);
+                const [col, row] = this.abs2relCoords(newX, newY);
+                knightMoves.push({row, col});
             }
         }
+        console.log("calculated: ", knightMoves);
         return knightMoves;
     }
 
@@ -847,12 +853,16 @@ export class KnightLineGame extends GameBase {
                 if ( move.type === "select" ) {
                     const [col, row] = this.algebraic2relCoords(move.what!);
                     rep.annotations.push({ type: "exit", targets: [{ row, col }] });
+
+                    const targets = this.getKnightMoves(col, row);
+                    if (targets.length)
+                        rep.annotations.push({ type: "dots", targets: targets as [RowCol, ...RowCol[]] });
                 } else if ( move.type === "move" ) {
                     const [col, row] = this.algebraic2relCoords(move.from!);
-                    rep.annotations.push({ type: "exit", targets: [{ row, col }] });
-
                     const [tcol, trow] = this.algebraic2relCoords(move.to!);
-                    rep.annotations.push({ type: "enter", colour: "#f00", targets: [{ row: trow, col: tcol }] });
+                    rep.annotations.push({ type: "eject", targets: [{ row, col },{ row: trow, col: tcol }] });
+
+                    rep.annotations.push({ type: "enter", targets: [{ row: trow, col: tcol }] });
                 }
             }
         }
