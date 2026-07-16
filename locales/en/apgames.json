@@ -1841,6 +1841,10 @@
             }
         },
         "knightline": {
+            "#setup": {
+                "name": "Default setup",
+                "description": "No special pieces."
+            },
             "blocker": {
                 "name": "Blocker",
                 "description": "A central neutral piece blocks all lines it lies on."
@@ -1848,6 +1852,14 @@
             "wildcard": {
                 "name": "Wildcard",
                 "description": "A central neutral piece may be used by any player."
+            },
+            "#size": {
+                "name": "Default stack size",
+                "description": "All players start with a stack of 20 pieces."
+            },
+            "size-24": {
+                "name": "Stack of 24",
+                "description": "All players start with a stack of 24 pieces."
             }
         },
         "konane": {

@@ -9,6 +9,15 @@ import i18next from "i18next";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 const deepclone = require("rfdc/default");
 
+/* TODO:
+ * N-in-a-row code.
+ * Out of moves code.
+ * Blocker code.
+ * Passing is only forced when out of moves.
+ * All draw (win) on all pass in 3p.
+ * Second player wins on all pass in 2p.
+ */
+
 type playerid = 1 | 2 | 3;
 type ColorID = 0 | 1 | 2 | 3;
 
@@ -72,9 +81,11 @@ export class KnightLineGame extends GameBase {
         variants: [
             { uid: "blocker", group: "setup" },
             { uid: "wildcard", group: "setup" },
+            { uid: "#size" },
+            { uid: "size-24", group: "size" },
         ],
         categories: ["goal>arrange", "mechanic>merge", "board>dynamic", "board>shape>rect", "board>connect>rect", "other>2+players"],
-        flags: ["experimental"],
+        flags: ["autopass", "experimental"],
     };
 
     private absXCoord2algebraic(x: number): string {
@@ -180,6 +191,7 @@ export class KnightLineGame extends GameBase {
     public numplayers!: number;
     public currplayer!: playerid;
     public board!: UnboundedSquareBoard<CellContents>;
+    public size!: number;
     public gameover = false;
     public winner: playerid[] = [];
     public stack!: Array<IMoveState>;
@@ -196,22 +208,26 @@ export class KnightLineGame extends GameBase {
             }
 
             const board: UnboundedSquareBoard<CellContents> = new UnboundedSquareBoard();
+
+            const size = this.variants.includes("size-24") ? 24 : 20;
+
             const fresh: IMoveState = {
                 _version: KnightLineGame.gameinfo.version,
                 _results: [],
                 _timestamp: new Date(),
                 currplayer: 1,
                 board,
+                size,
             };
 
             //Set up the starting stacks.
             if (this.variants.includes("blocker") || this.variants.includes("wildcard")) {
                 board.set(0,0,[0,1]);
             } else {
-                board.set(0,0,[1,20]);
-                board.set(1,0,[2,20]);
+                board.set(0,0,[1,size]);
+                board.set(1,0,[2,size]);
                 if (this.numplayers > 2) {
-                    board.set(0,1,[3,20]);
+                    board.set(0,1,[3,size]);
                 }
             }
             
@@ -251,6 +267,7 @@ export class KnightLineGame extends GameBase {
         this.results = [...state._results];
         this.currplayer = state.currplayer;
         this.board = state.board.deepClone();
+        this.size = state.size;
         this.lastmove = state.lastmove;
         return this;
     }
@@ -302,9 +319,14 @@ export class KnightLineGame extends GameBase {
         return false;
     }
 
-    private hasMoves(): boolean {
-        // Check if the player has any moves left.
-        // Useful for finite board variants.
+    private hasMoves(player?: playerid): boolean {
+        // Check if a player has any moves left.
+        // Needed to determine the move list for autopassing.
+
+        if (player === undefined) {
+            player = this.currplayer;
+        }
+        
         if (this.stack.length === 1) { return true; }
         return false;
     }
@@ -316,6 +338,19 @@ export class KnightLineGame extends GameBase {
         if ( this.stack.length > this.numplayers )
             return false;
         return true;
+    }
+
+    private isRestrictedMove(): boolean {
+        //The first player's first move is restricted only in a 2p game.
+        //It's unclear what's intended for the variants so we retain the restriction for 2p.
+        //This function takes both the restriction status and the move count status into account.
+        if ( this.numplayers > 2 )
+            return false;
+
+        if ( this.variants.includes("blocker") || this.variants.includes("wildcard") )
+            return (this.stack.length === 3);
+        
+        return (this.stack.length === 1);
     }
 
     public parseMove(m: string): IKLMove {
@@ -391,6 +426,20 @@ export class KnightLineGame extends GameBase {
         return move.join(",");
     }
 
+    public moves(player?: playerid): string[] {
+        //Generate the list of default moves, for autopass.
+        //Not the true list of moves.
+
+        if (player === undefined) {
+            player = this.currplayer;
+        }
+
+        if (! this.hasMoves(player) )
+            return ["pass"];
+        else
+            return [];
+    }
+
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             let newmove = "";
@@ -401,7 +450,7 @@ export class KnightLineGame extends GameBase {
             //There are some setup moves in the variants.
             if ( this.isOpeningMove() ) {
                 //This is an initial placement.
-                newmove = newcell + "," + newcell + ",20";
+                newmove = newcell + "," + newcell + "," + this.size;
             } else if (move && mm.targetCell && newcell === mm.targetCell && mm.restack !== undefined) {
                 //If there's already a target cell, we're clicking it again for stack splitting.
                 mm.restack++;
@@ -430,8 +479,12 @@ export class KnightLineGame extends GameBase {
                 //We also auto-populate restack.
                 const [absX, absY] = this.algebraic2absCoords(mm.cell);
                 const cellContent = this.board.get(absX, absY);
-                if ( cellContent && cellContent.length > 1 )
-                    mm.restack = this.stack.length > 1 ? Math.ceil(cellContent[1] / 2) : 1;
+                if ( cellContent && cellContent.length > 1 ) {
+                    if ( this.isRestrictedMove() )
+                        mm.restack = 1;
+                    else 
+                        mm.restack = Math.ceil(cellContent[1] / 2);
+                }
                 
                 newmove = this.pickleMove(mm);
             }
@@ -479,9 +532,8 @@ export class KnightLineGame extends GameBase {
 
         //Validate variant openings.
         if ( this.isOpeningMove() ) {
-            //Move must be an initial placement of a stack.
-            console.log("game stack: ", this.stack.length, " players: ", this.numplayers);
-            if (mm.restack !== 20) {
+            //An opening move must be an initial placement of a stack.
+            if (mm.restack !== this.size) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.knightline.BAD_START_STACK", { what: mm.restack });
                 return result;
@@ -569,7 +621,7 @@ export class KnightLineGame extends GameBase {
             return result;
         }
         
-        if ( this.stack.length === 1 && this.numplayers === 2 && !this.isOpeningMove() ) {
+        if ( this.isRestrictedMove() ) {
             if (restack === 1) {
                 //One of our few complete moves.
                 result.valid = true;
@@ -639,7 +691,7 @@ export class KnightLineGame extends GameBase {
         }
         
         this.lastmove = m;
-        this.currplayer = this.currplayer % 2 + 1 as playerid;
+        this.currplayer = (this.currplayer % this.numplayers + 1) as playerid;
 
         this.checkEOG();
         this.saveState();
@@ -755,6 +807,7 @@ export class KnightLineGame extends GameBase {
             _results: [...this.results],
             _timestamp: new Date(),
             currplayer: this.currplayer,
+            size: this.size,
             lastmove: this.lastmove,
             board: this.board.deepClone(),
         };
@@ -822,7 +875,7 @@ export class KnightLineGame extends GameBase {
         let firstAX = -1, firstAY = -1;
         const [width, height] = this.getRenderWidthHeight();
 
-        console.log("rendering highlight: ", this.highlight);
+        //console.log("rendering highlight: ", this.highlight);
         
         let sX = -1, sY = -1, tX = -1, tY = -1;
         if ( this.highlight !== undefined ) {
