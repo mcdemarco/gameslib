@@ -1851,7 +1851,7 @@
             },
             "wildcard": {
                 "name": "Wildcard",
-                "description": "A central neutral piece may be used by any player."
+                "description": "A central neutral piece may be counted by any player."
             },
             "#size": {
                 "name": "Default stack size",
@@ -5723,9 +5723,11 @@
             "PARTIAL_orientation": "Select a neighbouring cell to orient the piece."
         },
         "knightline": {
+            "BAD_PASS": "You may not pass if legal moves are available.",
             "BAD_START_PLACE": "The cell {{cell}} is not a legal initial placement.",
             "BAD_START_STACK": "The value {{what}} is not a legal initial stack quantity.",
             "BAD_VALUE": "The value {{what}} is not a legal split of your stack.",
+            "BLOCKED_TARGET": "The cell '{{cell}}' is blocked.",
             "INITIAL_INSTRUCTIONS": "Select a stack, then select a cell to jump to.",
             "INITIAL_INSTRUCTIONS_VARIANTS": "Select a cell to place your initial stack.",
             "INVALID_FIRST_MOVE": "In the first move of a two-player game, you may only split one piece off your stack.",
@@ -5733,6 +5735,7 @@
             "INVALID_NOTATION": "The move notation '{{move}}' is invalid.",
             "INVALID_STACK": "The stack at '{{cell}}' is not yours.",
             "INVALID_TARGET": "The cell '{{cell}}' is occupied.",
+            "MUST_PASS": "The only move available to you is to pass.",
             "NO_KNIGHT": "The selected cell '{{cell}}' is not a knight's move away.",
             "NO_NEIGHBORS": "The selected cell '{{cell}}' is not connected to the board.",
             "NO_STACK": "There is no stack at '{{cell}}'.",
