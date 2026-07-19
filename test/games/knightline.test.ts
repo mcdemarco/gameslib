@@ -134,6 +134,10 @@ describe("KnightLine", () => {
         g.move("n0,o2,10");
         g.move("m0,n2,13");
         g.move("o2,m1,5");
+        g.randomMove();
+        g.randomMove();
+        g.randomMove();
+        g.randomMove();
     });
 
 });

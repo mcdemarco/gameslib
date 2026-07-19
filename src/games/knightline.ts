@@ -2,10 +2,8 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResu
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, Glyph, MarkerGlyph, RowCol } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { reviver, UserFacingError } from "../common";
+import { allDirections, Direction, oppositeDirections, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
-//import { UndirectedGraph } from "graphology";
-//import { bidirectional } from "graphology-shortest-path";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 const deepclone = require("rfdc/default");
 
@@ -22,10 +20,7 @@ type CellContents = [ColorID, number];
 const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
 const revColLabels = "abcdefghijklmnopqrstuvwxyz".split("").reverse();
 const pieceInitials = ["X","A","B","C"];
-const allDirections: [number, number, string][] = [
-    [-1, 1, "nw"],  [0, 1, "n"],  [1, 1, "ne"],
-    [-1, 0, "w"],                [1, 0, "e"],
-    [-1, -1, "sw"], [0, -1, "s"], [1, -1, "se"]];
+const lineDirections: Direction[] = ["N", "NE", "E", "SE"];
 
 interface ILegendObj {
     [key: string]: Glyph|[Glyph, ...Glyph[]];
@@ -259,25 +254,30 @@ export class KnightLineGame extends GameBase {
         return this;
     }
 
-/*
-    private canPlaceAt(absX: number, absY: number, canExpandX: boolean, canExpandY: boolean): boolean {
-        if (this.board.has(absX, absY)) { return false; }
-        if (!canExpandX) {
-            if (this.board.expandsX(absX)) { return false; }
-        }
-        if (!canExpandY) {
-            if (this.board.expandsY(absY)) { return false; }
-        }
-        const neighbours = this.getNeighboursDir(absX, absY);
-        if (neighbours.length === 0) { return false; }
-        return true;
-    }
-*/
+    private getFreeMoves(): string[] {
+        //Returns an array of unoccupied cells that are connected to the board.
+        //Used for randomizing opening moves.
+        let freeMoves: string[] = [];
 
-    public getKnightMoves(absX: number, absY:number): [number, number][] {
-        //Takes a relative board location.
+        //Get all board locations.
+        //Collect all unoccupied neighbors thereof.
+        const allPositions = this.board.getAllPositions();
+        for (let a = 0; a < allPositions.length; a++) {
+            const [absX, absY] = allPositions[a];
+            allDirections.map( dir => {
+                const [nX, nY] = this.getNext(absX, absY, dir);
+                if (! this.board.has(nX, nY) )
+                    freeMoves.push(this.absCoords2algebraic(nX, nY));
+            });                   
+        }
+        
+        return [...new Set(freeMoves)];
+    }
+
+    private getKnightMoves(absX: number, absY:number): [number, number][] {
+        //Takes an absolute board location.
         //Returns an array of unoccupied cells that are connected to the board,
-        // in RowCol format because this function is only used by the renderer.
+        //and reachable by a knight move.
         const knightMoves: [number, number][] = [];
         const knightAdjust = [[-1,-2],[-1,2],[1,-2],[1,2],[-2,-1],[-2,1],[2,-1],[2,1]];
 
@@ -291,7 +291,7 @@ export class KnightLineGame extends GameBase {
         return knightMoves;
     }
 
-    public getKnightMovesRel(relX: number, relY:number): RowCol[] {
+    private getKnightMovesRel(relX: number, relY:number): RowCol[] {
         //A wrapper for getKnightMoves() for the renderer.
         //Takes a relative board location.
         //Returns an array of unoccupied cells that are connected to the board,
@@ -494,6 +494,52 @@ export class KnightLineGame extends GameBase {
             return [];
     }
 
+    public randomMove(): string {
+        //Not the full move list.
+        //Could be made more random.
+        if (this.gameover)
+            return "";
+
+        const player = this.currplayer;
+
+        let moves: string[] = [];
+
+        if (this.isOpeningMove()) {
+            
+            moves = this.getFreeMoves().map( cell => {
+                const move: IKLMove = {
+                    cell: cell,
+                    targetCell: cell,
+                    restack: this.size
+                };
+                return this.pickleMove(move);
+            });
+
+        } else {
+        
+            const activeStacks = this.getActiveStacks(player);
+        
+            for (var s = 0; s < activeStacks.length; s++) {
+                const [x, y] = activeStacks[s];
+                const cell = this.absCoords2algebraic(x, y);
+                const restack = Math.ceil(this.board.get(x, y)![1] / 2);
+                const dots = this.getKnightMoves(x, y);
+                const submoves = dots.map(([a,b]) => {
+                    const submove: IKLMove = {cell: cell, restack: restack};
+                    submove.targetCell = this.absCoords2algebraic(a, b);
+                    return this.pickleMove(submove);
+                });
+                moves = moves.concat(submoves);
+            }
+            
+            if (moves.length === 0)
+                moves = ["pass"];
+        }
+        
+        return moves[Math.floor(Math.random() * moves.length)];
+    }
+
+                                     
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             let newmove = "";
@@ -783,64 +829,114 @@ export class KnightLineGame extends GameBase {
         }
         
         this.lastmove = m;
+        this.checkEOG();
+
         this.currplayer = (this.currplayer % this.numplayers + 1) as playerid;
 
-        this.checkEOG();
         this.saveState();
         return this;
     }
-/*
-    private getNeighbours(cell: string, player: playerid): string[] {
-        const [x, y] = this.board.notation2abs(cell);
-        const neighboursDirs = this.getNeighboursDir(x, y);
-        const neighbours: string[] = [];
-        for (const [dx, dy] of neighboursDirs) {
-            if (player === 1) {
-                neighbours.push(this.board.abs2notation(x + dx, y + dy));
-            }
-        }
-        return neighbours;
-    }
 
-    private buildGraph(player: playerid, allPositionsNotation: string[]): UndirectedGraph {
-        const graph = new UndirectedGraph();
-        // seed nodes
-        allPositionsNotation.forEach(c => { graph.addNode(c); });
-        // for each node, check neighbours
-        // if any are in the graph, add an edge
-        for (const node of graph.nodes()) {
-            const neighbours = this.getNeighbours(node, player);
-            for (const n of neighbours) {
-                if (graph.hasNode(n) && !graph.hasEdge(node, n)) {
-                    graph.addEdge(node, n);
-                }
-            }
+    private getNext(x: number, y: number, dir: Direction): [number, number] {
+        //Adapted from SquareDiagGraph.move().
+        let xNew = x;
+        let yNew = y;
+
+        switch (dir) {
+            case "NE":
+                yNew++;
+            case "E":
+                xNew++;
+                break;
+            case "SE":
+                xNew++;
+            case "S":
+                yNew--;
+                break;
+            case "SW":
+                yNew--;
+            case "W":
+                xNew--;
+                break;
+            case "NW":
+                xNew--;
+            case "N":
+                yNew++;
+                break;
+            default:
+                throw new Error("Invalid direction passed to getNext().");
         }
-        return graph;
+        return [xNew, yNew];
     }
-*/
     
-    private goodNeighbors(absX: number, absY: number, board?: UnboundedSquareBoard<CellContents>): [number, number, string][] {
-        // Get the directions where the cell at (absX, absY) has neighbours.
-        board ??= this.board;
-        const neighbours: [number, number, string][] = [];
-        for (const [dx, dy, d] of allDirections) {
-            const x = absX + dx;
-            const y = absY + dy;
-            const cellContent = board.get(x, y);
-            if (cellContent !== undefined) {
-                if ( cellContent[0] === this.currplayer || (this.variants.includes("wildcard") && cellContent[0] === 0) ) {
-                    neighbours.push([x, y, d]);
+    private goodNeighbors(absX: number, absY: number): Map<Direction, [number, number]> {
+        // Get the directions where the cell at (absX, absY) has neighbours
+        // that count towards a 4-in-a-row.
+        let neighbors = new Map<Direction, [number, number]>;
+        for (const dir of allDirections) {
+            const [x, y] = this.getNext(absX, absY, dir);
+            if ( this.myNeighbor(x, y) )
+                neighbors.set(dir, [x, y]);
+        }
+        return neighbors;
+    }
+
+    private myNeighbor(x: number, y: number): boolean {
+        const cellContent = this.board.get(x, y);
+        if (cellContent !== undefined) {
+            if ( cellContent[0] === this.currplayer || (this.variants.includes("wildcard") && cellContent[0] === 0) ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private getKnightLines(dX: number, dY: number, neighbors: Map<Direction, [number, number]>): boolean {
+        //Expand firstNeighbors to find 4-in-a-row.
+        const goodDirections = [...neighbors.keys()];
+        for (const dir of lineDirections) {
+            const line: [number, number][] = [];
+            if ( goodDirections.indexOf(dir) > -1 ) {
+                line.push([dX, dY]);
+                const [eX, eY] = neighbors.get(dir)!;
+                line.push([eX, eY]);
+                const [fX, fY] = this.getNext(eX, eY, dir);
+                if ( this.myNeighbor(fX, fY) ) {
+                    line.push([fX, fY]);
+                    const [gX, gY] = this.getNext(fX, fY, dir);
+                    if ( this.myNeighbor(gX, gY) ) {
+                        //This is four in a row, so don't bother to push.
+                        return true;
+                    }
+                }
+            }
+            const oppDir = oppositeDirections.get(dir);
+            if ( goodDirections.indexOf(oppDir!) > -1 ) {
+                const [cX, cY] =  neighbors.get(oppDir!)!;
+                if (line.length > 0)
+                    line.unshift([cX, cY]);
+                else {
+                    line.push([cX, cY]);
+                    line.push([dX, dY]);
+                }
+                //We may have hit 4 in a row.
+                if (line.length === 4)
+                    return true;
+                
+                const [bX, bY] = this.getNext(cX, cY, oppDir!);
+                if ( this.myNeighbor(bX, bY) ) {
+                    line.unshift([bX, bY]);
+                    if (line.length === 4)
+                        return true;
+
+                    const [aX, aY] = this.getNext(bX, bY, oppDir!);
+                    if ( this.myNeighbor(aX, aY) ) {
+                        //This is four in a row, so don't bother to push.
+                        return true;
+                    }
                 }
             }
         }
-        return neighbours;
-    }
-
-    private getKnightLines(cX, cY, neighbors: [number, number, string][]): boolean {
-        //Expand firstNeighbors to find 4-in-a-row.
-        const goodDirections = [...new Set(neighbors.map(([x, y, d]) => d))];
-
         return false;
     }
     
@@ -875,7 +971,7 @@ export class KnightLineGame extends GameBase {
             //If it was not adjacent to any compatriots or the wildcard, it's a no-go.
             const [absX, absY] = this.algebraic2absCoords(this.parseMove(this.lastmove!).targetCell!);
             const firstNeighbors = this.goodNeighbors(absX, absY);
-            if (firstNeighbors.length === 0)
+            if (firstNeighbors.size === 0)
                 return this;
 
             //Check for 4-in-a-row.
@@ -918,6 +1014,7 @@ export class KnightLineGame extends GameBase {
     }
 
     private createPiece(cell: CellContents, forHighlight?: boolean): Glyph {
+        //Turn cellContents into a piece for rendering.
         if (!cell || cell.length < 2)
             throw new Error("Bad cellContents passed to createPiece.");
 
@@ -967,6 +1064,7 @@ export class KnightLineGame extends GameBase {
     }
 
     private encodePiece(cell: CellContents): string {
+        //Turn cellContents into the name of a piece for rendering.
         if (!cell || cell.length < 2)
             throw new Error("Bad cellContents passed to encodePiece.");
         
@@ -992,7 +1090,7 @@ export class KnightLineGame extends GameBase {
         const [width, height] = this.getRenderWidthHeight();
 
         //console.log("rendering highlight: ", this.highlight);
-        
+        //Create some transient pieces.
         let sX = -1, sY = -1, tX = -1, tY = -1;
         if ( this.highlight !== undefined ) {
             [sX, sY] = this.algebraic2relCoords(this.highlight.cell);
@@ -1003,7 +1101,7 @@ export class KnightLineGame extends GameBase {
         }
 
         let markerPoints: RowCol[] = [];
-
+        //Create the piece list and pieces, and find markers, in one fell swoop.
         for (let y = 0; y < height; y++) {
             const pstr: String[] = [];
             for (let x = 0; x < width; x++) {
@@ -1035,6 +1133,7 @@ export class KnightLineGame extends GameBase {
             pieces.push(pstr.join(","));
         }
 
+        //Turn the marker list into the markers.
         let markers: MarkerGlyph[] | undefined = [];
         if ( markerPoints.length > 0 ) {
             legend["xmark"] = {
@@ -1052,14 +1151,10 @@ export class KnightLineGame extends GameBase {
             markers = undefined;
         }
 
+        //Label my funny coordinate system.
         const rowLabels = [...Array(height).keys()].map(l => ( -(l + firstAY) ).toString()).reverse();
-
-        //TODO: This needs to account for aa, ab, ac, ...
         let columnLabels = (Array.from(Array(width).keys())).map(c =>
             this.absXCoord2algebraic(firstAX + c) );
-        
-        //let columnLabels = colLabels.slice(firstX + 12);
-        //columnLabels.length = width;
         
         // Build rep
         const rep: APRenderRep =  {
@@ -1081,6 +1176,7 @@ export class KnightLineGame extends GameBase {
             pieces: pieces.join("\n"),
         };
 
+        // Build annotations
         rep.annotations = [];
         if (this.results.length > 0) {
             for (const move of this.results) {
