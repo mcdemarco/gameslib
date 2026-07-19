@@ -501,6 +501,8 @@ export class KnightLineGame extends GameBase {
             return "";
 
         const player = this.currplayer;
+        if (this.eliminated.indexOf(player) > -1)
+            return "pass";
 
         let moves: string[] = [];
 
@@ -522,11 +524,15 @@ export class KnightLineGame extends GameBase {
             for (var s = 0; s < activeStacks.length; s++) {
                 const [x, y] = activeStacks[s];
                 const cell = this.absCoords2algebraic(x, y);
-                const restack = Math.ceil(this.board.get(x, y)![1] / 2);
+                const stackHeight = this.board.get(x, y)![1];
+                const restackArray = [...Array(stackHeight).keys()].map(r => r + 1);
+                restackArray.length = stackHeight - 1;
                 const dots = this.getKnightMoves(x, y);
                 const submoves = dots.map(([a,b]) => {
-                    const submove: IKLMove = {cell: cell, restack: restack};
+                    const submove: IKLMove = {cell: cell};
                     submove.targetCell = this.absCoords2algebraic(a, b);
+                    submove.restack =  restackArray[Math.floor(Math.random() * restackArray.length)];
+
                     return this.pickleMove(submove);
                 });
                 moves = moves.concat(submoves);
