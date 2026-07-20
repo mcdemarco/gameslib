@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, Glyph, MarkerGlyph, RowCol } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, Glyph, RowCol } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { allDirections, Direction, oppositeDirections, reviver, UserFacingError } from "../common";
 import i18next from "i18next";
@@ -8,8 +8,9 @@ import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 const deepclone = require("rfdc/default");
 
 /* TODO:
- * N-in-a-row code.
+ * Simplify N-in-a-row code.
  * bug when submitting move prematurely
+ * unhackify opening move encoding
  */
 
 type playerid = 1 | 2 | 3 ;
@@ -283,11 +284,10 @@ export class KnightLineGame extends GameBase {
 
         for (const [dx,dy] of knightAdjust) {
             const [newX, newY] = [absX + dx, absY + dy];
-            if ( (! this.isBlocked(newX, newY) ) && (! this.board.has(newX, newY) ) && this.hasNeighbors(newX, newY) ) {
+            if ( (! this.board.has(newX, newY) ) && this.hasNeighbors(newX, newY) ) {
                 knightMoves.push([newX, newY]);
             }
         }
-
         return knightMoves;
     }
 
@@ -359,25 +359,6 @@ export class KnightLineGame extends GameBase {
             if (knightMoves.length > 0)
                 return true;
         }
-
-        return false;
-    }
-
-    private isBlocked(absX: number, absY: number): boolean {
-        //This function checks all aspects of cell blocking
-        // except that the target is already occupied,
-        // which must be checked by the caller.
-        
-        if ( ! this.variants.includes("blocker") )
-            return false;
-        
-        if ( this.isOpeningMove() )
-            return false;
-        
-        if ( absX === 0 || absY === 0 )
-            return true;
-        if ( absX === absY || absX === -absY )
-            return true;
 
         return false;
     }
@@ -478,10 +459,8 @@ export class KnightLineGame extends GameBase {
     }
 
     public moves(player?: playerid): string[] {
-        //Generate a list of moves, possibly empty, or single pass,
-        // for autopass.
-        //Not the full list of moves.
-
+        //Generates either "pass" or the empty list, for autopassing.
+        //Random moves are available from randomMoves().
         if (player === undefined) {
             player = this.currplayer;
         }
@@ -495,8 +474,8 @@ export class KnightLineGame extends GameBase {
     }
 
     public randomMove(): string {
-        //Not the full move list.
-        //Could be made more random.
+        //Does not generate a full move list, but chooses a random stack,
+        // a random jump, and a random split of the stack.
         if (this.gameover)
             return "";
 
@@ -719,11 +698,6 @@ export class KnightLineGame extends GameBase {
             //This also handles the case of cell === targetCell.
             result.valid = false;
             result.message = i18next.t("apgames:validation.knightline.INVALID_TARGET", { cell: targetCell });
-            return result;
-        } else if ( this.isBlocked(tabsX, tabsY) ) {
-            //Once opening moves have been made, certain lines are blocked.
-            result.valid = false;
-            result.message = i18next.t("apgames:validation.knightline.BLOCKED_TARGET", { cell: targetCell });
             return result;
         } else if (! this.hasNeighbors(tabsX, tabsY) ) {
             result.valid = false;
@@ -1106,8 +1080,7 @@ export class KnightLineGame extends GameBase {
             }
         }
 
-        let markerPoints: RowCol[] = [];
-        //Create the piece list and pieces, and find markers, in one fell swoop.
+        //Create the piece list and pieces in one fell swoop.
         for (let y = 0; y < height; y++) {
             const pstr: String[] = [];
             for (let x = 0; x < width; x++) {
@@ -1122,8 +1095,6 @@ export class KnightLineGame extends GameBase {
                     pstr.push("H");
                 } else if (cellContent === undefined) {
                     pstr.push("-");
-                    if ( this.isBlocked(absX, absY) )
-                        markerPoints.push({ row: y, col: x });
                 } else if (x === sX && y === sY && this.highlight && this.highlight.restack) {
                     const name = this.encodePiece(cellContent) + "H";
                     pstr.push(name);
@@ -1139,24 +1110,6 @@ export class KnightLineGame extends GameBase {
             pieces.push(pstr.join(","));
         }
 
-        //Turn the marker list into the markers.
-        let markers: MarkerGlyph[] | undefined = [];
-        if ( markerPoints.length > 0 ) {
-            legend["xmark"] = {
-                name: "x",
-                colour: "#000",
-                opacity: 0.25,
-                scale: 0.75
-            };
-            markers.push({
-                type: "glyph",
-                glyph: "xmark",
-                points: markerPoints as [RowCol, ...RowCol[]]
-            });
-        } else {
-            markers = undefined;
-        }
-
         //Label my funny coordinate system.
         const rowLabels = [...Array(height).keys()].map(l => ( -(l + firstAY) ).toString()).reverse();
         let columnLabels = (Array.from(Array(width).keys())).map(c =>
@@ -1170,7 +1123,6 @@ export class KnightLineGame extends GameBase {
                 height,
                 columnLabels,
                 rowLabels,
-                markers,
                 strokeColour: {
                     func: "flatten",
                     fg: "_context_strokes",

@@ -1843,15 +1843,15 @@
         "knightline": {
             "#setup": {
                 "name": "Default setup",
-                "description": "No special pieces."
+                "description": "No special pieces, and stacks begin in a set configuration."
             },
             "blocker": {
                 "name": "Blocker",
-                "description": "A central neutral piece blocks all lines it lies on."
+                "description": "The game begins with a central neutral piece, and stacks are placed by players."
             },
             "wildcard": {
                 "name": "Wildcard",
-                "description": "A central neutral piece may be counted by any player."
+                "description": "A central neutral piece may be counted by any player, and stacks are placed by players."
             },
             "#size": {
                 "name": "Default stack size",
@@ -5727,7 +5727,6 @@
             "BAD_START_PLACE": "The cell {{cell}} is not a legal initial placement.",
             "BAD_START_STACK": "The value {{what}} is not a legal initial stack quantity.",
             "BAD_VALUE": "The value {{what}} is not a legal split of your stack.",
-            "BLOCKED_TARGET": "The cell '{{cell}}' is blocked.",
             "INITIAL_INSTRUCTIONS": "Select a stack, then select a cell to jump to.",
             "INITIAL_INSTRUCTIONS_VARIANTS": "Select a cell to place your initial stack.",
             "INVALID_FIRST_MOVE": "In the first move of a two-player game, you may only split one piece off your stack.",
