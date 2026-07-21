@@ -432,11 +432,14 @@ export class KnightLineGame extends GameBase {
 
         mm.cell = moves[0];
         
-        if ( moves[1] !== undefined )
+        if ( moves[1] !== undefined ) {
             mm.targetCell = moves[1];
-
-        if ( moves[2] !== undefined ) {
-            mm.restack = parseInt(moves[2],10);
+            if ( moves[2] !== undefined ) {
+                mm.restack = parseInt(moves[2],10);
+            }
+        } else {
+            if ( this.isOpeningMove() )
+                mm.complete = true;
         }
         
         return mm;
@@ -510,7 +513,10 @@ export class KnightLineGame extends GameBase {
                 const submoves = dots.map(([a,b]) => {
                     const submove: IKLMove = {cell: cell};
                     submove.targetCell = this.absCoords2algebraic(a, b);
-                    submove.restack =  restackArray[Math.floor(Math.random() * restackArray.length)];
+                    if ( this.isRestrictedMove() )
+                        submove.restack = 1;
+                    else
+                        submove.restack =  restackArray[Math.floor(Math.random() * restackArray.length)];
 
                     return this.pickleMove(submove);
                 });
