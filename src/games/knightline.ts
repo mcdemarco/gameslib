@@ -9,7 +9,6 @@ const deepclone = require("rfdc/default");
 
 /* TODO:
  * Simplify N-in-a-row code.
- * bug when submitting move prematurely
  */
 
 type playerid = 1 | 2 | 3 ;
@@ -788,10 +787,11 @@ export class KnightLineGame extends GameBase {
             const mm = this.parseMove(m);
             const [absX, absY] = this.algebraic2absCoords(mm.cell);
 
-            if ( partial ) {
-                if ( mm.targetCell === mm.cell )
-                    this.results = [{type: "place", where: mm.cell, what: mm.restack ? mm.restack.toString() : undefined}];
-                else if ( mm.targetCell )
+            if ( this.isOpeningMove() ) {
+                this.board.set(absX, absY, [this.currplayer, this.size]);
+                this.results = [{type: "place", where: mm.cell, what: this.size.toString() }];
+            } else if ( partial ) {
+                if ( mm.targetCell )
                     this.results = [{type: "move", from: mm.cell, to: mm.targetCell, what: mm.restack ? mm.restack.toString() : undefined}];
                 else
                     this.results = [{type: "select", what: mm.cell}];
@@ -799,19 +799,18 @@ export class KnightLineGame extends GameBase {
                 this.highlight = deepclone(mm);
                 
                 return this;
-            }
-
-            if ( this.isOpeningMove() ) {
-                this.board.set(absX, absY, [this.currplayer, this.size]);
-                this.results = [{type: "place", where: mm.cell, what: this.size.toString() }];
-            } else {
+            } else if ( mm.targetCell !== undefined && mm.restack !== undefined ) {
                 const cellContent = this.board.get(absX,absY);
                 const count = cellContent![1];
-                const destack = count - mm.restack!;
-                const [tabsX, tabsY] = this.algebraic2absCoords(mm.targetCell!);     
+                const destack = count - mm.restack;
+                const [tabsX, tabsY] = this.algebraic2absCoords(mm.targetCell);     
                 this.board.set(absX, absY, [this.currplayer, destack]);
-                this.board.set(tabsX, tabsY, [this.currplayer, mm.restack!]);
-                this.results = [{type: "move", from: mm.cell, to: mm.targetCell!, what: mm.restack!.toString()}];
+                this.board.set(tabsX, tabsY, [this.currplayer, mm.restack]);
+                this.results = [{type: "move", from: mm.cell, to: mm.targetCell, what: mm.restack.toString()}];
+            } else {
+                //Got a partial move that wasn't marked partial.
+                //Maybe this is just a playground kind of issue.
+                throw new Error("Partial move passed to move() as complete.");
             }
         }
         
