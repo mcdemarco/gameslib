@@ -7,10 +7,6 @@ import i18next from "i18next";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 const deepclone = require("rfdc/default");
 
-/* TODO:
- * Simplify N-in-a-row code.
- */
-
 type playerid = 1 | 2 | 3 ;
 type ColorID = 0 | 1 | 2 | 3 ;
 
@@ -83,6 +79,8 @@ export class KnightLineGame extends GameBase {
         flags: ["autopass", "experimental"],
     };
 
+    /* Three coordinate systems */
+    
     private absXCoord2algebraic(x: number): string {
         // In knightline, the y axis uses cartesian coordinates, 
         // and the x axis is lettered.
@@ -253,6 +251,26 @@ export class KnightLineGame extends GameBase {
         return this;
     }
 
+    /* Game logic functions */
+    
+    private getActiveStacks(player?: playerid) {
+        if (player === undefined) {
+            player = this.currplayer;
+        }
+
+        const allPositions = this.board.getAllPositions();
+        
+        return allPositions.filter( ([absX, absY]) => {
+            const cellContent = this.board.get(absX, absY);
+            if (cellContent![0] !== player)
+                return false;
+            else if (cellContent![1] === 1)
+                return false;
+            else
+                return true;
+        });
+    }
+
     private getFreeMoves(): string[] {
         //Returns an array of unoccupied cells that are connected to the board.
         //Used for randomizing opening moves.
@@ -306,38 +324,6 @@ export class KnightLineGame extends GameBase {
         return relKnightMoves;
     }
 
-
-    private getActiveStacks(player?: playerid) {
-        if (player === undefined) {
-            player = this.currplayer;
-        }
-
-        const allPositions = this.board.getAllPositions();
-        
-        return allPositions.filter( ([absX, absY]) => {
-            const cellContent = this.board.get(absX, absY);
-            if (cellContent![0] !== player)
-                return false;
-            else if (cellContent![1] === 1)
-                return false;
-            else
-                return true;
-        });
-    }
-
-    private hasNeighbors(absX: number, absY: number): boolean {
-        // Check if an empty cell has any neighbors.
-        for (var dx = -1; dx <= 1; dx++) {
-            for (var dy = -1; dy <= 1; dy++) {
-                if (dx === 0 && dy === 0) continue;
-                if (this.board.has(absX + dx, absY + dy)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private hasMoves(player?: playerid): boolean {
         // Check if a player has any moves left.
         // Needed to determine the move list for autopassing.
@@ -360,6 +346,21 @@ export class KnightLineGame extends GameBase {
 
         return false;
     }
+
+    private hasNeighbors(absX: number, absY: number): boolean {
+        // Check if an empty cell has any neighbors.
+        for (var dx = -1; dx <= 1; dx++) {
+            for (var dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                if (this.board.has(absX + dx, absY + dy)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /* Move parsing functions */
 
     private isOpeningMove(): boolean {
         //Opening moves (placements) are only made in variant games.
@@ -459,21 +460,6 @@ export class KnightLineGame extends GameBase {
         return move.join(",");
     }
 
-    public moves(player?: playerid): string[] {
-        //Generates either "pass" or the empty list, for autopassing.
-        //Random moves are available from randomMoves().
-        if (player === undefined) {
-            player = this.currplayer;
-        }
-
-        if ( this.eliminated.indexOf(player) > -1 )
-            return ["pass"];
-        else if (! this.hasMoves(player) )
-            return ["pass"];
-        else
-            return [];
-    }
-
     public randomMove(): string {
         //Does not generate a full move list, but chooses a random stack,
         // a random jump, and a random split of the stack.
@@ -526,7 +512,21 @@ export class KnightLineGame extends GameBase {
         return moves[Math.floor(Math.random() * moves.length)];
     }
 
-                                     
+    public moves(player?: playerid): string[] {
+        //Generates either "pass" or the empty list, for autopassing.
+        //Random moves are available from randomMoves().
+        if (player === undefined) {
+            player = this.currplayer;
+        }
+
+        if ( this.eliminated.indexOf(player) > -1 )
+            return ["pass"];
+        else if (! this.hasMoves(player) )
+            return ["pass"];
+        else
+            return [];
+    }
+
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             let newmove = "";
@@ -823,8 +823,46 @@ export class KnightLineGame extends GameBase {
         return this;
     }
 
+    /* Graph functions */
+
+    private expandLine(line: [number, number][], dir: Direction): [number, number][] {
+        //Expand candidate n-in-a-row in both directions if possible.
+        //Expand the first piece in the primary direction,
+        // and the last piece in the opposite direction.
+        // (They may be the same piece.)
+        
+        if (line.length < 1)
+            throw new Error("Bad array passed to expandLine.");
+
+        let [mX, mY] = line[0]; 
+        let [lX, lY] = this.getNext(mX, mY, dir);
+        while ( this.goodNeighbor(lX, lY) && line.length < 4 ) {
+            //Go as far as necessary in the primary direction.
+            line.unshift([lX, lY]);
+            [mX, mY] = line[0];
+            [lX, lY] = this.getNext(mX, mY, dir);
+        }
+
+        //Don't bother with the second half if this completed the line.
+        if (line.length >= 4)
+            return line;
+        
+        const oppDir = oppositeDirections.get(dir)!;
+        
+        let [nX, nY] = line[line.length - 1];
+        let [oX, oY] = this.getNext(nX, nY, oppDir);
+        while ( this.goodNeighbor(oX, oY) &&  line.length < 4 ) {
+            //Go as far as necessary in the secondary direction.
+            line.push([oX, oY]);
+            [nX, nY] = line[line.length - 1];
+            [oX, oY] = this.getNext(nX, nY, oppDir);
+        }
+
+        return line;
+    }
+    
     private getNext(x: number, y: number, dir: Direction): [number, number] {
-        //Adapted from SquareDiagGraph.move().
+        //Wrote my own adjacency function for some reason.
         let xNew = x;
         let yNew = y;
 
@@ -855,19 +893,8 @@ export class KnightLineGame extends GameBase {
         return [xNew, yNew];
     }
     
-    private goodNeighbors(absX: number, absY: number): Map<Direction, [number, number]> {
-        // Get the directions where the cell at (absX, absY) has neighbours
-        // that count towards a 4-in-a-row.
-        let neighbors = new Map<Direction, [number, number]>;
-        for (const dir of allDirections) {
-            const [x, y] = this.getNext(absX, absY, dir);
-            if ( this.myNeighbor(x, y) )
-                neighbors.set(dir, [x, y]);
-        }
-        return neighbors;
-    }
-
-    private myNeighbor(x: number, y: number): boolean {
+    private goodNeighbor(x: number, y: number): boolean {
+        //Can this neighbor contribute to the current player's n-in-a-row?
         const cellContent = this.board.get(x, y);
         if (cellContent !== undefined) {
             if ( cellContent[0] === this.currplayer || (this.variants.includes("wildcard") && cellContent[0] === 0) ) {
@@ -877,52 +904,15 @@ export class KnightLineGame extends GameBase {
         return false;
     }
 
-    private getKnightLines(dX: number, dY: number, neighbors: Map<Direction, [number, number]>): boolean {
-        //Expand firstNeighbors to find 4-in-a-row.
-        const goodDirections = [...neighbors.keys()];
-        for (const dir of lineDirections) {
-            const line: [number, number][] = [];
-            if ( goodDirections.indexOf(dir) > -1 ) {
-                line.push([dX, dY]);
-                const [eX, eY] = neighbors.get(dir)!;
-                line.push([eX, eY]);
-                const [fX, fY] = this.getNext(eX, eY, dir);
-                if ( this.myNeighbor(fX, fY) ) {
-                    line.push([fX, fY]);
-                    const [gX, gY] = this.getNext(fX, fY, dir);
-                    if ( this.myNeighbor(gX, gY) ) {
-                        //This is four in a row, so don't bother to push.
-                        return true;
-                    }
-                }
-            }
-            const oppDir = oppositeDirections.get(dir);
-            if ( goodDirections.indexOf(oppDir!) > -1 ) {
-                const [cX, cY] =  neighbors.get(oppDir!)!;
-                if (line.length > 0)
-                    line.unshift([cX, cY]);
-                else {
-                    line.push([cX, cY]);
-                    line.push([dX, dY]);
-                }
-                //We may have hit 4 in a row.
-                if (line.length === 4)
-                    return true;
-                
-                const [bX, bY] = this.getNext(cX, cY, oppDir!);
-                if ( this.myNeighbor(bX, bY) ) {
-                    line.unshift([bX, bY]);
-                    if (line.length === 4)
-                        return true;
+    private getKnightLines(absX: number, absY: number): boolean {
+        //Determine whether there is a 4-in-a-row through the cell.
 
-                    const [aX, aY] = this.getNext(bX, bY, oppDir!);
-                    if ( this.myNeighbor(aX, aY) ) {
-                        //This is four in a row, so don't bother to push.
-                        return true;
-                    }
-                }
-            }
+        for (const dir of lineDirections) {
+            const line = this.expandLine([[absX, absY]], dir);
+            if (line.length >= 4)
+                return true;
         }
+
         return false;
     }
     
@@ -952,16 +942,9 @@ export class KnightLineGame extends GameBase {
             if ( allPositions.length < this.numplayers * numPlayedPerPlayer + 1 ) //including this play
                 return this;
             
-            //Precheck: Check that the last placement has useful neighbors.
-            //We only need to check the current placement (because positions never go away).
-            //If it was not adjacent to any compatriots or the wildcard, it's a no-go.
+            //Check for 4-in-a-row.  We're far enough into the game that there must be a targetCell.
             const [absX, absY] = this.algebraic2absCoords(this.parseMove(this.lastmove!).targetCell!);
-            const firstNeighbors = this.goodNeighbors(absX, absY);
-            if (firstNeighbors.size === 0)
-                return this;
-
-            //Check for 4-in-a-row.
-            if ( this.getKnightLines(absX, absY, firstNeighbors) ) {
+            if ( this.getKnightLines(absX, absY) ) {
                 this.gameover = true;
                 this.results.push({ type: "eog" });
                 //It's not possible to make 4 in a row for another player, so we know it's you.
@@ -998,6 +981,8 @@ export class KnightLineGame extends GameBase {
             eliminated: [...this.eliminated],
         };
     }
+
+    /* Rendering functions */
 
     private createPiece(cell: CellContents, forHighlight?: boolean): Glyph {
         //Turn cellContents into a piece for rendering.
