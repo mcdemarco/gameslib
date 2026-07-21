@@ -10,7 +10,6 @@ const deepclone = require("rfdc/default");
 /* TODO:
  * Simplify N-in-a-row code.
  * bug when submitting move prematurely
- * unhackify opening move encoding
  */
 
 type playerid = 1 | 2 | 3 ;
@@ -492,9 +491,7 @@ export class KnightLineGame extends GameBase {
             
             moves = this.getFreeMoves().map( cell => {
                 const move: IKLMove = {
-                    cell: cell,
-                    targetCell: cell,
-                    restack: this.size
+                    cell: cell
                 };
                 return this.pickleMove(move);
             });
@@ -541,7 +538,7 @@ export class KnightLineGame extends GameBase {
             //There are some setup moves in the variants.
             if ( this.isOpeningMove() ) {
                 //This is an initial placement.
-                newmove = newcell + "," + newcell + "," + this.size;
+                newmove = newcell;
             } else if (move && mm.targetCell && newcell === mm.targetCell && mm.restack !== undefined) {
                 //If there's already a target cell, we're clicking it again for stack splitting.
                 mm.restack++;
@@ -648,17 +645,21 @@ export class KnightLineGame extends GameBase {
         //Validate variant openings.
         if ( this.isOpeningMove() ) {
             //An opening move must be an initial placement of a stack.
-            if (mm.restack !== this.size) {
+            if (mm.restack !== undefined) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.knightline.BAD_START_STACK", { what: mm.restack });
+                result.message = i18next.t("apgames:validation.knightline.BAD_OPENING_MOVE");
                 return result;
-            } else if (mm.targetCell === undefined || cell !== mm.targetCell) {
+            } else if (mm.targetCell !== undefined) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.knightline.BAD_START_PLACE", { what: cell });
+                result.message = i18next.t("apgames:validation.knightline.BAD_OPENING_MOVE");
+                return result;
+            } else if (this.board.has(absX, absY) ) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.knightline.BAD_START_PLACE", { cell: cell });
                 return result;
             } else if (! this.hasNeighbors(absX, absY) ) {
                 result.valid = false;
-                result.message = i18next.t("apgames:validation.knightline.BAD_START_PLACE", { what: cell });
+                result.message = i18next.t("apgames:validation.knightline.BAD_START_PLACE", { cell: cell });
                 return result;
             } else {
                 result.valid = true;
@@ -800,9 +801,9 @@ export class KnightLineGame extends GameBase {
                 return this;
             }
 
-            if ( mm.targetCell === mm.cell ) {
-                this.board.set(absX, absY, [this.currplayer, mm.restack!]);
-                this.results = [{type: "place", where: mm.cell, what: mm.restack!.toString() }];
+            if ( this.isOpeningMove() ) {
+                this.board.set(absX, absY, [this.currplayer, this.size]);
+                this.results = [{type: "place", where: mm.cell, what: this.size.toString() }];
             } else {
                 const cellContent = this.board.get(absX,absY);
                 const count = cellContent![1];

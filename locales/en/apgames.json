@@ -5724,8 +5724,8 @@
         },
         "knightline": {
             "BAD_PASS": "You may not pass if legal moves are available.",
+            "BAD_OPENING_MOVE": "The opening move in this variant must be a legal cell for initial stack placement.",
             "BAD_START_PLACE": "The cell {{cell}} is not a legal initial placement.",
-            "BAD_START_STACK": "The value {{what}} is not a legal initial stack quantity.",
             "BAD_VALUE": "The value {{what}} is not a legal split of your stack.",
             "INITIAL_INSTRUCTIONS": "Select a stack, then select a cell to jump to.",
             "INITIAL_INSTRUCTIONS_VARIANTS": "Select a cell to place your initial stack.",

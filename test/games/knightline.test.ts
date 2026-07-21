@@ -127,6 +127,9 @@ describe("KnightLine", () => {
         result = g.validateMove("m0,o1,1");
         expect(result.valid).to.be.true;
 
+        const ge = new KnightLineGame(2,["blocker"]);
+        result = ge.validateMove("m0");
+        expect(result.valid).to.be.false;
     });
 
     it ("Makes moves", () => {
