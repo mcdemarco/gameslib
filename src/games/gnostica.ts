@@ -1,11 +1,11 @@
 import { GameBase, IAPGameState, IIndividualState, IMoveOptions, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, Glyph } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, MinorCard, MajorCard, allCards } from "../common/tarot";
-import { GnosticaBoard } from "./gnostica/board";
+import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { Territory, ITerritory } from "./gnostica/Territory";
 import { Piece, Orientation, cardinalOrientations } from "./gnostica/Piece";
 import {
@@ -72,15 +72,24 @@ export class GnosticaGame extends GameBase {
         // i18next.t("apgames:descriptions.gnostica")
         description: "apgames:descriptions.gnostica",
         urls: ["https://www.looneylabs.com/games/gnostica"],
+        bggid: "9629",
         people: [
             { type: "designer", name: "John Cooper" },
             { type: "designer", name: "Kory Heath" },
             { type: "designer", name: "Kristin Matherly" },
             { type: "designer", name: "Jacob Davenport" },
+            {
+                type: "coder",
+                name: "mcd",
+                urls: ["https://mcdemarco.net/games/"],
+                apid: "4bd8317d-fb04-435f-89e0-2557c3f2e66c",
+            },
+
         ],
         variants: [
             { uid: "target-8", group: "target" },
             { uid: "target-10", group: "target" },
+            { uid: "no-majors" },
         ],
         categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
         flags: ["experimental", "no-moves", "custom-randomization", "player-stashes"],
@@ -1067,12 +1076,153 @@ export class GnosticaGame extends GameBase {
         return "draw";
     }
 
-    // Placeholder - the real dynamic-window grid renderer is a later phase.
+    // Standard grid renderer over a window recomputed from the board's live
+    // bounding box every call (the "Knight Line" pattern - see the plan:
+    // there's no fixed board size, so the visible window has to track
+    // wherever territories currently are, padded by one empty ring so
+    // placement/push destinations just outside the current bounds are still
+    // visible and clickable). Gnostica's algebraic notation is already
+    // absolute (GnosticaBoard.coords2algebraic doesn't shift as the board
+    // grows, unlike Knight Line's own notation), so this only needs ONE
+    // extra coordinate layer (window-relative row/col), not two.
     public render(): APRenderRep {
-        return {
-            board: { style: "squares-checkered", width: 1, height: 1 },
-            legend: {},
-            pieces: "-",
+        const minX = this.board.minX - 1;
+        const maxX = this.board.maxX + 1;
+        const minY = this.board.minY - 1;
+        const maxY = this.board.maxY + 1;
+        const width = maxX - minX + 1;
+        const height = maxY - minY + 1;
+
+        const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
+        const pieceRows: string[] = [];
+        for (let y = minY; y <= maxY; y++) {
+            const rowCells: string[] = [];
+            for (let x = minX; x <= maxX; x++) {
+                const cls = this.board.classify(x, y);
+                if (cls === "void") {
+                    rowCells.push("-");
+                    continue;
+                }
+                const t = this.board.get(x, y);
+                const key = this.cellRenderKey(t, cls);
+                if (!(key in legend)) {
+                    legend[key] = this.buildCellGlyph(t, cls);
+                }
+                rowCells.push(key);
+            }
+            pieceRows.push(rowCells.join(","));
+        }
+
+        const columnLabels: string[] = [];
+        for (let x = minX; x <= maxX; x++) {
+            // coords2algebraic(x, 0) always ends in the literal digit "0"
+            // (y===0 is a special case producing yval=0) - strip it to get
+            // just this column's letter(s).
+            columnLabels.push(GnosticaBoard.coords2algebraic(x, 0).slice(0, -1));
+        }
+        const rowLabels: string[] = [];
+        for (let y = minY; y <= maxY; y++) {
+            rowLabels.push((y === 0 ? 0 : -y).toString());
+        }
+
+        const rep: APRenderRep = {
+            board: {
+                style: "squares",
+                width,
+                height,
+                columnLabels,
+                rowLabels,
+                strokeColour: {
+                    func: "flatten",
+                    fg: "_context_strokes",
+                    bg: "_context_board",
+                    opacity: 0,
+                },
+            },
+            legend,
+            pieces: pieceRows.join("\n"),
         };
+
+        if (this.results.length > 0) {
+            const annotations: NonNullable<APRenderRep["annotations"]> = [];
+            for (const r of this.results) {
+                if (r.type === "place" && r.where !== undefined) {
+                    const [x, y] = GnosticaBoard.algebraic2coords(r.where);
+                    annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
+                } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
+                    const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
+                    const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
+                    annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
+                }
+            }
+            if (annotations.length > 0) {
+                rep.annotations = annotations;
+            }
+        }
+
+        return rep;
+    }
+
+    // A canonical string identifying this cell's exact visual contents
+    // (card identity + every piece's owner/size/orientation) - the legend
+    // only ever grows entries for combinations actually on the board, built
+    // fresh each render() call, matching Knight Line's encodePiece/
+    // createPiece pattern.
+    private cellRenderKey(t: Territory | undefined, cls: CellClass): string {
+        const cardPart = t?.card !== undefined ? t.card.uid : (cls === "wasteland" ? "waste" : "void");
+        // Piece.id() (owner+size+orientation, no punctuation) - legend keys
+        // end up as literal DOM ids in the renderer, and a "." breaks
+        // querySelector("#" + key) since it reads as a class selector.
+        const piecesPart = (t?.pieces ?? []).map(p => p.id()).join("_");
+        return `k_${cardPart}_${piecesPart}`;
+    }
+
+    private buildCellGlyph(t: Territory | undefined, cls: CellClass): Glyph | [Glyph, ...Glyph[]] {
+        const stack: Glyph[] = [];
+        if (t?.card !== undefined) {
+            stack.push(...t.card.toGlyph());
+        } else {
+            // Wasteland: a faint neutral square so the clickable area is
+            // visible without implying a territory is there. Void cells are
+            // never given a legend entry at all (rendered as "-").
+            stack.push({ name: "piece-square-borderless", scale: 1, opacity: cls === "wasteland" ? 0.15 : 0 });
+        }
+        // Up to 3 pieces, nudged along the bottom edge of the cell.
+        const nudges: [number, number][] = [[-280, 350], [0, 350], [280, 350]];
+        (t?.pieces ?? []).forEach((p, i) => {
+            const g = this.pyramidGlyph(p);
+            g.scale = 0.42;
+            const [dx, dy] = nudges[i] ?? [0, 350];
+            g.nudge = { dx, dy };
+            stack.push(g);
+        });
+        return stack as [Glyph, ...Glyph[]];
+    }
+
+    // "up" pyramids stand upright, drawn once with no rotation; N/E/S/W
+    // pyramids are the same "flat/pointing" glyph rotated to face that
+    // direction - the exact pattern btt.ts uses for its own Icehouse pieces.
+    private pyramidGlyph(piece: Piece): Glyph {
+        const sizeNames = ["small", "medium", "large"];
+        const sizeName = sizeNames[piece.size - 1];
+        if (piece.orientation === "up") {
+            return { name: `pyramid-up-${sizeName}`, colour: piece.owner };
+        }
+        const rotations: Record<Exclude<Orientation, "up">, number> = { N: 0, E: 90, S: 180, W: -90 };
+        return { name: `pyramid-flat-${sizeName}`, colour: piece.owner, rotate: rotations[piece.orientation] };
+    }
+
+    // Each player's remaining reserve, by size - see the `player-stashes` flag.
+    public getPlayerStash(player: number): { count: number; glyph: Glyph; movePart: string }[] | undefined {
+        const stash = this.stashes.get(player as playerid);
+        if (stash === undefined) {
+            return undefined;
+        }
+        const sizeNames = ["small", "medium", "large"];
+        return stash.map((count, i) => ({
+            count,
+            glyph: { name: `pyramid-up-${sizeNames[i]}`, colour: player },
+            movePart: (i + 1).toString(),
+        }));
     }
 }
