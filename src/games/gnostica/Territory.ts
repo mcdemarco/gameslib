@@ -3,6 +3,19 @@ import { Piece, IPiece } from "./Piece";
 
 export type TerritoryPointValue = 0 | 1 | 2 | 3;
 
+// Standalone so powers.ts can evaluate a candidate replacement card (from
+// hand or discard) before it's ever placed on the board, not just a card
+// already sitting in a Territory.
+export const cardPointValue = (card?: TarotCard): TerritoryPointValue => {
+    if (card === undefined) {
+        return 0;
+    }
+    if (card.major) {
+        return 3;
+    }
+    return (card as MinorCard).rank.court ? 2 : 1;
+};
+
 export interface ITerritory {
     card?: TarotCard;
     pieces: IPiece[];
@@ -57,13 +70,7 @@ export class Territory implements ITerritory {
     }
 
     public pointValue(): TerritoryPointValue {
-        if (this.card === undefined) {
-            return 0;
-        }
-        if (this.card.major) {
-            return 3;
-        }
-        return (this.card as MinorCard).rank.court ? 2 : 1;
+        return cardPointValue(this.card);
     }
 
     public clone(): Territory {

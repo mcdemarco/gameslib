@@ -132,13 +132,11 @@ export class GnosticaBoard {
 
     // Removes the card at {x,y} (the cell may still hold pieces afterwards).
     // Returns every cell (this one, or a neighbour) that consequently
-    // collapsed into the void, with the pieces evicted from it - by the
-    // general rule, those pieces are returned to their owners' stashes.
-    // EXCEPTION (Swords, "attack a territory"): if the destroyed cell itself
-    // is among the evicted cells, its own minions are destroyed instead of
-    // returned - that override is applied by the caller in powers.ts, which
-    // can tell "this territory" apart from "a stranded neighbour" by
-    // comparing coordinates against the ones passed in here.
+    // collapsed into the void, with the pieces evicted from it. Icehouse
+    // pieces are never removed from the game outright - by the general void
+    // rule, every evicted piece (including the destroyed cell's own) is
+    // returned to its owner's stash; the caller in powers.ts is responsible
+    // for actually crediting the stash.
     public destroyTerritory(x: number, y: number): IEvicted[] {
         const t = this.cells.get(x, y);
         if (t === undefined || t.card === undefined) {
