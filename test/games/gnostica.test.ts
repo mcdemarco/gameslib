@@ -511,4 +511,25 @@ describe("Gnostica: render", () => {
             expect(pairedLabel, `row ${i} (absolute y=${absY})`).eq(trueLabel);
         }
     });
+
+    // A territory can legitimately exceed the normal 3-piece capacity (some
+    // major arcana powers bypass Territory.canAdd()'s check), and pyramids
+    // must never be rendered stacked/overlapping. Regression test for
+    // exactly that bug: the old fixed 3-slot nudge table silently reused
+    // slot 1's coordinates for every piece beyond the 3rd.
+    it("never gives two pieces on the same territory identical render coordinates, even past normal capacity", () => {
+        const g = new GnosticaGame(2);
+        const t = g.board.get(0, 0)!;
+        t.pieces = [
+            new Piece(1, 1, "up"), new Piece(2, 1, "up"), new Piece(1, 2, "up"),
+            new Piece(2, 2, "up"), new Piece(1, 3, "up"),
+        ];
+        const rep = g.render() as { legend: Record<string, ({ name?: string; nudge?: { dx: number; dy: number } })[]> };
+        const entry = Object.values(rep.legend).find(
+            glyphs => glyphs.filter(gl => gl.name?.startsWith("pyramid-")).length === t.pieces.length
+        );
+        expect(entry, "expected a legend entry with 5 pyramid glyphs").to.not.be.undefined;
+        const coords = entry!.filter(gl => gl.name?.startsWith("pyramid-")).map(gl => `${gl.nudge!.dx},${gl.nudge!.dy}`);
+        expect(new Set(coords).size, "every piece should have a distinct nudge").eq(coords.length);
+    });
 });

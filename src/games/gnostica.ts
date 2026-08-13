@@ -23,6 +23,41 @@ import i18next from "i18next";
 
 export type playerid = 1|2|3|4|5|6;
 
+// A board tile overlays a 3x3 grid: the 4 corners are the card face (rank
+// + suit/power icons, see buildCardFace), leaving 5 cells for pyramids -
+// one edge midpoint per cardinal facing, plus the exact centre for an "up"
+// (unfaced) piece. Orientation has exactly 5 values (N/E/S/W/up), a 1:1
+// match.
+const BOARD_TILE_GRID_CORNER = 650;
+// Pieces get their own (smaller) radius rather than sharing
+// BOARD_TILE_GRID_CORNER: the card corners are diagonal, so their true
+// distance from centre is BOARD_TILE_GRID_CORNER*sqrt(2); an edge midpoint
+// at the same magnitude is only BOARD_TILE_GRID_CORNER from centre - closer
+// in a straight line - but pieces are much bigger glyphs (scale 0.48 vs
+// 0.15-0.25 for icons) sitting flush against an axis rather than tucked
+// into a corner, so at equal magnitude they visibly poked outside the tile
+// (confirmed - not just a theoretical concern).
+const PIECE_GRID_RADIUS = 380;
+// Index in this array doubles as the slot's identity everywhere else -
+// PIECE_GRID_PREFERRED_INDEX below must stay in step with it.
+const PIECE_GRID_SLOTS: [number, number][] = [[0, -1], [0, 1], [1, 0], [-1, 0], [0, 0]]; // N, S, E, W, up
+const PIECE_GRID_PREFERRED_INDEX: Record<Orientation, number> = { N: 0, S: 1, E: 2, W: 3, up: 4 };
+
+// The renderer's own glyph-composition source (read directly, not
+// inferred): a placed glyph's `nudge` is applied via its <use> element's
+// x/y attributes, and only THEN is that already-positioned content rotated
+// (around the origin) via the glyph's own `rotate` - so `nudge` lives in
+// the glyph's local, PRE-rotation space, not screen space. A rotated
+// piece's nudge therefore has to be the inverse-rotated target position -
+// the piece's own rotation (already set to make it visually point the
+// right way, see pyramidGlyph()) then carries that nudge back around to
+// where it's actually meant to land on screen. [cos,sin] of each cardinal
+// rotation's angle, in exact integers (not Math.cos/sin, which introduces
+// float noise like 6.1e-17 at these multiples of 90deg).
+const CARDINAL_COS_SIN: Record<Exclude<Orientation, "up">, [number, number]> = {
+    N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
+};
+
 // A minion's board location - shorthand used while resolving activate/play.
 interface IMinionRef {
     x: number;
@@ -1208,7 +1243,7 @@ export class GnosticaGame extends GameBase {
         // already tuned by eye for card format - left untouched.
         const rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
         const rankScale = compact ? 0.25 : 0.45;
-        const corner = compact ? 650 : 250;
+        const corner = compact ? BOARD_TILE_GRID_CORNER : 250;
         const rankShift = compact ? -675 : -corner;
         stack.push({
             text: rankText,
@@ -1270,21 +1305,91 @@ export class GnosticaGame extends GameBase {
             // never given a legend entry at all (rendered as "-").
             stack.push({ name: "piece-square-borderless", scale: 1, opacity: cls === "wasteland" ? 0.15 : 0 });
         }
-        // Up to 3 pieces, nudged along the bottom edge of the cell - sized
-        // to read clearly as the actual game pieces, bigger than the card's
-        // own (deliberately de-emphasized) iconography, but pulled in
-        // enough to stay inside the tile rather than bleeding into
-        // neighbours (0.65/±320/380 overflowed badly with 3 pieces present
-        // - confirmed by actually rendering it, not just eyeballing numbers).
-        const nudges: [number, number][] = [[-260, 330], [0, 330], [260, 330]];
-        (t?.pieces ?? []).forEach((p, i) => {
-            const g = this.pyramidGlyph(p);
-            g.scale = 0.48;
-            const [dx, dy] = nudges[i] ?? [0, 330];
-            g.nudge = { dx, dy };
+        const pieces = t?.pieces ?? [];
+        this.pieceGridSlots(pieces).forEach((slot, i) => {
+            const g = this.pyramidGlyph(pieces[i]);
+            g.scale = slot.scale;
+            g.nudge = { dx: slot.dx, dy: slot.dy };
             stack.push(g);
         });
         return stack as [Glyph, ...Glyph[]];
+    }
+
+    // Pieces are never allowed to visually stack/overlap, but a territory
+    // can legitimately hold more than 3 (some major arcana powers bypass
+    // Territory's normal capacity check - see Territory.canAdd()), so this
+    // can't just be a fixed 3-slot table.
+    //
+    // Up to 5 pieces: each piece's own orientation names its preferred cell
+    // in the tile's 3x3 grid (PIECE_GRID_SLOTS/PIECE_GRID_PREFERRED_INDEX) -
+    // an N-facing piece wants the top-centre cell, "up" wants dead centre,
+    // etc. Two pieces sharing an orientation (or one whose preferred cell
+    // is already taken) means only one gets it; the rest are bumped into
+    // whatever cells are still free, in no particular order for now - a
+    // first pass, not yet visually tuned the way the card face was.
+    private pieceGridSlots(pieces: Piece[]): { dx: number; dy: number; scale: number }[] {
+        const n = pieces.length;
+        if (n === 0) {
+            return [];
+        }
+        if (n > PIECE_GRID_SLOTS.length) {
+            return this.densePieceGrid(n);
+        }
+        const claimed = new Set<number>();
+        const chosenIdx: number[] = new Array(n);
+        pieces.forEach((p, i) => {
+            const idx = PIECE_GRID_PREFERRED_INDEX[p.orientation];
+            if (!claimed.has(idx)) {
+                claimed.add(idx);
+                chosenIdx[i] = idx;
+            }
+        });
+        const free = PIECE_GRID_SLOTS.map((_, idx) => idx).filter(idx => !claimed.has(idx));
+        for (let i = 0; i < n; i++) {
+            if (chosenIdx[i] === undefined) {
+                chosenIdx[i] = free.shift()!;
+            }
+        }
+        return chosenIdx.map((idx, i) => {
+            const [dirX, dirY] = PIECE_GRID_SLOTS[idx];
+            const targetX = dirX * PIECE_GRID_RADIUS;
+            const targetY = dirY * PIECE_GRID_RADIUS;
+            const orientation = pieces[i].orientation;
+            if (orientation === "up") {
+                // No rotate on this glyph at all - nudge is applied in
+                // plain screen space, no compensation needed.
+                return { dx: targetX, dy: targetY, scale: 0.48 };
+            }
+            const [cos, sin] = CARDINAL_COS_SIN[orientation];
+            return {
+                dx: targetX * cos + targetY * sin,
+                dy: -targetX * sin + targetY * cos,
+                scale: 0.48,
+            };
+        });
+    }
+
+    // Overflow fallback for the rare case of more pieces than the 3x3
+    // grid has spare cells for (5) - a dense shrink-to-fit grid, unrelated
+    // to (and not checked against) where the card face's own corners land.
+    private densePieceGrid(n: number): { dx: number; dy: number; scale: number }[] {
+        const cols = Math.ceil(Math.sqrt(n));
+        const rows = Math.ceil(n / cols);
+        const span = 800;
+        const cellW = span / cols;
+        const cellH = span / rows;
+        const scale = Math.min(0.48, (0.9 * Math.min(cellW, cellH)) / 500);
+        const slots: { dx: number; dy: number; scale: number }[] = [];
+        for (let i = 0; i < n; i++) {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            slots.push({
+                dx: -span / 2 + cellW * (col + 0.5),
+                dy: -span / 2 + cellH * (row + 0.5),
+                scale,
+            });
+        }
+        return slots;
     }
 
     // "up" pyramids stand upright, drawn once with no rotation; N/E/S/W
