@@ -338,6 +338,9 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         g.move("place m0", { trusted: true }); // player 1, defaults to "up" - no relation to the played card's suit
         g.move("place l0", { trusted: true }); // player 2
         const cupsUid = "2C";
+        // The random deal may already hold a copy - dedupe first so the
+        // post-play "not.include" assertion below can't see a leftover.
+        g.hands[0] = g.hands[0].filter(c => c !== cupsUid);
         g.hands[0].push(cupsUid);
         // The minion at m0 points "up", so it can only target its own
         // cell - add the second piece there rather than at an adjacent one.
@@ -481,5 +484,31 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         g.board.get(0, 0)!.card = major(1); // The Magician - only 1 power
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "up")];
         expect(() => g.move("activate m0, m0.0 C own m0 up, m0.0 C own m0 up")).to.throw();
+    });
+});
+
+describe("Gnostica: render", () => {
+    // The renderer pairs rowLabels[i] with pieceRows[N-1-i] (mirrored, not
+    // same-index) - confirmed by actually rendering an asymmetric board in
+    // the renderer playground, not just by reading the schema. This test
+    // guards against that mirroring silently regressing: for every row, the
+    // label paired with it (per the renderer's own convention) must equal
+    // that row's true algebraic notation, for every cell in the row.
+    it("labels every row with its true algebraic row number, mirrored per the renderer's convention", () => {
+        const g = new GnosticaGame(2);
+        const rep = g.render() as { board: { rowLabels: string[]; width: number }; pieces: string };
+        const pieceRows = rep.pieces.split("\n");
+        const n = pieceRows.length;
+        expect(rep.board.rowLabels.length).eq(n);
+        // The board's own minY is the absolute y of pieceRows[0] (top row,
+        // since y grows downward); walk every row and check the label the
+        // renderer will actually display against it.
+        const minY = g.board.minY - 1; // render() pads by 1 cell
+        for (let i = 0; i < n; i++) {
+            const absY = minY + i;
+            const trueLabel = (absY === 0 ? 0 : -absY).toString();
+            const pairedLabel = rep.board.rowLabels[n - 1 - i];
+            expect(pairedLabel, `row ${i} (absolute y=${absY})`).eq(trueLabel);
+        }
     });
 });

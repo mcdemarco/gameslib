@@ -5,12 +5,19 @@ import { Glyph } from "@abstractplay/renderer/build/schemas/schema";
 // real 78-card tarot deck (identity, major/minor split, suit/rank where
 // applicable). Anything that depends on how a particular game interprets the
 // cards (point values, powers, etc.) does NOT belong here.
+// `compact` requests a smaller-footprint composition (e.g. a board tile
+// that also has to leave room for up to 3 pieces) rather than the default,
+// roomier sizing appropriate for a card shown alone (e.g. in a hand).
+export interface ITarotGlyphOpts {
+    compact?: boolean;
+}
+
 export interface ITarotCard {
     readonly name: string;
     readonly uid: string;
     readonly major: boolean;
     clone(): ITarotCard;
-    toGlyph(): [Glyph, ...Glyph[]];
+    toGlyph(opts?: ITarotGlyphOpts): [Glyph, ...Glyph[]];
 }
 
 export type MinorParams = {
@@ -42,23 +49,25 @@ export class MinorCard implements ITarotCard {
         return this.rank.uid + this.suit.uid;
     }
 
-    public toGlyph(): [Glyph, ...Glyph[]] {
+    public toGlyph(opts: ITarotGlyphOpts = {}): [Glyph, ...Glyph[]] {
+        const scale = opts.compact ? 0.32 : 0.5;
+        const corner = opts.compact ? 310 : 250;
         const glyph: [Glyph, ...Glyph[]] = [
             { name: "piece-square", scale: 1 },
         ];
         if (this.suit.glyph !== undefined) {
             glyph.push({
                 name: this.suit.glyph,
-                scale: 0.5,
-                nudge: { dx: -250, dy: 250 },
+                scale,
+                nudge: { dx: -corner, dy: corner },
             });
         }
         // Ranks have no dedicated glyph asset; render the uid (A, 2-10, P, N, Q, K) as text.
         glyph.push({
             text: this.rank.uid,
-            scale: 0.5,
+            scale,
             colour: "_context_strokes",
-            nudge: { dx: 250, dy: -250 },
+            nudge: { dx: corner, dy: -corner },
         });
         return glyph;
     }
@@ -124,11 +133,18 @@ export class MajorCard implements ITarotCard {
     // No bespoke per-card art asset exists yet; render a generic card face
     // with the card's traditional numeral. Game-specific overlays (e.g.
     // Gnostica's 1-3 power icons) are composed on top by the consuming game,
-    // not here - this module only knows genuine tarot-deck facts.
-    public toGlyph(): [Glyph, ...Glyph[]] {
+    // not here - this module only knows genuine tarot-deck facts. In
+    // `compact` mode the numeral is nudged to the top edge, leaving the rest
+    // of the face free for whatever the caller layers on top of it.
+    public toGlyph(opts: ITarotGlyphOpts = {}): [Glyph, ...Glyph[]] {
         return [
             { name: "piece-square", scale: 1 },
-            { text: this.romanNumeral, scale: 0.6, colour: "_context_strokes" },
+            {
+                text: this.romanNumeral,
+                scale: opts.compact ? 0.32 : 0.6,
+                colour: "_context_strokes",
+                nudge: opts.compact ? { dx: 0, dy: -380 } : undefined,
+            },
         ];
     }
 

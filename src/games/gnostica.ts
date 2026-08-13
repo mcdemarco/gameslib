@@ -4,7 +4,7 @@ import { APRenderRep, Glyph } from "@abstractplay/renderer/build/schemas/schema"
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
-import { Deck, MinorCard, MajorCard, allCards } from "../common/tarot";
+import { Deck, MinorCard, MajorCard, TarotCard, allCards } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { Territory, ITerritory } from "./gnostica/Territory";
 import { Piece, Orientation, cardinalOrientations } from "./gnostica/Piece";
@@ -18,7 +18,7 @@ import {
     resolveHermitMovePiece, resolveHermitMoveTerritory, resolveTradeHands,
     resolveJudgementDraw, resolveHighPriestess,
 } from "./gnostica/powers";
-import { MajorArcanaDef, PowerStep, SuitPrimitive, getMajorArcanaDef } from "./gnostica/majorArcana";
+import { MajorArcanaDef, PowerStep, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import i18next from "i18next";
 
 export type playerid = 1|2|3|4|5|6;
@@ -71,6 +71,7 @@ export class GnosticaGame extends GameBase {
         dateAdded: "2026-08-13",
         // i18next.t("apgames:descriptions.gnostica")
         description: "apgames:descriptions.gnostica",
+        notes: "apgames:notes.gnostica",
         urls: ["https://www.looneylabs.com/games/gnostica"],
         bggid: "9629",
         people: [
@@ -1120,8 +1121,15 @@ export class GnosticaGame extends GameBase {
             // just this column's letter(s).
             columnLabels.push(GnosticaBoard.coords2algebraic(x, 0).slice(0, -1));
         }
+        // The renderer pairs rowLabels[i] with pieceRows[N-1-i] (mirrored,
+        // not same-index) - confirmed by actually rendering an asymmetric
+        // test board, not just by reading the schema. pieceRows[0] is the
+        // smallest absolute y (top, since y grows downward), so rowLabels
+        // has to be built bottom-first (largest y = index 0) for the
+        // mirrored pairing to land each row's true algebraic-notation label
+        // on itself. Matches Knight Line's own .reverse() in its render().
         const rowLabels: string[] = [];
-        for (let y = minY; y <= maxY; y++) {
+        for (let y = maxY; y >= minY; y--) {
             rowLabels.push((y === 0 ? 0 : -y).toString());
         }
 
@@ -1177,22 +1185,93 @@ export class GnosticaGame extends GameBase {
         return `k_${cardPart}_${piecesPart}`;
     }
 
+    // Gnostica's own card face, built from scratch rather than
+    // `card.toGlyph()`: a four-corner layout modelled on Decktet's own
+    // toGlyph() (rank/suit badges in the corners), not a tarot-deck fact,
+    // so it lives here rather than in the generic tarot module.
+    //   - top-left: the rank (minors) or major arcana numeral, plain text.
+    //   - top-right: a "piece" circle holding the suit icon (minors) or the
+    //     major's first power icon - always populated.
+    //   - bottom-left: nothing at all for minors; for majors, an empty
+    //     circle, except when the card has a 3rd icon (only the Devil,
+    //     currently), which populates it.
+    //   - bottom-right: nothing for pip minors (A-10); an empty circle for
+    //     court minors (P/N/Q/K); for majors, a circle populated with the
+    //     2nd icon if the card has one, else empty.
+    private buildCardFace(card: TarotCard, compact: boolean): Glyph[] {
+        const stack: Glyph[] = [{ name: "piece-square", scale: 1 }];
+
+        const rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
+        const rankScale = compact ? 0.45 : 0.45;
+        const corner = compact ? 250 : 250;
+        stack.push({
+            text: rankText,
+            scale: rankScale,
+            colour: "_context_strokes",
+            nudge: { dx: -corner, dy: -corner },
+        });
+
+        const icons = card.major
+            ? getMajorArcanaIcons(card as MajorCard)
+            : (card as MinorCard).suit.glyph !== undefined ? [(card as MinorCard).suit.glyph!] : [];
+        const circleScale = compact ? 0.45 : 0.45;
+        const iconScale = compact ? 0.30 : 0.30;
+        // The renderer positions a glyph via a scale-INDEPENDENT anchor
+        // (nudge - 250 in its internal 500-unit canvas) and only then
+        // applies that glyph's own scale around that anchor, so two glyphs
+        // sharing one nudge only share a visual centre when they also share
+        // scale - confirmed by inspecting the rendered <use> elements'
+        // actual x/y/transform. `iconShift` compensates so a smaller-scaled
+        // icon still lands centred on its larger coin.
+        const iconShift = 375; //125;// * (circleScale - iconScale);
+        // A solid "piece" circle backdrop, matching the physical sticker
+        // sheet's always-printed circles - the icon (if any) is composed on
+        // top of it. Flat fill, no opacity blending.
+        const pushCircle = (xdir: number, ydir: number, iconName?: string) => {
+            stack.push({ name: "piece", scale: circleScale, colour: "_context_board", nudge: { dx: xdir * corner, dy: ydir * corner } });
+            if (iconName !== undefined) {
+                stack.push({ name: iconName, scale: iconScale, nudge: { dx: xdir * iconShift, dy: ydir * iconShift } });
+            }
+        };
+
+        // Top-right: always populated.
+        pushCircle(1, -1, icons[0]);
+
+        if (card.major) {
+            pushCircle(-1, 1, icons[2]);
+            pushCircle(1, 1, icons[1]);
+        } else if ((card as MinorCard).rank.court) {
+            pushCircle(1, 1, undefined);
+        }
+
+        return stack;
+    }
+
+    // A board tile has to show the card AND up to 3 pieces in the same
+    // small square, so it uses the compact card face (smaller rank/circle
+    // sizing) rather than the roomier default meant for a card shown alone
+    // (e.g. a hand, once that's rendered).
     private buildCellGlyph(t: Territory | undefined, cls: CellClass): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
         if (t?.card !== undefined) {
-            stack.push(...t.card.toGlyph());
+            stack.push(...this.buildCardFace(t.card, true));
         } else {
             // Wasteland: a faint neutral square so the clickable area is
             // visible without implying a territory is there. Void cells are
             // never given a legend entry at all (rendered as "-").
             stack.push({ name: "piece-square-borderless", scale: 1, opacity: cls === "wasteland" ? 0.15 : 0 });
         }
-        // Up to 3 pieces, nudged along the bottom edge of the cell.
-        const nudges: [number, number][] = [[-280, 350], [0, 350], [280, 350]];
+        // Up to 3 pieces, nudged along the bottom edge of the cell - sized
+        // to read clearly as the actual game pieces, bigger than the card's
+        // own (deliberately de-emphasized) iconography, but pulled in
+        // enough to stay inside the tile rather than bleeding into
+        // neighbours (0.65/±320/380 overflowed badly with 3 pieces present
+        // - confirmed by actually rendering it, not just eyeballing numbers).
+        const nudges: [number, number][] = [[-260, 330], [0, 330], [260, 330]];
         (t?.pieces ?? []).forEach((p, i) => {
             const g = this.pyramidGlyph(p);
-            g.scale = 0.42;
-            const [dx, dy] = nudges[i] ?? [0, 350];
+            g.scale = 0.48;
+            const [dx, dy] = nudges[i] ?? [0, 330];
             g.nudge = { dx, dy };
             stack.push(g);
         });
