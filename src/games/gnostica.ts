@@ -1208,7 +1208,7 @@ export class GnosticaGame extends GameBase {
         // already tuned by eye for card format - left untouched.
         const rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
         const rankScale = compact ? 0.30 : 0.45;
-        const corner = compact ? 340 : 250;
+        const corner = compact ? 440 : 250;
         stack.push({
             text: rankText,
             scale: rankScale,
