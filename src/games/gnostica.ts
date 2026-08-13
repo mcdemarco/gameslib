@@ -1241,7 +1241,10 @@ export class GnosticaGame extends GameBase {
         // shrinks everything in them, versus the roomier sizing tuned for a
         // card shown alone. The non-compact numbers below are the ones
         // already tuned by eye for card format - left untouched.
-        const rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
+        let rankText = card.major ? (card as MajorCard).romanNumeralPadded : (card as MinorCard).rank.uid;
+        if (!card.major && (card as MinorCard).rank.uid !== "10") {
+            rankText += "\u00A0";
+        }
         const rankScale = compact ? 0.25 : 0.45;
         const corner = compact ? BOARD_TILE_GRID_CORNER : 250;
         const rankShift = compact ? -675 : -corner;
@@ -1250,6 +1253,7 @@ export class GnosticaGame extends GameBase {
             scale: rankScale,
             colour: "_context_strokes",
             nudge: { dx: rankShift, dy: rankShift },
+            fontFamily: "Georgia,serif",
         });
 
         const icons = card.major
