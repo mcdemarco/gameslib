@@ -1,9 +1,9 @@
 import { DirectionCardinal } from "../../common";
-import { TarotCard, allCards } from "../../common/tarot";
+import { TarotCard, MajorCard, allCards } from "../../common/tarot";
 import { GnosticaBoard, IEvicted } from "./board";
 import { Territory, cardPointValue } from "./Territory";
 import { Piece, PieceSize, Orientation } from "./Piece";
-import { PrimitiveOpts } from "./majorArcana";
+import { PrimitiveOpts, MAJOR_ARCANA, MajorArcanaDef } from "./majorArcana";
 
 // Per-size counts of pieces still in reserve (not on the board), indexed
 // [small, medium, large]. There's no dedicated Stash class - it's a plain
@@ -48,7 +48,10 @@ const stashOf = (ctx: PowerContext, player: number): Stash => {
     return s;
 };
 
-const takeFromStash = (ctx: PowerContext, player: number, size: PieceSize): void => {
+// Exported: the engine also needs this directly for the base "place" turn
+// action (your first piece comes from your own stash, same as every other
+// piece that ever enters play).
+export const takeFromStash = (ctx: PowerContext, player: number, size: PieceSize): void => {
     const s = stashOf(ctx, player);
     if (s[size - 1] <= 0) {
         throw new GnosticaRulesError(`Player ${player} has no size-${size} pieces left in their stash.`);
@@ -56,7 +59,7 @@ const takeFromStash = (ctx: PowerContext, player: number, size: PieceSize): void
     s[size - 1] -= 1;
 };
 
-const returnToStash = (ctx: PowerContext, player: number, size: PieceSize): void => {
+export const returnToStash = (ctx: PowerContext, player: number, size: PieceSize): void => {
     stashOf(ctx, player)[size - 1] += 1;
 };
 
@@ -265,7 +268,10 @@ export const resolveMovePiece = (
         destT = new Territory(undefined);
         ctx.board.store.set(destX, destY, destT);
     }
-    destT.add(moved, opts.ignoreCapacity);
+    // A relaxed landing (Chariot's waypoint) must bypass Territory.add()'s
+    // own capacity enforcement too, not just the pre-check above - passing
+    // "through" a 3+ piece cell means briefly exceeding it, transiently.
+    destT.add(moved, opts.ignoreCapacity || opts.skipLandingCheck);
 };
 
 // Push the territory the minion is pointing at (never the minion's own
@@ -467,4 +473,231 @@ export const resolveAttackTerritory = (
     }
     ctx.discardPile.push(oldUid);
     ctx.board.shrinkTerritory(targetX, targetY, newCard);
+};
+
+// ============================================================
+// Special powers - the major arcana abilities that don't reduce to one of
+// the four suit primitives. Each function here mirrors the primitives'
+// contract: given fully-specified parameters, mutate ctx/board correctly
+// for that one step. Chaining these together across a card's multi-step
+// power list (walking a MajorArcanaDef.powers array, tracking which of the
+// acting player's pieces have become minions this turn, etc.) is the move
+// parser's job in the GameBase engine (src/games/gnostica.ts), not this
+// file's - that orchestration needs the concrete move-string grammar, which
+// doesn't exist yet.
+//
+// Two of the twenty-two majors need no resolver here at all:
+// - Magician ({special: "magicianChoice"}) just means "the acting player
+//   picks any one of the eight primitive functions above for this step" -
+//   there's no distinct behaviour to implement, only a choice at dispatch
+//   time.
+// - every other major that decomposes into primitives (Lovers, Chariot,
+//   Strength, Temperance, Empress, Emperor, Justice's sword half, Hanged
+//   Man's rod half, Tower, Star, Moon, Sun, Death) is already fully covered
+//   by the primitives above plus their opts flags.
+// ============================================================
+
+// Orient one of the acting player's own minions. Unlike the suit
+// primitives, there's no adjacency/self targeting restriction here - any of
+// the player's current minions may be the one reoriented (Empress/
+// Emperor's first step, Tower/Star's first step).
+export const resolveOrientMinion = (
+    ctx: PowerContext, x: number, y: number, index: number, newOrientation: Orientation,
+): void => {
+    const p = getPiece(ctx, x, y, index);
+    requireOwnMinion(p, ctx.currplayer);
+    p.orientation = newOrientation;
+};
+
+// Devil only: orient ANY piece, even an opponent's - still subject to the
+// normal self/adjacent-cell targeting rule, since the minion doing the
+// orienting is still bound by its own facing. Reorienting the acting minion
+// itself changes what it can subsequently target with the Devil's other two
+// steps, which is the card's signature trick.
+export const resolveOrientAny = (
+    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
+    targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
+): void => {
+    const minion = getPiece(ctx, minionX, minionY, minionIndex);
+    requireOwnMinion(minion, ctx.currplayer);
+    assertValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+    const target = getPiece(ctx, targetX, targetY, targetIndex);
+    target.orientation = newOrientation;
+};
+
+// Hierophant: replace the target piece (anyone's) with one of the acting
+// player's own, same size, drawn from the acting player's stash - the
+// displaced piece returns to its own owner's stash, same as any other
+// removal.
+export const resolveHierophantReplace = (
+    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
+    targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
+): void => {
+    const minion = getPiece(ctx, minionX, minionY, minionIndex);
+    requireOwnMinion(minion, ctx.currplayer);
+    assertValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+    const t = getTerritory(ctx, targetX, targetY);
+    const target = t.pieces[targetIndex];
+    if (target === undefined) {
+        throw new GnosticaRulesError(`No piece at index ${targetIndex} on (${targetX},${targetY}).`);
+    }
+    takeFromStash(ctx, ctx.currplayer, target.size);
+    returnToStash(ctx, target.owner, target.size);
+    t.removeAt(targetIndex);
+    t.add(new Piece(ctx.currplayer, target.size, newOrientation));
+};
+
+// Hermit, piece variant: move a targeted piece to ANY completely empty
+// territory or wasteland on the board, ignoring the normal
+// adjacency/distance limits every Rod is bound by.
+export const resolveHermitMovePiece = (
+    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
+    targetX: number, targetY: number, targetIndex: number,
+    destX: number, destY: number, newOrientation: Orientation | undefined,
+): void => {
+    const minion = getPiece(ctx, minionX, minionY, minionIndex);
+    requireOwnMinion(minion, ctx.currplayer);
+    assertValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+    if (ctx.board.classify(destX, destY) === "void") {
+        throw new GnosticaRulesError("The Hermit may not move a piece into the void.");
+    }
+    const destT = ctx.board.get(destX, destY);
+    if (destT !== undefined && destT.pieces.length > 0) {
+        throw new GnosticaRulesError("The Hermit's destination must be completely empty.");
+    }
+    const srcT = getTerritory(ctx, targetX, targetY);
+    const moved = srcT.removeAt(targetIndex);
+    if (moved.owner === ctx.currplayer && newOrientation !== undefined) {
+        moved.orientation = newOrientation;
+    }
+    let dt = ctx.board.get(destX, destY);
+    if (dt === undefined) {
+        dt = new Territory(undefined);
+        ctx.board.store.set(destX, destY, dt);
+    }
+    dt.add(moved);
+};
+
+// Hermit, territory variant: move a targeted (non-enemy-occupied) territory
+// to ANY wasteland on the board not occupied by enemy pieces - the same
+// card-only-moves mechanic as a Rod's tile push, just without the
+// direction/distance limits.
+export const resolveHermitMoveTerritory = (
+    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
+    targetX: number, targetY: number, destX: number, destY: number,
+): void => {
+    const minion = getPiece(ctx, minionX, minionY, minionIndex);
+    requireOwnMinion(minion, ctx.currplayer);
+    assertValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
+    if (hasEnemyPieces(ctx, targetX, targetY, ctx.currplayer)) {
+        throw new GnosticaRulesError("That territory is occupied by enemy pieces.");
+    }
+    if (ctx.board.classify(destX, destY) !== "wasteland") {
+        throw new GnosticaRulesError("The Hermit must move a territory onto a wasteland.");
+    }
+    if (hasEnemyPieces(ctx, destX, destY, ctx.currplayer)) {
+        throw new GnosticaRulesError("That destination wasteland is occupied by enemy pieces.");
+    }
+    const evictions = ctx.board.pushTerritory(targetX, targetY, destX, destY);
+    returnEvictedPieces(ctx, evictions);
+};
+
+// Justice / Hanged Man: swap hands with the owner of the targeted piece.
+// PowerContext only ever carries the acting player's own hand, so the
+// caller (which owns the full per-player hand map) must pass in the other
+// player's live hand array by reference - both arrays are mutated in place,
+// matching every other pile mutation in this file. Returns the target's
+// owner so the caller can double-check it passed the right array.
+export const resolveTradeHands = (
+    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
+    targetX: number, targetY: number, targetIndex: number, otherHand: string[],
+): number => {
+    const minion = getPiece(ctx, minionX, minionY, minionIndex);
+    requireOwnMinion(minion, ctx.currplayer);
+    assertValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+    const target = getPiece(ctx, targetX, targetY, targetIndex);
+    const mine = [...ctx.hand];
+    ctx.hand.length = 0;
+    ctx.hand.push(...otherHand);
+    otherHand.length = 0;
+    otherHand.push(...mine);
+    return target.owner;
+};
+
+// Judgement: draw specific cards (chosen by the acting player, "from
+// anywhere in the discard pile") into hand, up to one per pip of the acting
+// minion, capped by the 6-card hand limit - drawing fewer than the minion's
+// full pip count is always allowed, per the general "all powers are
+// optional" rule.
+export const resolveJudgementDraw = (
+    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number, cardUids: string[],
+): void => {
+    const minion = getPiece(ctx, minionX, minionY, minionIndex);
+    requireOwnMinion(minion, ctx.currplayer);
+    const maxDraw = Math.min(minion.size, Math.max(0, 6 - ctx.hand.length));
+    if (cardUids.length > maxDraw) {
+        throw new GnosticaRulesError(`This minion may draw at most ${maxDraw} card(s) right now, not ${cardUids.length}.`);
+    }
+    for (const uid of cardUids) {
+        const idx = ctx.discardPile.indexOf(uid);
+        if (idx === -1) {
+            throw new GnosticaRulesError(`"${uid}" is not in the discard pile.`);
+        }
+        ctx.discardPile.splice(idx, 1);
+        ctx.hand.push(uid);
+    }
+};
+
+// High Priestess: one "discard any, then draw back up to 6" round (the card
+// grants two of these in a row - see MAJOR_ARCANA["02"] - by simply calling
+// this twice). No minion/targeting is involved; this is pure hand/pile
+// manipulation. Draws stop early if the draw pile runs dry rather than
+// throwing - same as the ordinary end-of-turn "discard and draw" action,
+// running out just means ending up with fewer than 6.
+export const resolveHighPriestess = (ctx: PowerContext, discardUids: string[]): void => {
+    for (const uid of discardUids) {
+        const idx = ctx.hand.indexOf(uid);
+        if (idx === -1) {
+            throw new GnosticaRulesError(`"${uid}" is not in hand.`);
+        }
+        ctx.hand.splice(idx, 1);
+        ctx.discardPile.push(uid);
+    }
+    while (ctx.hand.length < 6 && ctx.drawPile.length > 0) {
+        ctx.hand.push(ctx.drawPile.shift() as string);
+    }
+};
+
+// Fool: flip the top card of the draw pile and "play" it - i.e. it goes
+// straight to the discard pile, same as any other played card, and is
+// returned here so the caller can resolve whichever power it grants (the
+// card grants two flips - see MAJOR_ARCANA["00"] - by calling this twice).
+// Actually dispatching the flipped card's own power is the caller's job,
+// same scope boundary as Magician/World below - only the engine has the
+// full per-card power dispatcher.
+export const resolveFool = (ctx: PowerContext): TarotCard => {
+    const uid = ctx.drawPile.shift();
+    if (uid === undefined) {
+        throw new GnosticaRulesError("The draw pile is empty.");
+    }
+    const flipped = cardByUid(uid);
+    ctx.discardPile.push(uid);
+    return flipped;
+};
+
+// World: validates that `chosenUid` names a major arcana card currently
+// present somewhere on the board, and returns its MajorArcanaDef so the
+// caller can resolve that card's power(s) exactly as if it had been
+// activated directly - the actual multi-step dispatch is the engine's job.
+export const resolveWorldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArcanaDef => {
+    const present = [...ctx.board.entries()].some(([, , t]) =>
+        t.card !== undefined && t.card.major && (t.card as MajorCard).uid === chosenUid);
+    if (!present) {
+        throw new GnosticaRulesError(`No major arcana card "${chosenUid}" is currently on the board.`);
+    }
+    const def = MAJOR_ARCANA[chosenUid];
+    if (def === undefined) {
+        throw new GnosticaRulesError(`Unknown major arcana uid "${chosenUid}".`);
+    }
+    return def;
 };

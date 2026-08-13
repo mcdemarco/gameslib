@@ -11,6 +11,9 @@ import {
     resolveMovePiece, resolveMoveTerritory,
     resolveGrowPiece, resolveGrowTerritory,
     resolveAttackPiece, resolveAttackTerritory,
+    resolveOrientMinion, resolveOrientAny, resolveHierophantReplace,
+    resolveHermitMovePiece, resolveHermitMoveTerritory, resolveTradeHands,
+    resolveJudgementDraw, resolveHighPriestess, resolveFool, resolveWorldChoosePower,
 } from "../../src/games/gnostica/powers";
 
 const card = (uid: string) => minorCards.find(c => c.uid === uid) ?? majorCards.find(c => c.uid === uid)!;
@@ -378,5 +381,160 @@ describe("Gnostica powers: Swords (attack)", () => {
         b.store.set(0, 0, new Territory(theFool(), [new Piece(2, 1, "up")]));
         const ctx = makeCtx(b, { hand: ["KS"] });
         expect(() => resolveAttackTerritory(ctx, 0, 0, 0, 0, 0, 1, "KS")).to.throw();
+    });
+});
+
+describe("Gnostica powers: special (major arcana)", () => {
+    it("orientMinion reorients any of the acting player's own minions, with no adjacency restriction", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "N")]));
+        const ctx = makeCtx(b);
+        resolveOrientMinion(ctx, 0, 0, 0, "W");
+        expect(b.get(0, 0)!.pieces[0].orientation).eq("W");
+    });
+
+    it("orientMinion refuses to reorient an opponent's piece", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(2, 1, "N")]));
+        const ctx = makeCtx(b);
+        expect(() => resolveOrientMinion(ctx, 0, 0, 0, "W")).to.throw();
+    });
+
+    it("orientAny (Devil) can reorient an opponent's piece, but only a legally-targeted one", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "S")]));
+        const ctx = makeCtx(b);
+        resolveOrientAny(ctx, 0, 0, 0, 1, 0, 0, "N");
+        expect(b.get(1, 0)!.pieces[0].orientation).eq("N");
+    });
+
+    it("orientAny still enforces the minion's own self/adjacent targeting rule", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "N")])); // points N, not E
+        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "S")]));
+        const ctx = makeCtx(b);
+        expect(() => resolveOrientAny(ctx, 0, 0, 0, 1, 0, 0, "N")).to.throw();
+    });
+
+    it("Hierophant replaces a target piece with the acting player's own, same size, from their stash", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 2, "S")]));
+        const ctx = makeCtx(b);
+        resolveHierophantReplace(ctx, 0, 0, 0, 1, 0, 0, "N");
+        const dest = b.get(1, 0)!;
+        expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 2, orientation: "N" });
+        expect(ctx.stashes.get(1)!).to.deep.equal([5, 4, 5]); // took a medium from the acting player
+        expect(ctx.stashes.get(2)!).to.deep.equal([5, 6, 5]); // displaced piece returned to its own owner
+    });
+
+    it("Hierophant cannot replace with a size the acting player doesn't have", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 3, "S")]));
+        const ctx = makeCtx(b, { stashes: new Map([[1, [5, 5, 0] as Stash], [2, fullStash()]]) });
+        expect(() => resolveHierophantReplace(ctx, 0, 0, 0, 1, 0, 0, "N")).to.throw();
+    });
+
+    it("Hermit moves a piece to any completely empty cell on the board, ignoring adjacency", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up")]));
+        b.store.set(9, 9, new Territory(twoOfCups())); // far away, empty of pieces
+        const ctx = makeCtx(b);
+        resolveHermitMovePiece(ctx, 0, 0, 0, 0, 0, 0, 9, 9, "S");
+        expect(b.get(0, 0)!.pieces.length).eq(0);
+        expect(b.get(9, 9)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "S" });
+    });
+
+    it("Hermit refuses a destination that already holds a piece, or the void", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up")]));
+        b.store.set(9, 9, new Territory(twoOfCups(), [new Piece(2, 1, "up")]));
+        const ctx = makeCtx(b);
+        expect(() => resolveHermitMovePiece(ctx, 0, 0, 0, 0, 0, 0, 9, 9, undefined)).to.throw(); // occupied
+        expect(() => resolveHermitMovePiece(ctx, 0, 0, 0, 0, 0, 0, 50, 50, undefined)).to.throw(); // void
+    });
+
+    it("Hermit moves a territory to any wasteland, leaving its pieces behind, evicting anyone stranded", () => {
+        const b = new GnosticaBoard();
+        b.store.set(-1, 0, new Territory(threeOfCups())); // keeps (0,0) a wasteland throughout
+        b.store.set(0, 0, new Territory(undefined, [new Piece(1, 1, "E")])); // minion on a wasteland, pointing at (1,0)
+        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(1, 1, "up")]));
+        b.store.set(9, 9, new Territory(aceOfCups())); // keeps the landing spot a legal wasteland
+        const ctx = makeCtx(b);
+        resolveHermitMoveTerritory(ctx, 0, 0, 0, 1, 0, 9, 8);
+        expect(b.has(1, 0)).eq(false); // stranded, evicted
+        expect(b.get(9, 8)!.card?.uid).eq("2C");
+        expect(ctx.stashes.get(1)!).to.deep.equal([6, 5, 5]);
+    });
+
+    it("trade hands swaps the acting player's hand with the targeted piece owner's, in place", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "up")]));
+        const mine = ["AC", "2C"];
+        const theirs = ["KS"];
+        const ctx = makeCtx(b, { hand: mine });
+        const owner = resolveTradeHands(ctx, 0, 0, 0, 1, 0, 0, theirs);
+        expect(owner).eq(2);
+        expect(mine).to.deep.equal(["KS"]);
+        expect(theirs).to.deep.equal(["AC", "2C"]);
+        expect(ctx.hand).to.deep.equal(mine); // still the same live array reference
+    });
+
+    it("Judgement draws chosen cards from the discard pile, capped at pips and at the 6-card hand limit", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "up")]));
+        const ctx = makeCtx(b, { hand: ["AC", "2C", "3C"], discardPile: ["KS", "00"] });
+        resolveJudgementDraw(ctx, 0, 0, 0, ["KS", "00"]);
+        expect(ctx.hand).to.deep.equal(["AC", "2C", "3C", "KS", "00"]);
+        expect(ctx.discardPile).to.deep.equal([]);
+    });
+
+    it("Judgement refuses to draw more than the minion's pip count", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up")]));
+        const ctx = makeCtx(b, { discardPile: ["KS", "00"] });
+        expect(() => resolveJudgementDraw(ctx, 0, 0, 0, ["KS", "00"])).to.throw();
+    });
+
+    it("High Priestess discards chosen cards then redraws up to 6, stopping early if the draw pile runs out", () => {
+        const b = new GnosticaBoard();
+        const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: ["KS"] });
+        resolveHighPriestess(ctx, ["AC"]);
+        expect(ctx.hand).to.deep.equal(["2C", "KS"]);
+        expect(ctx.discardPile).to.deep.equal(["AC"]);
+        expect(ctx.drawPile).to.deep.equal([]);
+    });
+
+    it("Fool flips the top of the draw pile into the discard pile and returns it", () => {
+        const b = new GnosticaBoard();
+        const ctx = makeCtx(b, { drawPile: ["KS", "AC"] });
+        const flipped = resolveFool(ctx);
+        expect(flipped.uid).eq("KS");
+        expect(ctx.drawPile).to.deep.equal(["AC"]);
+        expect(ctx.discardPile).to.deep.equal(["KS"]);
+    });
+
+    it("Fool refuses to flip from an empty draw pile", () => {
+        const b = new GnosticaBoard();
+        const ctx = makeCtx(b, { drawPile: [] });
+        expect(() => resolveFool(ctx)).to.throw();
+    });
+
+    it("World validates the chosen major arcana card is actually on the board, and returns its definition", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(theFool()));
+        const ctx = makeCtx(b);
+        const def = resolveWorldChoosePower(ctx, "00");
+        expect(def.name).eq("The Fool");
+    });
+
+    it("World refuses to borrow the power of a major arcana card that isn't on the board", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups()));
+        const ctx = makeCtx(b);
+        expect(() => resolveWorldChoosePower(ctx, "00")).to.throw();
     });
 });
