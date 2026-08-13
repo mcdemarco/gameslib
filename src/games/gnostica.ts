@@ -1207,20 +1207,21 @@ export class GnosticaGame extends GameBase {
         // card shown alone. The non-compact numbers below are the ones
         // already tuned by eye for card format - left untouched.
         const rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
-        const rankScale = compact ? 0.30 : 0.45;
-        const corner = compact ? 440 : 250;
+        const rankScale = compact ? 0.25 : 0.45;
+        const corner = compact ? 650 : 250;
+        const rankShift = compact ? -675 : -corner;
         stack.push({
             text: rankText,
             scale: rankScale,
             colour: "_context_strokes",
-            nudge: { dx: -corner, dy: -corner },
+            nudge: { dx: rankShift, dy: rankShift },
         });
 
         const icons = card.major
             ? getMajorArcanaIcons(card as MajorCard)
             : (card as MinorCard).suit.glyph !== undefined ? [(card as MinorCard).suit.glyph!] : [];
-        const circleScale = compact ? 0.30 : 0.45;
-        const iconScale = compact ? 0.20 : 0.30;
+        const circleScale = compact ? 0.25 : 0.45;
+        const iconScale = compact ? 0.15 : 0.30;
         // The renderer positions a glyph via a scale-INDEPENDENT anchor
         // (nudge - 250 in its internal 500-unit canvas) and only then
         // applies that glyph's own scale around that anchor, so two glyphs
@@ -1231,7 +1232,7 @@ export class GnosticaGame extends GameBase {
         // (375) was tuned by eye; the compact value is only scaled
         // proportionally to the corner change (unverified - the exact
         // number likely needs the same by-eye check the original did).
-        const iconShift = compact ? 375 * (corner / 250) : 375;
+        const iconShift = compact ? 1075 : 375;
         // A solid "piece" circle backdrop, matching the physical sticker
         // sheet's always-printed circles - the icon (if any) is composed on
         // top of it. Flat fill, no opacity blending.
