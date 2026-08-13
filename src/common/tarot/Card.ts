@@ -129,6 +129,32 @@ export class MajorCard implements ITarotCard {
         }
         return numeral;
     }
+    // (Roman numerals have no zero, so it displays as the digit "0").
+    public get romanNumeralPadded(): string {
+        let numeral = "";
+        let paddingLength = 0;
+
+        if (this.seq === 0) {
+            numeral = "0";
+            paddingLength = 1;
+        } else {
+            const table: [number, string, number][] = [[10, "X", 1], [5, "V", 1], [1, "I", 0.33]];
+            let remaining = this.seq;
+            for (const [value, symbol, length] of table) {
+                while (remaining >= value) {
+                    numeral += symbol;
+                    remaining -= value;
+                    paddingLength += length;
+                }
+            }
+        }
+        
+        while (paddingLength < 6) {
+            numeral += "\u00A0";
+            paddingLength += 1;
+        }
+        return numeral;
+    }
 
     // No bespoke per-card art asset exists yet; render a generic card face
     // with the card's traditional numeral. Game-specific overlays (e.g.
