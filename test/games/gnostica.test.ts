@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions */
 import "mocha";
 import { expect } from "chai";
 import { GnosticaGame } from "../../src/games/gnostica";
@@ -531,5 +532,114 @@ describe("Gnostica: render", () => {
         expect(entry, "expected a legend entry with 5 pyramid glyphs").to.not.be.undefined;
         const coords = entry!.filter(gl => gl.name?.startsWith("pyramid-")).map(gl => `${gl.nudge!.dx},${gl.nudge!.dy}`);
         expect(new Set(coords).size, "every piece should have a distinct nudge").eq(coords.length);
+    });
+});
+
+describe("Gnostica: handleClick", () => {
+    // handleClick's row/col are relative to render()'s current window
+    // (padded by 1 cell beyond the board's own bounding box) - this mirrors
+    // that exact formula so tests can go from absolute board coords to the
+    // row/col a real click would report.
+    const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
+        const minX = g.board.minX - 1;
+        const minY = g.board.minY - 1;
+        return [y - minY, x - minX];
+    };
+
+    it("place: clicking a valid cell before any pieces are on the board starts a place move", () => {
+        const g = new GnosticaGame(2);
+        const [row, col] = rowColFor(g, 0, 0); // "m0"
+        const result = g.handleClick("", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.move).eq("place m0");
+    });
+
+    // A bare "place <cell>" is already grammatically complete (orientation
+    // defaults to "up"), so validateMove() alone would mark it complete:1 -
+    // but handleClick has to downgrade that to 0, or the interface would
+    // auto-submit "up" on the very first click, before the player ever
+    // gets a chance to click again and cycle to a real facing (the
+    // reported bug this guards against).
+    it("place: the first click is never auto-submittable - complete stays 0 even though the move is already valid", () => {
+        const g = new GnosticaGame(2);
+        const [row, col] = rowColFor(g, 0, 0);
+        const result = g.handleClick("", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.complete).eq(0);
+    });
+
+    it("place: clicking the same cell again cycles the orientation", () => {
+        const g = new GnosticaGame(2);
+        const [row, col] = rowColFor(g, 0, 0);
+        const first = g.handleClick("", row, col);
+        const second = g.handleClick(first.move, row, col);
+        expect(second.valid).to.be.true;
+        expect(second.move).eq("place m0 N");
+    });
+
+    it("orient: clicking your own piece (with pieces already on the board) starts an orient move", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        const [row, col] = rowColFor(g, 0, 0);
+        const result = g.handleClick("", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.move).eq("orient m0.0 up");
+        expect(result.complete).eq(0); // same auto-submit guard as place
+    });
+
+    it("orient: clicking the same piece again cycles the facing", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const [row, col] = rowColFor(g, 0, 0);
+        const first = g.handleClick("", row, col);
+        const second = g.handleClick(first.move, row, col);
+        expect(second.valid).to.be.true;
+        expect(second.move).eq("orient m0.0 N");
+    });
+
+    it("does not guess at a click on a cell with no piece of the acting player's, once placement is no longer legal", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2 - now player 1's turn again
+        const [row, col] = rowColFor(g, -1, 0); // "l0", player 2's piece
+        const result = g.handleClick("", row, col);
+        expect(result.valid).to.be.false;
+    });
+
+    it("draw: clicking a hand card toggles it into a draw move, and clicking again toggles it back out", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // draw requires pieces already on the board
+        g.move("place l0", { trusted: true }); // back to player 1's turn
+        const uid = g.hands[0][0];
+        const first = g.handleClick("", -1, -1, `hand_${uid}`);
+        expect(first.valid).to.be.true;
+        expect(first.move).eq(`draw ${uid}`);
+        expect(first.complete).eq(0); // same auto-submit guard as place/orient
+        const second = g.handleClick(first.move, -1, -1, `hand_${uid}`);
+        expect(second.valid).to.be.true;
+        expect(second.move).eq("draw");
+    });
+
+    it("draw: rejects a hand-card click for a card not in the acting player's hand", () => {
+        const g = new GnosticaGame(2);
+        const uid = g.hands[1][0]; // player 2's card, player 1 is acting
+        const result = g.handleClick("", -1, -1, `hand_${uid}`);
+        expect(result.valid).to.be.false;
+    });
+
+    // Hand redaction (blanking an opponent's hand uids to "") is the back
+    // end's job, not this class's - but render() still has to cope with
+    // whatever it's handed, rather than silently referencing a legend key
+    // that was never defined (which would break the actual renderer).
+    it("renders a redacted (blank-uid) hand card as a placeholder, not a dangling legend reference", () => {
+        const g = new GnosticaGame(2);
+        g.hands[1][0] = ""; // simulate the back end redacting player 2's first card
+        const rep = g.render() as { legend: Record<string, unknown>; areas?: { pieces: string[] }[] };
+        const p2area = rep.areas?.[1];
+        expect(p2area, "expected an area for player 2's hand").to.not.be.undefined;
+        expect(p2area!.pieces[0]).eq("hand_UNKNOWN");
+        expect(rep.legend).to.have.property("hand_UNKNOWN");
     });
 });

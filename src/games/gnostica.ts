@@ -1,6 +1,6 @@
-import { GameBase, IAPGameState, IIndividualState, IMoveOptions, IValidationResult } from "./_base";
+import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, Glyph } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaPieces, Glyph } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
@@ -57,6 +57,11 @@ const PIECE_GRID_PREFERRED_INDEX: Record<Orientation, number> = { N: 0, S: 1, E:
 const CARDINAL_COS_SIN: Record<Exclude<Orientation, "up">, [number, number]> = {
     N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
 };
+
+// Click-to-cycle order for handleClick's place/orient support - clicking
+// the same cell (or the same already-selected piece) again advances to the
+// next facing in this order, wrapping around.
+const ORIENTATION_CYCLE: Orientation[] = ["up", "N", "E", "S", "W"];
 
 // A minion's board location - shorthand used while resolving activate/play.
 interface IMinionRef {
@@ -347,6 +352,108 @@ export class GnosticaGame extends GameBase {
             result.message = e instanceof UserFacingError ? e.client : i18next.t("apgames:validation._general.INVALID_MOVE", { move: m });
         }
         return result;
+    }
+
+    // A syntactically-complete move that the click flow itself built up
+    // (as opposed to one the user finished typing) is still provisional -
+    // place/orient's orientation and draw's discard list are all optional
+    // refinements the player may want to keep clicking through, so this
+    // deliberately downgrades validateMove()'s natural complete:1 to 0
+    // whenever the move is otherwise valid. Matches Knight Line's own
+    // mm.complete-vs-result.complete distinction: complete:1 tells the
+    // interface it's safe to auto-finalize the move on its own, which is
+    // wrong here - only the player's own explicit "Submit Move" should end
+    // the click sequence, or the very first click auto-submits "up" before
+    // there's ever a chance to cycle to a real facing.
+    private provisionalResult(newmove: string): IClickResult {
+        const result = this.validateMove(newmove) as IClickResult;
+        result.move = newmove;
+        if (result.valid && result.complete === 1) {
+            result.complete = 0;
+        }
+        return result;
+    }
+
+    // Click support for the simple, single-segment actions only - place,
+    // orient, and toggling hand cards into a draw's discard list. activate/
+    // play's chained power steps aren't click-driven yet (deliberately
+    // scoped out of this pass).
+    public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
+        try {
+            // Hand-card clicks (from the per-player AreaPieces built in
+            // render()) arrive as `piece`, independent of row/col - only
+            // the acting player's own hand can be toggled into a draw.
+            if (piece !== undefined && piece.startsWith("hand_")) {
+                const uid = piece.slice("hand_".length);
+                const hand = this.hands[this.currplayer - 1] ?? [];
+                if (!hand.includes(uid)) {
+                    return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
+                }
+                const [head, ...args] = move.length > 0 ? move.split(/\s+/) : [];
+                let discards = head === "draw" ? [...args] : [];
+                if (discards.includes(uid)) {
+                    discards = discards.filter(u => u !== uid);
+                } else {
+                    discards.push(uid);
+                }
+                return this.provisionalResult(["draw", ...discards].join(" "));
+            }
+
+            const minX = this.board.minX - 1;
+            const minY = this.board.minY - 1;
+            const x = col + minX;
+            const y = row + minY;
+            const cell = GnosticaBoard.coords2algebraic(x, y);
+
+            const [head, ...args] = move.length > 0 ? move.split(/\s+/) : [];
+            let newmove: string;
+
+            if (head === "place") {
+                const [prevCell, prevOrientation] = args;
+                if (prevCell === cell) {
+                    const idx = ORIENTATION_CYCLE.indexOf((prevOrientation as Orientation) ?? "up");
+                    const next = ORIENTATION_CYCLE[(idx + 1) % ORIENTATION_CYCLE.length];
+                    newmove = `place ${cell} ${next}`;
+                } else {
+                    newmove = `place ${cell}`;
+                }
+            } else if (head === "orient") {
+                const [prevRef, prevFacing] = args;
+                const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
+                if (myPieceIdx === -1) {
+                    return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_SUCH_PIECE", { ref: cell }) };
+                }
+                const ref = `${cell}.${myPieceIdx}`;
+                if (prevRef === ref) {
+                    const idx = ORIENTATION_CYCLE.indexOf((prevFacing as Orientation) ?? "up");
+                    const next = ORIENTATION_CYCLE[(idx + 1) % ORIENTATION_CYCLE.length];
+                    newmove = `orient ${ref} ${next}`;
+                } else {
+                    newmove = `orient ${ref} up`;
+                }
+            } else if (!this.hasPiecesOnBoard(this.currplayer)) {
+                // Fresh click, nothing placed yet - place is the only legal
+                // start.
+                newmove = `place ${cell}`;
+            } else {
+                const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
+                if (myPieceIdx === -1) {
+                    // Not one of the acting player's pieces - not something
+                    // this pass handles (e.g. starting an activate/play);
+                    // leave the move untouched rather than guessing.
+                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                }
+                newmove = `orient ${cell}.${myPieceIdx} up`;
+            }
+
+            return this.provisionalResult(newmove);
+        } catch {
+            return {
+                move,
+                valid: false,
+                message: i18next.t("apgames:validation._general.DEFAULT_HANDLER"),
+            };
+        }
     }
 
     // Parses and executes `m` against `this` - the one place move grammar
@@ -1168,6 +1275,47 @@ export class GnosticaGame extends GameBase {
             rowLabels.push((y === 0 ? 0 : -y).toString());
         }
 
+        // One area per player's hand, full-size (non-compact) card faces.
+        // Per-viewer redaction (blanking opponents' hand uids to "") is the
+        // back end's job, same as every other Decktet-hand game in this
+        // repo - this class just has to render whatever it's actually
+        // given, including a placeholder for any uid it can't resolve
+        // (an opponent's redacted "" entry, matching emu.ts's own
+        // "UNKNOWN" convention), rather than assuming every uid is real.
+        const areas: AreaPieces[] = [];
+        for (let p = 1; p <= this.numplayers; p++) {
+            const hand = this.hands[p - 1] ?? [];
+            if (hand.length === 0) {
+                continue;
+            }
+            const handKeys: string[] = [];
+            for (const uid of hand) {
+                const card = allCards().find(c => c.uid === uid);
+                if (card === undefined) {
+                    if (!("hand_UNKNOWN" in legend)) {
+                        legend.hand_UNKNOWN = [
+                            { name: "piece-square", scale: 1 },
+                            { text: "?", scale: 0.5, colour: "_context_strokes" },
+                        ];
+                    }
+                    handKeys.push("hand_UNKNOWN");
+                    continue;
+                }
+                const key = `hand_${uid}`;
+                if (!(key in legend)) {
+                    legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
+                }
+                handKeys.push(key);
+            }
+            areas.push({
+                type: "pieces",
+                pieces: handKeys as [string, ...string[]],
+                label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p }),
+                spacing: 0.5,
+                ownerMark: p,
+            });
+        }
+
         const rep: APRenderRep = {
             board: {
                 style: "squares",
@@ -1184,6 +1332,7 @@ export class GnosticaGame extends GameBase {
             },
             legend,
             pieces: pieceRows.join("\n"),
+            areas: areas.length > 0 ? areas : undefined,
         };
 
         if (this.results.length > 0) {
@@ -1241,18 +1390,25 @@ export class GnosticaGame extends GameBase {
         // shrinks everything in them, versus the roomier sizing tuned for a
         // card shown alone. The non-compact numbers below are the ones
         // already tuned by eye for card format - left untouched.
-        let rankText = card.major ? (card as MajorCard).romanNumeralPadded : (card as MinorCard).rank.uid;
+        let rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
         if (!card.major && (card as MinorCard).rank.uid !== "10") {
             rankText += "\u00A0";
         }
         const rankScale = compact ? 0.25 : 0.45;
         const corner = compact ? BOARD_TILE_GRID_CORNER : 250;
-        const rankShift = compact ? -675 : -corner;
+        let rankShiftX = compact ? -675 : -corner;
+        let rankShiftY = rankShiftX;
+        if (card.major) {
+            rankShiftX += compact ? 675 : 250;
+            rankShiftY += compact ? -175 : -175;
+        }
+        const majorRotation = card.major ? -45 : 0;
         stack.push({
             text: rankText,
             scale: rankScale,
             colour: "_context_strokes",
-            nudge: { dx: rankShift, dy: rankShift },
+            nudge: { dx: rankShiftX, dy: rankShiftY },
+            rotate: majorRotation,
             fontFamily: "Georgia,serif",
         });
 
