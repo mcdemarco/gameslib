@@ -261,7 +261,12 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         g.board.get(-1, 0)!.card = aceOfCups(); // l0
         g.move("place l0 W", { trusted: true }); // player 1, pointing further west
         g.move("place n0", { trusted: true }); // player 2
-        const spotUid = g.hands[0].find(uid => /^(A|[2-9]|10)C$|^(A|[2-9]|10)R$|^(A|[2-9]|10)D$|^(A|[2-9]|10)S$/.test(uid))!;
+        // The random deal may not happen to include a spot minor - dedupe
+        // and force one in, rather than relying on chance (a real flaky
+        // failure otherwise, on the rare hand with none).
+        const spotUid = "2S";
+        g.hands[0] = g.hands[0].filter(uid => uid !== spotUid);
+        g.hands[0].push(spotUid);
         g.move(`activate l0, l0.0 new k0 ${spotUid}`, { trusted: true });
         expect(g.board.get(-2, 0)!.card?.uid).eq(spotUid);
         expect(g.hands[0]).to.not.include(spotUid);
@@ -641,5 +646,123 @@ describe("Gnostica: handleClick", () => {
         expect(p2area, "expected an area for player 2's hand").to.not.be.undefined;
         expect(p2area!.pieces[0]).eq("hand_UNKNOWN");
         expect(rep.legend).to.have.property("hand_UNKNOWN");
+    });
+
+    // The playground's live-preview mechanism calls move(m, {partial:
+    // true}) on every click to show what the in-progress move would do,
+    // without treating it as a final, committed turn (see move()'s own
+    // comment for the full story - this was a real, previously-missing
+    // piece of the engine, not a click-building bug). Without honouring
+    // `partial`, every preview call fully committed: advanced the turn,
+    // drew for real, and pushed onto the stack - so a player toggling
+    // multiple hand cards into one draw move would see each card
+    // discarded and immediately replaced one at a time, rather than the
+    // whole batch resolving together only once the move is truly
+    // submitted.
+    it("move(..., {partial: true}) applies the move's effects without advancing the turn or persisting it", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true }); // back to player 1
+        const uid = g.hands[0][0];
+        const beforePlayer = g.currplayer;
+        const beforeStackLength = g.stack.length;
+        const beforeHandLength = g.hands[0].length;
+
+        g.move(`draw ${uid}`, { partial: true });
+
+        expect(g.currplayer, "partial move should not advance the turn").eq(beforePlayer);
+        expect(g.stack.length, "partial move should not push onto the stack").eq(beforeStackLength);
+        // The discard itself did happen (that's the whole point of a
+        // preview - the card should visibly disappear), but a partial
+        // draw deliberately does NOT redraw yet, so the hand is smaller
+        // rather than being backfilled with a card the player hasn't
+        // earned by finishing their discard selection.
+        expect(g.hands[0].length).eq(beforeHandLength - 1);
+        expect(g.hands[0]).to.not.include(uid);
+    });
+
+    it("a partial draw only discards - the actual redraw happens once, on final (non-partial) submission", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const [uid1, uid2] = g.hands[0];
+
+        // Each click's preview reconstructs from the true persisted state
+        // (mirroring the playground rebuilding `game` from localStorage on
+        // every click) rather than accumulating on top of a previous
+        // preview - so this clones fresh each time, just as real usage does.
+        const preview1 = g.clone();
+        preview1.move(`draw ${uid1}`, { partial: true });
+        expect(preview1.hands[0].length).eq(5);
+
+        const preview2 = g.clone();
+        preview2.move(`draw ${uid1} ${uid2}`, { partial: true });
+        expect(preview2.hands[0].length).eq(4);
+
+        // The real game is untouched by any preview made on a clone.
+        expect(g.hands[0].length).eq(6);
+
+        g.move(`draw ${uid1} ${uid2}`, { trusted: true }); // final submission
+        expect(g.hands[0].length).eq(6);
+        expect(g.hands[0]).to.not.include(uid1);
+        expect(g.hands[0]).to.not.include(uid2);
+    });
+});
+
+describe("Gnostica: render - draw/discard pile summaries", () => {
+    // Too many cards to show individually - minor arcana are summarized as
+    // one counted token per (suit, spot-or-royalty) bucket, since exact
+    // rank doesn't matter here; major arcana are unique, so each remaining
+    // one gets its own full card face. The discard pile is always
+    // face-up/public, so it's read directly from discardPile.
+    it("buckets discard-pile minors by suit and spot/royalty, and shows majors as individual cards", () => {
+        const g = new GnosticaGame(2);
+        g.discardPile = ["AC", "2C", "KC", "07"]; // 2 spot cups, 1 royal cup, 1 major
+        const rep = g.render() as { legend: Record<string, unknown>; areas?: { label: string; pieces: string[] }[] };
+        const discardArea = rep.areas?.find(a => a.pieces.some(p => p.startsWith("discard_")));
+        expect(discardArea, "expected a discard-pile area").to.not.be.undefined;
+        expect(discardArea!.pieces).to.include("discard_C_spot");
+        expect(discardArea!.pieces).to.include("discard_C_royal");
+        expect(discardArea!.pieces).to.include("discard_07");
+        expect(discardArea!.pieces.length).eq(3); // one spot-cup bucket, one royal-cup bucket, one major - not 4 separate entries
+        expect(rep.legend).to.have.property("discard_C_spot");
+        const spotGlyphs = rep.legend.discard_C_spot as { text?: string }[];
+        expect(spotGlyphs.find(gl => gl.text === "2x"), "spot bucket should count 2").to.not.be.undefined;
+    });
+
+    it("omits the discard-pile area entirely once the pile is empty", () => {
+        const g = new GnosticaGame(2);
+        g.discardPile = [];
+        const rep = g.render() as { areas?: { pieces: string[] }[] };
+        const discardArea = rep.areas?.find(a => a.pieces.some(p => p.startsWith("discard_")));
+        expect(discardArea).to.be.undefined;
+    });
+
+    // The draw pile's own order/contents are exactly as hidden from a
+    // viewer as an opponent's redacted hand uids, so the summary can't
+    // just read drawPile directly - it has to compute "what's unknown" by
+    // elimination (every card not definitively visible somewhere else).
+    // This is the direct behavioural proof: a real card moves from
+    // "not counted" to "counted as unknown" the moment it's redacted.
+    it("counts a card hidden in another player's redacted hand as part of the draw-pile pool", () => {
+        const g = new GnosticaGame(2);
+        for (const [, , t] of g.board.entries()) {
+            t.card = undefined;
+        }
+        g.discardPile = [];
+        g.hands[0] = [];
+        g.hands[1] = ["AC"]; // a real, visible Ace of Cups in player 2's hand
+        g.drawPile = []; // deliberately empty/stale - must not affect the summary
+
+        // 10 spot cups exist in total; with AC visible in hand, the other
+        // 9 are unaccounted for anywhere and should show as unknown.
+        const before = g.render() as { legend: Record<string, { text?: string }[]> };
+        const beforeText = before.legend.draw_C_spot.find(gl => gl.text !== undefined)!.text;
+        expect(beforeText, "AC is visible, so only the other 9 spot cups are unknown").eq("9x");
+
+        g.hands[1] = [""]; // the back end redacts it - now hidden from this viewer
+        const after = g.render() as { legend: Record<string, { text?: string }[]> };
+        const afterText = after.legend.draw_C_spot.find(gl => gl.text !== undefined)!.text;
+        expect(afterText, "AC is now hidden too, so all 10 spot cups are unknown").eq("10x");
     });
 });
