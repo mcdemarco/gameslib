@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaPieces, Glyph } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaButtonBar, AreaPieces, ButtonBarButton, Glyph } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
@@ -58,11 +58,6 @@ const CARDINAL_COS_SIN: Record<Exclude<Orientation, "up">, [number, number]> = {
     N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
 };
 
-// Click-to-cycle order for handleClick's place/orient support - clicking
-// the same cell (or the same already-selected piece) again advances to the
-// next facing in this order, wrapping around.
-const ORIENTATION_CYCLE: Orientation[] = ["up", "N", "E", "S", "W"];
-
 // A minion's board location - shorthand used while resolving activate/play.
 interface IMinionRef {
     x: number;
@@ -77,6 +72,60 @@ interface IMinionRef {
 // acting player's OWN pieces reports its new location here.
 interface IStepOutcome {
     newMinion?: IMinionRef;
+}
+
+// Click support for minor arcana's single suit-power step (major arcana
+// chaining is out of scope for this pass - see parsePendingMinorStep()).
+// One entry per suit+mode: the button label, whether the mode's target is a
+// whole cell (assertValidCellTarget) or a specific piece within one
+// (assertValidPieceTarget, which additionally always allows self regardless
+// of facing), and the minimum number of tokens after "<minionRef> <mode>"
+// needed before applyMinorPower() will actually attempt the primitive
+// rather than treating the step as still-in-progress (see its own docs).
+// Trailing optional args (a reorientation after acting on your own piece)
+// are deliberately not counted here, and not click-driven this pass either
+// - every mode is fully usable without one, just not adjustable by click.
+interface MinorModeConfig {
+    label: string;
+    shape: "cell" | "piece" | "none";
+    minArgs: number;
+}
+const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
+    C: {
+        own: { label: "Create (Own)", shape: "cell", minArgs: 2 },
+        copy: { label: "Create (Copy)", shape: "cell", minArgs: 2 },
+        new: { label: "Create Territory", shape: "cell", minArgs: 2 },
+    },
+    R: {
+        piece: { label: "Move Piece", shape: "piece", minArgs: 2 },
+        tile: { label: "Push Territory", shape: "none", minArgs: 1 },
+    },
+    D: {
+        piece: { label: "Grow Piece", shape: "piece", minArgs: 1 },
+        tile: { label: "Grow Territory", shape: "cell", minArgs: 2 },
+    },
+    S: {
+        piece: { label: "Attack Piece", shape: "piece", minArgs: 2 },
+        tile: { label: "Attack Territory", shape: "cell", minArgs: 2 },
+    },
+};
+
+// The engine-side view of an in-progress "activate"/"play" click sequence
+// for a minor arcana card - reconstructed fresh from the move string on
+// every call (same philosophy as isPendingFirstPlacement/
+// highlightedButtonValues, not persisted anywhere). `minion` always defaults
+// to the first eligible piece (see eligibleMinionsForActivate/Play's own
+// docs on why disambiguating between several eligible minions by click is
+// out of scope this pass). Undefined whenever there's nothing here for the
+// minor-arcana click flow to do - no activate/play in progress, the card is
+// major (out of scope), or there are no eligible minions at all.
+interface IPendingMinorStep {
+    head: "activate" | "play";
+    headArg: string;
+    suitUid: string;
+    minion: IMinionRef;
+    mode?: string;
+    rest: string[];
 }
 
 // Major arcana chaining (up to 3 power steps, "become a minion when
@@ -391,22 +440,553 @@ export class GnosticaGame extends GameBase {
         return result;
     }
 
-    // Click support for the simple, single-segment actions only - place,
-    // orient, and toggling hand cards into a draw's discard list. activate/
-    // play's chained power steps aren't click-driven yet (deliberately
-    // scoped out of this pass).
+    // A result for a button-seeded but not-yet-targeted action ("activate"/
+    // "play"/"orient" with no cell/card chosen yet) - deliberately NOT run
+    // through validateMove(), since the bare keyword alone would just
+    // report as an error (it's missing required args by design, not
+    // broken). Mirrors validateMove()'s own empty-string case: valid,
+    // complete:-1, an instructional message telling the player what to
+    // click next.
+    private modeSeedResult(newmove: string, messageKey: string): IClickResult {
+        return { move: newmove, valid: true, complete: -1, message: i18next.t(messageKey) };
+    }
+
+    // The six top-level turn choices, as buttons - see the class-level docs
+    // above render() for why: a bare click on a cell/piece the acting
+    // player already occupies is genuinely ambiguous between "orient this"
+    // and "activate this card", and there's no second click region per
+    // cell to disambiguate with. None of these are legal with zero board
+    // pieces (place is the only option then, and needs no button - a
+    // direct empty-cell click already builds it). "Declare" only makes
+    // sense once some other action is already chosen, but is still offered
+    // up front, same as the others.
+    // A partial preview of an in-progress (not yet submitted) "place"
+    // click already mutates this.board for rendering purposes (see
+    // move()'s own docs on `partial`), so hasPiecesOnBoard() alone can't
+    // tell "genuinely has committed board presence" apart from "just
+    // tentatively placed this same turn, still building the move". This
+    // cross-checks that the most recent "place" result (this.results,
+    // reset on every move() call, partial or not) actually belongs to the
+    // CURRENT player - a stale "place" result left over from the PREVIOUS
+    // player's own turn wouldn't match, since ownership at that cell would
+    // be theirs, not this player's.
+    //
+    // `r.how !== undefined` excludes Cups' "own"/"copy" modes, which also
+    // push a `type:"place"` result (see applyCups) - those can only ever
+    // happen once the acting player already has committed board presence
+    // (activate/play both require it), so they can never actually BE a
+    // pending first placement; without this check they'd still falsely
+    // match the shape above (same result type, a `where` the current
+    // player now occupies) and collapse the button bar back down to the
+    // single "Place" button mid-power-step.
+    private isPendingFirstPlacement(): boolean {
+        return this.results.some(r => {
+            if (r.type !== "place" || r.where === undefined || r.how !== undefined) {
+                return false;
+            }
+            const [px, py] = GnosticaBoard.algebraic2coords(r.where);
+            return this.board.get(px, py)?.pieces.some(p => p.owner === this.currplayer) ?? false;
+        });
+    }
+
+    // Which button(s) to bold, based on this.lastmove - set unconditionally
+    // by move() on every call, partial preview or real commit alike
+    // (unlike this.results, which some actions - e.g. an activate that
+    // declines its power - never populate at all, so it can't be relied on
+    // uniformly here). "Declare" is a modifier, not a top-level choice, so
+    // it can be highlighted alongside whatever the base action is, not
+    // instead of it. Can go briefly stale for exactly one render - the
+    // window between one player's real commit and the next player's own
+    // first click - since lastmove doesn't reset between turns; harmless
+    // and self-correcting the moment that next click happens.
+    private highlightedButtonValues(): Set<string> {
+        const found = new Set<string>();
+        if (this.lastmove === undefined) {
+            return found;
+        }
+        const segments = this.lastmove.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
+        const head = segments[0]?.split(/\s+/)[0]?.toLowerCase();
+        if (head !== undefined && ["place", "activate", "play", "orient", "draw"].includes(head)) {
+            found.add(head);
+        }
+        if (segments.some(s => s.toLowerCase() === "last")) {
+            found.add("declare");
+        }
+        return found;
+    }
+
+    private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        if (this.gameover) {
+            return undefined;
+        }
+        if (!this.hasPiecesOnBoard(this.currplayer) || this.isPendingFirstPlacement()) {
+            // Only one action is legal here regardless of which case this
+            // is - place is a full turn on its own with zero real board
+            // presence, so nothing else should be offered mid-placement
+            // either. A single bold button rather than nothing at all,
+            // mirroring Magnate's own single-button "Choose" state for an
+            // analogous "only one thing possible right now" situation.
+            return [{ label: "Place", value: "place", attributes: [{ name: "font-weight", value: "bold" }] }];
+        }
+        const buttons: ButtonBarButton[] = [
+            { label: "Use Territory", value: "activate" },
+            { label: "Use Hand Card", value: "play" },
+            { label: "Orient", value: "orient" },
+            { label: "Discard", value: "draw" },
+            { label: "Pass", value: "pass" },
+        ];
+        if (this.lastTurnAnnouncedBy === undefined || this.lastTurnAnnouncedBy === this.currplayer) {
+            buttons.push({ label: "Declare", value: "declare" });
+        }
+        const pendingMinor = this.parsePendingMinorStep(this.lastmove ?? "");
+        if (pendingMinor !== undefined) {
+            for (const mode of this.legalMinorModes(pendingMinor)) {
+                const config = MINOR_MODES[pendingMinor.suitUid][mode];
+                const button: ButtonBarButton = { label: config.label, value: `mode_${pendingMinor.suitUid}_${mode}` };
+                if (pendingMinor.mode === mode) {
+                    button.attributes = [{ name: "font-weight", value: "bold" }];
+                }
+                buttons.push(button);
+            }
+        }
+        const highlighted = this.highlightedButtonValues();
+        for (const b of buttons) {
+            if (b.value !== undefined && highlighted.has(b.value)) {
+                b.attributes = [{ name: "font-weight", value: "bold" }];
+            }
+        }
+        return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // Reconstructs the in-progress minor-arcana power step (if any) purely
+    // from a move string - same "recompute, don't persist" approach as
+    // isPendingFirstPlacement/highlightedButtonValues. `moveStr` is passed
+    // explicitly (rather than always reading this.lastmove) so handleClick
+    // can call this with its own `move` parameter mid-click, before that
+    // click's result has been partial-applied back into this.lastmove -
+    // the two stay in lockstep in practice (see the click-handling docs
+    // below), but this keeps the dependency explicit either way.
+    // `minion` always defaults to the first eligible piece - disambiguating
+    // between several eligible minions by click is out of scope this pass
+    // (mirrors the same simplification "orient" already makes). Undefined
+    // whenever there's nothing here for the minor-arcana click flow to do:
+    // no activate/play in progress, the card is major (chaining isn't
+    // click-driven yet), or there's no eligible minion at all.
+    private parsePendingMinorStep(moveStr: string): IPendingMinorStep | undefined {
+        const segments = moveStr.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
+        if (segments.length === 0) {
+            return undefined;
+        }
+        const [head, ...headArgs] = segments[0].split(/\s+/);
+        if (head !== "activate" && head !== "play") {
+            return undefined;
+        }
+        const headArg = headArgs[0];
+        if (headArg === undefined) {
+            return undefined;
+        }
+        let card: MinorCard | MajorCard | undefined;
+        let eligible: IMinionRef[];
+        if (head === "activate") {
+            let x: number, y: number;
+            try {
+                [x, y] = GnosticaBoard.algebraic2coords(headArg);
+            } catch {
+                return undefined;
+            }
+            card = this.board.get(x, y)?.card;
+            eligible = this.eligibleMinionsForActivate(x, y);
+        } else {
+            card = allCards().find(c => c.uid === headArg);
+            eligible = this.eligibleMinionsForPlay();
+        }
+        if (card === undefined || card.major || eligible.length === 0) {
+            return undefined;
+        }
+        const suitUid = (card as MinorCard).suit.uid;
+        const stepTokens = segments.length >= 2 ? segments[1].split(/\s+/) : [];
+        const [, mode, ...rest] = stepTokens; // stepTokens[0] is the minionRef - always eligible[0] by construction
+        return { head, headArg, suitUid, minion: eligible[0], mode, rest };
+    }
+
+    // The single valid cell a minor suit-power step may affect, per
+    // assertValidCellTarget in powers.ts: the minion's own cell if it's
+    // facing "up", otherwise the one cell it's pointing at. Also used as
+    // the DEFAULT target for "piece"-shaped modes (self is additionally
+    // always valid there too, per assertValidPieceTarget - clicking the
+    // minion's own cell switches to that instead, see
+    // handlePendingMinorBoardClick).
+    private minorTargetCell(minion: IMinionRef): [number, number] {
+        const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
+        if (piece.orientation === "up") {
+            return [minion.x, minion.y];
+        }
+        const [dx, dy] = this.board.delta(piece.orientation as Exclude<Orientation, "up">);
+        return [minion.x + dx, minion.y + dy];
+    }
+
+    private pieceRefStr(x: number, y: number, index: number): string {
+        return `${GnosticaBoard.coords2algebraic(x, y)}.${index}`;
+    }
+
+    // Click-to-orient: clicking the cell a piece already occupies means
+    // "face up"; clicking one of its four orthogonal neighbours means
+    // "face that way" - one click always states the intended direction
+    // outright, rather than stepping through up to 5 states via a toggle.
+    // Every one of a piece's neighbours is guaranteed to be inside the
+    // current render window (padded by exactly 1 beyond the board's own
+    // bounding box - see render()'s own docs) and, since void cells now
+    // render an invisible-but-clickable placeholder there too, guaranteed
+    // clickable regardless of whether that neighbour is a territory,
+    // wasteland, or void. Returns undefined when `toX,toY` is neither the
+    // piece's own cell nor an orthogonal neighbour of it.
+    private orientationTowardClick(fromX: number, fromY: number, toX: number, toY: number): Orientation | undefined {
+        if (fromX === toX && fromY === toY) {
+            return "up";
+        }
+        for (const dir of cardinalOrientations) {
+            const [dx, dy] = this.board.delta(dir as Exclude<Orientation, "up">);
+            if (fromX + dx === toX && fromY + dy === toY) {
+                return dir;
+            }
+        }
+        return undefined;
+    }
+
+    // A void cell only ever matters to click-to-orient (see
+    // orientationTowardClick) as the facing target of a piece sitting on a
+    // WASTELAND cell next door - a piece on an actual territory can never
+    // have a void neighbour at all (any neighbour of a card-bearing cell is
+    // itself at worst a wasteland, by classify()'s own definition), so this
+    // only needs to check wasteland neighbours, not territory ones too.
+    private voidCellNeedsClickTarget(x: number, y: number): boolean {
+        return this.board.neighbors(x, y).some(([nx, ny]) => {
+            if (this.board.classify(nx, ny) !== "wasteland") {
+                return false;
+            }
+            return (this.board.get(nx, ny)?.pieces.length ?? 0) > 0;
+        });
+    }
+
+    // Best-effort filter over which modes are worth offering as buttons
+    // right now, given current board state - not a full legality check
+    // (validateMove still catches anything this misses or over-includes
+    // once the player actually acts). Rods needs its own orientation gate
+    // (a piece pointing "up" cannot use a rod at all, per
+    // requireCanUseRod in powers.ts); the other three suits have no such
+    // restriction.
+    private legalMinorModes(pending: IPendingMinorStep): string[] {
+        const minion = this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const [tx, ty] = this.minorTargetCell(pending.minion);
+        const targetT = this.board.get(tx, ty);
+        return Object.keys(MINOR_MODES[pending.suitUid]).filter(mode => {
+            switch (`${pending.suitUid}.${mode}`) {
+                case "C.own":
+                    return targetT === undefined || targetT.canAdd();
+                case "C.copy":
+                    return (targetT?.pieces ?? []).some(p => p.owner !== this.currplayer);
+                case "C.new":
+                    return this.board.classify(tx, ty) === "wasteland";
+                case "R.piece":
+                case "R.tile":
+                    return minion.orientation !== "up";
+                case "D.tile":
+                case "S.tile":
+                    return (targetT?.pointValue() ?? 0) > 0;
+                default:
+                    return true;
+            }
+        });
+    }
+
+    // Builds the move string for choosing a suit-power mode via button -
+    // the minion is always the first eligible one (see
+    // IPendingMinorStep's docs), and the target cell is auto-derived
+    // (minorTargetCell) since it's fully determined by the minion's own
+    // facing, not something the player needs to click. "Piece"-shaped
+    // modes default to targeting the minion itself (always structurally
+    // valid, regardless of what's in the facing cell) - clicking the
+    // facing cell afterwards redirects to a piece there, see
+    // handlePendingMinorBoardClick. Deliberately produces a step with
+    // FEWER tokens than MINOR_MODES' minArgs for modes needing a hand-card
+    // uid (Cups "new", Discs/Swords "tile") - applyMinorPower's own
+    // tolerance (see its docs) keeps that a harmless, still-provisional
+    // "declined so far" state rather than a thrown error, until
+    // supplyMinorCardUid fills it in.
+    private buildMinorModeMove(pending: IPendingMinorStep, mode: string): string {
+        const ref = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        const [tx, ty] = this.minorTargetCell(pending.minion);
+        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        const tokens = [ref, mode];
+        switch (`${pending.suitUid}.${mode}`) {
+            case "C.own":
+                tokens.push(targetCell, "up");
+                break;
+            case "C.copy": {
+                const t = this.board.get(tx, ty);
+                const victimIdx = (t?.pieces ?? []).findIndex(p => p.owner !== this.currplayer);
+                tokens.push(targetCell, String(Math.max(victimIdx, 0)));
+                break;
+            }
+            case "C.new":
+                tokens.push(targetCell);
+                break;
+            case "R.piece":
+                tokens.push(ref, "1");
+                break;
+            case "R.tile":
+                tokens.push("1");
+                break;
+            case "D.piece":
+                tokens.push(ref);
+                break;
+            case "D.tile":
+                tokens.push(targetCell);
+                break;
+            case "S.piece":
+                tokens.push(ref, "1");
+                break;
+            case "S.tile":
+                tokens.push(targetCell, "1");
+                break;
+            default:
+                throw new Error(`Unknown minor mode "${pending.suitUid}.${mode}".`);
+        }
+        return `${pending.head} ${pending.headArg}, ${tokens.join(" ")}`;
+    }
+
+    private pendingMoveString(pending: IPendingMinorStep): string {
+        if (pending.mode === undefined) {
+            return `${pending.head} ${pending.headArg}`;
+        }
+        const ref = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        return `${pending.head} ${pending.headArg}, ${ref} ${pending.mode} ${pending.rest.join(" ")}`.trim();
+    }
+
+    // Board-click handling once a minor-arcana power step's MODE is already
+    // chosen (see buildMinorModeMove) - cycling or switching whichever
+    // trailing arg(s) that mode's shape supports. Returns undefined when
+    // the click isn't one of this step's own interactive targets, so the
+    // caller falls back to its own (unrelated) handling.
+    //
+    // Known, deliberate simplifications (consistent with "orient"'s own
+    // first-match precedent elsewhere in this file): picking a specific
+    // piece INDEX within a multi-piece facing cell isn't click-driven
+    // (always defaults to index 0 there); the optional trailing
+    // reorientation available after acting on your own piece isn't
+    // click-driven either. Both remain available by typing a move
+    // manually.
+    private handlePendingMinorBoardClick(pending: IPendingMinorStep, x: number, y: number, cell: string): IClickResult | undefined {
+        if (pending.mode === undefined) {
+            return undefined;
+        }
+        const mode = pending.mode;
+        const config = MINOR_MODES[pending.suitUid][mode];
+        const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        const minionPiece = this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const rebuild = (rest: string[]): IClickResult =>
+            this.provisionalResult(`${pending.head} ${pending.headArg}, ${minionRef} ${mode} ${rest.join(" ")}`.trim());
+
+        if (config.shape === "cell") {
+            const [tx, ty] = this.minorTargetCell(pending.minion);
+            // Cups "own" is the one cell-shape mode with an orientation arg
+            // (the new piece's own facing) - click-to-orient (see
+            // orientationTowardClick) relative to the target cell, so its
+            // clickable region is that cell PLUS its neighbours, not just
+            // the cell itself like every other cell-shape mode below.
+            if (pending.suitUid === "C" && mode === "own") {
+                const dir = this.orientationTowardClick(tx, ty, x, y);
+                if (dir === undefined) {
+                    return undefined;
+                }
+                return rebuild([GnosticaBoard.coords2algebraic(tx, ty), dir]);
+            }
+            if (x !== tx || y !== ty) {
+                return undefined;
+            }
+            if (pending.suitUid === "C" && mode === "copy") {
+                const t = this.board.get(tx, ty);
+                const enemyIndices = (t?.pieces ?? [])
+                    .map((p, i) => ({ owner: p.owner, i }))
+                    .filter(({ owner }) => owner !== this.currplayer)
+                    .map(({ i }) => i);
+                if (enemyIndices.length === 0) {
+                    return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.NO_ENEMY_THERE", { cell }) };
+                }
+                const current = parseInt(pending.rest[1] ?? "-1", 10);
+                const at = enemyIndices.indexOf(current);
+                const next = enemyIndices[(at + 1) % enemyIndices.length];
+                return rebuild([cell, String(next)]);
+            }
+            // "new" (Cups) / "tile" (Discs) - the only remaining arg is a
+            // hand-card uid (supplyMinorCardUid), nothing to cycle here.
+            return rebuild(pending.rest);
+        }
+
+        if (config.shape === "piece") {
+            const [faceX, faceY] = this.minorTargetCell(pending.minion);
+            const isSelfClick = x === pending.minion.x && y === pending.minion.y;
+            const isFaceClick = x === faceX && y === faceY;
+            if (!isSelfClick && !isFaceClick) {
+                return undefined;
+            }
+            const currentIsSelf = pending.rest[0] === minionRef;
+            const needsNumeric = !(pending.suitUid === "D" && mode === "piece");
+            const switchingToSelf = isSelfClick && !currentIsSelf;
+            const switchingToFace = isFaceClick && !(faceX === pending.minion.x && faceY === pending.minion.y) && currentIsSelf;
+            if (switchingToSelf) {
+                return rebuild(needsNumeric ? [minionRef, "1"] : [minionRef]);
+            }
+            if (switchingToFace) {
+                const t = this.board.get(faceX, faceY);
+                if (t === undefined || t.pieces.length === 0) {
+                    return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
+                }
+                const ref = this.pieceRefStr(faceX, faceY, 0);
+                return rebuild(needsNumeric ? [ref, "1"] : [ref]);
+            }
+            // Same cell as the current target - cycle the numeric arg, if any.
+            if (!needsNumeric) {
+                return rebuild(pending.rest);
+            }
+            const maxArg = minionPiece.size;
+            const current = parseInt(pending.rest[1] ?? "1", 10);
+            const next = (current % maxArg) + 1;
+            return rebuild([pending.rest[0], String(next)]);
+        }
+
+        // "none" shape (Rods' "tile" mode) - only the minion's own cell is
+        // interactive, cycling distance.
+        if (x !== pending.minion.x || y !== pending.minion.y) {
+            return undefined;
+        }
+        const maxArg = minionPiece.size;
+        const current = parseInt(pending.rest[0] ?? "1", 10);
+        const next = (current % maxArg) + 1;
+        return rebuild([String(next)]);
+    }
+
+    // Supplies a hand-card uid for whichever minor-arcana mode is currently
+    // waiting on one (Cups "new", Discs/Swords "tile") - the caller (a
+    // hand-card click in handleClick) has already confirmed the card is
+    // actually in hand. Returns undefined if the current pending step isn't
+    // waiting on a card right now, so the caller falls back to its own
+    // (unrelated) hand-card handling. Deliberately doesn't pre-validate
+    // that the card's point value is the one actually required (a spot
+    // card for Cups; current+1 for Discs; current-pips for Swords) -
+    // that's resolveCreateTerritory/resolveGrowTerritory/
+    // resolveAttackTerritory's own job, surfaced as an ordinary validation
+    // message if the player picks the wrong one.
+    private supplyMinorCardUid(pending: IPendingMinorStep, uid: string): IClickResult | undefined {
+        if (pending.mode === undefined) {
+            return undefined;
+        }
+        const key = `${pending.suitUid}.${pending.mode}`;
+        const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        let rest: string[];
+        if ((key === "C.new" || key === "D.tile") && pending.rest.length === 1) {
+            rest = [pending.rest[0], uid];
+        } else if (key === "S.tile" && pending.rest.length === 2) {
+            rest = [...pending.rest, uid];
+        } else {
+            return undefined;
+        }
+        return this.provisionalResult(`${pending.head} ${pending.headArg}, ${minionRef} ${pending.mode} ${rest.join(" ")}`);
+    }
+
+    // Click support for the top-level turn choice (via the button bar from
+    // getActionButtons()) plus the simple, single-segment actions - place,
+    // orient, activate/play with power declined, and toggling hand cards
+    // into a draw's discard list. activate/play's chained power steps
+    // aren't click-driven yet (deliberately scoped out of this pass).
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
+            if (piece !== undefined && piece.startsWith("_btn_")) {
+                const value = piece.slice("_btn_".length);
+                if (value.startsWith("mode_")) {
+                    // "mode_<suitUid>_<mode>" - see getActionButtons()'s own
+                    // pendingMinor branch, which only ever offers one of
+                    // these once a minor-arcana activate/play is already
+                    // seeded (0 steps taken yet).
+                    const [, suitUid, mode] = value.split("_");
+                    const pending = this.parsePendingMinorStep(move);
+                    if (pending === undefined || pending.suitUid !== suitUid) {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    return this.provisionalResult(this.buildMinorModeMove(pending, mode));
+                }
+                switch (value) {
+                    case "pass":
+                    case "draw":
+                        // Discard's own bare seed is already a legal,
+                        // complete move on its own (discard nothing) - no
+                        // different from Pass, so both just build it.
+                        return this.provisionalResult("draw");
+                    case "place":
+                        // Not strictly necessary (an empty move already
+                        // builds "place <cell>" directly from a bare board
+                        // click, see below), but offered as a button too
+                        // for consistency with every other action, now
+                        // that "place" is always shown as the sole choice
+                        // rather than an empty bar - see getActionButtons().
+                        return this.modeSeedResult("place", "apgames:validation.gnostica.PICK_CELL_TO_PLACE");
+                    case "activate":
+                        return this.modeSeedResult("activate", "apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE");
+                    case "play":
+                        return this.modeSeedResult("play", "apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY");
+                    case "orient":
+                        return this.modeSeedResult("orient", "apgames:validation.gnostica.PICK_PIECE_TO_ORIENT");
+                    case "declare": {
+                        if (move.trim().length === 0) {
+                            return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
+                        }
+                        const segments = move.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
+                        const hasLast = segments.some(s => s.toLowerCase() === "last");
+                        const newmove = hasLast
+                            ? segments.filter(s => s.toLowerCase() !== "last").join(", ")
+                            : `${move}, last`;
+                        return this.provisionalResult(newmove);
+                    }
+                    default:
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                }
+            }
+
+            // Segment-aware, not just whitespace-split - once a minor-arcana
+            // power step is being built the move string has a second,
+            // comma-separated segment (see buildMinorModeMove), and a naive
+            // split(/\s+/) would leave a trailing comma stuck to the cell
+            // token. Only the HEAD segment's own tokens are needed here;
+            // the pending-step helpers below do their own full parsing.
+            const headSegments = move.length > 0 ? move.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0) : [];
+            const [head, ...args] = headSegments.length > 0 ? headSegments[0].split(/\s+/) : [];
+
             // Hand-card clicks (from the per-player AreaPieces built in
             // render()) arrive as `piece`, independent of row/col - only
-            // the acting player's own hand can be toggled into a draw.
+            // the acting player's own hand can be touched. A card click
+            // means something different depending on what's already in
+            // progress: supplying a card uid for a pending minor-arcana
+            // power step in progress (Cups "new", Discs/Swords "tile"),
+            // playing the card outright ("play"), or toggling it into a
+            // draw's discard list (the default, if no mode is active).
             if (piece !== undefined && piece.startsWith("hand_")) {
                 const uid = piece.slice("hand_".length);
                 const hand = this.hands[this.currplayer - 1] ?? [];
                 if (!hand.includes(uid)) {
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
                 }
-                const [head, ...args] = move.length > 0 ? move.split(/\s+/) : [];
+                const pendingForCard = this.parsePendingMinorStep(move);
+                if (pendingForCard?.mode !== undefined) {
+                    const result = this.supplyMinorCardUid(pendingForCard, uid);
+                    if (result !== undefined) {
+                        return result;
+                    }
+                    // Not a mode expecting a card uid right now - fall
+                    // through to the ordinary hand-card behaviour below.
+                }
+                if (head === "play") {
+                    return this.provisionalResult(`play ${uid}`);
+                }
                 let discards = head === "draw" ? [...args] : [];
                 if (discards.includes(uid)) {
                     discards = discards.filter(u => u !== uid);
@@ -422,45 +1002,90 @@ export class GnosticaGame extends GameBase {
             const y = row + minY;
             const cell = GnosticaBoard.coords2algebraic(x, y);
 
-            const [head, ...args] = move.length > 0 ? move.split(/\s+/) : [];
             let newmove: string;
 
             if (head === "place") {
-                const [prevCell, prevOrientation] = args;
-                if (prevCell === cell) {
-                    const idx = ORIENTATION_CYCLE.indexOf((prevOrientation as Orientation) ?? "up");
-                    const next = ORIENTATION_CYCLE[(idx + 1) % ORIENTATION_CYCLE.length];
-                    newmove = `place ${cell} ${next}`;
+                // Click-to-orient (see orientationTowardClick's own docs):
+                // once a placement cell is chosen, clicking it again means
+                // "face up", clicking one of its neighbours means "face
+                // that way" - any OTHER cell is a fresh placement there
+                // instead (defaulting to "up" again), same as clicking a
+                // different cell always has.
+                const [prevCell] = args;
+                let dir: Orientation | undefined;
+                if (prevCell !== undefined) {
+                    const [px, py] = GnosticaBoard.algebraic2coords(prevCell);
+                    dir = this.orientationTowardClick(px, py, x, y);
+                }
+                if (prevCell !== undefined && dir !== undefined) {
+                    newmove = `place ${prevCell} ${dir}`;
                 } else {
                     newmove = `place ${cell}`;
                 }
             } else if (head === "orient") {
-                const [prevRef, prevFacing] = args;
-                const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
-                if (myPieceIdx === -1) {
-                    return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_SUCH_PIECE", { ref: cell }) };
+                // Same click-to-orient model as "place" above, but relative
+                // to whichever piece is already selected (prevRef) rather
+                // than the clicked cell - a click on a cell adjacent to
+                // THAT piece sets its facing, even if the clicked cell also
+                // happens to hold another of the player's own pieces
+                // (known simplification: to re-select a different, ADJACENT
+                // own piece instead, click a non-adjacent cell first, or
+                // just submit and start over - re-selecting rarely matters
+                // once a piece is already picked).
+                const [prevRef] = args;
+                let dir: Orientation | undefined;
+                if (prevRef !== undefined) {
+                    const loc = this.parsePieceRef(prevRef);
+                    dir = this.orientationTowardClick(loc.x, loc.y, x, y);
                 }
-                const ref = `${cell}.${myPieceIdx}`;
-                if (prevRef === ref) {
-                    const idx = ORIENTATION_CYCLE.indexOf((prevFacing as Orientation) ?? "up");
-                    const next = ORIENTATION_CYCLE[(idx + 1) % ORIENTATION_CYCLE.length];
-                    newmove = `orient ${ref} ${next}`;
+                if (prevRef !== undefined && dir !== undefined) {
+                    newmove = `orient ${prevRef} ${dir}`;
                 } else {
-                    newmove = `orient ${ref} up`;
+                    const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
+                    if (myPieceIdx === -1) {
+                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_SUCH_PIECE", { ref: cell }) };
+                    }
+                    newmove = `orient ${cell}.${myPieceIdx} up`;
                 }
+            } else if (head === "activate" || head === "play") {
+                // Once a minor-arcana power step's mode is already chosen,
+                // a board click is target/arg cycling for that step first -
+                // see handlePendingMinorBoardClick's own docs. Falls
+                // through to the ordinary activate/play handling below only
+                // when the click doesn't match one of that step's own
+                // interactive targets (undefined).
+                const pending = this.parsePendingMinorStep(move);
+                if (pending !== undefined && pending.mode !== undefined) {
+                    const result = this.handlePendingMinorBoardClick(pending, x, y, cell);
+                    if (result !== undefined) {
+                        return result;
+                    }
+                }
+                if (head === "play") {
+                    // "play" has no cell of its own to re-pick the way
+                    // "activate" does below - a board click here only ever
+                    // means pending-step cycling (handled above); anything
+                    // else is ambiguous.
+                    return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
+                }
+                const t = this.board.get(x, y);
+                if (t?.card === undefined) {
+                    return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_CARD_THERE", { cell }) };
+                }
+                if (!t.pieces.some(p => p.owner === this.currplayer)) {
+                    return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell }) };
+                }
+                newmove = `activate ${cell}`;
             } else if (!this.hasPiecesOnBoard(this.currplayer)) {
                 // Fresh click, nothing placed yet - place is the only legal
-                // start.
+                // start, and needs no button.
                 newmove = `place ${cell}`;
             } else {
-                const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
-                if (myPieceIdx === -1) {
-                    // Not one of the acting player's pieces - not something
-                    // this pass handles (e.g. starting an activate/play);
-                    // leave the move untouched rather than guessing.
-                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                }
-                newmove = `orient ${cell}.${myPieceIdx} up`;
+                // No mode chosen yet (or an unrecognized one) and pieces
+                // already exist - board clicks are genuinely ambiguous
+                // here (see getActionButtons()'s docs), so this doesn't
+                // guess; the player picks a button first.
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
             }
 
             return this.provisionalResult(newmove);
@@ -702,6 +1327,34 @@ export class GnosticaGame extends GameBase {
 
     // "Activate a card on the board. All your pieces on that card are
     // minions [...]"
+    // Every piece the acting player owns on the activated cell - the pool
+    // "activate" draws minions from. Returns [] (rather than throwing) for a
+    // cell with no card / no eligible piece, so click-time helpers can use
+    // this directly without their own duplicate error handling.
+    private eligibleMinionsForActivate(x: number, y: number): IMinionRef[] {
+        const t = this.board.get(x, y);
+        if (t === undefined || t.card === undefined) {
+            return [];
+        }
+        return t.pieces
+            .map((p, index) => ({ x, y, index }))
+            .filter(ref => t.pieces[ref.index].owner === this.currplayer);
+    }
+
+    // Every piece the acting player owns anywhere on the board - the pool
+    // "play" draws minions from.
+    private eligibleMinionsForPlay(): IMinionRef[] {
+        const eligible: IMinionRef[] = [];
+        for (const [x, y, t] of this.board.entries()) {
+            t.pieces.forEach((p, index) => {
+                if (p.owner === this.currplayer) {
+                    eligible.push({ x, y, index });
+                }
+            });
+        }
+        return eligible;
+    }
+
     private cmdActivate(args: string[], stepSegments: string[][]): void {
         const [cellStr] = args;
         if (cellStr === undefined) {
@@ -712,9 +1365,7 @@ export class GnosticaGame extends GameBase {
         if (t === undefined || t.card === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_CARD_THERE", { cell: cellStr }));
         }
-        const eligible: IMinionRef[] = t.pieces
-            .map((p, index) => ({ x, y, index }))
-            .filter(ref => t.pieces[ref.index].owner === this.currplayer);
+        const eligible = this.eligibleMinionsForActivate(x, y);
         if (eligible.length === 0) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell: cellStr }));
         }
@@ -741,14 +1392,7 @@ export class GnosticaGame extends GameBase {
         this.discardPile.push(uid);
         this.results.push({ type: "deckDraw", count: 0, what: uid, from: "hand" });
 
-        const eligible: IMinionRef[] = [];
-        for (const [x, y, t] of this.board.entries()) {
-            t.pieces.forEach((p, index) => {
-                if (p.owner === this.currplayer) {
-                    eligible.push({ x, y, index });
-                }
-            });
-        }
+        const eligible = this.eligibleMinionsForPlay();
         this.applyCardPower(card, eligible, stepSegments);
     }
 
@@ -759,8 +1403,12 @@ export class GnosticaGame extends GameBase {
             // resolution (a randomly flipped card; any major currently on
             // the board) rather than doing something self-contained - that
             // recursive dispatch is a distinct, not-yet-built piece of work,
-            // not an oversight in the chaining logic below.
-            if (def.uid === "00" || def.uid === "21") {
+            // not an oversight in the chaining logic below. But every
+            // power is optional ("keeping in mind that all powers are
+            // optional"), including these two - declining it entirely
+            // needs no power resolution at all, so only reject when a step
+            // is actually attempted.
+            if ((def.uid === "00" || def.uid === "21") && stepSegments.length > 0) {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.FOOL_WORLD_NOT_YET_SUPPORTED"));
             }
             this.applyMajorPower(def, eligible, stepSegments);
@@ -769,6 +1417,14 @@ export class GnosticaGame extends GameBase {
         }
     }
 
+    // Tolerant of an incomplete step (mode chosen but not enough trailing
+    // args yet, or no mode at all) rather than throwing - treated as still
+    // effectively "declined so far", same trick Magnate's own move parser
+    // uses to let the click flow build a move up incrementally across
+    // several clicks, each producing a fully-parseable (if still
+    // provisional) move string. Genuinely wrong data (a garbled minionRef,
+    // an unrecognized mode, more than one step) still throws - only
+    // "not enough tokens yet" is swallowed. See MINOR_MODES for minArgs.
     private applyMinorPower(suitUid: string, eligible: IMinionRef[], stepSegments: string[][]): void {
         if (stepSegments.length === 0) {
             return; // power declined - always optional
@@ -777,13 +1433,23 @@ export class GnosticaGame extends GameBase {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MINOR_ONE_STEP_ONLY"));
         }
         const [minionRef, mode, ...rest] = stepSegments[0];
-        if (minionRef === undefined || mode === undefined) {
+        if (minionRef === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED"));
         }
         const loc = this.parsePieceRef(minionRef);
         const minion = eligible.find(e => e.x === loc.x && e.y === loc.y && e.index === loc.index);
         if (minion === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_AN_ELIGIBLE_MINION", { ref: minionRef }));
+        }
+        if (mode === undefined) {
+            return; // minion earmarked, mode not chosen yet - still declined
+        }
+        const config = MINOR_MODES[suitUid]?.[mode];
+        if (config === undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitUid }));
+        }
+        if (rest.length < config.minArgs) {
+            return; // mode chosen, args not yet complete - still declined
         }
         this.applySuitPrimitive(suitUid, minion, mode, rest, {});
     }
@@ -1265,20 +1931,30 @@ export class GnosticaGame extends GameBase {
         const width = maxX - minX + 1;
         const height = maxY - minY + 1;
 
+        // A void cell only gets a real (invisible-but-clickable) legend
+        // entry when a piece might actually need to click it - see
+        // voidCellNeedsClickTarget's own docs for exactly when that is.
+        // Every other void cell stays the bare "-" the renderer leaves
+        // with no legend entry (and no clickable region) at all, to avoid
+        // padding the rendered board out with clickable-but-pointless
+        // space. Re-rendering happens after every click/commit, so a void
+        // cell that only becomes relevant once a piece lands on the
+        // wasteland next to it picks up its click target on the very next
+        // render - nothing is ever permanently unreachable.
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
         const pieceRows: string[] = [];
         for (let y = minY; y <= maxY; y++) {
             const rowCells: string[] = [];
             for (let x = minX; x <= maxX; x++) {
                 const cls = this.board.classify(x, y);
-                if (cls === "void") {
+                if (cls === "void" && !this.voidCellNeedsClickTarget(x, y)) {
                     rowCells.push("-");
                     continue;
                 }
                 const t = this.board.get(x, y);
                 const key = this.cellRenderKey(t, cls);
                 if (!(key in legend)) {
-                    legend[key] = this.buildCellGlyph(t, cls);
+                    legend[key] = this.buildCellGlyph(t);
                 }
                 rowCells.push(key);
             }
@@ -1311,7 +1987,7 @@ export class GnosticaGame extends GameBase {
         // given, including a placeholder for any uid it can't resolve
         // (an opponent's redacted "" entry, matching emu.ts's own
         // "UNKNOWN" convention), rather than assuming every uid is real.
-        const areas: AreaPieces[] = [];
+        const areas: (AreaPieces | AreaButtonBar)[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
             const hand = this.hands[p - 1] ?? [];
             if (hand.length === 0) {
@@ -1374,6 +2050,15 @@ export class GnosticaGame extends GameBase {
             areas.push(discardArea);
         }
 
+        // The top-level turn choice (Use Territory/Use Hand Card/Orient/
+        // Discard/Pass/Declare) as buttons - see getActionButtons()'s own
+        // docs for why a button bar rather than inferring intent from
+        // board clicks alone.
+        const actionButtons = this.getActionButtons();
+        if (actionButtons !== undefined) {
+            areas.push({ type: "buttonBar", position: "left", buttons: actionButtons });
+        }
+
         const rep: APRenderRep = {
             board: {
                 style: "squares",
@@ -1393,21 +2078,30 @@ export class GnosticaGame extends GameBase {
             areas: areas.length > 0 ? areas : undefined,
         };
 
-        if (this.results.length > 0) {
-            const annotations: NonNullable<APRenderRep["annotations"]> = [];
-            for (const r of this.results) {
-                if (r.type === "place" && r.where !== undefined) {
-                    const [x, y] = GnosticaBoard.algebraic2coords(r.where);
-                    annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
-                } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
-                    const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
-                    const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
-                    annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
-                }
+        // A visual marker for wasteland cells (distinct from an occupied
+        // territory) is still an open question - a per-cell fill glyph
+        // defaults to plain white regardless of opacity (confirmed by
+        // reading the renderer's own glyph definition), a MarkerFence
+        // border traces the full cell rather than the smaller inset area
+        // an actual card occupies, and "enter"-type annotations merge into
+        // one outline around their combined union rather than drawing one
+        // square per cell, no matter how many separate entries are given
+        // (confirmed by actually rendering both cases). Wasteland cells
+        // are still fully functional (clickable, correctly classified) -
+        // just visually plain for now.
+        const annotations: NonNullable<APRenderRep["annotations"]> = [];
+        for (const r of this.results) {
+            if (r.type === "place" && r.where !== undefined) {
+                const [x, y] = GnosticaBoard.algebraic2coords(r.where);
+                annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
+            } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
+                const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
+                const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
+                annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
             }
-            if (annotations.length > 0) {
-                rep.annotations = annotations;
-            }
+        }
+        if (annotations.length > 0) {
+            rep.annotations = annotations;
         }
 
         return rep;
@@ -1626,15 +2320,18 @@ export class GnosticaGame extends GameBase {
     // small square, so it uses the compact card face (smaller rank/circle
     // sizing) rather than the roomier default meant for a card shown alone
     // (e.g. a hand, once that's rendered).
-    private buildCellGlyph(t: Territory | undefined, cls: CellClass): Glyph | [Glyph, ...Glyph[]] {
+    private buildCellGlyph(t: Territory | undefined): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
         if (t?.card !== undefined) {
             stack.push(...this.buildCardFace(t.card, true));
         } else {
-            // Wasteland: a faint neutral square so the clickable area is
-            // visible without implying a territory is there. Void cells are
-            // never given a legend entry at all (rendered as "-").
-            stack.push({ name: "piece-square-borderless", scale: 1, opacity: cls === "wasteland" ? 0.15 : 0 });
+            // Wasteland: fully invisible - its actual visual marker (a
+            // dashed border tracing the cell) is a board-level fence
+            // marker built once in render(), not a per-cell fill glyph.
+            // This placeholder only exists so the cell still has a
+            // clickable legend entry, distinct from a void cell (which
+            // gets none at all, rendered as "-").
+            stack.push({ name: "piece-square-borderless", scale: 1, opacity: 0 });
         }
         const pieces = t?.pieces ?? [];
         this.pieceGridSlots(pieces).forEach((slot, i) => {
