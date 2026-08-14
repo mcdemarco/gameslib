@@ -4,7 +4,7 @@ import { APRenderRep, AreaPieces, Glyph } from "@abstractplay/renderer/build/sch
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
-import { Deck, MinorCard, MajorCard, TarotCard, allCards } from "../common/tarot";
+import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { Territory, ITerritory } from "./gnostica/Territory";
 import { Piece, Orientation, cardinalOrientations } from "./gnostica/Piece";
@@ -309,8 +309,21 @@ export class GnosticaGame extends GameBase {
     // once handleClick/render exist to actually exercise it.
     // ============================================================
 
+    // `partial: true` is the playground/interface's live-preview signal -
+    // "apply this move's effects so I can render what it would look like,
+    // but don't treat it as an actual, final turn" (see Homeworlds' own
+    // move(), which documents the exact same contract). Every hand-card
+    // toggle click re-renders a preview by calling move(..., {partial:
+    // true}) on a disposable reconstructed instance; without honouring
+    // that flag, each of those preview calls was running full end-of-move
+    // processing - advancing the turn and re-drawing for real - which is
+    // exactly what produced the reported "discards immediately replaced,
+    // one at a time" bug. The `partial` object this method mutates is
+    // documented (by that same Homeworlds precedent) as left in a
+    // possibly-inconsistent state afterwards; only ever call it on a
+    // disposable/throwaway instance.
     public move(m: string, opts: IMoveOptions = {}): GnosticaGame {
-        const { trusted = false } = opts;
+        const { partial = false, trusted = false } = opts;
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
@@ -322,8 +335,11 @@ export class GnosticaGame extends GameBase {
             }
         }
         this.results = [];
-        this.applyMove(m);
+        this.applyMove(m, partial);
         this.lastmove = m;
+        if (partial) {
+            return this;
+        }
         this.nextPlayer();
         this.checkEOG();
         this.saveState();
@@ -349,6 +365,7 @@ export class GnosticaGame extends GameBase {
             result.message = i18next.t("apgames:validation._general.VALID_MOVE");
         } catch (e) {
             result.valid = false;
+            result.complete = -1;
             result.message = e instanceof UserFacingError ? e.client : i18next.t("apgames:validation._general.INVALID_MOVE", { move: m });
         }
         return result;
@@ -465,7 +482,7 @@ export class GnosticaGame extends GameBase {
     // (minor arcana always grants exactly one power, and it's always
     // optional). Major arcana cards (which can chain up to 3 power steps)
     // aren't supported here yet - see cmdActivate/cmdPlay.
-    private applyMove(m: string): void {
+    private applyMove(m: string, partial = false): void {
         const segments = m.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
         let announceLast = false;
         const remaining: string[] = [];
@@ -505,7 +522,7 @@ export class GnosticaGame extends GameBase {
             case "draw":
                 requireNoSteps();
                 this.requireHasPiecesOnBoard();
-                this.cmdDraw(rest);
+                this.cmdDraw(rest, partial);
                 break;
             case "activate":
                 this.requireHasPiecesOnBoard();
@@ -627,7 +644,16 @@ export class GnosticaGame extends GameBase {
 
     // "draw [uid...]" - discard the named hand cards, then redraw to 6,
     // reshuffling the discard pile into the draw pile if it runs dry.
-    private cmdDraw(args: string[]): void {
+    //
+    // `partial` (set only by move()'s live-preview calls, never by a real
+    // submitted move) stops after the discard step, deliberately skipping
+    // the redraw - the player may still be clicking through more cards to
+    // discard, and drawing replacements prematurely would either reveal
+    // cards for a discard set that isn't final yet, or require redrawing
+    // (and discarding the previous preview's draws back into the deck) on
+    // every subsequent click. The hand simply shows smaller while this is
+    // in progress; the real draw only happens once, on final submission.
+    private cmdDraw(args: string[], partial = false): void {
         const hand = this.hands[this.currplayer - 1];
         for (const uid of args) {
             const idx = hand.indexOf(uid);
@@ -636,6 +662,9 @@ export class GnosticaGame extends GameBase {
             }
             hand.splice(idx, 1);
             this.discardPile.push(uid);
+        }
+        if (partial) {
+            return;
         }
         let drawnCount = 0;
         while (hand.length < 6) {
@@ -1316,6 +1345,35 @@ export class GnosticaGame extends GameBase {
             });
         }
 
+        // The literal drawPile array isn't used for the draw-pile summary -
+        // its order/contents are exactly as hidden from this viewer as an
+        // opponent's redacted hand uids, so "what's left to draw" is
+        // computed by elimination instead: every card in the full 78-card
+        // deck that isn't visible somewhere else. This naturally folds
+        // hidden opponent hand cards into the same pool - a card sitting
+        // unseen in an opponent's hand is exactly as "still in the draw
+        // pile" as far as this summary can tell them apart. It also
+        // degrades correctly with no redaction at all (e.g. in tests, or a
+        // local sandbox with no back end): every hand is then fully
+        // visible, so the eliminated set is exactly drawPile's own
+        // contents.
+        const visible = this.visibleCardUids();
+        const unknownUids = allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
+        const drawArea = this.buildDeckSummaryArea(
+            unknownUids, "draw", legend, i18next.t("apgames:validation.gnostica.LABEL_DECK")
+        );
+        if (drawArea !== undefined) {
+            areas.push(drawArea);
+        }
+        // The discard pile is always face-up/public, unlike hands or the
+        // draw pile, so its own contents are read directly.
+        const discardArea = this.buildDeckSummaryArea(
+            this.discardPile, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
+        );
+        if (discardArea !== undefined) {
+            areas.push(discardArea);
+        }
+
         const rep: APRenderRep = {
             board: {
                 style: "squares",
@@ -1355,6 +1413,112 @@ export class GnosticaGame extends GameBase {
         return rep;
     }
 
+    // Every card whose identity is definitively known to whoever is
+    // viewing this render: every board territory's card, the always
+    // face-up discard pile, and any hand entry that isn't a redacted ""
+    // placeholder - including the viewer's own hand, which (per this
+    // class's own redaction convention, matching every other Decktet-hand
+    // game here) is never blanked for the player it belongs to. Used to
+    // compute the draw-pile summary by elimination rather than by reading
+    // drawPile's own (equally hidden-from-the-viewer) contents directly.
+    private visibleCardUids(): Set<string> {
+        const visible = new Set<string>();
+        for (const [, , t] of this.board.entries()) {
+            if (t.card !== undefined) {
+                visible.add(t.card.uid);
+            }
+        }
+        for (const uid of this.discardPile) {
+            visible.add(uid);
+        }
+        for (const hand of this.hands) {
+            for (const uid of hand) {
+                if (uid !== "") {
+                    visible.add(uid);
+                }
+            }
+        }
+        return visible;
+    }
+
+    // Draw/discard piles can hold most of the 78-card deck at once - too
+    // many to show as individual cards. Minor arcana are summarized as one
+    // token per (suit, spot-or-royalty) bucket with a count, since only
+    // that combination matters for a minor card's identity here (not the
+    // exact rank); major arcana are unique, so each remaining one is shown
+    // as its own full card face, per the design brief. Returns undefined
+    // for an empty pile (no area to show).
+    private buildDeckSummaryArea(
+        uids: string[], keyPrefix: string, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string
+    ): AreaPieces | undefined {
+        if (uids.length === 0) {
+            return undefined;
+        }
+        const counts = new Map<string, number>();
+        const majorUids: string[] = [];
+        for (const uid of uids) {
+            const card = allCards().find(c => c.uid === uid);
+            if (card === undefined) {
+                continue;
+            }
+            if (card.major) {
+                majorUids.push(uid);
+            } else {
+                const minor = card as MinorCard;
+                const bucket = `${minor.suit.uid}_${minor.rank.court ? "royal" : "spot"}`;
+                counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+            }
+        }
+
+        const pieces: string[] = [];
+        for (const suit of suits) {
+            for (const category of ["spot", "royal"] as const) {
+                const bucket = `${suit.uid}_${category}`;
+                const count = counts.get(bucket);
+                if (count === undefined) {
+                    continue;
+                }
+                const key = `${keyPrefix}_${bucket}`;
+                if (!(key in legend)) {
+                    // Built via buildCardFace itself - same already-tuned
+                    // corner/circle numbers as every other card face,
+                    // rather than a second, separately-guessed composition.
+                    // A representative rank (any court rank for "royal",
+                    // any non-court rank for "spot") drives the exact same
+                    // icon/circle layout a real card of that category would
+                    // get; only the background (borderless, no card-square)
+                    // and the rank-corner text (a count, not a real rank)
+                    // are overridden.
+                    const representativeRank = ranks.find(r => r.court === (category === "royal"))!;
+                    const representative = new MinorCard({ rank: representativeRank, suit });
+                    legend[key] = this.buildCardFace(representative, false, {
+                        borderless: true,
+                        rankText: `${count}x`,
+                    }) as [Glyph, ...Glyph[]];
+                }
+                pieces.push(key);
+            }
+        }
+        for (const uid of majorUids.sort()) {
+            const key = `${keyPrefix}_${uid}`;
+            if (!(key in legend)) {
+                const card = allCards().find(c => c.uid === uid)!;
+                legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
+            }
+            pieces.push(key);
+        }
+
+        if (pieces.length === 0) {
+            return undefined;
+        }
+        return {
+            type: "pieces",
+            pieces: pieces as [string, ...string[]],
+            label,
+            spacing: 0.5,
+        };
+    }
+
     // A canonical string identifying this cell's exact visual contents
     // (card identity + every piece's owner/size/orientation) - the legend
     // only ever grows entries for combinations actually on the board, built
@@ -1382,17 +1546,24 @@ export class GnosticaGame extends GameBase {
     //   - bottom-right: nothing for pip minors (A-10); an empty circle for
     //     court minors (P/N/Q/K); for majors, a circle populated with the
     //     2nd icon if the card has one, else empty.
-    private buildCardFace(card: TarotCard, compact: boolean): Glyph[] {
-        const stack: Glyph[] = [{ name: "piece-square", scale: 1 }];
+    // `borderless` drops the card-square background (for tokens that
+    // summarize a category rather than depict an actual card - see
+    // buildDeckSummaryArea); `rankText` overrides the upper-left text
+    // (same purpose - a count like "3x" instead of a real rank/numeral).
+    private buildCardFace(card: TarotCard, compact: boolean, opts: { borderless?: boolean; rankText?: string } = {}): Glyph[] {
+        const stack: Glyph[] = [{ name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 }];
 
         // `compact` (board tiles, which also have to fit up to 3+ pieces in
         // the same small square) pushes the four corners further out and
         // shrinks everything in them, versus the roomier sizing tuned for a
         // card shown alone. The non-compact numbers below are the ones
         // already tuned by eye for card format - left untouched.
-        let rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
-        if (!card.major && (card as MinorCard).rank.uid !== "10") {
-            rankText += "\u00A0";
+        let rankText = opts.rankText;
+        if (rankText === undefined) {
+            rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
+            if (!card.major && (card as MinorCard).rank.uid !== "10") {
+                rankText += "\u00A0";
+            }
         }
         const rankScale = compact ? 0.25 : 0.45;
         const corner = compact ? BOARD_TILE_GRID_CORNER : 250;
