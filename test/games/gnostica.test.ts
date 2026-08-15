@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
 import "mocha";
 import { expect } from "chai";
+import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/Piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
@@ -792,14 +793,39 @@ describe("Gnostica: handleClick", () => {
         expect(bar!.buttons!.length).greaterThan(1);
     });
 
-    it("highlights the button matching the most recently committed action", () => {
+    // hasLiveMoveInProgress() is the fix for a real bug: this.lastmove/
+    // this.results don't reset between turns on their own, so without this
+    // guard a committed action from the PREVIOUS player's finished turn
+    // would misread as the NEW current player's own in-progress action
+    // (most visibly when the two share a contested cell) - wrongly
+    // highlighting a button, or worse, collapsing the whole bar down to a
+    // stale single button or mode-button set. This is the direct
+    // regression test: right after a real commit, before the next player
+    // has clicked anything at all, nothing should be highlighted.
+    it("does not highlight a stale button before the next player's own first click", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true }); // player 1
         g.move("place l0", { trusted: true }); // player 2 - now player 1's turn again
         g.move(`orient m0.0 N`, { trusted: true }); // player 1 orients, ending their turn
-        // highlighting is keyed off this.lastmove, the most recent move() call
-        // overall - not "this player's own last action" - so it's read right
-        // after the orient commits, before player 2's turn produces a newer one
+        // it's player 2's turn now; they haven't clicked anything yet - the
+        // just-committed "orient" belongs to player 1's finished turn, not
+        // a live action of player 2's.
+        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        for (const b of bar!.buttons!) {
+            expect(b.attributes, `button "${b.value}" should not be highlighted yet`).to.be.undefined;
+        }
+    });
+
+    it("highlights the button matching the current player's own in-progress action", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2 - now player 1's turn again
+        const [row, col] = rowColFor(g, 0, 0);
+        const seed = g.handleClick("", -1, -1, "_btn_orient");
+        const clicked = g.handleClick(seed.move, row, col);
+        expect(clicked.move).eq("orient m0.0 up");
+        g.move(clicked.move, { partial: true }); // sync engine state, same as the playground's own preview flow
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const orientBtn = bar!.buttons!.find(b => b.value === "orient");
@@ -808,12 +834,11 @@ describe("Gnostica: handleClick", () => {
         expect(activateBtn!.attributes).to.be.undefined;
     });
 
-    it("highlights Discard (not Pass) after a bare draw commit, since the two share move text", () => {
+    it("highlights Discard (not Pass) during a live draw preview, since the two share move text", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
-        g.move("draw", { trusted: true }); // player 1 passes/discards nothing
-        g.move("draw", { trusted: true }); // player 2 does the same
+        g.move("draw", { partial: true }); // player 1's own live preview - passes/discards nothing
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const drawBtn = bar!.buttons!.find(b => b.value === "draw");
@@ -822,9 +847,7 @@ describe("Gnostica: handleClick", () => {
         expect(passBtn!.attributes).to.be.undefined; // known simplification: Pass and Discard are indistinguishable from lastmove alone
     });
 
-    it("known gap: an activate that declines its power pushes no results, so highlighting it is not guaranteed", () => {
-        // Documented, not asserted either way - the user judged this an acceptable
-        // gap since declining the power is not the common case in normal usage.
+    it("still highlights Use Territory during a live activate-declining-power preview (no results pushed)", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
@@ -832,13 +855,38 @@ describe("Gnostica: handleClick", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const clicked = g.handleClick(seed.move, row, col);
         expect(clicked.move).eq("activate m0");
-        g.move("activate m0", { trusted: true }); // decline the power
+        g.move(clicked.move, { partial: true }); // live preview, power still declined - pushes zero results
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const activateBtn = bar!.buttons!.find(b => b.value === "activate");
         // lastmove-based detection still catches this case, since lastmove is
         // set unconditionally regardless of pushed results
         expect(activateBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
+    });
+
+    // The bug this whole guard exists for: a CONTESTED cell (both players
+    // have a piece there) defeats the narrower "does the current player
+    // own a piece at that result's cell" checks alone, since the new
+    // current player genuinely does have a piece there too - only knowing
+    // whether a move() call has happened yet THIS turn can tell the two
+    // apart.
+    it("does not carry a stale mode-button set into a contested cell on the next player's fresh turn", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.card = aceOfCups();
+        g.move("place m0", { trusted: true }); // player 1's piece on m0, "up"
+        g.move("place l0", { trusted: true }); // player 2, elsewhere
+        g.board.get(0, 0)!.pieces.push(new Piece(2, 1, "up")); // contrive: player 2 ALSO on m0 now
+        g.move("activate m0, m0.0 own m0 up", { trusted: true }); // player 1 uses Cups (own), ending their turn
+        // it's player 2's turn now, and they haven't clicked anything -
+        // even though player 2 also has a piece on the just-activated
+        // cell, the mode-button set from player 1's finished turn must not
+        // leak through.
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("activate");
+        expect(values).to.include("play"); // the full top-level set, not narrowed
+        expect(values).to.not.include("mode_C_own");
     });
 
     it("does not guess at a click on a cell with no piece of the acting player's, once placement is no longer legal", () => {
@@ -1151,10 +1199,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.board.get(1, 0)!.card?.uid).eq(royaltyUid);
     });
 
-    it("Swords (piece): mode button defaults to attacking the minion itself", () => {
+    it("Swords (piece): with no facing piece to attack (minion is \"up\"), falls back to the minion itself", () => {
         const g = new GnosticaGame(2);
         g.board.get(0, 0)!.card = aceOfSwords();
-        g.move("place m0", { trusted: true }); // player 1, size 1, "up"
+        g.move("place m0", { trusted: true }); // player 1, size 1, "up" - no facing cell at all
         g.move("place l0", { trusted: true }); // player 2
         const seed = g.handleClick("", -1, -1, "_btn_activate");
         const [row, col] = rowColFor(g, 0, 0);
@@ -1164,6 +1212,28 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         g.move(modeClick.move, { trusted: true });
         expect(g.board.get(0, 0)!.pieces.length).eq(0); // 1 pip on a size-1 piece destroys it
         expect(g.stashes.get(1)![0]).eq(5); // returned to its own stash
+    });
+
+    // Regression test for a reported bug: using a Sword to attack a
+    // neighbouring enemy instead attacked the acting player's own minion,
+    // because the mode button unconditionally defaulted to self. Attacking
+    // yourself is almost never what's wanted (unlike Rods' "move self" or
+    // Discs' "grow self", both genuinely common choices) - when the minion
+    // is actually facing an enemy, that's what the default should target.
+    it("Swords (piece): with a piece in the facing cell, defaults to attacking THAT instead of self", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.card = aceOfSwords();
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the facing cell
+        const seed = g.handleClick("", -1, -1, "_btn_activate");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
+        expect(modeClick.move).eq("activate m0, m0.0 piece n0.0 1");
+        g.move(modeClick.move, { trusted: true });
+        expect(g.board.get(0, 0)!.pieces.length).eq(1); // the acting player's own minion survives
+        expect(g.board.get(1, 0)!.pieces.length).eq(0); // the enemy piece is destroyed instead
+        expect(g.stashes.get(2)![0]).eq(5); // returned to ITS owner's stash
     });
 
     it("Swords (tile): mode button seeds an incomplete (still valid) step, a hand-card click supplies the uid", () => {
@@ -1191,6 +1261,30 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.board.get(-1, 0)!.card?.uid).eq(spotUid);
     });
 
+    it("narrows the bar to just the selected top-level button, a spacer, then the mode buttons", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.card = aceOfCups();
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        g.move("activate m0", { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        // The full top-level set (play/orient/draw/pass) is gone, save for
+        // the one choice that got us here - no room to keep both levels.
+        expect(values).to.not.include("play");
+        expect(values).to.not.include("orient");
+        expect(values).to.not.include("draw");
+        expect(values).to.not.include("pass");
+        expect(values[0]).eq("activate");
+        expect(bar!.buttons![0].attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
+        expect(values[1]).eq("_spacer"); // divider - the schema has no dedicated type for one
+        expect(values.slice(2)).to.include("mode_C_own");
+        // Declare stays available throughout - an orthogonal end-of-turn
+        // flourish, not a step of this particular choice.
+        expect(values[values.length - 1]).eq("declare");
+    });
+
     it("offers only currently-sensible suit modes as buttons", () => {
         const g = new GnosticaGame(2);
         g.board.get(0, 0)!.card = aceOfCups();
@@ -1215,5 +1309,103 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const ownBtn = bar!.buttons!.find(b => b.value === "mode_C_own");
         expect(ownBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
+    });
+
+    // Regression test for a second reported bug, hit via the Sword
+    // self-attack above: destroying the acting player's own last minion
+    // mid-preview made getActionButtons() misread "zero pieces on board
+    // right now" as "fresh turn, needs a placement" and collapse the whole
+    // bar down to a single Place button - even though the in-progress
+    // activate/play move was still perfectly valid and just needed
+    // submitting. A live "activate"/"play" preview can only ever have
+    // started with board presence (both throw otherwise), so this piece
+    // count is a legitimate mid-action side effect, not a fresh-turn
+    // signal.
+    it("does not collapse to the Place button mid-preview when a power step destroys the acting player's own last minion", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.card = aceOfSwords();
+        g.move("place m0", { trusted: true }); // player 1, size 1, "up" - only piece on the board
+        g.move("place l0", { trusted: true }); // player 2
+        const seed = g.handleClick("", -1, -1, "_btn_activate");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
+        expect(modeClick.move).eq("activate m0, m0.0 piece m0.0 1"); // self-attack, since "up" has no facing cell
+        g.move(modeClick.move, { partial: true }); // live preview - destroys the player's only piece
+        expect(g.board.get(0, 0)!.pieces.length).eq(0); // confirm the destructive side effect really happened
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.not.deep.equal(["place"]);
+        expect(values).to.include("activate");
+        expect(values).to.include("play");
+    });
+});
+
+// Regression tests for validateMove()'s rearchitecture: a genuine,
+// non-mutating validator (gnostica.ts's validateX tree + gnostica/powers.ts's
+// checkX functions) replacing the old "clone this, try applyMove() on the
+// clone, catch whatever it throws" mechanism. That old mechanism silently
+// discarded every specific reason a suit-power move was illegal, since the
+// thrown GnosticaRulesError wasn't a UserFacingError and the catch block
+// only ever unwrapped UserFacingError's own message - every powers.ts
+// failure surfaced as the generic INVALID_MOVE fallback instead of its real
+// message.
+describe("Gnostica: validateMove architecture (non-mutating validator)", () => {
+    before(() => {
+        addResource("en");
+    });
+
+    it("surfaces the real reason a suit-power move failed, not the generic fallback", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.card = aceOfCups();
+        g.move("place m0", { trusted: true }); // player 1, "up" - targets itself
+        g.move("place l0", { trusted: true }); // player 2
+        g.board.get(0, 0)!.pieces.push(new Piece(1, 1, "up"), new Piece(1, 1, "up")); // fill to capacity (3)
+        const result = g.validateMove("activate m0, m0.0 own m0 up");
+        expect(result.valid).to.be.false;
+        // CELL_FULL's own message is still an empty placeholder (task #7,
+        // not yet filled in) - if this had instead fallen through to the
+        // generic INVALID_MOVE fallback ("'...' doesn't look like a valid
+        // move."), the message would be non-empty.
+        expect(result.message).to.eq("");
+    });
+
+    it("does not mutate game state while validating an invalid move", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.card = aceOfCups();
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const handBefore = [...g.hands[0]];
+        const piecesBefore = g.board.get(0, 0)!.pieces.length;
+        const discardBefore = g.discardPile.length;
+        const result = g.validateMove("activate m0, m0.0 own m0 up, m0.0 own m0 up"); // MINOR_ONE_STEP_ONLY
+        expect(result.valid).to.be.false;
+        expect(g.hands[0]).to.deep.equal(handBefore);
+        expect(g.board.get(0, 0)!.pieces.length).to.eq(piecesBefore);
+        expect(g.discardPile.length).to.eq(discardBefore);
+    });
+
+    // Second bug found while building this refactor: Cups "own"/"copy"
+    // previously looked up the target cell with the throwing getTerritory()
+    // helper, which threw on a genuinely untouched wasteland (no stored
+    // Territory object at all, since one is only ever created for a cell
+    // that already has a card or a piece) - inconsistent with
+    // movePiece/hermitMovePiece, which already handle exactly
+    // this case by creating one on the fly. Now fixed to match.
+    it("Cups (own) can target a genuinely untouched wasteland, not just an existing territory", () => {
+        const g = new GnosticaGame(2);
+        const [cx, cy] = [1, 1]; // a corner of the initial 3x3
+        const cornerCell = GnosticaBoard.coords2algebraic(cx, cy);
+        const [tx, ty] = [2, 1]; // outside the 3x3 - genuinely untouched
+        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        expect(g.board.has(tx, ty)).to.be.false;
+        g.board.get(cx, cy)!.card = aceOfCups();
+        g.move(`place ${cornerCell} E`, { trusted: true }); // player 1, pointing at the untouched cell
+        g.move("place l0", { trusted: true }); // player 2
+        const move = `activate ${cornerCell}, ${cornerCell}.0 own ${targetCell} up`;
+        expect(g.validateMove(move).valid).to.be.true;
+        expect(() => g.move(move, { trusted: true })).to.not.throw();
+        expect(g.board.get(tx, ty)!.pieces.length).to.eq(1);
     });
 });
