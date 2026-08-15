@@ -90,6 +90,20 @@ type StepValidation =
     | { failed: true; result: IValidationResult }
     | { failed: false; outcome?: IStepOutcome };
 
+// resolvePieceRef's result: "ok" resolves to exactly one piece;
+// "malformed" is a syntax failure (wrong segment count, bad pips,
+// unrecognized orientation letter, bad player number); "not_found" is
+// zero matches after applying whatever fields were supplied;
+// "ambiguous" is more than one match remaining, where supplying
+// additional fields would have narrowed it further (as opposed to true
+// duplicate pieces, which "ok" already resolves via first-match - see
+// resolvePieceRef's own docs).
+type PieceRefResolution =
+    | { kind: "ok"; ref: IMinionRef }
+    | { kind: "malformed" }
+    | { kind: "not_found" }
+    | { kind: "ambiguous" };
+
 // Click support for minor arcana's single suit-power step (major arcana
 // chaining is out of scope for this pass - see parsePendingMinorStep()).
 // One entry per suit+mode: the button label, whether the mode's target is a
@@ -139,6 +153,13 @@ interface IPendingMinorStep {
     head: "activate" | "play";
     headArg: string;
     suitUid: string;
+    // Every one of the acting player's own pieces eligible to act here -
+    // `minion` is always eligible[0] (see this interface's own docs), but
+    // the full list is kept too so a minion-selector ref can still be
+    // generated correctly (disambiguated only against the player's own
+    // other eligible minions, never a co-located enemy piece - see
+    // resolvePieceRef's docs on the "minion-selector" pool).
+    eligible: IMinionRef[];
     minion: IMinionRef;
     mode?: string;
     rest: string[];
@@ -194,6 +215,7 @@ export class GnosticaGame extends GameBase {
         ],
         variants: [
             { uid: "target-8", group: "target" },
+            { uid: "#target" },
             { uid: "target-10", group: "target" },
             { uid: "no-majors" },
         ],
@@ -361,20 +383,23 @@ export class GnosticaGame extends GameBase {
     // ============================================================
     // Move parsing
     //
-    // Grammar (see the plan for the full design): a comma/semicolon/slash-
-    // delimited list of segments. Exactly one segment names the turn's
-    // action; an optional extra "last" segment announces the player's final
-    // turn. "activate"/"play" (which chain 0-2 suit/major-arcana power
-    // steps after the action segment) aren't implemented yet - only place/
-    // orient/draw are real right now.
+    // Grammar: a comma/semicolon/slash-delimited list of segments naming
+    // the turn's action (plus, for "activate"/"play", 0+ further segments
+    // chaining suit/major-arcana power steps). A trailing "(last)" suffix
+    // on the WHOLE move string - not a segment of its own, always at the
+    // very end - announces the player's final turn; see hasLastFlag/
+    // stripLastFlag. It's deliberately a distinct, unmistakable suffix
+    // rather than just another comma-segment, so it can be stripped once
+    // up front (by validateMove/applyMove/handleClick/
+    // parsePendingMinorStep, each independently) without the rest of the
+    // grammar ever needing to know it exists, and safely re-attached to
+    // whatever move string handleClick's various branches build, without
+    // each of them threading it through by hand.
     //
-    // validateMove() and move() share one code path (applyMove(), below)
-    // rather than duplicating the legality checks: validateMove() runs it
-    // against a throwaway clone and reports whether it threw. This is
-    // simpler than Homeworlds' hand-rolled parallel validators, at the cost
-    // of the granular complete:0-vs-1 partial-move UX every other game gets
-    // from a bespoke validator - that polish is deferred to a later pass
-    // once handleClick/render exist to actually exercise it.
+    // validateMove() (above applyMove(), below) is a real, non-mutating
+    // validator that walks this same grammar read-only, rather than
+    // mutating a throwaway clone and reporting whether it threw - see its
+    // own docs for why.
     // ============================================================
 
     // `partial: true` is the playground/interface's live-preview signal -
@@ -442,20 +467,12 @@ export class GnosticaGame extends GameBase {
     // side effect here: every validateX/checkX failure below carries its
     // own key straight through to the returned message.
     public validateMove(m: string): IValidationResult {
-        m = m.trim();
+        const announceLast = this.hasLastFlag(m);
+        m = this.stripLastFlag(m);
         if (m.length === 0) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
-        const segments = m.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
-        let announceLast = false;
-        const remaining: string[] = [];
-        for (const seg of segments) {
-            if (seg.toLowerCase() === "last") {
-                announceLast = true;
-            } else {
-                remaining.push(seg);
-            }
-        }
+        const remaining = m.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
         if (remaining.length === 0) {
             return this.invalid("apgames:validation._general.INVALID_MOVE", { move: m });
         }
@@ -500,12 +517,45 @@ export class GnosticaGame extends GameBase {
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
+    // The end-of-turn "declare" flag is always this exact trailing suffix
+    // on the whole move string - never a comma-separated segment mixed in
+    // with the rest - so every consumer of a move string can strip it
+    // (or check for it) with one shared regex, independent of wherever
+    // else in the grammar it's being parsed. See this file's "Move
+    // parsing" docs above for why.
+    private static readonly LAST_FLAG_RE = /\s*\(last\)\s*$/i;
+
+    private hasLastFlag(move: string): boolean {
+        return GnosticaGame.LAST_FLAG_RE.test(move.trim());
+    }
+
+    private stripLastFlag(move: string): string {
+        return move.replace(GnosticaGame.LAST_FLAG_RE, "").trim();
+    }
+
+    private withLastFlag(move: string): string {
+        return move.trim().length === 0 ? "(last)" : `${move.trim()} (last)`;
+    }
+
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
         return { valid: false, complete: -1, message: i18next.t(key, params) };
     }
 
     private failureResult(failure: PowerFailure): IValidationResult {
         return this.invalid(`apgames:validation.gnostica.${failure.key}`, failure.params);
+    }
+
+    // Maps a failed resolvePieceRef() result to its validation message -
+    // `notFoundKey` lets a minion-selector call site report
+    // NOT_AN_ELIGIBLE_MINION instead of the target-slot default of
+    // NO_SUCH_PIECE for the same "nothing matched" outcome (mirrors
+    // resolvePieceRefOrThrow's own notFoundKey param on the apply* side).
+    private invalidPieceRef(kind: "malformed" | "not_found" | "ambiguous", ref: string | undefined, notFoundKey = "NO_SUCH_PIECE"): IValidationResult {
+        switch (kind) {
+            case "malformed": return this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref });
+            case "not_found": return this.invalid(`apgames:validation.gnostica.${notFoundKey}`, { ref });
+            case "ambiguous": return this.invalid("apgames:validation.gnostica.AMBIGUOUS_PIECE_REF", { ref });
+        }
     }
 
     private validateHasPiecesOnBoard(): IValidationResult | undefined {
@@ -537,25 +587,102 @@ export class GnosticaGame extends GameBase {
         }
     }
 
-    private tryParsePieceRef(ref: string | undefined): { x: number; y: number; index: number } | undefined {
+    // The ref-notation letter for a piece's orientation - N/E/S/W/U, all
+    // single uppercase letters (U for "up"), distinct from
+    // tryParseOrientation's own lowercase "up" word used by the `orient`
+    // command and Cups "own" - this vocabulary is local to piece refs only.
+    private orientationRefLetter(o: Orientation): string {
+        return o === "up" ? "U" : o;
+    }
+
+    private orientationFromRefLetter(letter: string): Orientation | undefined {
+        if (letter === "U") {
+            return "up";
+        }
+        return (cardinalOrientations as string[]).includes(letter) ? letter as Orientation : undefined;
+    }
+
+    // A piece reference names a pyramid the same way a player would
+    // describe one out loud: "<cell>.<pips>[.<orientation>][.<player>]" -
+    // pips always present, orientation/player each included only if
+    // needed to pick out one piece. Resolved against `pool` if given
+    // (a "minion-selector" slot - the eligible/minions list, already the
+    // acting player's own pieces, filtered to the parsed cell), or every
+    // piece at the parsed cell if omitted (a "target" slot - any owner is
+    // fair game, matching checkValidPieceTarget's own lack of an
+    // ownership restriction). Two pieces identical in every field
+    // (owner+size+orientation - see Piece.id()) are functionally
+    // interchangeable, so resolve to whichever comes first rather than
+    // erroring; anything less than fully identical that's still ambiguous
+    // after the fields actually supplied is a genuine "ambiguous" result,
+    // since supplying more fields would have resolved it.
+    private resolvePieceRef(ref: string | undefined, pool?: IMinionRef[]): PieceRefResolution {
         if (ref === undefined) {
-            return undefined;
+            return { kind: "malformed" };
         }
-        const parts = ref.split(".");
-        if (parts.length !== 2) {
-            return undefined;
+        const segments = ref.split(".");
+        if (segments.length < 2 || segments.length > 4) {
+            return { kind: "malformed" };
         }
-        const [cellStr, idxStr] = parts;
-        const index = parseInt(idxStr, 10);
-        if (Number.isNaN(index)) {
-            return undefined;
-        }
+        const [cellStr, pipsStr, ...rest] = segments;
         const coords = this.tryAlgebraic2coords(cellStr);
         if (coords === undefined) {
-            return undefined;
+            return { kind: "malformed" };
         }
         const [x, y] = coords;
-        return { x, y, index };
+        const pips = parseInt(pipsStr, 10);
+        if (Number.isNaN(pips) || pips < 1 || pips > 3) {
+            return { kind: "malformed" };
+        }
+        let orientation: Orientation | undefined;
+        let player: number | undefined;
+        for (const tok of rest) {
+            const asOrientation = this.orientationFromRefLetter(tok);
+            if (asOrientation !== undefined) {
+                if (orientation !== undefined || player !== undefined) {
+                    return { kind: "malformed" };
+                }
+                orientation = asOrientation;
+                continue;
+            }
+            const asPlayer = parseInt(tok, 10);
+            if (Number.isNaN(asPlayer) || player !== undefined) {
+                return { kind: "malformed" };
+            }
+            player = asPlayer;
+        }
+        const candidateRefs = pool !== undefined
+            ? pool.filter(p => p.x === x && p.y === y)
+            : (this.board.get(x, y)?.pieces ?? []).map((_, index) => ({ x, y, index }));
+        let matches = candidateRefs
+            .map(r => ({ r, piece: this.board.get(r.x, r.y)!.pieces[r.index] }))
+            .filter(({ piece }) => piece.size === pips);
+        if (orientation !== undefined) {
+            matches = matches.filter(({ piece }) => piece.orientation === orientation);
+        }
+        if (player !== undefined) {
+            matches = matches.filter(({ piece }) => piece.owner === player);
+        }
+        if (matches.length === 0) {
+            return { kind: "not_found" };
+        }
+        if (matches.length > 1 && new Set(matches.map(({ piece }) => piece.id())).size > 1) {
+            return { kind: "ambiguous" };
+        }
+        return { kind: "ok", ref: matches[0].r };
+    }
+
+    // Throwing counterpart to resolvePieceRef, for the
+    // mutating apply* side - `notFoundKey` lets a minion-selector call
+    // site report NOT_AN_ELIGIBLE_MINION instead of the target-slot
+    // default of NO_SUCH_PIECE for the same "nothing matched" outcome.
+    private resolvePieceRefOrThrow(ref: string | undefined, pool?: IMinionRef[], notFoundKey = "NO_SUCH_PIECE"): { x: number; y: number; index: number } {
+        const result = this.resolvePieceRef(ref, pool);
+        if (result.kind === "ok") {
+            return result.ref;
+        }
+        const key = result.kind === "malformed" ? "BAD_PIECE_REF" : result.kind === "ambiguous" ? "AMBIGUOUS_PIECE_REF" : notFoundKey;
+        throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${key}`, { ref }));
     }
 
     // A syntactically-complete move that the click flow itself built up
@@ -650,13 +777,14 @@ export class GnosticaGame extends GameBase {
         if (this.liveMove === undefined) {
             return found;
         }
-        const segments = this.liveMove.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
+        if (this.hasLastFlag(this.liveMove)) {
+            found.add("declare");
+        }
+        const bareMove = this.stripLastFlag(this.liveMove);
+        const segments = bareMove.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
         const head = segments[0]?.split(/\s+/)[0]?.toLowerCase();
         if (head !== undefined && ["place", "activate", "play", "orient", "draw"].includes(head)) {
             found.add(head);
-        }
-        if (segments.some(s => s.toLowerCase() === "last")) {
-            found.add("declare");
         }
         return found;
     }
@@ -748,7 +876,12 @@ export class GnosticaGame extends GameBase {
     // no activate/play in progress, the card is major (chaining isn't
     // click-driven yet), or there's no eligible minion at all.
     private parsePendingMinorStep(moveStr: string): IPendingMinorStep | undefined {
-        const segments = moveStr.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
+        // Defensive strip, independent of whatever the caller already did -
+        // a trailing "(last)" would otherwise land as a bogus extra token
+        // on this step's own rest/mode args (it's stuck onto the end of
+        // the whole move string, not its own segment - see the "Move
+        // parsing" docs above).
+        const segments = this.stripLastFlag(moveStr).split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
         if (segments.length === 0) {
             return undefined;
         }
@@ -781,7 +914,7 @@ export class GnosticaGame extends GameBase {
         const suitUid = (card as MinorCard).suit.uid;
         const stepTokens = segments.length >= 2 ? segments[1].split(/\s+/) : [];
         const [, mode, ...rest] = stepTokens; // stepTokens[0] is the minionRef - always eligible[0] by construction
-        return { head, headArg, suitUid, minion: eligible[0], mode, rest };
+        return { head, headArg, suitUid, eligible, minion: eligible[0], mode, rest };
     }
 
     // The single valid cell a minor suit-power step may affect, per
@@ -800,8 +933,31 @@ export class GnosticaGame extends GameBase {
         return [minion.x + dx, minion.y + dy];
     }
 
-    private pieceRefStr(x: number, y: number, index: number): string {
-        return `${GnosticaBoard.coords2algebraic(x, y)}.${index}`;
+    // Inverse of resolvePieceRef: the shortest ref that resolves back to
+    // this exact piece within the same pool (see resolvePieceRef's docs -
+    // omitted here, defaults to every piece at the cell). Tries pips alone,
+    // then pips+orientation alone, then pips+player alone (skipping
+    // orientation if it didn't help), then all three together.
+    private pieceRefStr(x: number, y: number, index: number, pool?: IMinionRef[]): string {
+        const piece = this.board.get(x, y)!.pieces[index];
+        const cell = GnosticaBoard.coords2algebraic(x, y);
+        const candidateRefs = pool !== undefined
+            ? pool.filter(p => p.x === x && p.y === y)
+            : (this.board.get(x, y)?.pieces ?? []).map((_, i) => ({ x, y, index: i }));
+        const byPips = candidateRefs
+            .map(r => this.board.get(r.x, r.y)!.pieces[r.index])
+            .filter(p => p.size === piece.size);
+        if (byPips.length <= 1) {
+            return `${cell}.${piece.size}`;
+        }
+        const orientLetter = this.orientationRefLetter(piece.orientation);
+        if (byPips.filter(p => p.orientation === piece.orientation).length <= 1) {
+            return `${cell}.${piece.size}.${orientLetter}`;
+        }
+        if (byPips.filter(p => p.owner === piece.owner).length <= 1) {
+            return `${cell}.${piece.size}.${piece.owner}`;
+        }
+        return `${cell}.${piece.size}.${orientLetter}.${piece.owner}`;
     }
 
     // Click-to-orient: clicking the cell a piece already occupies means
@@ -888,32 +1044,68 @@ export class GnosticaGame extends GameBase {
     // tolerance (see its docs) keeps that a harmless, still-provisional
     // "declined so far" state rather than a thrown error, until
     // supplyMinorCardUid fills it in.
+    // Cups "copy"'s victim argument reuses the same <pips>[.<orientation>]
+    // [.<player>] qualifier vocabulary as a full piece ref, just without
+    // its own leading cell segment (the target cell is already "copy"'s
+    // own first argument) - built/read by borrowing pieceRefStr/
+    // resolvePieceRef's own logic and stripping/re-adding the cell.
+    private victimRefStr(x: number, y: number, index: number): string {
+        const full = this.pieceRefStr(x, y, index);
+        return full.slice(full.indexOf(".") + 1);
+    }
+
+    private resolveVictimRef(cellStr: string, suffix: string | undefined): PieceRefResolution {
+        if (suffix === undefined) {
+            return { kind: "malformed" };
+        }
+        return this.resolvePieceRef(`${cellStr}.${suffix}`);
+    }
+
+    private resolveVictimRefOrThrow(cellStr: string, suffix: string | undefined): { x: number; y: number; index: number } {
+        const result = this.resolveVictimRef(cellStr, suffix);
+        if (result.kind === "ok") {
+            return result.ref;
+        }
+        const key = result.kind === "malformed" ? "BAD_PIECE_REF" : result.kind === "ambiguous" ? "AMBIGUOUS_PIECE_REF" : "NO_SUCH_PIECE";
+        throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${key}`, { ref: suffix }));
+    }
+
     private buildMinorModeMove(pending: IPendingMinorStep, mode: string): string {
-        const ref = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        // Two different refs to the acting minion: `minionRef` fills the
+        // step's own minion-selector slot (disambiguated only against the
+        // player's OTHER eligible minions - see resolvePieceRef's docs on
+        // the "minion-selector" pool); `selfRef` is used wherever the same
+        // piece is the DEFAULT TARGET of a "piece"-shaped mode instead
+        // (disambiguated against every piece at that cell, any owner -
+        // the "target" pool). These can differ, so they're never
+        // interchangeable even though they name the same piece here.
+        const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.eligible);
+        const selfRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
-        const tokens = [ref, mode];
+        const tokens = [minionRef, mode];
         switch (`${pending.suitUid}.${mode}`) {
             case "C.own":
                 tokens.push(targetCell, "up");
                 break;
             case "C.copy": {
                 const t = this.board.get(tx, ty);
-                const victimIdx = (t?.pieces ?? []).findIndex(p => p.owner !== this.currplayer);
-                tokens.push(targetCell, String(Math.max(victimIdx, 0)));
+                const victim = (t?.pieces ?? []).find(p => p.owner !== this.currplayer);
+                const victimIdx = victim !== undefined ? t!.pieces.indexOf(victim) : 0;
+                tokens.push(targetCell, this.victimRefStr(tx, ty, victimIdx));
                 break;
             }
             case "C.new":
                 tokens.push(targetCell);
                 break;
             case "R.piece":
-                tokens.push(ref, "1");
+                tokens.push(selfRef, "1");
                 break;
             case "R.tile":
                 tokens.push("1");
                 break;
             case "D.piece":
-                tokens.push(ref);
+                tokens.push(selfRef);
                 break;
             case "D.tile":
                 tokens.push(targetCell);
@@ -931,7 +1123,7 @@ export class GnosticaGame extends GameBase {
                 // all, rather than silently defaulting to self-harm.
                 const facingHasPiece = (tx !== pending.minion.x || ty !== pending.minion.y)
                     && (this.board.get(tx, ty)?.pieces.length ?? 0) > 0;
-                tokens.push(facingHasPiece ? this.pieceRefStr(tx, ty, 0) : ref, "1");
+                tokens.push(facingHasPiece ? this.pieceRefStr(tx, ty, 0) : selfRef, "1");
                 break;
             }
             case "S.tile":
@@ -947,7 +1139,7 @@ export class GnosticaGame extends GameBase {
         if (pending.mode === undefined) {
             return `${pending.head} ${pending.headArg}`;
         }
-        const ref = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        const ref = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.eligible);
         return `${pending.head} ${pending.headArg}, ${ref} ${pending.mode} ${pending.rest.join(" ")}`.trim();
     }
 
@@ -970,7 +1162,13 @@ export class GnosticaGame extends GameBase {
         }
         const mode = pending.mode;
         const config = MINOR_MODES[pending.suitUid][mode];
-        const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        // Two refs to the same acting minion, same reasoning as
+        // buildMinorModeMove: `minionRef` (eligible pool) always fills the
+        // rebuilt move's own selector slot below; `selfRef` (target pool)
+        // is used wherever the piece needs to be named as a TARGET instead
+        // (the "piece"-shape branch's self/face comparisons and rebuilds).
+        const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.eligible);
+        const selfRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
         const minionPiece = this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
         const rebuild = (rest: string[]): IClickResult =>
             this.provisionalResult(`${pending.head} ${pending.headArg}, ${minionRef} ${mode} ${rest.join(" ")}`.trim());
@@ -1001,10 +1199,11 @@ export class GnosticaGame extends GameBase {
                 if (enemyIndices.length === 0) {
                     return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.NO_ENEMY_THERE", { cell }) };
                 }
-                const current = parseInt(pending.rest[1] ?? "-1", 10);
+                const currentResolution = this.resolveVictimRef(cell, pending.rest[1]);
+                const current = currentResolution.kind === "ok" ? currentResolution.ref.index : -1;
                 const at = enemyIndices.indexOf(current);
                 const next = enemyIndices[(at + 1) % enemyIndices.length];
-                return rebuild([cell, String(next)]);
+                return rebuild([cell, this.victimRefStr(tx, ty, next)]);
             }
             // "new" (Cups) / "tile" (Discs) - the only remaining arg is a
             // hand-card uid (supplyMinorCardUid), nothing to cycle here.
@@ -1018,12 +1217,12 @@ export class GnosticaGame extends GameBase {
             if (!isSelfClick && !isFaceClick) {
                 return undefined;
             }
-            const currentIsSelf = pending.rest[0] === minionRef;
+            const currentIsSelf = pending.rest[0] === selfRef;
             const needsNumeric = !(pending.suitUid === "D" && mode === "piece");
             const switchingToSelf = isSelfClick && !currentIsSelf;
             const switchingToFace = isFaceClick && !(faceX === pending.minion.x && faceY === pending.minion.y) && currentIsSelf;
             if (switchingToSelf) {
-                return rebuild(needsNumeric ? [minionRef, "1"] : [minionRef]);
+                return rebuild(needsNumeric ? [selfRef, "1"] : [selfRef]);
             }
             if (switchingToFace) {
                 const t = this.board.get(faceX, faceY);
@@ -1070,7 +1269,7 @@ export class GnosticaGame extends GameBase {
             return undefined;
         }
         const key = `${pending.suitUid}.${pending.mode}`;
-        const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.eligible);
         let rest: string[];
         if ((key === "C.new" || key === "D.tile") && pending.rest.length === 1) {
             rest = [pending.rest[0], uid];
@@ -1087,7 +1286,59 @@ export class GnosticaGame extends GameBase {
     // orient, activate/play with power declined, and toggling hand cards
     // into a draw's discard list. activate/play's chained power steps
     // aren't click-driven yet (deliberately scoped out of this pass).
+    //
+    // "Declare" is handled up front, separately from everything else -
+    // it's the one click that operates on the "(last)" flag directly
+    // (toggling it), rather than building/replacing the move's base
+    // action. Every OTHER click below is handled with "(last)" stripped
+    // off first (so none of that logic has to know it exists) and
+    // reattached to whatever move string comes back out - see
+    // reattachLastFlag - so the flag survives no matter what the player
+    // clicks next, including switching to a completely different action
+    // after already declaring.
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
+        if (piece === "_btn_declare") {
+            return this.handleDeclareClick(move);
+        }
+        const hadLast = this.hasLastFlag(move);
+        const result = this.handleClickCore(this.stripLastFlag(move), row, col, piece);
+        return this.reattachLastFlag(result, hadLast);
+    }
+
+    // Toggles the "(last)" suffix on/off the current move, whatever it is
+    // right now - including nothing at all yet, since Declare is shown
+    // unconditionally (see getActionButtons()'s own docs - "an orthogonal
+    // end-of-turn flourish, not a step of this particular choice") and
+    // shouldn't require picking a base action first.
+    private handleDeclareClick(move: string): IClickResult {
+        const trimmed = move.trim();
+        const newmove = this.hasLastFlag(trimmed) ? this.stripLastFlag(trimmed) : this.withLastFlag(trimmed);
+        return this.provisionalResult(newmove);
+    }
+
+    // Reattaches "(last)" to a click result computed against the
+    // last-stripped move, if it was present going in. A still-incomplete
+    // result (complete: -1 - either a friendly, deliberately-not-validated
+    // seed like modeSeedResult's, or a genuinely in-progress real move)
+    // gets the flag spliced on as-is, since it isn't submittable yet
+    // regardless; a complete, currently-valid result gets properly
+    // re-validated on the combined string instead, so a move that's only
+    // illegal BECAUSE of declaring (ALREADY_ANNOUNCED) is still caught
+    // right when it matters. An outright error result (valid: false)
+    // still gets the flag spliced into the echoed-back `.move` for
+    // display, but keeps its own real error message untouched.
+    private reattachLastFlag(result: IClickResult, hadLast: boolean): IClickResult {
+        if (!hadLast || result.move === undefined || this.hasLastFlag(result.move)) {
+            return result;
+        }
+        const combined = this.withLastFlag(result.move);
+        if (result.valid && result.complete !== -1) {
+            return this.provisionalResult(combined);
+        }
+        return { ...result, move: combined };
+    }
+
+    private handleClickCore(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
@@ -1124,17 +1375,6 @@ export class GnosticaGame extends GameBase {
                         return this.modeSeedResult("play", "apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY");
                     case "orient":
                         return this.modeSeedResult("orient", "apgames:validation.gnostica.PICK_PIECE_TO_ORIENT");
-                    case "declare": {
-                        if (move.trim().length === 0) {
-                            return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
-                        }
-                        const segments = move.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
-                        const hasLast = segments.some(s => s.toLowerCase() === "last");
-                        const newmove = hasLast
-                            ? segments.filter(s => s.toLowerCase() !== "last").join(", ")
-                            : `${move}, last`;
-                        return this.provisionalResult(newmove);
-                    }
                     default:
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                 }
@@ -1223,7 +1463,7 @@ export class GnosticaGame extends GameBase {
                 const [prevRef] = args;
                 let dir: Orientation | undefined;
                 if (prevRef !== undefined) {
-                    const loc = this.parsePieceRef(prevRef);
+                    const loc = this.resolvePieceRefOrThrow(prevRef);
                     dir = this.orientationTowardClick(loc.x, loc.y, x, y);
                 }
                 if (prevRef !== undefined && dir !== undefined) {
@@ -1233,7 +1473,7 @@ export class GnosticaGame extends GameBase {
                     if (myPieceIdx === -1) {
                         return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_SUCH_PIECE", { ref: cell }) };
                     }
-                    newmove = `orient ${cell}.${myPieceIdx} up`;
+                    newmove = `orient ${this.pieceRefStr(x, y, myPieceIdx)} up`;
                 }
             } else if (head === "activate" || head === "play") {
                 // Once a minor-arcana power step's mode is already chosen,
@@ -1296,16 +1536,9 @@ export class GnosticaGame extends GameBase {
     // optional). Major arcana cards (which can chain up to 3 power steps)
     // aren't supported here yet - see cmdActivate/cmdPlay.
     private applyMove(m: string, partial = false): void {
-        const segments = m.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
-        let announceLast = false;
-        const remaining: string[] = [];
-        for (const seg of segments) {
-            if (seg.toLowerCase() === "last") {
-                announceLast = true;
-            } else {
-                remaining.push(seg);
-            }
-        }
+        const announceLast = this.hasLastFlag(m);
+        m = this.stripLastFlag(m);
+        const remaining = m.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
         if (remaining.length === 0) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
         }
@@ -1391,20 +1624,6 @@ export class GnosticaGame extends GameBase {
         throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: s }));
     }
 
-    private parsePieceRef(ref: string): { x: number; y: number; index: number } {
-        const parts = ref.split(".");
-        if (parts.length !== 2) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_PIECE_REF", { ref }));
-        }
-        const [cellStr, idxStr] = parts;
-        const index = parseInt(idxStr, 10);
-        if (Number.isNaN(index)) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_PIECE_REF", { ref }));
-        }
-        const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
-        return { x, y, index };
-    }
-
     // "place <cell> [orientation]" - only legal with zero pieces on board;
     // orientation defaults to "up".
     private cmdPlace(args: string[]): void {
@@ -1466,17 +1685,14 @@ export class GnosticaGame extends GameBase {
         return undefined;
     }
 
-    // "orient <cell>.<index> <facing>" - only your own piece.
+    // "orient <pieceRef> <facing>" - only your own piece.
     private cmdOrient(args: string[]): void {
         const [ref, orientationStr] = args;
         if (ref === undefined || orientationStr === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ORIENT_ARGS_REQUIRED"));
         }
-        const { x, y, index } = this.parsePieceRef(ref);
-        const piece = this.board.get(x, y)?.pieces[index];
-        if (piece === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_SUCH_PIECE", { ref }));
-        }
+        const { x, y, index } = this.resolvePieceRefOrThrow(ref);
+        const piece = this.board.get(x, y)!.pieces[index];
         if (piece.owner !== this.currplayer) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_YOUR_PIECE", { ref }));
         }
@@ -1490,14 +1706,12 @@ export class GnosticaGame extends GameBase {
         if (ref === undefined || orientationStr === undefined) {
             return this.invalid("apgames:validation.gnostica.ORIENT_ARGS_REQUIRED");
         }
-        const loc = this.tryParsePieceRef(ref);
-        if (loc === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref });
+        const result = this.resolvePieceRef(ref);
+        if (result.kind !== "ok") {
+            return this.invalidPieceRef(result.kind, ref);
         }
-        const piece = this.board.get(loc.x, loc.y)?.pieces[loc.index];
-        if (piece === undefined) {
-            return this.invalid("apgames:validation.gnostica.NO_SUCH_PIECE", { ref });
-        }
+        const { x, y, index } = result.ref;
+        const piece = this.board.get(x, y)!.pieces[index];
         if (piece.owner !== this.currplayer) {
             return this.invalid("apgames:validation.gnostica.NOT_YOUR_PIECE", { ref });
         }
@@ -1750,11 +1964,7 @@ export class GnosticaGame extends GameBase {
         if (minionRef === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED"));
         }
-        const loc = this.parsePieceRef(minionRef);
-        const minion = eligible.find(e => e.x === loc.x && e.y === loc.y && e.index === loc.index);
-        if (minion === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_AN_ELIGIBLE_MINION", { ref: minionRef }));
-        }
+        const minion = this.resolvePieceRefOrThrow(minionRef, eligible, "NOT_AN_ELIGIBLE_MINION");
         if (mode === undefined) {
             return; // minion earmarked, mode not chosen yet - still declined
         }
@@ -1782,14 +1992,11 @@ export class GnosticaGame extends GameBase {
         if (minionRef === undefined) {
             return this.invalid("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED");
         }
-        const loc = this.tryParsePieceRef(minionRef);
-        if (loc === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: minionRef });
+        const result = this.resolvePieceRef(minionRef, eligible);
+        if (result.kind !== "ok") {
+            return this.invalidPieceRef(result.kind, minionRef, "NOT_AN_ELIGIBLE_MINION");
         }
-        const minion = eligible.find(e => e.x === loc.x && e.y === loc.y && e.index === loc.index);
-        if (minion === undefined) {
-            return this.invalid("apgames:validation.gnostica.NOT_AN_ELIGIBLE_MINION", { ref: minionRef });
-        }
+        const minion = result.ref;
         if (mode === undefined) {
             return undefined; // minion earmarked, mode not chosen yet - still declined
         }
@@ -1861,11 +2068,7 @@ export class GnosticaGame extends GameBase {
         if (minionRef === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED"));
         }
-        const loc = this.parsePieceRef(minionRef);
-        const minion = minions.find(m => m.x === loc.x && m.y === loc.y && m.index === loc.index);
-        if (minion === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_AN_ELIGIBLE_MINION", { ref: minionRef }));
-        }
+        const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
         if ("primitive" in step) {
             const [mode, ...modeArgs] = rest;
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
@@ -1911,14 +2114,11 @@ export class GnosticaGame extends GameBase {
         if (minionRef === undefined) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED") };
         }
-        const loc = this.tryParsePieceRef(minionRef);
-        if (loc === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: minionRef }) };
+        const result = this.resolvePieceRef(minionRef, minions);
+        if (result.kind !== "ok") {
+            return { failed: true, result: this.invalidPieceRef(result.kind, minionRef, "NOT_AN_ELIGIBLE_MINION") };
         }
-        const minion = minions.find(m => m.x === loc.x && m.y === loc.y && m.index === loc.index);
-        if (minion === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.NOT_AN_ELIGIBLE_MINION", { ref: minionRef }) };
-        }
+        const minion = result.ref;
         if ("primitive" in step) {
             const [mode, ...modeArgs] = rest;
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
@@ -2025,9 +2225,9 @@ export class GnosticaGame extends GameBase {
                 return { newMinion: { x: tx, y: ty, index: newIndex } };
             }
             case "copy": {
-                const [cellStr, victimIdxStr] = rest;
+                const [cellStr, victimRef] = rest;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const victimIndex = parseInt(victimIdxStr, 10);
+                const { index: victimIndex } = this.resolveVictimRefOrThrow(cellStr, victimRef);
                 createCopy(ctx, minion.x, minion.y, minion.index, tx, ty, victimIndex, opts);
                 this.results.push({ type: "place", where: cellStr, how: "cups-copy" });
                 return {}; // the new piece belongs to the copied enemy, not the acting player
@@ -2072,17 +2272,17 @@ export class GnosticaGame extends GameBase {
                 return { failed: false, outcome: { newMinion: { x: tx, y: ty, index: newIndex } } };
             }
             case "copy": {
-                const [cellStr, victimIdxStr] = rest;
+                const [cellStr, victimRef] = rest;
                 const coords = this.tryAlgebraic2coords(cellStr);
                 if (coords === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
                 }
                 const [tx, ty] = coords;
-                const victimIndex = parseInt(victimIdxStr, 10);
-                if (Number.isNaN(victimIndex)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_NUMBER", { value: victimIdxStr }) };
+                const victimResult = this.resolveVictimRef(cellStr, victimRef);
+                if (victimResult.kind !== "ok") {
+                    return { failed: true, result: this.invalidPieceRef(victimResult.kind, victimRef) };
                 }
-                const failure = checkCreateCopy(ctx, minion.x, minion.y, minion.index, tx, ty, victimIndex, opts);
+                const failure = checkCreateCopy(ctx, minion.x, minion.y, minion.index, tx, ty, victimResult.ref.index, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -2114,7 +2314,7 @@ export class GnosticaGame extends GameBase {
         switch (mode) {
             case "piece": {
                 const [targetRef, distStr, orientationStr] = rest;
-                const target = this.parsePieceRef(targetRef);
+                const target = this.resolvePieceRefOrThrow(targetRef);
                 const dist = parseInt(distStr, 10);
                 const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
                 // Captured before the move mutates the board, to compute
@@ -2123,9 +2323,17 @@ export class GnosticaGame extends GameBase {
                 const movedOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
                 const facing = this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation;
                 const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "up">);
-                movePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, newOrientation, opts);
                 const destX = target.x + dx * dist;
                 const destY = target.y + dy * dist;
+                // A genuine final landing (not a Chariot-relaxed waypoint)
+                // in the void destroys the piece instead of moving it -
+                // see movePiece's own docs.
+                const destroyedInVoid = opts.skipLandingCheck !== true && this.board.classify(destX, destY) === "void";
+                movePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, newOrientation, opts);
+                if (destroyedInVoid) {
+                    this.results.push({ type: "destroy", what: targetRef });
+                    return {};
+                }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
                 this.results.push({ type: "move", from: targetRef, to: dest, how: "rod-piece" });
                 if (movedOwner === this.currplayer) {
@@ -2157,10 +2365,11 @@ export class GnosticaGame extends GameBase {
         switch (mode) {
             case "piece": {
                 const [targetRef, distStr, orientationStr] = rest;
-                const target = this.tryParsePieceRef(targetRef);
-                if (target === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: targetRef }) };
+                const targetResult = this.resolvePieceRef(targetRef);
+                if (targetResult.kind !== "ok") {
+                    return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
+                const target = targetResult.ref;
                 const dist = parseInt(distStr, 10);
                 if (Number.isNaN(dist)) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_NUMBER", { value: distStr }) };
@@ -2177,6 +2386,10 @@ export class GnosticaGame extends GameBase {
                 const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "up">);
                 const destX = target.x + dx * dist;
                 const destY = target.y + dy * dist;
+                const destroyedInVoid = opts.skipLandingCheck !== true && this.board.classify(destX, destY) === "void";
+                if (destroyedInVoid) {
+                    return { failed: false };
+                }
                 if (movedOwner === this.currplayer) {
                     const newIndex = this.board.get(destX, destY)?.pieces.length ?? 0;
                     return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex } } };
@@ -2206,7 +2419,7 @@ export class GnosticaGame extends GameBase {
         switch (mode) {
             case "piece": {
                 const [targetRef, orientationStr] = rest;
-                const target = this.parsePieceRef(targetRef);
+                const target = this.resolvePieceRefOrThrow(targetRef);
                 const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
                 const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 const owner = targetPiece.owner;
@@ -2237,10 +2450,11 @@ export class GnosticaGame extends GameBase {
         switch (mode) {
             case "piece": {
                 const [targetRef, orientationStr] = rest;
-                const target = this.tryParsePieceRef(targetRef);
-                if (target === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: targetRef }) };
+                const targetResult = this.resolvePieceRef(targetRef);
+                if (targetResult.kind !== "ok") {
+                    return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
+                const target = targetResult.ref;
                 if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
                 }
@@ -2283,7 +2497,7 @@ export class GnosticaGame extends GameBase {
         switch (mode) {
             case "piece": {
                 const [targetRef, pipsStr, orientationStr] = rest;
-                const target = this.parsePieceRef(targetRef);
+                const target = this.resolvePieceRefOrThrow(targetRef);
                 const pips = parseInt(pipsStr, 10);
                 const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
                 const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
@@ -2316,10 +2530,11 @@ export class GnosticaGame extends GameBase {
         switch (mode) {
             case "piece": {
                 const [targetRef, pipsStr, orientationStr] = rest;
-                const target = this.tryParsePieceRef(targetRef);
-                if (target === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: targetRef }) };
+                const targetResult = this.resolvePieceRef(targetRef);
+                if (targetResult.kind !== "ok") {
+                    return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
+                const target = targetResult.ref;
                 const pips = parseInt(pipsStr, 10);
                 if (Number.isNaN(pips)) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_NUMBER", { value: pipsStr }) };
@@ -2391,7 +2606,7 @@ export class GnosticaGame extends GameBase {
     // just without the "must be your own piece" restriction.
     private applyOrientAny(minion: IMinionRef, rest: string[]): IStepOutcome {
         const [targetRef, orientationStr] = rest;
-        const target = this.parsePieceRef(targetRef);
+        const target = this.resolvePieceRefOrThrow(targetRef);
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const orientation = this.parseOrientation(orientationStr);
         orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
@@ -2401,10 +2616,11 @@ export class GnosticaGame extends GameBase {
 
     private validateOrientAny(minion: IMinionRef, rest: string[]): StepValidation {
         const [targetRef, orientationStr] = rest;
-        const target = this.tryParsePieceRef(targetRef);
-        if (target === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: targetRef }) };
+        const targetResult = this.resolvePieceRef(targetRef);
+        if (targetResult.kind !== "ok") {
+            return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
+        const target = targetResult.ref;
         if (this.tryParseOrientation(orientationStr) === undefined) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
         }
@@ -2419,7 +2635,7 @@ export class GnosticaGame extends GameBase {
     // Hierophant: <minionRef> <targetPieceRef> <newOrientation>
     private applyHierophantReplace(minion: IMinionRef, rest: string[]): IStepOutcome {
         const [targetRef, orientationStr] = rest;
-        const target = this.parsePieceRef(targetRef);
+        const target = this.resolvePieceRefOrThrow(targetRef);
         const orientation = this.parseOrientation(orientationStr);
         hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
         this.results.push({ type: "convert", what: targetRef, into: `owner-${this.currplayer}` });
@@ -2429,10 +2645,11 @@ export class GnosticaGame extends GameBase {
 
     private validateHierophantReplace(minion: IMinionRef, rest: string[]): StepValidation {
         const [targetRef, orientationStr] = rest;
-        const target = this.tryParsePieceRef(targetRef);
-        if (target === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: targetRef }) };
+        const targetResult = this.resolvePieceRef(targetRef);
+        if (targetResult.kind !== "ok") {
+            return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
+        const target = targetResult.ref;
         if (this.tryParseOrientation(orientationStr) === undefined) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
         }
@@ -2453,7 +2670,7 @@ export class GnosticaGame extends GameBase {
         const ctx = this.buildPowerContext();
         if (mode === "piece") {
             const [targetRef, destCellStr, orientationStr] = args;
-            const target = this.parsePieceRef(targetRef);
+            const target = this.resolvePieceRefOrThrow(targetRef);
             const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
             const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
             const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
@@ -2480,10 +2697,11 @@ export class GnosticaGame extends GameBase {
         const ctx = this.buildPowerContext();
         if (mode === "piece") {
             const [targetRef, destCellStr, orientationStr] = args;
-            const target = this.tryParsePieceRef(targetRef);
-            if (target === undefined) {
-                return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: targetRef }) };
+            const targetResult = this.resolvePieceRef(targetRef);
+            if (targetResult.kind !== "ok") {
+                return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
             }
+            const target = targetResult.ref;
             const destCoords = this.tryAlgebraic2coords(destCellStr);
             if (destCoords === undefined) {
                 return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: destCellStr }) };
@@ -2530,7 +2748,7 @@ export class GnosticaGame extends GameBase {
     // per-player hand map) and passed in directly.
     private applyTradeHands(minion: IMinionRef, rest: string[]): IStepOutcome {
         const [targetRef] = rest;
-        const target = this.parsePieceRef(targetRef);
+        const target = this.resolvePieceRefOrThrow(targetRef);
         const targetOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const otherHand = this.hands[targetOwner - 1];
         tradeHands(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, otherHand);
@@ -2540,10 +2758,11 @@ export class GnosticaGame extends GameBase {
 
     private validateTradeHands(minion: IMinionRef, rest: string[]): StepValidation {
         const [targetRef] = rest;
-        const target = this.tryParsePieceRef(targetRef);
-        if (target === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref: targetRef }) };
+        const targetResult = this.resolvePieceRef(targetRef);
+        if (targetResult.kind !== "ok") {
+            return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
+        const target = targetResult.ref;
         const failure = checkTradeHands(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };

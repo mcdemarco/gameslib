@@ -156,7 +156,7 @@ describe("Gnostica powers: Rods (move)", () => {
         expect(dest.pieces[0]).to.deep.include({ owner: 2, orientation: "S" }); // unchanged - not the mover's own piece
     });
 
-    it("cannot move zero spaces, beyond its size, into the void, or into a full cell", () => {
+    it("cannot move zero spaces, beyond its size, or into a full cell", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
         b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(1, 1), new Piece(1, 1), new Piece(1, 1)]));
@@ -168,6 +168,33 @@ describe("Gnostica powers: Rods (move)", () => {
         const ctxVoid = makeCtx(b2);
         expect(() => movePiece(ctxVoid, 0, 0, 0, 0, 0, 0, 5, undefined)).to.throw(); // beyond size 1
         expect(() => movePiece(ctxVoid, 0, 0, 0, 0, 0, 0, 0, undefined)).to.throw(); // zero spaces
+    });
+
+    // Unlike Hermit's teleport (which forbids the void outright), a Rod push
+    // landing in the void is legal - the piece is simply destroyed, same as
+    // any other piece that ends up there (a territory-push/destroy eviction,
+    // for instance). A relaxed mid-chain waypoint (Chariot, skipLandingCheck)
+    // is the one exception: the piece must persist there for the next step.
+    it("a genuine final landing in the void destroys the piece, returning it to its owner's stash", () => {
+        const b = new GnosticaBoard();
+        // A size-1 piece can only move 1 space, and 1 space away from a
+        // carded cell is always still a wasteland (adjacent) - only a
+        // size-2+ piece moving 2+ spaces can actually clear the wasteland
+        // border and reach genuine void.
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "E")]));
+        const ctx = makeCtx(b);
+        movePiece(ctx, 0, 0, 0, 0, 0, 0, 2, undefined); // 2 spaces east of (0,0) - void, no card in reach
+        expect(b.has(2, 0)).eq(false); // no phantom territory left behind
+        expect(ctx.stashes.get(1)!).to.deep.equal([5, 6, 5]); // returned to the mover's own stash
+    });
+
+    it("a relaxed mid-chain waypoint in the void does NOT destroy the piece - it must still be there for the next step", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "E")]));
+        const ctx = makeCtx(b);
+        movePiece(ctx, 0, 0, 0, 0, 0, 0, 2, undefined, { skipLandingCheck: true });
+        expect(b.get(2, 0)!.pieces.length).eq(1); // still on the board, sitting in the void
+        expect(ctx.stashes.get(1)!).to.deep.equal([5, 5, 5]); // NOT returned - the piece is still in play
     });
 
     it("ignoreCapacity (Emperor) lets a push land on an already-full cell", () => {
