@@ -363,9 +363,9 @@ export const checkMovePiece = (
         const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
         const destX = targetX + dx * dist;
         const destY = targetY + dy * dist;
-        if (ctx.board.classify(destX, destY) === "void") {
-            return { key: "CANT_END_IN_VOID" };
-        }
+        // Landing in the void is legal here (unlike Hermit's teleport,
+        // which forbids it) - it just destroys the piece, same as any
+        // other piece that ends up in the void (see returnEvictedPieces).
         const destT = ctx.board.get(destX, destY);
         if (destT !== undefined && !destT.canAdd(opts.ignoreCapacity)) {
             return { key: "CELL_FULL" };
@@ -390,6 +390,13 @@ export const movePiece = (
 
     const srcT = getTerritory(ctx, targetX, targetY);
     const moved = srcT.removeAt(targetIndex);
+    // A genuine final landing in the void destroys the piece. A relaxed
+    // mid-chain waypoint (skipLandingCheck, Chariot) must NOT - the piece
+    // still needs to be sitting there for the chain's next step to act on.
+    if (!opts.skipLandingCheck && ctx.board.classify(destX, destY) === "void") {
+        returnToStash(ctx, moved.owner, moved.size);
+        return;
+    }
     if (moved.owner === ctx.currplayer && newOrientation !== undefined) {
         moved.orientation = newOrientation;
     }
@@ -582,7 +589,7 @@ export const checkAttackPiece = (
     const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
     if (targetErr) return targetErr;
     if (pips < 1 || pips > minion.size) {
-        return { key: "BAD_PIPS", params: { size: minion.size, pips } };
+        return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
     }
     const victim = ctx.board.get(targetX, targetY)?.pieces[targetIndex];
     if (victim === undefined) {
@@ -641,7 +648,7 @@ export const checkAttackTerritory = (
         return { key: "CELL_HAS_ENEMY" };
     }
     if (pips < 1 || pips > minion.size) {
-        return { key: "BAD_PIPS", params: { size: minion.size, pips } };
+        return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
     }
     const t = ctx.board.get(targetX, targetY);
     const current = t?.pointValue() ?? 0;
