@@ -1,6 +1,6 @@
-import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IValidationResult } from "./_base";
+import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaButtonBar, AreaPieces, ButtonBarButton, Glyph } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
@@ -386,7 +386,7 @@ export class GnosticaGame extends GameBase {
             { uid: "no-majors" }
         ],
         categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
-        flags: ["experimental", "no-moves", "custom-randomization", "player-stashes", "autopass"],
+        flags: ["experimental", "no-moves", "custom-randomization", "player-stashes", "autopass", "scores"],
     };
 
     public numplayers!: number;
@@ -894,6 +894,21 @@ export class GnosticaGame extends GameBase {
     // above for why.
     private static readonly LAST_FLAG_RE = /\s*\(last\)\s*$/i;
     private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw", "pass"];
+
+    // English ordinal suffix (1st, 2nd, 3rd, 4th, ..., 11th-13th stay
+    // "th") - used only for the turn-order legend's own labels. Plain
+    // TS-side formatting rather than an i18next key: every other numeric
+    // interpolation in this file's own locale keys is a bare number, and
+    // ordinal pluralization is a different (unused elsewhere here) i18n
+    // feature not worth introducing for one label.
+    private static ordinal(n: number): string {
+        const j = n % 10;
+        const k = n % 100;
+        if (j === 1 && k !== 11) return `${n}st`;
+        if (j === 2 && k !== 12) return `${n}nd`;
+        if (j === 3 && k !== 13) return `${n}rd`;
+        return `${n}th`;
+    }
 
     // Every step's first token is always either a piece ref (every suit
     // primitive and special power except one) or a card uid (High
@@ -4270,6 +4285,24 @@ export class GnosticaGame extends GameBase {
         return this.scoreFor(player as playerid);
     }
 
+    // Position i is always player i+1's score - the framework-wide
+    // convention every other game's own sidebarScores() already follows
+    // (see e.g. magnate.ts), since the front end reads this array
+    // positionally with no other player label attached. Always plain
+    // player-number order, even for the bidding variant (where the
+    // FIRST mover isn't necessarily player 1) - reordering by turn order
+    // here would silently attribute the wrong score to the wrong
+    // player's own slot on the real site.
+    public sidebarScores(): IScores[] {
+        const scores: number[] = [];
+        for (let p = 1; p <= this.numplayers; p++) {
+            scores.push(this.scoreFor(p as playerid));
+        }
+        return [
+            { name: i18next.t("apgames:status.SCORES"), scores },
+        ];
+    }
+
     // Called (after the player's action for the turn has already been
     // applied) when this is the turn following that player's own
     // "announce last turn" - decides win or elimination.
@@ -5026,7 +5059,7 @@ export class GnosticaGame extends GameBase {
         // given, including a placeholder for any uid it can't resolve
         // (an opponent's redacted "" entry, matching emu.ts's own
         // "UNKNOWN" convention), rather than assuming every uid is real.
-        const areas: (AreaPieces | AreaButtonBar)[] = [];
+        const areas: (AreaPieces | AreaButtonBar | AreaKey)[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
             const hand = this.hands[p - 1] ?? [];
             if (hand.length === 0) {
@@ -5116,6 +5149,34 @@ export class GnosticaGame extends GameBase {
         );
         if (discardArea !== undefined) {
             areas.push(discardArea);
+        }
+
+        // With only 2 players, turn order is trivially "you, then them" -
+        // nothing worth a legend for. With 3+, the bidding variant's own
+        // "winner goes first" rule (see beginRedraw's own docs) means
+        // turn order can genuinely diverge from player number, so it's
+        // worth spelling out explicitly rather than leaving players to
+        // infer it from watching currplayer hop around. Defaults to
+        // plain ascending order (1..N) whenever bidWinner isn't set yet
+        // (the default, non-bidding variant; or the bidding variant
+        // still mid-bid) - exactly the sequence nextPlayer()'s own +1
+        // rotation already produces in that case.
+        if (this.numplayers >= 3) {
+            const start = this.bidWinner ?? 1;
+            const list: AreaKey["list"] = [];
+            let p = start;
+            for (let i = 0; i < this.numplayers; i++) {
+                const key = `turnorder_p${p}`;
+                if (!(key in legend)) {
+                    legend[key] = { name: "pyramid-up-small", colour: p };
+                }
+                list.push({ piece: key, name: GnosticaGame.ordinal(i + 1) });
+                p = (p % this.numplayers) + 1;
+            }
+            // "left", not "right" - the action button bar already owns
+            // the right side (see actionButtons below), and the two
+            // don't stack cleanly on the same side.
+            areas.push({ type: "key", list, position: "left", height: 0.7, clickable: false });
         }
 
         // The top-level turn choice (Use Territory/Use Hand Card/Orient/

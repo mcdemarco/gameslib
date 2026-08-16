@@ -5831,6 +5831,7 @@
             "REPLACEMENT_CARD_REQUIRED": "You must provide the new, lower-level territory from your hand.",
             "ROD_NEEDS_FACING": "You may not take a Rods action with an upright minion.",
             "STASH_EMPTY": "{{Player}} has no minions of level {{size}}, so you cannot perform this action.",
+            "TARGET_IS_VOID": "You may not create a minion in the void.",
             "TOO_FEW_PIPS": "Your minion does not have enough pips to attack this enemy.",
             "TOO_FEW_PIPS_TERRITORY": "Your minion does not have enough pips to attack this territory.",
             "TOO_MANY_TO_DRAW": "You may not draw more than {{maxDraw}} cards.",

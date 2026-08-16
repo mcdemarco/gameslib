@@ -339,6 +339,22 @@ describe("Gnostica: announce last turn / win / elimination", () => {
     });
 });
 
+describe("Gnostica: sidebarScores", () => {
+    it("reports each player's score, position i always player i+1's - never reordered by turn order", () => {
+        const g = new GnosticaGame(3);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.move("place n0", { trusted: true }); // player 3
+        g.board.get(0, 0)!.card = aceOfCups(); // player 1's own cell: spot, 1 pt
+        g.board.get(-1, 0)!.card = card("KS"); // player 2's own cell: royalty, 2 pts
+        g.board.get(1, 0)!.card = theWorld().clone(); // player 3's own cell: major, 3 pts
+        const scores = g.sidebarScores();
+        expect(scores).to.have.length(1);
+        expect(scores[0].scores).to.deep.equal([1, 2, 3]);
+        expect(scores[0].scores).to.deep.equal([g.getPlayerScore(1), g.getPlayerScore(2), g.getPlayerScore(3)]);
+    });
+});
+
 describe("Gnostica: activate/play - minor arcana suit powers", () => {
     it("declining the power is legal - a bare use with no power step", () => {
         const g = new GnosticaGame(2);
