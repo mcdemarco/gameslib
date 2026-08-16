@@ -7,7 +7,7 @@ import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { minorCards, majorCards } from "../../src/common/tarot";
 import {
     PowerContext, Stash,
-    createOwn, createCopy, createTerritory,
+    createOwn, createEnemy, createTerritory,
     movePiece, moveTerritory,
     growPiece, growTerritory,
     attackPiece, attackTerritory,
@@ -68,7 +68,7 @@ describe("Gnostica powers: Cups (create)", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up"), new Piece(2, 1, "W")]));
         const ctx = makeCtx(b);
-        createCopy(ctx, 0, 0, 0, 0, 0, 1);
+        createEnemy(ctx, 0, 0, 0, 0, 0, 1);
         const t = b.get(0, 0)!;
         expect(t.pieces.length).eq(3);
         expect(t.pieces[2]).to.deep.include({ owner: 2, size: 1, orientation: "W" });
@@ -80,7 +80,7 @@ describe("Gnostica powers: Cups (create)", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up"), new Piece(1, 1, "W")]));
         const ctx = makeCtx(b);
-        expect(() => createCopy(ctx, 0, 0, 0, 0, 0, 1)).to.throw();
+        expect(() => createEnemy(ctx, 0, 0, 0, 0, 0, 1)).to.throw();
     });
 
     it("creates a new territory on a wasteland from a spot card in hand", () => {
@@ -121,6 +121,15 @@ describe("Gnostica powers: Cups (create)", () => {
         createTerritory(ctx, 0, 0, 0, 1, 0, undefined, { allowRandomDraw: true });
         expect(b.get(1, 0)!.card?.uid).eq("3C");
         expect(ctx.drawPile).to.deep.equal([]);
+    });
+
+    it("Wheel of Fortune's random-draw mode reshuffles the discard pile once the draw pile runs dry", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        const ctx = makeCtx(b, { drawPile: [], discardPile: ["3C"] });
+        createTerritory(ctx, 0, 0, 0, 1, 0, undefined, { allowRandomDraw: true });
+        expect(b.get(1, 0)!.card?.uid).eq("3C");
+        expect(ctx.discardPile).to.deep.equal([]);
     });
 });
 
@@ -526,12 +535,33 @@ describe("Gnostica powers: special (major arcana)", () => {
         expect(() => judgementDraw(ctx, 0, 0, 0, ["KS", "00"])).to.throw();
     });
 
-    it("High Priestess discards chosen cards then redraws up to 6, stopping early if the draw pile runs out", () => {
+    it("High Priestess discards chosen cards then redraws up to 6, drawing the just-discarded card back out via reshuffle once the draw pile empties", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: ["KS"] });
         highPriestess(ctx, ["AC"]);
-        expect(ctx.hand).to.deep.equal(["2C", "KS"]);
-        expect(ctx.discardPile).to.deep.equal(["AC"]);
+        // Only 3 cards exist anywhere (2C, KS, AC), so all 3 end up in hand -
+        // the reshuffle even pulls the just-discarded AC back in, since the
+        // rules make reshuffling unconditional.
+        expect(ctx.hand).to.deep.equal(["2C", "KS", "AC"]);
+        expect(ctx.discardPile).to.deep.equal([]);
+        expect(ctx.drawPile).to.deep.equal([]);
+    });
+
+    it("High Priestess reshuffles the discard pile into the draw pile mid-redraw if the draw pile runs dry", () => {
+        const b = new GnosticaBoard();
+        const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: ["3C"], drawPile: [] });
+        highPriestess(ctx, ["AC"]);
+        expect(ctx.hand.slice().sort()).to.deep.equal(["2C", "3C", "AC"].sort());
+        expect(ctx.discardPile).to.deep.equal([]);
+        expect(ctx.drawPile).to.deep.equal([]);
+    });
+
+    it("High Priestess stops redrawing once there is genuinely nothing left in either pile", () => {
+        const b = new GnosticaBoard();
+        const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: [] });
+        highPriestess(ctx, []); // decline to discard anything
+        expect(ctx.hand).to.deep.equal(["AC", "2C"]);
+        expect(ctx.discardPile).to.deep.equal([]);
         expect(ctx.drawPile).to.deep.equal([]);
     });
 
@@ -544,9 +574,18 @@ describe("Gnostica powers: special (major arcana)", () => {
         expect(ctx.discardPile).to.deep.equal(["KS"]);
     });
 
-    it("Fool refuses to flip from an empty draw pile", () => {
+    it("Fool reshuffles the discard pile into the draw pile if the draw pile is empty", () => {
         const b = new GnosticaBoard();
-        const ctx = makeCtx(b, { drawPile: [] });
+        const ctx = makeCtx(b, { drawPile: [], discardPile: ["3C"] });
+        const flipped = fool(ctx);
+        expect(flipped.uid).eq("3C");
+        expect(ctx.drawPile).to.deep.equal([]);
+        expect(ctx.discardPile).to.deep.equal(["3C"]);
+    });
+
+    it("Fool refuses to flip when both the draw pile and discard pile are empty", () => {
+        const b = new GnosticaBoard();
+        const ctx = makeCtx(b, { drawPile: [], discardPile: [] });
         expect(() => fool(ctx)).to.throw();
     });
 
