@@ -5754,7 +5754,7 @@
             "PARTIAL": "Select the cell where you wish to place the henge piece."
         },
         "gnostica": {
-            "ACTIVATE_CELL_REQUIRED": "Click on a territory cell to use that territory's power.",
+            "ACTIVATE_UID_REQUIRED": "Click on a territory cell to use that territory's power.",
             "ALREADY_ANNOUNCED": "You cannot declare your final round during another player's final round.",
             "ALREADY_MAX_SIZE": "The minion is already size 3 and cannot grow any larger.",
             "ALREADY_ON_BOARD": "You cannot make an initial placement because you already have pieces on the board.",
@@ -5770,6 +5770,7 @@
             "BAD_SUIT_LETTER": "The selected suit was malformed.",
             "CANT_END_IN_VOID": "The Hermit (VIIII) cannot move a piece to the void.",
             "CANT_PUSH_ONTO_SELF": "The move didn't move the territory anywhere.",
+            "CARD_NOT_ON_BOARD": "That card is not currently on the board.",
             "CARD_UID_REQUIRED": "No card was provided when creating a new territory.",
             "CELL_FULL": "There are already 3 or more pieces in the destination cell.",
             "CELL_HAS_ENEMY": "This move is not permitted when there are enemies on the territory.",

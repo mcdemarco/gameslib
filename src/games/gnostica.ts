@@ -236,7 +236,7 @@ const SPECIAL_MIN_TOKENS: Record<SpecialPower, number> = {
 // optional fields instead - each of those functions asserts `suitUid!`
 // once at its own top, documented there, rather than scattering asserts.
 interface IPendingStep {
-    head: "activate" | "play";
+    head: "use" | "play";
     headArg: string;
     // For a minor card, its own suit. For a major card's `primitive` step,
     // the suit that primitive maps to (create→C, move→R, grow→D,
@@ -647,7 +647,7 @@ export class GnosticaGame extends GameBase {
                 requireNoSteps();
                 this.cmdDiscard(parsed.rest, partial);
                 break;
-            case "activate":
+            case "use":
                 requireValidStepShapes();
                 this.cmdActivate(parsed.rest, parsed.stepSegments);
                 break;
@@ -744,7 +744,7 @@ export class GnosticaGame extends GameBase {
             case "discard":
                 failure = requireNoSteps() ?? this.validateDiscard(parsed.rest);
                 break;
-            case "activate":
+            case "use":
                 failure = requireValidStepShapes() ?? this.validateActivate(parsed.rest, parsed.stepSegments);
                 break;
             case "play":
@@ -769,7 +769,7 @@ export class GnosticaGame extends GameBase {
     // of the string is being parsed. See this file's "Move parsing" docs
     // above for why.
     private static readonly LAST_FLAG_RE = /\s*\(last\)\s*$/i;
-    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "activate", "play"];
+    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play"];
 
     // Every step's first token is always either a piece ref (every suit
     // primitive and special power except one) or a card uid (High
@@ -1058,7 +1058,7 @@ export class GnosticaGame extends GameBase {
             found.add("declare");
         }
         const head = parsed.head?.toLowerCase();
-        if (head !== undefined && ["place", "activate", "play", "orient", "discard"].includes(head)) {
+        if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
         }
         return found;
@@ -1079,7 +1079,7 @@ export class GnosticaGame extends GameBase {
         // misread that transient state and collapse the bar down to
         // "Place" mid-preview, even though the in-progress move is still
         // perfectly valid and submittable as-is.
-        const midPowerStep = this.liveMove !== undefined && /^(activate|play)\b/.test(this.liveMove);
+        const midPowerStep = this.liveMove !== undefined && /^(use|play)\b/.test(this.liveMove);
         if ((!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement()) {
             // Only one action is legal here regardless of which case this
             // is - place is a full turn on its own with zero real board
@@ -1090,7 +1090,7 @@ export class GnosticaGame extends GameBase {
             return [{ label: "Place", value: "place", attributes: [{ name: "font-weight", value: "bold" }] }];
         }
         const topLevel: ButtonBarButton[] = [
-            { label: "Use Territory", value: "activate" },
+            { label: "Use Territory", value: "use" },
             { label: "Use Hand Card", value: "play" },
             { label: "Orient", value: "orient" },
             { label: "Discard/Draw", value: "discard" },
@@ -1251,7 +1251,7 @@ export class GnosticaGame extends GameBase {
     private parsePendingStep(moveStr: string, callOpts: { preferCurrent?: boolean } = {}): IPendingStep | undefined {
         const parsed = this.parseMove(moveStr);
         const head = parsed.head;
-        if (head !== "activate" && head !== "play") {
+        if (head !== "use" && head !== "play") {
             return undefined;
         }
         const headArg = parsed.rest[0];
@@ -1260,13 +1260,12 @@ export class GnosticaGame extends GameBase {
         }
         let card: MinorCard | MajorCard | undefined;
         let eligible: IMinionRef[];
-        if (head === "activate") {
-            let x: number, y: number;
-            try {
-                [x, y] = GnosticaBoard.algebraic2coords(headArg);
-            } catch {
+        if (head === "use") {
+            const loc = this.findCardCell(headArg);
+            if (loc === undefined) {
                 return undefined;
             }
+            const { x, y } = loc;
             card = this.board.get(x, y)?.card;
             eligible = this.eligibleMinionsForActivate(x, y);
         } else {
@@ -1365,7 +1364,7 @@ export class GnosticaGame extends GameBase {
     // move string those functions build), letting that entire existing
     // machinery drive stage 2 completely unmodified.
     private buildSpecialPending(
-        special: SpecialPower, head: "activate" | "play", headArg: string,
+        special: SpecialPower, head: "use" | "play", headArg: string,
         eligible: IMinionRef[], minions: IMinionRef[], priorSteps: string[], tokens: string[],
     ): IPendingStep {
         if (special === "magicianChoice" && MAGICIAN_SUITS.some(s => s.uid === tokens[1])) {
@@ -2089,8 +2088,8 @@ export class GnosticaGame extends GameBase {
                         // that "place" is always shown as the sole choice
                         // rather than an empty bar - see getActionButtons().
                         return { move: "place", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CELL_TO_PLACE") };
-                    case "activate":
-                        return { move: "activate", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE") };
+                    case "use":
+                        return { move: "use", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE") };
                     case "play":
                         return { move: "play", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY") };
                     case "orient":
@@ -2293,7 +2292,7 @@ export class GnosticaGame extends GameBase {
                     newmove = `orient ${this.pieceRefStr(x, y, myPieceIdx)} U`;
                 }
                 resultMessageKey = "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
-            } else if (head === "activate" || head === "play") {
+            } else if (head === "use" || head === "play") {
                 // Once a minor-arcana power step's mode is already chosen,
                 // a board click is target/arg cycling for that step first -
                 // see handlePendingStepBoardClick's own docs. Falls
@@ -2353,7 +2352,7 @@ export class GnosticaGame extends GameBase {
                 if (!t.pieces.some(p => p.owner === this.currplayer)) {
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell }) };
                 }
-                newmove = `activate ${cell}`;
+                newmove = `use ${t.card.uid}`;
                 resultMessageKey = "apgames:validation.gnostica.POWER_STILL_OPTIONAL";
             } else if (!this.hasPiecesOnBoard(this.currplayer)) {
                 // Fresh click, nothing placed yet - place is the only legal
@@ -2613,6 +2612,22 @@ export class GnosticaGame extends GameBase {
         };
     }
 
+    // "use <cardUid>" targets a card by its own identity, not a cell - every
+    // card uid is unique across the whole 78-card deck, so this is
+    // unambiguous, and it matches "play <uid>"'s own by-identity targeting.
+    // Returns undefined for a uid that isn't currently on the board
+    // anywhere (whether or not it's a real card at all - that distinction
+    // is the caller's job to report separately, see cmdActivate/
+    // validateActivate's own UNKNOWN_CARD vs CARD_NOT_ON_BOARD split).
+    private findCardCell(uid: string): { x: number; y: number } | undefined {
+        for (const [x, y, t] of this.board.entries()) {
+            if (t.card?.uid === uid) {
+                return { x, y };
+            }
+        }
+        return undefined;
+    }
+
     // "Activate a card on the board. All your pieces on that card are
     // minions [...]"
     // Every piece the acting player owns on the activated cell - the pool
@@ -2644,41 +2659,45 @@ export class GnosticaGame extends GameBase {
     }
 
     private cmdActivate(args: string[], stepSegments: string[][]): void {
-        const [cellStr] = args;
-        if (cellStr === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ACTIVATE_CELL_REQUIRED"));
+        const [cardUid] = args;
+        if (cardUid === undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ACTIVATE_UID_REQUIRED"));
         }
-        const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
-        const t = this.board.get(x, y);
-        if (t === undefined || t.card === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_CARD_THERE", { cell: cellStr }));
+        if (allCards().find(c => c.uid === cardUid) === undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: cardUid }));
         }
+        const loc = this.findCardCell(cardUid);
+        if (loc === undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.CARD_NOT_ON_BOARD", { uid: cardUid }));
+        }
+        const { x, y } = loc;
+        const t = this.board.get(x, y)!;
         const eligible = this.eligibleMinionsForActivate(x, y);
         if (eligible.length === 0) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell: cellStr }));
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid }));
         }
-        this.applyCardPower(t.card, eligible, stepSegments);
+        this.applyCardPower(t.card!, eligible, stepSegments);
     }
 
     private validateActivate(args: string[], stepSegments: string[][]): IValidationResult | undefined {
-        const [cellStr] = args;
-        if (cellStr === undefined) {
-            return this.invalid("apgames:validation.gnostica.ACTIVATE_CELL_REQUIRED");
+        const [cardUid] = args;
+        if (cardUid === undefined) {
+            return this.invalid("apgames:validation.gnostica.ACTIVATE_UID_REQUIRED");
         }
-        const coords = this.tryAlgebraic2coords(cellStr);
-        if (coords === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr });
+        if (allCards().find(c => c.uid === cardUid) === undefined) {
+            return this.invalid("apgames:validation.gnostica.UNKNOWN_CARD", { uid: cardUid });
         }
-        const [x, y] = coords;
-        const t = this.board.get(x, y);
-        if (t === undefined || t.card === undefined) {
-            return this.invalid("apgames:validation.gnostica.NO_CARD_THERE", { cell: cellStr });
+        const loc = this.findCardCell(cardUid);
+        if (loc === undefined) {
+            return this.invalid("apgames:validation.gnostica.CARD_NOT_ON_BOARD", { uid: cardUid });
         }
+        const { x, y } = loc;
+        const t = this.board.get(x, y)!;
         const eligible = this.eligibleMinionsForActivate(x, y);
         if (eligible.length === 0) {
-            return this.invalid("apgames:validation.gnostica.NO_MINIONS_THERE", { cell: cellStr });
+            return this.invalid("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid });
         }
-        return this.validateCardPower(t.card, eligible, stepSegments);
+        return this.validateCardPower(t.card!, eligible, stepSegments);
     }
 
     // "Play a card from your hand to the discard pile. All your pieces on
@@ -3530,7 +3549,7 @@ export class GnosticaGame extends GameBase {
         const target = this.resolvePieceRefOrThrow(targetRef);
         const orientation = this.parseOrientation(orientationStr);
         hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
-        this.results.push({ type: "convert", what: targetRef, into: `owner-${this.currplayer}` });
+        this.results.push({ type: "convert", what: targetRef, into: `owner-${this.currplayer}`, where: targetRef });
         const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
         return { newMinion: { x: target.x, y: target.y, index: newIndex } };
     }
