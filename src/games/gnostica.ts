@@ -6,7 +6,7 @@ import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
-import { Territory, ITerritory } from "./gnostica/Territory";
+import { Territory, ITerritory, cardPointValue } from "./gnostica/Territory";
 import { Piece, Orientation, cardinalOrientations } from "./gnostica/Piece";
 import {
     Stash, PowerContext, PowerFailure, takeFromStash, hasStashAvailable,
@@ -25,7 +25,7 @@ import {
     checkHermitMovePiece, checkHermitMoveTerritory, checkTradeHands,
     checkJudgementDraw, checkHighPriestess,
 } from "./gnostica/powers";
-import { MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
+import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import i18next from "i18next";
 
 export type playerid = 1|2|3|4|5|6;
@@ -66,10 +66,21 @@ const CARDINAL_COS_SIN: Record<Exclude<Orientation, "U">, [number, number]> = {
 };
 
 // A minion's board location - shorthand used while resolving use/play.
+// `piece` is set only for a newMinion predicted by a non-mutating validate*
+// step (see validateCups/validateRods/validateHermitStep's "own"/"piece"
+// cases): since validation never actually mutates the board, a piece
+// created/moved onto a cell with no stored Territory object yet has nowhere
+// real to read owner/size/orientation from until the move is actually
+// committed - this snapshot carries that data along instead. Every other
+// producer of an IMinionRef (the real apply* mutation path, and any ref
+// pointing at a piece that already existed before this chain started)
+// leaves it unset and callers fall back to reading the real board, exactly
+// as before this field existed.
 interface IMinionRef {
     x: number;
     y: number;
     index: number;
+    piece?: Piece;
 }
 
 // What a single suit-power step did, as far as chaining later steps in the
@@ -1024,9 +1035,15 @@ export class GnosticaGame extends GameBase {
         }
         const candidateRefs = pool !== undefined
             ? pool.filter(p => p.x === x && p.y === y)
-            : (this.board.get(x, y)?.pieces ?? []).map((_, index) => ({ x, y, index }));
+            : (this.board.get(x, y)?.pieces ?? []).map((_, index): IMinionRef => ({ x, y, index }));
         let matches = candidateRefs
-            .map(r => ({ r, piece: this.board.get(r.x, r.y)!.pieces[r.index] }))
+            .map(r => ({ r, piece: r.piece ?? this.board.get(r.x, r.y)?.pieces[r.index] }))
+            // A pool entry can go stale mid-chain (an earlier step for
+            // real relocated whatever used to be there - pool membership
+            // alone doesn't guarantee a piece still exists at that exact
+            // index) - treat that the same as never having matched, rather
+            // than crashing on a `piece.size` read against undefined.
+            .filter((m): m is { r: IMinionRef; piece: Piece } => m.piece !== undefined)
             .filter(({ piece }) => piece.size === pips);
         if (orientation !== undefined) {
             matches = matches.filter(({ piece }) => piece.orientation === orientation);
@@ -1499,13 +1516,14 @@ export class GnosticaGame extends GameBase {
     // then pips+orientation alone, then pips+player alone (skipping
     // orientation if it didn't help), then all three together.
     private pieceRefStr(x: number, y: number, index: number, pool?: IMinionRef[]): string {
-        const piece = this.board.get(x, y)!.pieces[index];
+        const self = pool?.find(p => p.x === x && p.y === y && p.index === index);
+        const piece = self?.piece ?? this.board.get(x, y)!.pieces[index];
         const cell = GnosticaBoard.coords2algebraic(x, y);
         const candidateRefs = pool !== undefined
             ? pool.filter(p => p.x === x && p.y === y)
-            : (this.board.get(x, y)?.pieces ?? []).map((_, i) => ({ x, y, index: i }));
+            : (this.board.get(x, y)?.pieces ?? []).map((_, i): IMinionRef => ({ x, y, index: i }));
         const byPips = candidateRefs
-            .map(r => this.board.get(r.x, r.y)!.pieces[r.index])
+            .map(r => r.piece ?? this.board.get(r.x, r.y)!.pieces[r.index])
             .filter(p => p.size === piece.size);
         if (byPips.length <= 1) {
             return `${cell}.${piece.size}`;
@@ -3544,9 +3562,12 @@ export class GnosticaGame extends GameBase {
                     return { failed: true, result: this.failureResult(failure) };
                 }
                 // The new piece is always pushed to the end - its
-                // pre-mutation length here IS its post-mutation index.
+                // pre-mutation length here IS its post-mutation index. The
+                // target cell may not have a stored Territory yet (a
+                // genuinely untouched wasteland), so this ref carries its
+                // own piece data rather than relying on a later board read.
                 const newIndex = this.board.get(tx, ty)?.pieces.length ?? 0;
-                return { failed: false, outcome: { newMinion: { x: tx, y: ty, index: newIndex } } };
+                return { failed: false, outcome: { newMinion: { x: tx, y: ty, index: newIndex, piece: new Piece(this.currplayer, 1, orientation) } } };
             }
             case "enemy": {
                 const [cellStr, victimRef] = rest;
@@ -3658,7 +3679,7 @@ export class GnosticaGame extends GameBase {
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                const movedOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
+                const movedPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 const facing = this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation;
                 const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
                 const destX = target.x + dx * dist;
@@ -3667,9 +3688,15 @@ export class GnosticaGame extends GameBase {
                 if (destroyedInVoid) {
                     return { failed: false };
                 }
-                if (movedOwner === this.currplayer) {
+                if (movedPiece.owner === this.currplayer) {
+                    // The destination may not have a stored Territory yet (a
+                    // genuinely untouched wasteland), so this ref carries
+                    // its own piece data rather than relying on a later
+                    // board read - see IMinionRef's own docs.
                     const newIndex = this.board.get(destX, destY)?.pieces.length ?? 0;
-                    return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex } } };
+                    const finalOrientation = orientationStr !== undefined ? this.tryParseOrientation(orientationStr)! : movedPiece.orientation;
+                    const newPiece = new Piece(movedPiece.owner, movedPiece.size, finalOrientation);
+                    return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece } } };
                 }
                 return { failed: false };
             }
@@ -3991,10 +4018,16 @@ export class GnosticaGame extends GameBase {
             if (failure) {
                 return { failed: true, result: this.failureResult(failure) };
             }
-            const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
-            if (owner === this.currplayer) {
+            const movedPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+            if (movedPiece.owner === this.currplayer) {
+                // The destination may not have a stored Territory yet (a
+                // genuinely untouched wasteland), so this ref carries its
+                // own piece data rather than relying on a later board read -
+                // see IMinionRef's own docs.
                 const newIndex = this.board.get(destX, destY)?.pieces.length ?? 0;
-                return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex } } };
+                const finalOrientation = orientationStr !== undefined ? this.tryParseOrientation(orientationStr)! : movedPiece.orientation;
+                const newPiece = new Piece(movedPiece.owner, movedPiece.size, finalOrientation);
+                return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece } } };
             }
             return { failed: false };
         } else if (mode === "tile") {
@@ -4190,24 +4223,613 @@ export class GnosticaGame extends GameBase {
         return this;
     }
 
-    // Stub covering only place/discard - use/play (both fully implemented
-    // elsewhere) aren't candidates here yet. `custom-randomization` is
-    // declared precisely because full `moves()` enumeration of every legal
-    // chained-power target combination is combinatorially infeasible (see
-    // Homeworlds' own precedent), not merely deferred.
+    // ============================================================
+    // randomMove() and its supporting builders
+    //
+    // `custom-randomization` is declared precisely because full `moves()`
+    // enumeration of every legal chained-power target combination is
+    // combinatorially infeasible - randomMove() instead CONSTRUCTS a
+    // candidate move (random targets/modes/cards at each decision point)
+    // and leans on this file's own existing validateX functions as the
+    // single source of truth for legality, rather than re-deriving every
+    // rule itself. Every builder below either produces something
+    // guaranteed legal by construction, or verifies its own candidate
+    // against the matching validateX before accepting it - see each
+    // one's own docs for which. The top-level dispatch below also runs
+    // the fully-assembled move through validateMove() as a final safety
+    // net before returning it.
+    // ============================================================
+
     public randomMove(): string {
+        if (this.gameover) {
+            return ""; // matches magnate.ts's own precedent for this case
+        }
+        if (this.phase === "bidding") {
+            const hand = this.hands[this.currplayer - 1];
+            return `bid ${1 + Math.floor(Math.random() * hand.length)}`;
+        }
+        if (this.phase === "redraw") {
+            const needed = 6 - this.hands[this.currplayer - 1].length;
+            const picks = (shuffle(this.biddingPool) as string[]).slice(0, needed);
+            return `redraw ${picks.join(" ")}`.trim();
+        }
         if (!this.hasPiecesOnBoard(this.currplayer)) {
-            const candidates: string[] = [];
-            for (const [x, y, t] of this.board.entries()) {
-                if (t.pieces.length === 0 && this.board.classify(x, y) !== "void") {
-                    candidates.push(`place ${GnosticaBoard.coords2algebraic(x, y)}`);
+            return this.randomPlaceMove();
+        }
+        // "discard" is always unconditionally legal once the player has
+        // board presence (any subset of hand, no draw suffix required),
+        // so shuffling every head into the try-order and falling all the
+        // way through to a bare "discard" guarantees this loop always
+        // terminates with something real.
+        const heads = shuffle(["use", "play", "orient", "discard"]) as string[];
+        for (const head of heads) {
+            try {
+                const candidate = this.buildRandomHeadMove(head);
+                if (candidate === undefined) {
+                    continue;
                 }
-            }
-            if (candidates.length > 0) {
-                return candidates[Math.floor(Math.random() * candidates.length)];
+                const check = this.validateMove(candidate);
+                if (!check.valid || check.complete !== 1) {
+                    continue;
+                }
+                // validateMove() never mutates, so a multi-step chain that
+                // re-targets a piece/territory an EARLIER step of the same
+                // chain relocated can look fully legal here (step 2 still
+                // "sees" the original, pre-move board) while actually
+                // committing it later would fail - the same
+                // validate/apply divergence as task #45, just triggered by
+                // a later step's own target rather than its acting minion.
+                // A cheap commit-on-a-throwaway-clone check catches this
+                // (and anything else in the same class) before it's ever
+                // handed back as "the" move, matching how click-support's
+                // own preview already verifies via clone+real-apply rather
+                // than trusting prediction.
+                this.clone().move(candidate, { trusted: false });
+                return candidate;
+            } catch {
+                // A speculative chain can hit a still-open engine edge case
+                // (see task #45 - a later step's own acting minion landing
+                // on a cell the board doesn't actually have data for yet)
+                // that throws instead of failing validation gracefully.
+                // Same tolerance as an ordinary failed candidate: drop it
+                // and let the loop try a different head/card/chain shape -
+                // "discard" below is always available as the last resort.
+                continue;
             }
         }
-        return "discard"; // discards nothing, draws the max
+        return "discard";
+    }
+
+    private buildRandomHeadMove(head: string): string | undefined {
+        switch (head) {
+            case "discard": return this.randomDiscardMove();
+            case "orient": return this.randomOrientMove();
+            case "use": return this.randomUseOrPlayMove("use");
+            case "play": return this.randomUseOrPlayMove("play");
+            default: return undefined;
+        }
+    }
+
+    // Every cell that's both non-void and currently holds zero pieces -
+    // scanned over the same padded window render() uses (board's own
+    // min/max +/-1 in each direction), NOT just `board.entries()` (which
+    // only yields cells with a stored Territory object - see
+    // randomPlaceMove's own docs on why that under-enumerates). Shared by
+    // randomPlaceMove (a legal initial-placement target) and
+    // buildRandomHermitTokens (a legal teleport destination - hermit's
+    // own rules use the identical "empty territory or wasteland" shape).
+    private emptyNonVoidCells(): [number, number][] {
+        const minX = this.board.minX - 1;
+        const maxX = this.board.maxX + 1;
+        const minY = this.board.minY - 1;
+        const maxY = this.board.maxY + 1;
+        const cells: [number, number][] = [];
+        for (let x = minX; x <= maxX; x++) {
+            for (let y = minY; y <= maxY; y++) {
+                if (this.board.classify(x, y) === "void") {
+                    continue;
+                }
+                const t = this.board.get(x, y);
+                if (t !== undefined && t.pieces.length > 0) {
+                    continue;
+                }
+                cells.push([x, y]);
+            }
+        }
+        return cells;
+    }
+
+    // Candidate cells are scanned the same padded window render() uses
+    // (board's own min/max +/-1 in each direction), NOT just
+    // `board.entries()` - entries() only yields cells with a stored
+    // Territory object, but a never-touched wasteland adjacent to an
+    // existing territory (classify() derives wasteland-ness from
+    // NEIGHBORING cards, not from whether the cell itself was ever
+    // stored) is an equally legal placement target. This matters a lot
+    // here specifically: place is the ONLY legal head whenever
+    // !hasPiecesOnBoard (every other head, including bare discard,
+    // throws MUST_PLACE_FIRST), so under-enumerating candidates isn't
+    // just a coverage gap, it risks returning nothing legal at all in a
+    // forced-re-placement-after-wipeout scenario.
+    private randomPlaceMove(): string {
+        const candidates = this.emptyNonVoidCells();
+        // Structurally shouldn't happen (the board always has somewhere
+        // to place in practice), but "discard" would be flatly illegal
+        // in this exact state (see this function's own docs) - "" (no
+        // legal move) is the honest answer, matching the gameover case
+        // above, rather than returning something guaranteed to throw.
+        if (candidates.length === 0) {
+            return "";
+        }
+        const [x, y] = candidates[Math.floor(Math.random() * candidates.length)];
+        const orientations: Orientation[] = ["U", ...cardinalOrientations];
+        const orientation = orientations[Math.floor(Math.random() * orientations.length)];
+        return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
+    }
+
+    // Any subset of hand is a legal discard list; an optional "draw <n>"
+    // suffix (random count up to the room left) is sometimes added,
+    // otherwise the draw-to-max default applies - see cmdDiscard's own
+    // docs. Always legal by construction.
+    private randomDiscardMove(): string {
+        const hand = this.hands[this.currplayer - 1];
+        const discards = hand.filter(() => Math.random() < 0.3);
+        const maxDraw = Math.max(0, 6 - (hand.length - discards.length));
+        const tokens = ["discard", ...discards];
+        if (Math.random() < 0.5) {
+            tokens.push("draw", String(Math.floor(Math.random() * (maxDraw + 1))));
+        }
+        return tokens.join(" ");
+    }
+
+    // Any of the acting player's own on-board pieces, reoriented to any
+    // of the 5 facings - unconditionally legal for your own piece.
+    // undefined only if hasPiecesOnBoard's own scan somehow disagrees
+    // with this one (defensive; can't happen in the only place this is
+    // called from).
+    private randomOrientMove(): string | undefined {
+        const ownPieces: { x: number; y: number; index: number }[] = [];
+        for (const [x, y, t] of this.board.entries()) {
+            t.pieces.forEach((p, index) => {
+                if (p.owner === this.currplayer) {
+                    ownPieces.push({ x, y, index });
+                }
+            });
+        }
+        if (ownPieces.length === 0) {
+            return undefined;
+        }
+        const { x, y, index } = ownPieces[Math.floor(Math.random() * ownPieces.length)];
+        const ref = this.pieceRefStr(x, y, index);
+        const orientations: Orientation[] = ["U", ...cardinalOrientations];
+        const orientation = orientations[Math.floor(Math.random() * orientations.length)];
+        return `orient ${ref} ${orientation}`;
+    }
+
+    // "use"/"play" - candidate card, then a random (possibly empty) power
+    // chain. See buildRandomChain's own docs for the chain-building
+    // strategy; this just picks the target card and assembles the final
+    // move string.
+    private randomUseOrPlayMove(head: "use" | "play"): string | undefined {
+        if (head === "use") {
+            const onBoard: { uid: string; eligible: IMinionRef[] }[] = [];
+            for (const [x, y, t] of this.board.entries()) {
+                if (t.card === undefined) {
+                    continue;
+                }
+                const eligible = this.eligibleMinionsForActivate(x, y);
+                if (eligible.length > 0) {
+                    onBoard.push({ uid: t.card.uid, eligible });
+                }
+            }
+            if (onBoard.length === 0) {
+                return undefined;
+            }
+            const { uid, eligible } = onBoard[Math.floor(Math.random() * onBoard.length)];
+            const card = allCards().find(c => c.uid === uid)!;
+            const chain = this.buildRandomChain(card, eligible);
+            return [`use ${uid}`, ...chain.map(tokens => tokens.join(" "))].join(", ");
+        }
+        const hand = this.hands[this.currplayer - 1];
+        if (hand.length === 0) {
+            return undefined;
+        }
+        const uid = hand[Math.floor(Math.random() * hand.length)];
+        const card = allCards().find(c => c.uid === uid)!;
+        const eligible = this.eligibleMinionsForPlay();
+        // cmdPlay removes the played card from hand before resolving its
+        // power (it's spent to fund the ability, same as a discard), so a
+        // chain step that spends a hand card (Cups "new", Discs/Swords
+        // "tile") can't legally reuse this exact uid as its own material.
+        // Temporarily removing it here - restored below regardless of
+        // outcome, since this speculative build must never leave a lasting
+        // side effect on the real hand - makes buildRandomChain's own hand
+        // reads see the same post-play hand a real commit would.
+        const handIdx = hand.indexOf(uid);
+        hand.splice(handIdx, 1);
+        try {
+            const chain = this.buildRandomChain(card, eligible);
+            return [`play ${uid}`, ...chain.map(tokens => tokens.join(" "))].join(", ");
+        } finally {
+            hand.splice(handIdx, 0, uid);
+        }
+    }
+
+    // Every legal target ref for a minion's own "piece"-shaped actions:
+    // itself, plus every piece (any owner) sitting in its facing cell -
+    // exactly the target set checkValidPieceTarget allows. Shared by
+    // every builder below that needs a piece-shaped target (R.piece/
+    // D.piece/S.piece, tradeHands, orientAny, hierophantReplace,
+    // hermitTeleport's own "piece" mode).
+    private pieceTargetRefs(minion: IMinionRef): string[] {
+        const [tx, ty] = this.minorTargetCell(minion);
+        const selfRef = this.pieceRefStr(minion.x, minion.y, minion.index);
+        if (tx === minion.x && ty === minion.y) {
+            return [selfRef];
+        }
+        const targetT = this.board.get(tx, ty);
+        const facingRefs = (targetT?.pieces ?? []).map((_, i) => this.pieceRefStr(tx, ty, i));
+        return [selfRef, ...facingRefs];
+    }
+
+    // Adapts legalMinorModes' own switch to a raw minion rather than an
+    // IPendingStep (reconstructed from a move string, not convenient
+    // here) - same per-mode legality rules, just read directly off the
+    // minion/board. Best-effort pre-filter only, same as legalMinorModes
+    // itself - buildRandomModeArgCandidates + validateSuitPrimitive
+    // remain the real gate.
+    private legalModesForMinion(minion: IMinionRef, suitUid: string, ignoreCapacity: boolean): string[] {
+        const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
+        const [tx, ty] = this.minorTargetCell(minion);
+        const targetT = this.board.get(tx, ty);
+        return Object.keys(MINOR_MODES[suitUid]).filter(mode => {
+            switch (`${suitUid}.${mode}`) {
+                case "C.own":
+                    return targetT === undefined || targetT.canAdd(ignoreCapacity);
+                case "C.enemy":
+                    return (targetT?.pieces ?? []).some(p => p.owner !== this.currplayer);
+                case "C.new":
+                    return this.board.classify(tx, ty) === "wasteland";
+                case "R.piece":
+                case "R.tile":
+                    return piece.orientation !== "U";
+                case "D.tile":
+                case "S.tile":
+                    return (targetT?.pointValue() ?? 0) > 0;
+                default:
+                    return true;
+            }
+        });
+    }
+
+    // Every plausible full set of trailing args (after "<minionRef>
+    // <mode>") for one suit-mode, given hand sizes/pip counts small
+    // enough that a full enumeration is cheap - not just one random
+    // guess, since several of these (a hand card matching an exact
+    // value, a specific victim among several) have a narrow or empty
+    // legal set that blind random guessing would miss far more often
+    // than it hit. The caller shuffles this list and tries each against
+    // validateSuitPrimitive until one passes (or the list runs out).
+    private buildRandomModeArgCandidates(minion: IMinionRef, suitUid: string, mode: string): string[][] {
+        const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
+        const [tx, ty] = this.minorTargetCell(minion);
+        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        const targetT = this.board.get(tx, ty);
+        const hand = this.hands[this.currplayer - 1];
+        const orientations: Orientation[] = ["U", ...cardinalOrientations];
+        const pieceTargets = this.pieceTargetRefs(minion);
+        const pips = Array.from({ length: piece.size }, (_, i) => String(i + 1));
+        const cardsWorth = (value: number) => hand.filter(uid => {
+            const c = allCards().find(cc => cc.uid === uid);
+            return c !== undefined && cardPointValue(c) === value;
+        });
+
+        switch (`${suitUid}.${mode}`) {
+            case "C.own":
+                return orientations.map(o => [targetCell, o]);
+            case "C.enemy":
+                return (targetT?.pieces ?? [])
+                    .map((p, i) => ({ p, i }))
+                    .filter(({ p }) => p.owner !== this.currplayer)
+                    .map(({ i }) => [targetCell, this.victimRefStr(tx, ty, i)]);
+            case "C.new":
+                return cardsWorth(1).map(uid => [targetCell, uid]);
+            case "R.piece":
+                return pieceTargets.flatMap(ref => pips.map(d => [ref, d]));
+            case "R.tile":
+                return pips.map(d => [d]);
+            case "D.piece":
+                return pieceTargets.map(ref => [ref]);
+            case "D.tile": {
+                const current = targetT?.pointValue() ?? 0;
+                return [...cardsWorth(current + 1), ...cardsWorth(current + 2)].map(uid => [targetCell, uid]);
+            }
+            case "S.piece":
+                return pieceTargets.flatMap(ref => pips.map(p => [ref, p]));
+            case "S.tile": {
+                const current = targetT?.pointValue() ?? 0;
+                const results: string[][] = [];
+                for (const p of pips) {
+                    const resultValue = current - Number(p);
+                    if (resultValue < 0) {
+                        continue;
+                    }
+                    if (resultValue === 0) {
+                        results.push([targetCell, p]);
+                    } else {
+                        for (const uid of cardsWorth(resultValue)) {
+                            results.push([targetCell, p, uid]);
+                        }
+                    }
+                }
+                return results;
+            }
+            default:
+                return [];
+        }
+    }
+
+    // Searches for one legal (minion, mode, args) combination for a suit
+    // primitive - shuffled minion pool, shuffled legal modes per minion,
+    // shuffled arg candidates per mode, first fully-validated combination
+    // wins. Returns the raw pieces (not yet assembled into a move-string
+    // token array) since magicianChoice needs the same raw minion to
+    // build its own doubly-wrapped step; buildRandomStepTokens below is
+    // the thin wrapper that assembles tokens for direct suit-mode use.
+    private findRandomPrimitiveChoice(
+        suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>,
+    ): { minion: IMinionRef; mode: string; args: string[] } | undefined {
+        const ignoreCapacity = opts.ignoreCapacity === true;
+        const pool = shuffle([...minions]) as IMinionRef[];
+        for (const minion of pool) {
+            const modes = shuffle(this.legalModesForMinion(minion, suitUid, ignoreCapacity)) as string[];
+            for (const mode of modes) {
+                const candidates = shuffle(this.buildRandomModeArgCandidates(minion, suitUid, mode)) as string[][];
+                for (const args of candidates) {
+                    const check = this.validateSuitPrimitive(suitUid, minion, mode, args, opts);
+                    if (!check.failed) {
+                        return { minion, mode, args };
+                    }
+                }
+            }
+        }
+        return undefined;
+    }
+
+    private buildRandomStepTokens(suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>): string[] | undefined {
+        const choice = this.findRandomPrimitiveChoice(suitUid, minions, opts);
+        if (choice === undefined) {
+            return undefined;
+        }
+        const ref = this.pieceRefStr(choice.minion.x, choice.minion.y, choice.minion.index, minions);
+        return [ref, choice.mode, ...choice.args];
+    }
+
+    // A major card's own `primitive` step - same suit machinery as a
+    // minor card's single step, but the relaxation opts a shortcut card
+    // (Chariot/Strength/Death/Sun/Star/Moon/Empress/Emperor) grants for
+    // THIS step depend on where it sits in the chain, hence threading
+    // def/stepIndex/totalSteps through to computeShortcutOpts - the same
+    // call a real commit makes - rather than always building against the
+    // unrelaxed rules. computeShortcutOpts's relaxations only ever WIDEN
+    // legality, so skipping this would be safe, just needlessly weaker
+    // coverage of those cards' own shortcut paths.
+    private buildRandomPrimitiveStepTokens(
+        primitive: SuitPrimitive, minions: IMinionRef[], def: MajorArcanaDef, stepOpts: PrimitiveOpts | undefined, stepIndex: number, totalSteps: number,
+    ): string[] | undefined {
+        const suitUid = this.primitiveToSuit(primitive);
+        const opts = this.computeShortcutOpts(def, primitive, stepIndex, totalSteps, stepOpts);
+        return this.buildRandomStepTokens(suitUid, minions, opts);
+    }
+
+    private buildRandomOrientMinionTokens(minions: IMinionRef[]): string[] | undefined {
+        const pool = shuffle([...minions]) as IMinionRef[];
+        const orientations: Orientation[] = ["U", ...cardinalOrientations];
+        for (const minion of pool) {
+            for (const o of shuffle([...orientations]) as Orientation[]) {
+                const check = this.validateOrientMinion(minion, [o]);
+                if (!check.failed) {
+                    const ref = this.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                    return [ref, o];
+                }
+            }
+        }
+        return undefined;
+    }
+
+    private buildRandomTradeHandsTokens(minions: IMinionRef[]): string[] | undefined {
+        const pool = shuffle([...minions]) as IMinionRef[];
+        for (const minion of pool) {
+            for (const targetRef of shuffle(this.pieceTargetRefs(minion)) as string[]) {
+                const check = this.validateTradeHands(minion, [targetRef]);
+                if (!check.failed) {
+                    const ref = this.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                    return [ref, targetRef];
+                }
+            }
+        }
+        return undefined;
+    }
+
+    // Shared by orientAny (Devil) and hierophantReplace (Hierophant) -
+    // identical shape (<minionRef> <targetRef> <orientation>), just a
+    // different validateX to check against.
+    private buildRandomOrientAnyOrHierophantTokens(minions: IMinionRef[], special: "orientAny" | "hierophantReplace"): string[] | undefined {
+        const pool = shuffle([...minions]) as IMinionRef[];
+        const orientations: Orientation[] = ["U", ...cardinalOrientations];
+        for (const minion of pool) {
+            for (const targetRef of shuffle(this.pieceTargetRefs(minion)) as string[]) {
+                for (const o of shuffle([...orientations]) as Orientation[]) {
+                    const check = special === "orientAny"
+                        ? this.validateOrientAny(minion, [targetRef, o])
+                        : this.validateHierophantReplace(minion, [targetRef, o]);
+                    if (!check.failed) {
+                        const ref = this.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                        return [ref, targetRef, o];
+                    }
+                }
+            }
+        }
+        return undefined;
+    }
+
+    private buildRandomHermitTokens(minions: IMinionRef[]): string[] | undefined {
+        const destinations = shuffle(this.emptyNonVoidCells()) as [number, number][];
+        if (destinations.length === 0) {
+            return undefined;
+        }
+        const pool = shuffle([...minions]) as IMinionRef[];
+        for (const minion of pool) {
+            for (const mode of shuffle(["piece", "tile"]) as string[]) {
+                const targetToken = mode === "piece"
+                    ? undefined // resolved per-candidate below (piece mode has several possible targets)
+                    : GnosticaBoard.coords2algebraic(...this.minorTargetCell(minion));
+                const pieceTargets = mode === "piece" ? shuffle(this.pieceTargetRefs(minion)) as string[] : [targetToken as string];
+                for (const target of pieceTargets) {
+                    for (const [dx, dy] of destinations) {
+                        const destCell = GnosticaBoard.coords2algebraic(dx, dy);
+                        const check = this.validateHermitStep(minion, [mode, target, destCell]);
+                        if (!check.failed) {
+                            const ref = this.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                            return [ref, mode, target, destCell];
+                        }
+                    }
+                }
+            }
+        }
+        return undefined;
+    }
+
+    private buildRandomJudgementDrawTokens(minions: IMinionRef[]): string[] | undefined {
+        const pool = shuffle([...minions]) as IMinionRef[];
+        const hand = this.hands[this.currplayer - 1];
+        for (const minion of pool) {
+            const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
+            const maxDraw = Math.min(piece.size, Math.max(0, 6 - hand.length));
+            const count = Math.floor(Math.random() * (maxDraw + 1));
+            const uids = (shuffle([...this.discardPile]) as string[]).slice(0, count);
+            const failure = this.validateJudgementDraw(minion, uids);
+            if (failure === undefined) {
+                const ref = this.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                return [ref, ...uids];
+            }
+        }
+        return undefined;
+    }
+
+    // No minion involved at all - pure hand/pile manipulation. Always
+    // legal by construction (a random subset of the acting player's own
+    // hand, each uid distinct since it's drawn from `hand` itself).
+    private buildRandomHighPriestessTokens(): string[] {
+        const hand = this.hands[this.currplayer - 1];
+        const discards = hand.filter(() => Math.random() < 0.3);
+        const failure = this.validateHighPriestess(discards);
+        return failure === undefined ? discards : [];
+    }
+
+    // Once a suit is chosen, magicianChoice's own step IS an ordinary
+    // suit-mode step (see buildSpecialPending's own redirect) - reuse
+    // findRandomPrimitiveChoice directly rather than re-deriving mode/arg
+    // legality, then verify the doubly-wrapped shape via
+    // validateMagicianChoice as this step's own final check.
+    private buildRandomMagicianChoiceTokens(minions: IMinionRef[]): string[] | undefined {
+        for (const suit of shuffle([...MAGICIAN_SUITS]) as typeof MAGICIAN_SUITS) {
+            const choice = this.findRandomPrimitiveChoice(suit.uid, minions, {});
+            if (choice === undefined) {
+                continue;
+            }
+            const check = this.validateMagicianChoice(choice.minion, [suit.uid, choice.mode, ...choice.args]);
+            if (!check.failed) {
+                const ref = this.pieceRefStr(choice.minion.x, choice.minion.y, choice.minion.index, minions);
+                return [ref, suit.uid, choice.mode, ...choice.args];
+            }
+        }
+        return undefined;
+    }
+
+    private buildRandomSpecialStepTokens(special: SpecialPower, minions: IMinionRef[]): string[] | undefined {
+        switch (special) {
+            case "orientMinion": return this.buildRandomOrientMinionTokens(minions);
+            case "tradeHands": return this.buildRandomTradeHandsTokens(minions);
+            case "orientAny": return this.buildRandomOrientAnyOrHierophantTokens(minions, "orientAny");
+            case "hierophantReplace": return this.buildRandomOrientAnyOrHierophantTokens(minions, "hierophantReplace");
+            case "hermitTeleport": return this.buildRandomHermitTokens(minions);
+            case "judgementDraw": return this.buildRandomJudgementDrawTokens(minions);
+            case "highPriestess": return this.buildRandomHighPriestessTokens();
+            case "magicianChoice": return this.buildRandomMagicianChoiceTokens(minions);
+            // fool/worldUseAny - never reached; buildRandomChain filters
+            // Fool/World out by uid before any step is ever attempted.
+            default: return undefined;
+        }
+    }
+
+    private buildRandomStepForPowerStep(
+        step: PowerStep, minions: IMinionRef[], def: MajorArcanaDef, stepIndex: number, totalSteps: number,
+    ): string[] | undefined {
+        if ("primitive" in step) {
+            return this.buildRandomPrimitiveStepTokens(step.primitive, minions, def, step.opts, stepIndex, totalSteps);
+        }
+        return this.buildRandomSpecialStepTokens(step.special, minions);
+    }
+
+    // Builds a random (possibly empty) power-step chain for a "use"/"play"
+    // target card. Minor arcana get at most their one single step;
+    // major arcana chain through def.powers in order, threading each
+    // step's outcome.newMinion into the next step's own minion pool
+    // (the "become a minion" rule - see applyMajorPower's own docs, which
+    // this mirrors exactly). The first step that can't be built stops
+    // the chain there - no attempt to "skip" a declined step and resume
+    // later, matching the common real-play pattern.
+    //
+    // Final correctness pass: truncates from the end while
+    // validateMajorPower rejects the assembled chain, since
+    // computeShortcutOpts's totalSteps-dependent relaxations (e.g.
+    // Chariot's "every step except the last") can invalidate an earlier
+    // step once the chain's ACTUAL final length is known, which can
+    // differ from the length assumed while speculatively building it.
+    // Always terminates - validateMajorPower(def, eligible, []) is
+    // trivially legal (no steps to check).
+    private buildRandomChain(card: MinorCard | MajorCard, eligible: IMinionRef[]): string[][] {
+        if (!card.major) {
+            if (eligible.length === 0 || Math.random() < 0.2) {
+                return []; // decline outright - always legal
+            }
+            const suitUid = (card as MinorCard).suit.uid;
+            const tokens = this.buildRandomStepTokens(suitUid, eligible, {});
+            if (tokens === undefined) {
+                return [];
+            }
+            return this.validateMinorPower(suitUid, eligible, [tokens]) === undefined ? [tokens] : [];
+        }
+        const def = getMajorArcanaDef(card as MajorCard);
+        if (def.uid === "00" || def.uid === "21") {
+            return []; // Fool/World - not yet engine-supported beyond declining
+        }
+        if (Math.random() < 0.15) {
+            return []; // decline outright sometimes, same as minor arcana
+        }
+        const stepSegments: string[][] = [];
+        let minions = [...eligible];
+        for (let i = 0; i < def.powers.length; i++) {
+            const step = def.powers[i];
+            const tokens = this.buildRandomStepForPowerStep(step, minions, def, i, stepSegments.length + 1);
+            if (tokens === undefined) {
+                break;
+            }
+            stepSegments.push(tokens);
+            const result = this.validatePowerStep(step, minions, tokens, def, i, stepSegments.length);
+            if (result.failed) {
+                stepSegments.pop();
+                break;
+            }
+            if (result.outcome?.newMinion !== undefined) {
+                minions = [...minions, result.outcome.newMinion];
+            }
+        }
+        while (stepSegments.length > 0 && this.validateMajorPower(def, eligible, stepSegments) !== undefined) {
+            stepSegments.pop();
+        }
+        return stepSegments;
     }
 
     // Standard grid renderer over a window recomputed from the board's live
