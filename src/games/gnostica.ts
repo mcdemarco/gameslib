@@ -3874,7 +3874,7 @@ export class GnosticaGame extends GameBase {
                 const t = this.board.get(x, y);
                 const key = this.cellRenderKey(t, cls);
                 if (!(key in legend)) {
-                    legend[key] = this.buildCellGlyph(t);
+                    legend[key] = this.buildCellGlyph(t, cls);
                 }
                 rowCells.push(key);
             }
@@ -4003,17 +4003,6 @@ export class GnosticaGame extends GameBase {
             areas: areas.length > 0 ? areas : undefined,
         };
 
-        // A visual marker for wasteland cells (distinct from an occupied
-        // territory) is still an open question - a per-cell fill glyph
-        // defaults to plain white regardless of opacity (confirmed by
-        // reading the renderer's own glyph definition), a MarkerFence
-        // border traces the full cell rather than the smaller inset area
-        // an actual card occupies, and "enter"-type annotations merge into
-        // one outline around their combined union rather than drawing one
-        // square per cell, no matter how many separate entries are given
-        // (confirmed by actually rendering both cases). Wasteland cells
-        // are still fully functional (clickable, correctly classified) -
-        // just visually plain for now.
         const annotations: NonNullable<APRenderRep["annotations"]> = [];
         for (const r of this.results) {
             if (r.type === "place" && r.where !== undefined) {
@@ -4258,17 +4247,15 @@ export class GnosticaGame extends GameBase {
     // small square, so it uses the compact card face (smaller rank/circle
     // sizing) rather than the roomier default meant for a card shown alone
     // (e.g. a hand, once that's rendered).
-    private buildCellGlyph(t: Territory | undefined): Glyph | [Glyph, ...Glyph[]] {
+    private buildCellGlyph(t: Territory | undefined, cls: CellClass): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
         if (t?.card !== undefined) {
             stack.push(...this.buildCardFace(t.card, true));
+        } else if (cls === "wasteland") {
+            stack.push({ name: "piece-square-dashed", scale: 1 });
         } else {
-            // Wasteland: fully invisible - its actual visual marker (a
-            // dashed border tracing the cell) is a board-level fence
-            // marker built once in render(), not a per-cell fill glyph.
-            // This placeholder only exists so the cell still has a
-            // clickable legend entry, distinct from a void cell (which
-            // gets none at all, rendered as "-").
+            // A void cell needing a click target (see voidCellNeedsClickTarget)
+            // still needs a legend entry, but stays fully invisible.
             stack.push({ name: "piece-square-borderless", scale: 1, opacity: 0 });
         }
         const pieces = t?.pieces ?? [];
