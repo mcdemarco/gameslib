@@ -25,6 +25,7 @@
         "biscuit": "The following cards were in opposing hands: {{cards}}.",
         "deckfish": "{{player}} was unable to move and must pass from now on.",
         "frogger": "{{player}} chose to refill the draw pool.  Other players must pass so he can take his {{moves}} remaining move(s).",
+        "gnostica": "{{player}} made a declaration.",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}.",
         "scribe_super": "{{player}}'s super formation: {{formation}}.",
         "stawvs": "{{player}} was unable to move and must pass from now on.  Their pieces remain on the following pyramids: {{pyramids}}."
@@ -195,7 +196,12 @@
         "magnate": "The discards were shuffled.  There are no shuffles remaining.",
         "quincunx_one": "{{player}} drew {{count}} card.",
         "quincunx_other": "{{player}} drew {{count}} cards.",
-        "evenatodds": "{{player}} drew a tile from the boneyard."
+        "evenatodds": "{{player}} drew a tile from the boneyard.",
+        "gnostica_deck_one": "{{player}} drew {{count}} card.",
+        "gnostica_deck_other": "{{player}} drew {{count}} cards.",
+        "gnostica_discard_one": "{{player}} drew {{count}} card from the discard pile.",
+        "gnostica_discard_other": "{{player}} drew {{count}} cards from the discard pile.",
+        "gnostica_hand": "{{player}} played {{what}} from their hand."
     },
     "DECLARE": {
         "biscuit": "{{player}} has gone out!",
@@ -235,6 +241,7 @@
             "minimal_one": "{{count}} friendly piece was destroyed.",
             "minimal_other": "{{count}} friendly pieces were destroyed."
         },
+        "gnostica": "{{player}} destroyed {{what}}.",
         "logger": "{{player}} felled a tree at {{where}}.",
         "mattock": "{{player}} mined at {{where}}.",
         "string": "String {{where}} broke under the strain."
@@ -315,6 +322,10 @@
         "ball_drop_other": "{{count}} balls dropped from {{from}} to {{to}}.",
         "bao": "Initial direction of movement: {{direction}}.",
         "blockade": "{{player}} moved a piece from {{from}} to {{to}}.",
+        "hermit-piece": "{{player}} teleported a minion from {{from}} to {{to}}.",
+        "hermit-tile": "{{player}} teleported the territory at {{from}} to {{to}}.",
+        "rod-piece": "{{player}} moved a minion from {{from}} to {{to}}.",
+        "rod-tile": "{{player}} pushed the territory at {{from}} to {{to}}.",
         "byte": {
             "full": "{{player}} moved a full stack from {{from}} to {{to}}.",
             "partial_one": "{{player}} moved {{count}} checker from {{from}} to {{to}}.",
@@ -443,6 +454,8 @@
         "crosshairs_cloud": "{{player}} placed a cloud at {{where}}.",
         "conhex": "{{player}} placed a piece at vertex {{where}}.",
         "connecticut": "{{player}} placed a triomino at {{where}}.",
+        "cups-enemy": "{{player}} added a copy of an enemy minion to {{where}}.",
+        "cups-own": "{{player}} added one of their own minions to {{where}}.",
         "boxes": "{{player}} adds a line at {{where}}.",
         "boxes_claim1": "{{player}} adds a line at {{where}}, claiming {{box}}.",
         "boxes_claim2": "{{player}} adds a line at {{where}}, claiming {{box1}} and {{box2}}.",
