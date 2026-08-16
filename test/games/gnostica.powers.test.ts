@@ -64,6 +64,21 @@ describe("Gnostica powers: Cups (create)", () => {
         expect(() => createOwn(ctx, 0, 0, 0, 1, 0, "N")).to.throw();
     });
 
+    it("refuses to create an own piece in the void (a minion on an isolated wasteland facing away from any card)", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups()));
+        // A minion sitting on a wasteland (adjacent to (0,0)'s card, but
+        // no card of its own), facing further away from it - (2,0) is
+        // void, not adjacent to any card at all. Reproduces a real bug:
+        // a piece created here had no way to ever be evicted (unlike a
+        // MOVED piece landing in the void, which movePiece destroys as
+        // it goes), so it just sat there permanently.
+        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "E")]));
+        const ctx = makeCtx(b);
+        expect(() => createOwn(ctx, 1, 0, 0, 2, 0, "N")).to.throw();
+        expect(b.get(2, 0)).to.be.undefined;
+    });
+
     it("copies an enemy piece's own small piece, matching its orientation, from the enemy's stash", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 1, "W")]));
@@ -81,6 +96,15 @@ describe("Gnostica powers: Cups (create)", () => {
         b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U"), new Piece(1, 1, "W")]));
         const ctx = makeCtx(b);
         expect(() => createEnemy(ctx, 0, 0, 0, 0, 0, 1)).to.throw();
+    });
+
+    it("refuses to create an enemy copy in the void, same as createOwn", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new Territory(aceOfCups()));
+        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "E")]));
+        const ctx = makeCtx(b);
+        expect(() => createEnemy(ctx, 1, 0, 0, 2, 0, 0)).to.throw();
+        expect(b.get(2, 0)).to.be.undefined;
     });
 
     it("creates a new territory on a wasteland from a spot card in hand", () => {

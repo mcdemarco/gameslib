@@ -213,6 +213,16 @@ export const checkCreateOwn = (
     if (ownErr) return ownErr;
     const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
     if (targetErr) return targetErr;
+    // A minion sitting on an isolated wasteland (not itself a territory)
+    // can face a cell that's genuinely void - unlike movePiece, which
+    // destroys a piece that lands in the void as a natural consequence of
+    // relocating an EXISTING piece, there's no equivalent cleanup for a
+    // brand-new piece, so it would otherwise just sit there forever,
+    // invisible to every void-eviction path. Reject outright instead,
+    // same as checkCreateTerritory's own wasteland-only restriction.
+    if (ctx.board.classify(targetX, targetY) === "void") {
+        return { key: "TARGET_IS_VOID" };
+    }
     // The target cell may be a genuinely untouched wasteland (no stored
     // Territory object at all, since one is only ever created for a cell
     // that already has a card or a piece) - that's zero pieces there, not
@@ -254,6 +264,14 @@ export const checkCreateEnemy = (
     if (ownErr) return ownErr;
     const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
     if (targetErr) return targetErr;
+    // A genuinely void cell can never legitimately have a piece to copy
+    // (a real victim already rules this out below), but check explicitly
+    // anyway - see checkCreateOwn's own docs on why creation, unlike
+    // movement, has no other cleanup path for a piece stranded in the
+    // void.
+    if (ctx.board.classify(targetX, targetY) === "void") {
+        return { key: "TARGET_IS_VOID" };
+    }
     const t = ctx.board.get(targetX, targetY);
     const victim = t?.pieces[victimIndex];
     if (victim === undefined) {
