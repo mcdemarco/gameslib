@@ -1,4 +1,4 @@
-import { DirectionCardinal } from "../../common";
+import { DirectionCardinal, shuffle } from "../../common";
 import { TarotCard, MajorCard, allCards } from "../../common/tarot";
 import { GnosticaBoard, IEvicted } from "./board";
 import { Territory, cardPointValue } from "./Territory";
@@ -65,6 +65,22 @@ const takeFromPile = (pile: string[], uid: string): TarotCard => {
     }
     pile.splice(idx, 1);
     return cardByUid(uid);
+};
+
+// Reshuffles the discard pile into the draw pile in place whenever the
+// draw pile is empty, per the rules' unconditional "reshuffle the discard
+// pile whenever the draw pile is exhausted" - mirrors cmdDraw's own
+// reshuffle in gnostica.ts. Mutates the arrays in place (push/splice)
+// rather than reassigning ctx.drawPile/ctx.discardPile, since those are
+// the same array instances GnosticaGame's this.drawPile/this.discardPile
+// point to - a reassignment here wouldn't be visible there. No-op if the
+// draw pile isn't actually empty, or if there's nothing to reshuffle.
+const reshuffleIfDrawPileEmpty = (ctx: PowerContext): void => {
+    if (ctx.drawPile.length > 0 || ctx.discardPile.length === 0) {
+        return;
+    }
+    ctx.drawPile.push(...(shuffle(ctx.discardPile) as string[]));
+    ctx.discardPile.length = 0;
 };
 
 const stashOf = (ctx: PowerContext, player: number): Stash => {
@@ -229,7 +245,7 @@ export const createOwn = (
 
 // Add one of the TARGETED enemy's own small pieces to the same cell,
 // matching that enemy piece's orientation, drawn from the enemy's stash.
-export const checkCreateCopy = (
+export const checkCreateEnemy = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
 ): PowerFailure | undefined => {
@@ -244,7 +260,7 @@ export const checkCreateCopy = (
         return { key: "NO_VICTIM_THERE" };
     }
     if (victim.owner === ctx.currplayer) {
-        return { key: "COPY_NEEDS_ENEMY" };
+        return { key: "MUST_TARGET_ENEMY" };
     }
     if (!opts.ignoreCapacity && (t?.pieces.length ?? 0) >= 3) {
         return { key: "CELL_FULL" };
@@ -252,11 +268,11 @@ export const checkCreateCopy = (
     return undefined;
 };
 
-export const createCopy = (
+export const createEnemy = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
 ): void => {
-    const failure = checkCreateCopy(ctx, minionX, minionY, minionIndex, targetX, targetY, victimIndex, opts);
+    const failure = checkCreateEnemy(ctx, minionX, minionY, minionIndex, targetX, targetY, victimIndex, opts);
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
@@ -285,7 +301,7 @@ export const checkCreateTerritory = (
         return { key: "CELL_HAS_ENEMY" };
     }
     if (opts.allowRandomDraw) {
-        if (ctx.drawPile.length === 0) {
+        if (ctx.drawPile.length === 0 && ctx.discardPile.length === 0) {
             return { key: "DRAW_PILE_EMPTY" };
         }
         // A random draw's own point value can't be predicted without
@@ -319,6 +335,7 @@ export const createTerritory = (
     }
     let card: TarotCard;
     if (opts.allowRandomDraw) {
+        reshuffleIfDrawPileEmpty(ctx);
         const drawnUid = ctx.drawPile.shift() as string;
         card = cardByUid(drawnUid);
         if (cardPointValue(card) !== 1) {
@@ -996,10 +1013,10 @@ export const judgementDraw = (
 // High Priestess: one "discard any, then draw back up to 6" round (the card
 // grants two of these in a row - see MAJOR_ARCANA["02"] - by simply calling
 // this twice). No minion/targeting is involved; this is pure hand/pile
-// manipulation. Draws stop early if the draw pile runs dry rather than
-// throwing - same as the ordinary end-of-turn "discard and draw" action,
-// running out just means ending up with fewer than 6. Every named uid is
-// checked up front for the same reason as Judgement above.
+// manipulation. Reshuffles the discard pile into the draw pile if it runs
+// dry mid-draw, same as the ordinary end-of-turn "discard and draw" action -
+// draws only stop early if both piles end up genuinely empty. Every named
+// uid is checked up front for the same reason as Judgement above.
 export const checkHighPriestess = (ctx: PowerContext, discardUids: string[]): PowerFailure | undefined => {
     const seen = new Set<string>();
     for (const uid of discardUids) {
@@ -1024,7 +1041,11 @@ export const highPriestess = (ctx: PowerContext, discardUids: string[]): void =>
         ctx.hand.splice(idx, 1);
         ctx.discardPile.push(uid);
     }
-    while (ctx.hand.length < 6 && ctx.drawPile.length > 0) {
+    while (ctx.hand.length < 6) {
+        reshuffleIfDrawPileEmpty(ctx);
+        if (ctx.drawPile.length === 0) {
+            break; // nothing left anywhere
+        }
         ctx.hand.push(ctx.drawPile.shift() as string);
     }
 };
@@ -1039,6 +1060,7 @@ export const highPriestess = (ctx: PowerContext, discardUids: string[]): void =>
 // this section's own header comment on why this isn't split into a
 // checkX/mutating pair yet.
 export const fool = (ctx: PowerContext): TarotCard => {
+    reshuffleIfDrawPileEmpty(ctx);
     const uid = ctx.drawPile.shift();
     if (uid === undefined) {
         throw new GnosticaRulesError("DRAW_PILE_EMPTY");
