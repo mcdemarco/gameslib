@@ -643,9 +643,9 @@ export class GnosticaGame extends GameBase {
                 requireNoSteps();
                 this.cmdOrient(parsed.rest);
                 break;
-            case "draw":
+            case "discard":
                 requireNoSteps();
-                this.cmdDraw(parsed.rest, partial);
+                this.cmdDiscard(parsed.rest, partial);
                 break;
             case "activate":
                 requireValidStepShapes();
@@ -741,8 +741,8 @@ export class GnosticaGame extends GameBase {
             case "orient":
                 failure = requireNoSteps() ?? this.validateOrient(parsed.rest);
                 break;
-            case "draw":
-                failure = requireNoSteps() ?? this.validateDraw(parsed.rest);
+            case "discard":
+                failure = requireNoSteps() ?? this.validateDiscard(parsed.rest);
                 break;
             case "activate":
                 failure = requireValidStepShapes() ?? this.validateActivate(parsed.rest, parsed.stepSegments);
@@ -769,7 +769,7 @@ export class GnosticaGame extends GameBase {
     // of the string is being parsed. See this file's "Move parsing" docs
     // above for why.
     private static readonly LAST_FLAG_RE = /\s*\(last\)\s*$/i;
-    private static readonly RECOGNIZED_HEADS = ["place", "orient", "draw", "activate", "play"];
+    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "activate", "play"];
 
     // Every step's first token is always either a piece ref (every suit
     // primitive and special power except one) or a card uid (High
@@ -963,7 +963,7 @@ export class GnosticaGame extends GameBase {
 
     // A syntactically-complete move that the click flow itself built up
     // (as opposed to one the user finished typing) is still provisional -
-    // place/orient's orientation and draw's discard list are all optional
+    // place/orient's orientation and discard's uid/count list are all optional
     // refinements the player may want to keep clicking through, so this
     // deliberately downgrades validateMove()'s natural complete:1 to 0
     // whenever the move is otherwise valid. Matches Knight Line's own
@@ -982,17 +982,6 @@ export class GnosticaGame extends GameBase {
             result.message = i18next.t(messageKey);
         }
         return result;
-    }
-
-    // A result for a button-seeded but not-yet-targeted action ("activate"/
-    // "play"/"orient" with no cell/card chosen yet) - deliberately NOT run
-    // through validateMove(), since the bare keyword alone would just
-    // report as an error (it's missing required args by design, not
-    // broken). Mirrors validateMove()'s own empty-string case: valid,
-    // complete:-1, an instructional message telling the player what to
-    // click next.
-    private modeSeedResult(newmove: string, messageKey: string): IClickResult {
-        return { move: newmove, valid: true, complete: -1, message: i18next.t(messageKey) };
     }
 
     // The six top-level turn choices, as buttons - see the class-level docs
@@ -1061,7 +1050,7 @@ export class GnosticaGame extends GameBase {
             found.add("declare");
         }
         const head = parsed.head?.toLowerCase();
-        if (head !== undefined && ["place", "activate", "play", "orient", "draw"].includes(head)) {
+        if (head !== undefined && ["place", "activate", "play", "orient", "discard"].includes(head)) {
             found.add(head);
         }
         return found;
@@ -1096,7 +1085,7 @@ export class GnosticaGame extends GameBase {
             { label: "Use Territory", value: "activate" },
             { label: "Use Hand Card", value: "play" },
             { label: "Orient", value: "orient" },
-            { label: "Discard", value: "draw" },
+            { label: "Discard/Draw", value: "discard" },
             { label: "Pass", value: "pass" },
         ];
         if (this.lastTurnAnnouncedBy === undefined || this.lastTurnAnnouncedBy === this.currplayer) {
@@ -1106,6 +1095,29 @@ export class GnosticaGame extends GameBase {
         for (const b of topLevel) {
             if (b.value !== undefined && highlighted.has(b.value)) {
                 b.attributes = [{ name: "font-weight", value: "bold" }];
+            }
+        }
+
+        // Discard's own count is optional (an omitted "draw <n>" defaults
+        // to the max at commit time - see cmdDiscard's docs), but the bar
+        // still actively solicits it: as soon as "discard" is the live
+        // head and no count has been chosen yet, offer every legal count
+        // from 0 up to the room left in a 6-card hand as its own button,
+        // fully replacing the top-level bar (same shape as hermitTeleport/
+        // magicianChoice's own button sets below). Recomputed fresh every
+        // render off the live move's own already-toggled discard uids, so
+        // the offered range shrinks/grows correctly as the player keeps
+        // clicking hand cards.
+        if (this.liveMove !== undefined) {
+            const liveParsed = this.parseMove(this.liveMove);
+            if (liveParsed.head?.toLowerCase() === "discard" && !liveParsed.rest.includes("draw")) {
+                const hand = this.hands[this.currplayer - 1] ?? [];
+                const maxDraw = Math.max(0, 6 - (hand.length - liveParsed.rest.length));
+                const countButtons: ButtonBarButton[] = [];
+                for (let n = 0; n <= maxDraw; n++) {
+                    countButtons.push({ label: `Draw ${n}`, value: `drawcount_${n}` });
+                }
+                return countButtons as [ButtonBarButton, ...ButtonBarButton[]];
             }
         }
 
@@ -1928,7 +1940,7 @@ export class GnosticaGame extends GameBase {
     // Click support for the top-level turn choice (via the button bar from
     // getActionButtons()) plus the simple, single-segment actions - place,
     // orient, activate/play with power declined, and toggling hand cards
-    // into a draw's discard list. activate/play's chained power steps
+    // into a discard's uid list. activate/play's chained power steps
     // aren't click-driven yet (deliberately scoped out of this pass).
     //
     // "Declare" is handled up front, separately from everything else -
@@ -1953,7 +1965,7 @@ export class GnosticaGame extends GameBase {
     // Reattaches "(last)" to a click result computed against the
     // last-stripped move, if it was present going in. A still-incomplete
     // result (complete: -1 - either a friendly, deliberately-not-validated
-    // seed like modeSeedResult's, or a genuinely in-progress real move)
+    // button-seeded result, or a genuinely in-progress real move)
     // gets the flag spliced on as-is, since it isn't submittable yet
     // regardless; a complete, currently-valid result gets properly
     // re-validated on the combined string instead, so a move that's only
@@ -2034,13 +2046,29 @@ export class GnosticaGame extends GameBase {
                     }
                     return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                 }
+                if (value.startsWith("drawcount_")) {
+                    // The count-picker buttons getActionButtons() offers
+                    // once "discard" is the live head and no "draw <n>"
+                    // suffix has been chosen yet - see its own docs. Always
+                    // rebuilt from the move's current discard uids (there's
+                    // never an existing "draw <n>" tail to strip here,
+                    // since the button set itself stops being offered the
+                    // moment one is present).
+                    const n = value.slice("drawcount_".length);
+                    const parsed = this.parseMove(move);
+                    if (parsed.head?.toLowerCase() !== "discard") {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    return this.provisionalResult(["discard", ...parsed.rest, "draw", n].join(" "));
+                }
                 switch (value) {
                     case "pass":
-                    case "draw":
+                    case "discard":
                         // Discard's own bare seed is already a legal,
-                        // complete move on its own (discard nothing) - no
-                        // different from Pass, so both just build it.
-                        return this.provisionalResult("draw");
+                        // complete move on its own (discard nothing, draw
+                        // the max) - no different from Pass, so both just
+                        // build it.
+                        return this.provisionalResult("discard");
                     case "place":
                         // Not strictly necessary (an empty move already
                         // builds "place <cell>" directly from a bare board
@@ -2048,13 +2076,13 @@ export class GnosticaGame extends GameBase {
                         // for consistency with every other action, now
                         // that "place" is always shown as the sole choice
                         // rather than an empty bar - see getActionButtons().
-                        return this.modeSeedResult("place", "apgames:validation.gnostica.PICK_CELL_TO_PLACE");
+                        return { move: "place", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CELL_TO_PLACE") };
                     case "activate":
-                        return this.modeSeedResult("activate", "apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE");
+                        return { move: "activate", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE") };
                     case "play":
-                        return this.modeSeedResult("play", "apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY");
+                        return { move: "play", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY") };
                     case "orient":
-                        return this.modeSeedResult("orient", "apgames:validation.gnostica.PICK_PIECE_TO_ORIENT");
+                        return { move: "orient", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
                     default:
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                 }
@@ -2072,7 +2100,7 @@ export class GnosticaGame extends GameBase {
             // progress: supplying a card uid for a pending minor-arcana
             // power step in progress (Cups "new", Discs/Swords "tile"),
             // playing the card outright ("play"), or toggling it into a
-            // draw's discard list (the default, if no mode is active).
+            // discard's uid list (the default, if no mode is active).
             if (piece !== undefined && piece.startsWith("hand_")) {
                 const uid = piece.slice("hand_".length);
                 const hand = this.hands[this.currplayer - 1] ?? [];
@@ -2089,8 +2117,8 @@ export class GnosticaGame extends GameBase {
                     // through to the ordinary hand-card behaviour below.
                 }
                 if (pendingForCard?.special === "highPriestess") {
-                    // Same toggle-into-a-list mechanic as "draw"'s own
-                    // discard list below, just scoped to this in-progress
+                    // Same toggle-into-a-list mechanic as "discard"'s own
+                    // uid list below, just scoped to this in-progress
                     // step's own token list (no minionRef prefix at all -
                     // see IPendingStep's own docs) rather than the
                     // top-level move's args. Checked BEFORE the
@@ -2108,13 +2136,20 @@ export class GnosticaGame extends GameBase {
                 if (head === "play") {
                     return this.provisionalResult(`play ${uid}`, "apgames:validation.gnostica.POWER_STILL_OPTIONAL");
                 }
-                let discards = head === "draw" ? [...args] : [];
+                // Any already-chosen "draw <n>" tail is deliberately
+                // dropped here rather than carried forward - the valid
+                // count range shifts with the discard list itself, so
+                // changing which cards are discarded re-solicits the count
+                // fresh (via getActionButtons()'s own count-picker) rather
+                // than silently keeping a now-possibly-invalid number.
+                const drawIdx = head === "discard" ? args.indexOf("draw") : -1;
+                let discards = head === "discard" ? (drawIdx === -1 ? [...args] : args.slice(0, drawIdx)) : [];
                 if (discards.includes(uid)) {
                     discards = discards.filter(u => u !== uid);
                 } else {
                     discards.push(uid);
                 }
-                return this.provisionalResult(["draw", ...discards].join(" "));
+                return this.provisionalResult(["discard", ...discards].join(" "));
             }
 
             // Discard-pile clicks (from the AreaPieces built by
@@ -2456,20 +2491,31 @@ export class GnosticaGame extends GameBase {
         return undefined;
     }
 
-    // "draw [uid...]" - discard the named hand cards, then redraw to 6,
-    // reshuffling the discard pile into the draw pile if it runs dry.
+    // "discard [uid...] [draw <n>]" - discard the named hand cards, then
+    // draw back: exactly <n> if "draw <n>" is given (0 up to however much
+    // room is left in a 6-card hand - it's always legal to draw fewer than
+    // the max), or as many as possible if "draw <n>" is omitted entirely
+    // (the only behaviour before this command could under-draw on
+    // purpose). Reshuffles the discard pile into the draw pile if it runs
+    // dry, same as every other draw-pile-exhaustion spot - see
+    // reshuffleIfDrawPileEmpty's twin logic in gnostica/powers.ts (this one
+    // can't share that helper directly, since it mutates this.drawPile/
+    // this.discardPile rather than a PowerContext's).
     //
     // `partial` (set only by move()'s live-preview calls, never by a real
     // submitted move) stops after the discard step, deliberately skipping
     // the redraw - the player may still be clicking through more cards to
-    // discard, and drawing replacements prematurely would either reveal
-    // cards for a discard set that isn't final yet, or require redrawing
-    // (and discarding the previous preview's draws back into the deck) on
-    // every subsequent click. The hand simply shows smaller while this is
-    // in progress; the real draw only happens once, on final submission.
-    private cmdDraw(args: string[], partial = false): void {
+    // discard or choosing a count, and drawing replacements prematurely
+    // would either reveal cards for a choice that isn't final yet, or
+    // require redrawing (and discarding the previous preview's draws back
+    // into the deck) on every subsequent click. The hand simply shows
+    // smaller while this is in progress; the real draw only happens once,
+    // on final submission.
+    private cmdDiscard(args: string[], partial = false): void {
         const hand = this.hands[this.currplayer - 1];
-        for (const uid of args) {
+        const drawIdx = args.indexOf("draw");
+        const discardUids = drawIdx === -1 ? args : args.slice(0, drawIdx);
+        for (const uid of discardUids) {
             const idx = hand.indexOf(uid);
             if (idx === -1) {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }));
@@ -2480,8 +2526,18 @@ export class GnosticaGame extends GameBase {
         if (partial) {
             return;
         }
+        const maxDraw = Math.max(0, 6 - hand.length);
+        let count = maxDraw;
+        if (drawIdx !== -1) {
+            const countStr = args[drawIdx + 1];
+            const parsedCount = countStr === undefined ? NaN : Number(countStr);
+            if (!Number.isInteger(parsedCount) || parsedCount < 0 || parsedCount > maxDraw) {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_DRAW_COUNT", { count: countStr, max: maxDraw }));
+            }
+            count = parsedCount;
+        }
         let drawnCount = 0;
-        while (hand.length < 6) {
+        while (drawnCount < count) {
             if (this.drawPile.length === 0) {
                 if (this.discardPile.length === 0) {
                     break; // nothing left anywhere
@@ -2495,21 +2551,32 @@ export class GnosticaGame extends GameBase {
         this.results.push({ type: "deckDraw", count: drawnCount, from: "deck" });
     }
 
-    // Every named uid is checked up front, including rejecting the same
-    // uid named twice - cmdDraw's own loop mutates the hand as it goes, so
-    // a repeated uid already fails there (found once, then genuinely gone
-    // from hand on the second lookup); this reproduces that without
-    // actually mutating anything.
-    private validateDraw(args: string[]): IValidationResult | undefined {
+    // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar and
+    // logic, non-mutating. Every named discard uid is checked up front,
+    // including rejecting the same uid named twice - cmdDiscard's own loop
+    // mutates the hand as it goes, so a repeated uid already fails there
+    // (found once, then genuinely gone from hand on the second lookup);
+    // this reproduces that without actually mutating anything.
+    private validateDiscard(args: string[]): IValidationResult | undefined {
         const hand = this.hands[this.currplayer - 1];
+        const drawIdx = args.indexOf("draw");
+        const discardUids = drawIdx === -1 ? args : args.slice(0, drawIdx);
         const seen = new Set<string>();
-        for (const uid of args) {
+        for (const uid of discardUids) {
             if (seen.has(uid)) {
                 return this.invalid("apgames:validation.gnostica.DUPLICATE_CARD", { uid });
             }
             seen.add(uid);
             if (!hand.includes(uid)) {
                 return this.invalid("apgames:validation.gnostica.NOT_IN_HAND", { uid });
+            }
+        }
+        if (drawIdx !== -1) {
+            const maxDraw = Math.max(0, 6 - (hand.length - discardUids.length));
+            const countStr = args[drawIdx + 1];
+            const count = countStr === undefined ? NaN : Number(countStr);
+            if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
+                return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { count: countStr, max: maxDraw });
             }
         }
         return undefined;
@@ -3727,7 +3794,7 @@ export class GnosticaGame extends GameBase {
     }
 
     // Stub covering only the two turn types implemented so far
-    // (place/draw) - expand once activate/play exist. `custom-randomization`
+    // (place/discard) - expand once activate/play exist. `custom-randomization`
     // is declared precisely because full `moves()` enumeration of every
     // legal chained-power target combination is combinatorially infeasible
     // (see Homeworlds' own precedent), not merely deferred.
@@ -3743,7 +3810,7 @@ export class GnosticaGame extends GameBase {
                 return candidates[Math.floor(Math.random() * candidates.length)];
             }
         }
-        return "draw";
+        return "discard"; // discards nothing, draws the max
     }
 
     // Standard grid renderer over a window recomputed from the board's live
