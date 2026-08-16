@@ -32,8 +32,8 @@ export type playerid = 1|2|3|4|5|6;
 
 // A board tile overlays a 3x3 grid: the 4 corners are the card face (rank
 // + suit/power icons, see buildCardFace), leaving 5 cells for pyramids -
-// one edge midpoint per cardinal facing, plus the exact centre for an "up"
-// (unfaced) piece. Orientation has exactly 5 values (N/E/S/W/up), a 1:1
+// one edge midpoint per cardinal facing, plus the exact centre for a "U"
+// (unfaced) piece. Orientation has exactly 5 values (N/E/S/W/U), a 1:1
 // match.
 const BOARD_TILE_GRID_CORNER = 650;
 // Pieces get their own (smaller) radius rather than sharing
@@ -47,8 +47,8 @@ const BOARD_TILE_GRID_CORNER = 650;
 const PIECE_GRID_RADIUS = 380;
 // Index in this array doubles as the slot's identity everywhere else -
 // PIECE_GRID_PREFERRED_INDEX below must stay in step with it.
-const PIECE_GRID_SLOTS: [number, number][] = [[0, -1], [0, 1], [1, 0], [-1, 0], [0, 0]]; // N, S, E, W, up
-const PIECE_GRID_PREFERRED_INDEX: Record<Orientation, number> = { N: 0, S: 1, E: 2, W: 3, up: 4 };
+const PIECE_GRID_SLOTS: [number, number][] = [[0, -1], [0, 1], [1, 0], [-1, 0], [0, 0]]; // N, S, E, W, U
+const PIECE_GRID_PREFERRED_INDEX: Record<Orientation, number> = { N: 0, S: 1, E: 2, W: 3, U: 4 };
 
 // The renderer's own glyph-composition source (read directly, not
 // inferred): a placed glyph's `nudge` is applied via its <use> element's
@@ -61,7 +61,7 @@ const PIECE_GRID_PREFERRED_INDEX: Record<Orientation, number> = { N: 0, S: 1, E:
 // where it's actually meant to land on screen. [cos,sin] of each cardinal
 // rotation's angle, in exact integers (not Math.cos/sin, which introduces
 // float noise like 6.1e-17 at these multiples of 90deg).
-const CARDINAL_COS_SIN: Record<Exclude<Orientation, "up">, [number, number]> = {
+const CARDINAL_COS_SIN: Record<Exclude<Orientation, "U">, [number, number]> = {
     N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
 };
 
@@ -308,6 +308,33 @@ interface IMoveState extends IIndividualState {
     eliminated: playerid[];
     lastTurnAnnouncedBy: playerid | undefined;
     lastmove?: string;
+    // The "bidding" variant's opening procedure - see cmdBid's own docs.
+    // Every other variant/game stays in "main" for its entire lifetime, so
+    // none of the fields below are ever touched outside that variant.
+    phase: "bidding" | "redraw" | "main";
+    bidRound: number;
+    // One slot per player (index 0 = player 1): the 1-based position in
+    // THEIR OWN hand they've committed as this round's bid, or null if
+    // they haven't bid yet this round. null, not undefined - state gets
+    // JSON round-tripped (state()/serialize(), exactly what happens
+    // between every real move), and JSON.stringify silently turns
+    // `undefined` array elements into `null` (arrays can't have holes in
+    // JSON) - checking `!== undefined` against an already-round-tripped
+    // array would misread every still-open slot as already filled.
+    // Deliberately a position, not a card uid - see cmdBid's docs for why
+    // storing the identity here would leak it the instant the move is
+    // submitted.
+    bidPositions: (number | null)[];
+    // Every card actually revealed by a bid, across every round played
+    // (tied rounds and the final decisive one alike) - the shared pool
+    // every player draws back up to 6 from during "redraw".
+    biddingPool: string[];
+    bidWinner: playerid | undefined;
+    // The counterclockwise redraw order (winner's right-hand neighbour
+    // first, winner last) and a cursor into it - computed once the bid
+    // resolves, consumed one player at a time during "redraw".
+    redrawOrder: playerid[];
+    redrawPos: number;
 }
 
 export interface IGnosticaState extends IAPGameState {
@@ -368,6 +395,15 @@ export class GnosticaGame extends GameBase {
     // Transient click-UI hint, not part of persisted game state - see
     // move()'s own docs for exactly what this does and does not track.
     private liveMove: string | undefined;
+    // The "bidding" variant's own state - see IMoveState's own docs on
+    // each field.
+    public phase!: "bidding" | "redraw" | "main";
+    public bidRound = 0;
+    public bidPositions: (number | null)[] = [];
+    public biddingPool: string[] = [];
+    public bidWinner: playerid | undefined;
+    public redrawOrder: playerid[] = [];
+    public redrawPos = 0;
 
     private targetScore(): number {
         if (this.variants.includes("target-8")) {
@@ -431,11 +467,10 @@ export class GnosticaGame extends GameBase {
                 stashes.set(p as playerid, [5, 5, 5]);
             }
 
-            // Player 1 is the starting player by definition - randomizing
-            // who's actually "player 1" (or running the rules' bid-and-
-            // redraw procedure) is the front end's job, not the engine's.
-            // v1 doesn't implement the bid procedure at all; a future
-            // variant could.
+            // Player 1 is the starting player by default. The "bidding"
+            // variant runs the rules' own bid-and-redraw procedure first -
+            // see cmdBid's docs - and only sets currplayer to whoever
+            // actually won once that's resolved.
             const fresh: IMoveState = {
                 _version: GnosticaGame.gameinfo.version,
                 _results: [],
@@ -448,6 +483,13 @@ export class GnosticaGame extends GameBase {
                 stashes,
                 eliminated: [],
                 lastTurnAnnouncedBy: undefined,
+                phase: this.variants.includes("bidding") ? "bidding" : "main",
+                bidRound: 0,
+                bidPositions: new Array(this.numplayers).fill(null),
+                biddingPool: [],
+                bidWinner: undefined,
+                redrawOrder: [],
+                redrawPos: 0,
             };
             this.stack = [fresh];
         } else {
@@ -493,6 +535,13 @@ export class GnosticaGame extends GameBase {
         this.eliminated = [...state.eliminated];
         this.lastTurnAnnouncedBy = state.lastTurnAnnouncedBy;
         this.lastmove = state.lastmove;
+        this.phase = state.phase;
+        this.bidRound = state.bidRound;
+        this.bidPositions = [...state.bidPositions];
+        this.biddingPool = [...state.biddingPool];
+        this.bidWinner = state.bidWinner;
+        this.redrawOrder = [...state.redrawOrder];
+        this.redrawPos = state.redrawPos;
         return this;
     }
 
@@ -510,6 +559,13 @@ export class GnosticaGame extends GameBase {
             eliminated: [...this.eliminated],
             lastTurnAnnouncedBy: this.lastTurnAnnouncedBy,
             lastmove: this.lastmove,
+            phase: this.phase,
+            bidRound: this.bidRound,
+            bidPositions: [...this.bidPositions],
+            biddingPool: [...this.biddingPool],
+            bidWinner: this.bidWinner,
+            redrawOrder: [...this.redrawOrder],
+            redrawPos: this.redrawPos,
         };
     }
 
@@ -621,6 +677,42 @@ export class GnosticaGame extends GameBase {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") }));
             }
         };
+        const headLower = parsed.head.toLowerCase();
+
+        // The "bidding" variant's own opening procedure - see cmdBid's/
+        // cmdRedraw's own docs. Structurally unlike every other head
+        // below: no power steps, no "(last)" announcement, and their own
+        // bespoke currplayer advancement (next bidder/redrawer, or a
+        // phase transition) instead of the generic nextPlayer() call
+        // every other move falls through to - so both are handled
+        // entirely here rather than folded into the switch below.
+        if (headLower === "bid" || headLower === "redraw") {
+            const expectedHead = this.phase === "bidding" ? "bid" : this.phase === "redraw" ? "redraw" : undefined;
+            if (headLower !== expectedHead) {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
+            }
+            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
+            }
+            if (headLower === "bid") {
+                this.cmdBid(parsed.rest, partial);
+            } else {
+                this.cmdRedraw(parsed.rest, partial);
+            }
+            this.lastmove = m;
+            this.liveMove = partial ? m : undefined;
+            if (partial) {
+                return this;
+            }
+            this.saveState();
+            return this;
+        }
+        // Every other head is illegal until the bidding variant's opening
+        // procedure has fully resolved into "main".
+        if (this.phase !== "main") {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
+        }
+
         // Place is always a player's ENTIRE turn - one gate here, ahead of
         // the switch, replaces a separate check inside every other command:
         // with no board presence, place is the only legal head this turn,
@@ -630,7 +722,6 @@ export class GnosticaGame extends GameBase {
         // fresh every call, so this covers a mid-game wipeout's forced
         // re-placement identically to the very first turn - no separate
         // tracked state needed for either case.
-        const headLower = parsed.head.toLowerCase();
         if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST"));
         }
@@ -722,8 +813,22 @@ export class GnosticaGame extends GameBase {
             return undefined;
         };
 
-        // Mirrors move()'s own single top-level gate - see its docs.
+        // Mirrors move()'s own bid/redraw/phase gates - see their docs.
         const headLower = parsed.head.toLowerCase();
+        if (headLower === "bid" || headLower === "redraw") {
+            const expectedHead = this.phase === "bidding" ? "bid" : this.phase === "redraw" ? "redraw" : undefined;
+            if (headLower !== expectedHead) {
+                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+            }
+            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
+                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
+            }
+            const failure = headLower === "bid" ? this.validateBid(parsed.rest) : this.validateRedraw(parsed.rest);
+            return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        }
+        if (this.phase !== "main") {
+            return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+        }
         if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
         }
@@ -763,7 +868,7 @@ export class GnosticaGame extends GameBase {
     // of the string is being parsed. See this file's "Move parsing" docs
     // above for why.
     private static readonly LAST_FLAG_RE = /\s*\(last\)\s*$/i;
-    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play"];
+    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw"];
 
     // Every step's first token is always either a piece ref (every suit
     // primitive and special power except one) or a card uid (High
@@ -846,20 +951,15 @@ export class GnosticaGame extends GameBase {
     }
 
     // The move grammar's orientation vocabulary - N/E/S/W/U, all single
-    // uppercase letters ("U" for the internal "up" value), used
-    // everywhere a move string names a facing (place, orient, Cups
-    // "own", piece refs, every optional post-action reorientation arg).
-    // Case-insensitive on input; orientationLetter (below) is this
-    // function's exact inverse for generating a move string.
+    // uppercase letters, used everywhere a move string names a facing
+    // (place, orient, Cups "own", piece refs, every optional post-action
+    // reorientation arg). Case-insensitive on input.
     private tryParseOrientation(s: string | undefined): Orientation | undefined {
         if (s === undefined) {
             return undefined;
         }
-        if (s.toUpperCase() === "U") {
-            return "up";
-        }
         const dir = s.toUpperCase();
-        if ((cardinalOrientations as string[]).includes(dir)) {
+        if (dir === "U" || (cardinalOrientations as string[]).includes(dir)) {
             return dir as Orientation;
         }
         return undefined;
@@ -871,10 +971,6 @@ export class GnosticaGame extends GameBase {
         } catch {
             return undefined;
         }
-    }
-
-    private orientationLetter(o: Orientation): string {
-        return o === "up" ? "U" : o;
     }
 
     // A piece reference names a pyramid the same way a player would
@@ -972,7 +1068,7 @@ export class GnosticaGame extends GameBase {
     // mm.complete-vs-result.complete distinction: complete:1 tells the
     // interface it's safe to auto-finalize the move on its own, which is
     // wrong here - only the player's own explicit "Submit Move" should end
-    // the click sequence, or the very first click auto-submits "up" before
+    // the click sequence, or the very first click auto-submits "U" before
     // there's ever a chance to cycle to a real facing.
     private provisionalResult(newmove: string, messageKey?: string): IClickResult {
         const result = this.validateMove(newmove) as IClickResult;
@@ -1062,6 +1158,17 @@ export class GnosticaGame extends GameBase {
         if (this.gameover) {
             return undefined;
         }
+        // The "bidding" variant's opening procedure - a single bold button
+        // per phase, same "only one thing possible right now" pattern as
+        // the initial-placement case below. Not strictly necessary (a
+        // direct hand/pool card click already builds the move on its own
+        // - see handleBiddingClick), but offered for consistency.
+        if (this.phase === "bidding") {
+            return [{ label: "Bid", value: "bid", attributes: [{ name: "font-weight", value: "bold" }] }];
+        }
+        if (this.phase === "redraw") {
+            return [{ label: "Redraw", value: "redraw", attributes: [{ name: "font-weight", value: "bold" }] }];
+        }
         // A live preview of "use"/"play" can only ever have STARTED
         // with the acting player already having board presence - both
         // throw via move()'s own top-level hasPiecesOnBoard gate otherwise
@@ -1085,7 +1192,7 @@ export class GnosticaGame extends GameBase {
         }
         const topLevel: ButtonBarButton[] = [
             { label: "Use Territory", value: "use" },
-            { label: "Use Hand Card", value: "play" },
+            { label: "Play Card", value: "play" },
             { label: "Orient", value: "orient" },
             { label: "Discard/Draw", value: "discard" },
             { label: "Pass", value: "pass" },
@@ -1372,17 +1479,17 @@ export class GnosticaGame extends GameBase {
 
     // The single valid cell a minor suit-power step may affect, per
     // assertValidCellTarget in powers.ts: the minion's own cell if it's
-    // facing "up", otherwise the one cell it's pointing at. Also used as
+    // facing "U", otherwise the one cell it's pointing at. Also used as
     // the DEFAULT target for "piece"-shaped modes (self is additionally
     // always valid there too, per assertValidPieceTarget - clicking the
     // minion's own cell switches to that instead, see
     // handlePendingStepBoardClick).
     private minorTargetCell(minion: IMinionRef): [number, number] {
         const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
-        if (piece.orientation === "up") {
+        if (piece.orientation === "U") {
             return [minion.x, minion.y];
         }
-        const [dx, dy] = this.board.delta(piece.orientation as Exclude<Orientation, "up">);
+        const [dx, dy] = this.board.delta(piece.orientation as Exclude<Orientation, "U">);
         return [minion.x + dx, minion.y + dy];
     }
 
@@ -1403,14 +1510,13 @@ export class GnosticaGame extends GameBase {
         if (byPips.length <= 1) {
             return `${cell}.${piece.size}`;
         }
-        const orientLetter = this.orientationLetter(piece.orientation);
         if (byPips.filter(p => p.orientation === piece.orientation).length <= 1) {
-            return `${cell}.${piece.size}.${orientLetter}`;
+            return `${cell}.${piece.size}.${piece.orientation}`;
         }
         if (byPips.filter(p => p.owner === piece.owner).length <= 1) {
             return `${cell}.${piece.size}.${piece.owner}`;
         }
-        return `${cell}.${piece.size}.${orientLetter}.${piece.owner}`;
+        return `${cell}.${piece.size}.${piece.orientation}.${piece.owner}`;
     }
 
     // Click-to-orient: clicking the cell a piece already occupies means
@@ -1426,10 +1532,10 @@ export class GnosticaGame extends GameBase {
     // piece's own cell nor an orthogonal neighbour of it.
     private orientationTowardClick(fromX: number, fromY: number, toX: number, toY: number): Orientation | undefined {
         if (fromX === toX && fromY === toY) {
-            return "up";
+            return "U";
         }
         for (const dir of cardinalOrientations) {
-            const [dx, dy] = this.board.delta(dir as Exclude<Orientation, "up">);
+            const [dx, dy] = this.board.delta(dir as Exclude<Orientation, "U">);
             if (fromX + dx === toX && fromY + dy === toY) {
                 return dir;
             }
@@ -1456,7 +1562,7 @@ export class GnosticaGame extends GameBase {
     // right now, given current board state - not a full legality check
     // (validateMove still catches anything this misses or over-includes
     // once the player actually acts). Rods needs its own orientation gate
-    // (a piece pointing "up" cannot use a rod at all, per
+    // (a piece pointing "U" cannot use a rod at all, per
     // requireCanUseRod in powers.ts); the other three suits have no such
     // restriction.
     private legalMinorModes(pending: IPendingStep): string[] {
@@ -1476,7 +1582,7 @@ export class GnosticaGame extends GameBase {
                     return this.board.classify(tx, ty) === "wasteland";
                 case "R.piece":
                 case "R.tile":
-                    return minion.orientation !== "up";
+                    return minion.orientation !== "U";
                 case "D.tile":
                 case "S.tile":
                     return (targetT?.pointValue() ?? 0) > 0;
@@ -1593,7 +1699,7 @@ export class GnosticaGame extends GameBase {
                 // so self is the only sensible default), defaulting an
                 // attack to the acting player's OWN minion is almost never
                 // what's wanted. If the minion is actually facing a piece
-                // (not "up", which has no facing cell at all - self really
+                // (not "U", which has no facing cell at all - self really
                 // is the only legal target there), default to attacking
                 // THAT piece instead - the common case (attack the enemy
                 // this minion is pointing at) then needs no second click at
@@ -1667,7 +1773,7 @@ export class GnosticaGame extends GameBase {
                 if (dir === undefined) {
                     return undefined;
                 }
-                return rebuild([GnosticaBoard.coords2algebraic(tx, ty), this.orientationLetter(dir)], "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE");
+                return rebuild([GnosticaBoard.coords2algebraic(tx, ty), dir], "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE");
             }
             if (x !== tx || y !== ty) {
                 return undefined;
@@ -1828,7 +1934,7 @@ export class GnosticaGame extends GameBase {
         }
         const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
         return this.provisionalResult(
-            this.assembleStepMove(pending, [minionRef, this.orientationLetter(dir)]),
+            this.assembleStepMove(pending, [minionRef, dir]),
             "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE",
         );
     }
@@ -1889,7 +1995,7 @@ export class GnosticaGame extends GameBase {
             return undefined;
         }
         return this.provisionalResult(
-            this.assembleStepMove(pending, [minionRef, targetRef, this.orientationLetter(dir)]),
+            this.assembleStepMove(pending, [minionRef, targetRef, dir]),
             "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE",
         );
     }
@@ -1989,8 +2095,59 @@ export class GnosticaGame extends GameBase {
         return { ...result, move: combined };
     }
 
+    // Click support for the "bidding" variant's opening procedure. Row/col
+    // are never used - both phases are driven entirely by clicking cards
+    // in an AreaPieces (own hand during "bidding", the shared pool during
+    // "redraw"), never the board.
+    private handleBiddingClick(move: string, piece?: string): IClickResult {
+        if (piece === "_btn_bid") {
+            return { move: "bid", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_BID") };
+        }
+        if (piece === "_btn_redraw") {
+            return { move: "redraw", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARDS_TO_REDRAW") };
+        }
+        // A bid is always exactly one card - unlike discard's toggle-list,
+        // each click REPLACES any earlier pick rather than accumulating
+        // (mirrors "play <uid>"'s own single-click-replaces behaviour).
+        if (this.phase === "bidding" && piece?.startsWith("hand_")) {
+            const uid = piece.slice("hand_".length);
+            const hand = this.hands[this.currplayer - 1] ?? [];
+            const idx = hand.indexOf(uid);
+            if (idx === -1) {
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
+            }
+            return this.provisionalResult(`bid ${idx + 1}`);
+        }
+        // Redraw can need several cards, so pool clicks toggle a uid list
+        // exactly like discard's own hand-card toggle - see cmdDiscard's
+        // click handling above for the identical pattern.
+        if (this.phase === "redraw" && piece?.startsWith("pool_")) {
+            const uid = piece.slice("pool_".length);
+            if (!this.biddingPool.includes(uid)) {
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid }) };
+            }
+            const { head, rest: args } = this.parseMove(move);
+            let picks = head?.toLowerCase() === "redraw" ? [...args] : [];
+            if (picks.includes(uid)) {
+                picks = picks.filter(u => u !== uid);
+            } else {
+                picks.push(uid);
+            }
+            return this.provisionalResult(["redraw", ...picks].join(" "));
+        }
+        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+    }
+
     private handleClickCore(move: string, row: number, col: number, piece?: string): IClickResult {
         try {
+            // The "bidding" variant's opening procedure - structurally
+            // unlike every other click below (no board, no pending power
+            // steps, nothing else legal), so it's handled entirely by its
+            // own function rather than interleaved into the main-phase
+            // tree - see handleBiddingClick's own docs.
+            if (this.phase !== "main") {
+                return this.handleBiddingClick(move, piece);
+            }
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
                 if (value.startsWith("mode_")) {
@@ -2003,7 +2160,7 @@ export class GnosticaGame extends GameBase {
                     if (pending === undefined || pending.suitUid !== suitUid) {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
-                    // Cups "own" seeds its new piece's facing as "up" by
+                    // Cups "own" seeds its new piece's facing as "U" by
                     // default (see buildStepModeMove's own C.own case) -
                     // still adjustable by clicking around the target cell,
                     // same as place/orient's own click-to-orient.
@@ -2229,7 +2386,7 @@ export class GnosticaGame extends GameBase {
             // Overrides the generic VALID_MOVE message for a board-click
             // result that's already complete/submittable but still
             // deliberately soft-pedals that: DIRECTION_STILL_ADJUSTABLE
-            // (place/orient's own facing, defaulted to "up" or set to
+            // (place/orient's own facing, defaulted to "U" or set to
             // whatever neighbour was clicked, never the player's final
             // word on it - Cups "own"'s new-piece facing sets this too,
             // separately, in handlePendingStepBoardClick) and
@@ -2246,7 +2403,7 @@ export class GnosticaGame extends GameBase {
                 // once a placement cell is chosen, clicking it again means
                 // "face up", clicking one of its neighbours means "face
                 // that way" - any OTHER cell is a fresh placement there
-                // instead (defaulting to "up" again), same as clicking a
+                // instead (defaulting to "U" again), same as clicking a
                 // different cell always has.
                 const [prevCell] = args;
                 let dir: Orientation | undefined;
@@ -2255,7 +2412,7 @@ export class GnosticaGame extends GameBase {
                     dir = this.orientationTowardClick(px, py, x, y);
                 }
                 if (prevCell !== undefined && dir !== undefined) {
-                    newmove = `place ${prevCell} ${this.orientationLetter(dir)}`;
+                    newmove = `place ${prevCell} ${dir}`;
                 } else {
                     newmove = `place ${cell}`;
                 }
@@ -2277,7 +2434,7 @@ export class GnosticaGame extends GameBase {
                     dir = this.orientationTowardClick(loc.x, loc.y, x, y);
                 }
                 if (prevRef !== undefined && dir !== undefined) {
-                    newmove = `orient ${prevRef} ${this.orientationLetter(dir)}`;
+                    newmove = `orient ${prevRef} ${dir}`;
                 } else {
                     const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
                     if (myPieceIdx === -1) {
@@ -2390,7 +2547,7 @@ export class GnosticaGame extends GameBase {
 
     private parseOrientation(s: string): Orientation {
         if (s.toUpperCase() === "U") {
-            return "up";
+            return "U";
         }
         const dir = s.toUpperCase();
         if ((cardinalOrientations as string[]).includes(dir)) {
@@ -2399,8 +2556,227 @@ export class GnosticaGame extends GameBase {
         throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: s }));
     }
 
+    // ============================================================
+    // The "bidding" variant's opening procedure
+    // ============================================================
+
+    // "bid <n>" - n is the 1-based position of a card in the ACTING
+    // player's own current hand, deliberately not the card's own uid.
+    // Move strings are permanently public the instant they're submitted
+    // (this is a strict-turn, replay-reconstructed engine - there is no
+    // "hide this specific move from other players" mechanism anywhere),
+    // so a `bid <uid>` move would leak the real card to every viewer
+    // immediately, defeating the whole point of a blind bid. A bare
+    // position leaks nothing: an opponent's hand is already all-redacted
+    // to them (see render()'s own docs on that convention), so "player 3
+    // bid their 2nd card" tells them nothing they don't already not-know.
+    // The real card stays sitting untouched in `hands[]` - reusing the
+    // one field this codebase already has a proven per-viewer redaction
+    // convention for - until every player has committed a position, at
+    // which point resolveBidRound() reveals them all together.
+    // `partial` mirrors cmdDiscard's own contract (see move()'s own docs
+    // on what `partial` means): a live-preview call must validate the
+    // click exactly as normal, but stop BEFORE actually committing the
+    // bid - resolveBidRound() advances phase/currplayer/hands for real,
+    // which must never happen on move()'s disposable preview instance.
+    // There's nothing else worth rendering for an in-progress bid pick
+    // (the acting player's own hand doesn't change until the round
+    // actually resolves), so partial is a clean early return.
+    private cmdBid(args: string[], partial = false): void {
+        const failure = this.validateBid(args);
+        if (failure !== undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", failure.message);
+        }
+        if (partial) {
+            return;
+        }
+        const n = Number(args[0]);
+        this.bidPositions[this.currplayer - 1] = n;
+        this.results.push({ type: "select", who: this.currplayer, what: "bid" });
+        if (this.bidPositions.every(p => p !== null)) {
+            this.resolveBidRound();
+        } else {
+            this.nextPlayer();
+        }
+    }
+
+    private validateBid(args: string[]): IValidationResult | undefined {
+        const [nStr] = args;
+        if (nStr === undefined) {
+            return this.invalid("apgames:validation.gnostica.BID_POSITION_REQUIRED");
+        }
+        const hand = this.hands[this.currplayer - 1];
+        const n = Number(nStr);
+        if (!Number.isInteger(n) || n < 1 || n > hand.length) {
+            return this.invalid("apgames:validation.gnostica.BAD_BID_POSITION", { position: nStr, max: hand.length });
+        }
+        // Defensive - unreachable in normal play, since a round resolves
+        // (and resets every slot to null) the instant the last player's
+        // slot is filled, so currplayer can never be asked to bid twice
+        // within the same still-open round.
+        if (this.bidPositions[this.currplayer - 1] !== null) {
+            return this.invalid("apgames:validation.gnostica.ALREADY_BID");
+        }
+        return undefined;
+    }
+
+    // Every bidPositions slot is filled - reveal them all together
+    // (splicing each named card out of its owner's hand into the shared
+    // biddingPool, real uids and all - safe now, since this is the exact
+    // moment the rules say everyone becomes entitled to see them) and
+    // resolve the round.
+    private resolveBidRound(): void {
+        const revealed: { player: playerid; card: TarotCard }[] = [];
+        for (let p = 1; p <= this.numplayers; p++) {
+            const idx = this.bidPositions[p - 1]! - 1;
+            const hand = this.hands[p - 1];
+            const uid = hand[idx];
+            hand.splice(idx, 1);
+            this.biddingPool.push(uid);
+            revealed.push({ player: p as playerid, card: allCards().find(c => c.uid === uid)! });
+        }
+        this.bidPositions = new Array(this.numplayers).fill(null) as (number | null)[];
+
+        // "The player with the highest number major arcana card wins the
+        // bid. If nobody bid with a major arcana card, then the player
+        // with the highest minor arcana card wins" - MajorCard.seq (0-21)
+        // and MinorCard.rank.seq (Component's own ranks array is already
+        // Ace=1..King=14) are exactly these two comparison keys already;
+        // no separate ranking table needed.
+        const majors = revealed.filter(r => r.card.major);
+        const pool = majors.length > 0 ? majors : revealed;
+        const rank = (r: { card: TarotCard }): number => r.card.major ? (r.card as MajorCard).seq : (r.card as MinorCard).rank.seq;
+        const maxRank = Math.max(...pool.map(rank));
+        const winners = pool.filter(r => rank(r) === maxRank).map(r => r.player);
+
+        if (winners.length === 1) {
+            this.bidWinner = winners[0];
+            this.beginRedraw();
+            return;
+        }
+
+        // Tied - "set aside the bidding cards and then every player must
+        // bid again, repeated until one player wins the bid." Every
+        // player re-bids, not just the tied ones. This can only fail to
+        // converge if someone's hand is now empty (nothing left to bid);
+        // the rules don't cover that case. The engine-level fallback:
+        // keep the tied players in the order they were already in -
+        // `winners` is built by scanning players 1..numplayers in order
+        // (see the loop above), so its first entry is simply the
+        // lowest-numbered tied player, taken deterministically rather
+        // than broken at random.
+        this.bidRound += 1;
+        if (this.hands.some(h => h.length === 0)) {
+            this.bidWinner = winners[0];
+            this.beginRedraw();
+            return;
+        }
+        this.currplayer = 1;
+    }
+
+    // "The player to the right of the winner draws... as does each
+    // player in turn counterclockwise around the table" - this engine's
+    // own turn rotation (nextPlayer()) already goes winner -> winner+1 ->
+    // ... , which is what "turns proceeding clockwise" (the very next
+    // sentence in the rules) maps onto, so counterclockwise is simply the
+    // reverse: starting at winner-1 and stepping by -1, ending at the
+    // winner itself last.
+    private beginRedraw(): void {
+        const winner = this.bidWinner!;
+        const order: playerid[] = [];
+        let p = winner;
+        for (let i = 0; i < this.numplayers; i++) {
+            p = (((p - 2 + this.numplayers) % this.numplayers) + 1) as playerid;
+            order.push(p);
+        }
+        this.redrawOrder = order;
+        this.redrawPos = 0;
+        this.phase = "redraw";
+        this.currplayer = order[0];
+    }
+
+    // "redraw <uid...>" - the acting player's free choice of cards from
+    // the shared, fully public biddingPool (every bid card revealed
+    // across the whole opening procedure), drawing exactly enough to
+    // bring their hand back up to 6. Unlike "bid", uids are safe to name
+    // directly here: by the time redraw is legal, every one of these
+    // cards has already been revealed to everyone.
+    // `partial` mirrors cmdDiscard's own split exactly: moving the picked
+    // cards from the (fully public) pool into the acting player's hand is
+    // safe to do even on a disposable preview instance, so the render can
+    // show the pick accumulating - but advancing redrawPos/currplayer/
+    // phase is the consequential part move()'s live-preview calls must
+    // never trigger for real.
+    private cmdRedraw(args: string[], partial = false): void {
+        const failure = this.validateRedraw(args);
+        if (failure !== undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", failure.message);
+        }
+        const hand = this.hands[this.currplayer - 1];
+        for (const uid of args) {
+            this.biddingPool.splice(this.biddingPool.indexOf(uid), 1);
+            hand.push(uid);
+        }
+        if (partial) {
+            return;
+        }
+        this.results.push({ type: "deckDraw", count: args.length, from: "pool" });
+
+        this.redrawPos += 1;
+        if (this.redrawPos < this.numplayers) {
+            this.currplayer = this.redrawOrder[this.redrawPos];
+        } else {
+            // Everyone has redrawn - the pool is now exactly empty (see
+            // resolveBidRound's own accounting) and normal play begins.
+            this.phase = "main";
+            if (this.numplayers === 2) {
+                // Two players only: never assign currplayer to an
+                // arbitrary value here - reduces exposure to any risk
+                // around directly reassigning it to the bid winner (see
+                // task #38). With exactly two players, "the winner goes
+                // first" and "player 1 auto-passes an empty first turn,
+                // then it's player 2's turn" are exactly equivalent -
+                // passing costs nothing here, since every hand is already
+                // back to exactly 6 cards by this point (nothing to
+                // discard, nothing to draw). currplayer only ever holds
+                // its ordinary default (1) or a value reached through
+                // nextPlayer()'s own +1 rotation - the same path every
+                // other turn in the game already takes, bidding or not.
+                this.currplayer = 1;
+                if (this.bidWinner === 2) {
+                    this.results.push({ type: "pass", who: 1, why: "bidding" });
+                    this.nextPlayer();
+                }
+            } else {
+                // "The winner goes first, turns proceeding clockwise" -
+                // nextPlayer()'s own +1 rotation needs no changes at all
+                // from here.
+                this.currplayer = this.bidWinner!;
+            }
+        }
+    }
+
+    private validateRedraw(args: string[]): IValidationResult | undefined {
+        const hand = this.hands[this.currplayer - 1];
+        const needed = 6 - hand.length;
+        if (args.length !== needed) {
+            return this.invalid("apgames:validation.gnostica.REDRAW_COUNT_MISMATCH", { requested: args.length, needed });
+        }
+        const seen = new Set<string>();
+        for (const uid of args) {
+            if (seen.has(uid)) {
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid });
+            }
+            seen.add(uid);
+            if (!this.biddingPool.includes(uid)) {
+                return this.invalid("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid });
+            }
+        }
+        return undefined;
+    }
+
     // "place <cell> [orientation]" - only legal with zero pieces on board;
-    // orientation defaults to "up".
+    // orientation defaults to "U".
     private cmdPlace(args: string[]): void {
         const [cellStr, orientationStr] = args;
         if (cellStr === undefined) {
@@ -3223,7 +3599,7 @@ export class GnosticaGame extends GameBase {
                 // the minion-chaining check below.
                 const movedOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
                 const facing = this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation;
-                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "up">);
+                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
                 const destX = target.x + dx * dist;
                 const destY = target.y + dy * dist;
                 // A genuine final landing (not a Chariot-relaxed waypoint)
@@ -3247,7 +3623,7 @@ export class GnosticaGame extends GameBase {
                 const [distStr] = rest;
                 const dist = parseInt(distStr, 10);
                 const facing = this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation;
-                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "up">);
+                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
                 const srcX = minion.x + dx;
                 const srcY = minion.y + dy;
                 moveTerritory(ctx, minion.x, minion.y, minion.index, dist);
@@ -3284,7 +3660,7 @@ export class GnosticaGame extends GameBase {
                 }
                 const movedOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
                 const facing = this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation;
-                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "up">);
+                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
                 const destX = target.x + dx * dist;
                 const destY = target.y + dy * dist;
                 const destroyedInVoid = opts.skipLandingCheck !== true && this.board.classify(destX, destY) === "void";
@@ -3946,6 +4322,30 @@ export class GnosticaGame extends GameBase {
             });
         }
 
+        // The "bidding" variant's shared pool - every card revealed by the
+        // opening bid procedure so far, available for anyone to redraw
+        // from (see cmdRedraw's own docs). Fully public by the time it's
+        // ever non-empty, unlike hands - no redaction/placeholder handling
+        // needed at all.
+        if (this.biddingPool.length > 0) {
+            const poolKeys: string[] = [];
+            for (const uid of this.biddingPool) {
+                const card = allCards().find(c => c.uid === uid)!;
+                const key = `pool_${uid}`;
+                if (!(key in legend)) {
+                    legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
+                }
+                poolKeys.push(key);
+            }
+            areas.push({
+                type: "pieces",
+                pieces: poolKeys as [string, ...string[]],
+                label: i18next.t("apgames:validation.gnostica.LABEL_BIDDING_POOL"),
+                spacing: 0.25,
+                width: 6,
+            });
+        }
+
         // The literal drawPile array isn't used for the draw-pile summary -
         // its order/contents are exactly as hidden from this viewer as an
         // opponent's redacted hand uids, so "what's left to draw" is
@@ -4037,6 +4437,9 @@ export class GnosticaGame extends GameBase {
             }
         }
         for (const uid of this.discardPile) {
+            visible.add(uid);
+        }
+        for (const uid of this.biddingPool) {
             visible.add(uid);
         }
         for (const hand of this.hands) {
@@ -4275,7 +4678,7 @@ export class GnosticaGame extends GameBase {
     //
     // Up to 5 pieces: each piece's own orientation names its preferred cell
     // in the tile's 3x3 grid (PIECE_GRID_SLOTS/PIECE_GRID_PREFERRED_INDEX) -
-    // an N-facing piece wants the top-centre cell, "up" wants dead centre,
+    // an N-facing piece wants the top-centre cell, "U" wants dead centre,
     // etc. Two pieces sharing an orientation (or one whose preferred cell
     // is already taken) means only one gets it; the rest are bumped into
     // whatever cells are still free, in no particular order for now - a
@@ -4308,7 +4711,7 @@ export class GnosticaGame extends GameBase {
             const targetX = dirX * PIECE_GRID_RADIUS;
             const targetY = dirY * PIECE_GRID_RADIUS;
             const orientation = pieces[i].orientation;
-            if (orientation === "up") {
+            if (orientation === "U") {
                 // No rotate on this glyph at all - nudge is applied in
                 // plain screen space, no compensation needed.
                 return { dx: targetX, dy: targetY, scale: 0.48 };
@@ -4345,16 +4748,16 @@ export class GnosticaGame extends GameBase {
         return slots;
     }
 
-    // "up" pyramids stand upright, drawn once with no rotation; N/E/S/W
+    // "U" pyramids stand upright, drawn once with no rotation; N/E/S/W
     // pyramids are the same "flat/pointing" glyph rotated to face that
     // direction - the exact pattern btt.ts uses for its own Icehouse pieces.
     private pyramidGlyph(piece: Piece): Glyph {
         const sizeNames = ["small", "medium", "large"];
         const sizeName = sizeNames[piece.size - 1];
-        if (piece.orientation === "up") {
+        if (piece.orientation === "U") {
             return { name: `pyramid-up-${sizeName}`, colour: piece.owner };
         }
-        const rotations: Record<Exclude<Orientation, "up">, number> = { N: 0, E: 90, S: 180, W: -90 };
+        const rotations: Record<Exclude<Orientation, "U">, number> = { N: 0, E: 90, S: 180, W: -90 };
         return { name: `pyramid-flat-${sizeName}`, colour: piece.owner, rotate: rotations[piece.orientation] };
     }
 

@@ -1,5 +1,5 @@
 export type PieceSize = 1 | 2 | 3;
-export type Orientation = "N" | "E" | "S" | "W" | "up";
+export type Orientation = "N" | "E" | "S" | "W" | "U";
 
 export const cardinalOrientations: Orientation[] = ["N", "E", "S", "W"];
 
@@ -10,14 +10,14 @@ export interface IPiece {
 }
 
 // One Icehouse-style pyramid "minion" on the board: who it belongs to, its
-// size (1/2/3 pips), and which way it's pointing (N/E/S/W, or "up" meaning it
+// size (1/2/3 pips), and which way it's pointing (N/E/S/W, or "U" meaning it
 // targets only its own space).
 export class Piece implements IPiece {
     public owner: number;
     public size: PieceSize;
     public orientation: Orientation;
 
-    constructor(owner: number, size: PieceSize, orientation: Orientation = "up") {
+    constructor(owner: number, size: PieceSize, orientation: Orientation = "U") {
         this.owner = owner;
         this.size = size;
         this.orientation = orientation;
