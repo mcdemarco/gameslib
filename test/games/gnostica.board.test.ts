@@ -21,7 +21,7 @@ describe("Gnostica: Piece", () => {
 
     it("defaults to standing up", () => {
         const p = new Piece(1, 1);
-        expect(p.orientation).eq("up");
+        expect(p.orientation).eq("U");
     });
 
     it("clones independently", () => {
@@ -135,7 +135,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("grows/shrinks a territory's card in place without touching its pieces", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up")]));
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
         b.growTerritory(0, 0, kingOfSwords());
         expect(b.get(0, 0)!.card?.uid).eq("KS");
         expect(b.get(0, 0)!.pieces.length).eq(1);
@@ -147,7 +147,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         const b = new GnosticaBoard();
         // A single isolated territory with a piece sitting on its wasteland neighbour.
         b.store.set(0, 0, new Territory(aceOfCups()));
-        b.store.set(1, 0, new Territory(undefined, [new Piece(2, 1, "up")]));
+        b.store.set(1, 0, new Territory(undefined, [new Piece(2, 1, "U")]));
 
         const evicted = b.destroyTerritory(0, 0);
         // (1,0) had no other territory neighbour, so it collapses to void and evicts.
@@ -162,7 +162,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new Territory(aceOfCups()));
         b.store.set(2, 0, new Territory(aceOfCups()));
-        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "up")]));
+        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "U")]));
 
         const evicted = b.destroyTerritory(0, 0);
         expect(evicted.length).eq(0);
@@ -172,7 +172,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("pushes only the card, leaving pieces behind at the departure cell", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up")]));
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
         // A second territory keeps (0,0) from collapsing to void after the card leaves.
         b.store.set(-1, 0, new Territory(twoOfCups()));
 
@@ -186,7 +186,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new Territory(aceOfCups()));
         b.store.set(-1, 0, new Territory(twoOfCups())); // keeps (0,0) alive after push
-        b.store.set(1, 0, new Territory(undefined, [new Piece(2, 1, "up")]));
+        b.store.set(1, 0, new Territory(undefined, [new Piece(2, 1, "U")]));
 
         b.pushTerritory(0, 0, 1, 0);
         const dest = b.get(1, 0)!;
@@ -197,7 +197,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("evicts pieces stranded at the departure side of a push", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "up")]));
+        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
         // Pushed two spaces away (not adjacent to the source), so the
         // departure cell has no card next door to keep it a wasteland.
         b.store.set(5, 0, new Territory(twoOfCups())); // far enough not to help (0,0)

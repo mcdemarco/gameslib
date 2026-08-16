@@ -165,7 +165,7 @@ const checkOwnMinion = (minion: Piece, player: number): PowerFailure | undefined
     return undefined;
 };
 
-// Every suit power targets either the minion's own cell (orientation "up")
+// Every suit power targets either the minion's own cell (orientation "U")
 // or the single cell it's pointing at (orientation N/E/S/W) - see the rules'
 // "Orientation and targeting" section. This is the shared legality check for
 // a CELL-level target (a territory/wasteland as a whole, not a specific
@@ -173,7 +173,7 @@ const checkOwnMinion = (minion: Piece, player: number): PowerFailure | undefined
 const checkValidCellTarget = (
     ctx: PowerContext, minion: Piece, minionX: number, minionY: number, targetX: number, targetY: number,
 ): PowerFailure | undefined => {
-    if (minion.orientation === "up") {
+    if (minion.orientation === "U") {
         if (targetX === minionX && targetY === minionY) {
             return undefined;
         }
@@ -353,7 +353,7 @@ export const createTerritory = (
 // ============================================================
 
 const checkCanUseRod = (minion: Piece): PowerFailure | undefined => {
-    if (minion.orientation === "up") {
+    if (minion.orientation === "U") {
         return { key: "ROD_NEEDS_FACING" };
     }
     return undefined;
