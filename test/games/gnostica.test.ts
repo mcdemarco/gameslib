@@ -134,17 +134,17 @@ describe("Gnostica: orient", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 N", { trusted: true }); // player 1
         g.move("place n0", { trusted: true }); // player 2
-        g.move("draw", { trusted: true }); // player 1 - now legal, they've placed
+        g.move("discard", { trusted: true }); // player 1 - now legal, they've placed
         expect(() => g.move("orient m0.1 W")).to.throw(); // player 2, targeting player 1's piece
     });
 
     it("requires having placed a piece before any non-place action", () => {
         const g = new GnosticaGame(2);
-        expect(() => g.move("draw")).to.throw();
+        expect(() => g.move("discard")).to.throw();
     });
 });
 
-describe("Gnostica: draw", () => {
+describe("Gnostica: discard", () => {
     it("discards named cards and redraws back to 6", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true }); // player 1
@@ -152,7 +152,7 @@ describe("Gnostica: draw", () => {
         const hand = [...g.hands[0]];
         const discard1 = hand[0];
         const discard2 = hand[1];
-        g.move(`draw ${discard1} ${discard2}`, { trusted: true }); // player 1
+        g.move(`discard ${discard1} ${discard2}`, { trusted: true }); // player 1
         expect(g.hands[0].length).eq(6);
         expect(g.hands[0]).to.not.include(discard1);
         expect(g.hands[0]).to.not.include(discard2);
@@ -165,7 +165,46 @@ describe("Gnostica: draw", () => {
         g.move("place m0", { trusted: true });
         g.move("place n0", { trusted: true });
         const notInHand = [...g.drawPile].find(uid => !g.hands[0].includes(uid))!;
-        expect(() => g.move(`draw ${notInHand}`)).to.throw();
+        expect(() => g.move(`discard ${notInHand}`)).to.throw();
+    });
+
+    it("an explicit \"draw <n>\" draws exactly that many, not the max - it is legal to end up under 6", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place n0", { trusted: true }); // player 2
+        const hand = [...g.hands[0]];
+        const discard1 = hand[0];
+        const discard2 = hand[1];
+        g.move(`discard ${discard1} ${discard2} draw 1`, { trusted: true }); // player 1
+        expect(g.hands[0].length).eq(5); // 4 left after discarding 2, +1 drawn back
+        expect(g.hands[0]).to.not.include(discard1);
+        expect(g.hands[0]).to.not.include(discard2);
+    });
+
+    it("\"discard draw 0\" is a legal no-op turn - discards nothing, draws nothing", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        const before = [...g.hands[0]];
+        g.move("discard draw 0", { trusted: true });
+        expect(g.hands[0]).to.deep.equal(before);
+    });
+
+    it("refuses a \"draw <n>\" above the room left in a 6-card hand", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        const [discard1] = g.hands[0];
+        // Only 1 discarded, so at most 1 can legally be drawn back.
+        expect(() => g.move(`discard ${discard1} draw 2`)).to.throw();
+    });
+
+    it("refuses a negative or non-numeric \"draw <n>\"", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        expect(() => g.move("discard draw -1")).to.throw();
+        expect(() => g.move("discard draw abc")).to.throw();
     });
 });
 
@@ -179,11 +218,11 @@ describe("Gnostica: turn order", () => {
         expect(g.currplayer).eq(3);
         g.move("place n0", { trusted: true });
         expect(g.currplayer).eq(1);
-        g.move("draw", { trusted: true });
+        g.move("discard", { trusted: true });
         expect(g.currplayer).eq(2);
-        g.move("draw", { trusted: true });
+        g.move("discard", { trusted: true });
         expect(g.currplayer).eq(3);
-        g.move("draw", { trusted: true });
+        g.move("discard", { trusted: true });
         expect(g.currplayer).eq(1);
     });
 });
@@ -203,10 +242,10 @@ describe("Gnostica: announce last turn / win / elimination", () => {
             t.card = theWorld().clone();
             t.pieces = [new Piece(1, 1, "up")];
         }
-        g.move("draw (last)", { trusted: true }); // player 1 announces
+        g.move("discard (last)", { trusted: true }); // player 1 announces
         expect(g.lastTurnAnnouncedBy).eq(1);
-        g.move("draw", { trusted: true }); // player 2's turn
-        g.move("draw", { trusted: true }); // player 1's resolving turn
+        g.move("discard", { trusted: true }); // player 2's turn
+        g.move("discard", { trusted: true }); // player 1's resolving turn
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([1]);
     });
@@ -218,10 +257,10 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.move("place m0", { trusted: true }); // player 1
         g.move("place l0", { trusted: true }); // player 2
         g.move("place n0", { trusted: true }); // player 3
-        g.move("draw (last)", { trusted: true }); // player 1 announces
-        g.move("draw", { trusted: true }); // player 2
-        g.move("draw", { trusted: true }); // player 3
-        g.move("draw", { trusted: true }); // player 1's resolving turn - falls short
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        g.move("discard", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // player 3
+        g.move("discard", { trusted: true }); // player 1's resolving turn - falls short
         expect(g.eliminated).to.deep.equal([1]);
         expect(g.hands[0]).to.deep.equal([]);
         expect(g.gameover).eq(false); // players 2 and 3 remain
@@ -231,9 +270,9 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true }); // player 1
         g.move("place n0", { trusted: true }); // player 2
-        g.move("draw (last)", { trusted: true }); // player 1 announces
-        g.move("draw", { trusted: true }); // player 2
-        g.move("draw", { trusted: true }); // player 1's resolving turn - falls short, eliminated
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        g.move("discard", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // player 1's resolving turn - falls short, eliminated
         expect(g.eliminated).to.deep.equal([1]);
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([2]);
@@ -244,8 +283,8 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.move("place m0", { trusted: true }); // player 1
         g.move("place l0", { trusted: true }); // player 2
         g.move("place n0", { trusted: true }); // player 3
-        g.move("draw (last)", { trusted: true }); // player 1 announces
-        expect(() => g.move("draw (last)")).to.throw(); // player 2 tries to announce too
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        expect(() => g.move("discard (last)")).to.throw(); // player 2 tries to announce too
     });
 
     it("\"target-8\" variant: 8 points wins, unlike the default target of 9", () => {
@@ -258,9 +297,9 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.board.get(-1, 1)!.pieces = [new Piece(1, 1, "up")];
         g.board.get(-1, 1)!.card = card("KC"); // King of Cups: royalty, 2 pts - running total 8, exactly the target-8 threshold
         expect(g.getPlayerScore(1)).eq(8);
-        g.move("draw (last)", { trusted: true }); // player 1 announces
-        g.move("draw", { trusted: true }); // player 2
-        g.move("draw", { trusted: true }); // player 1's resolving turn
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        g.move("discard", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // player 1's resolving turn
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([1]);
     });
@@ -275,9 +314,9 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.board.get(-1, 1)!.pieces = [new Piece(1, 1, "up")];
         g.board.get(-1, 1)!.card = major(13).clone(); // Death: major, 3 pts - running total 9, short of the target-10 threshold
         expect(g.getPlayerScore(1)).eq(9);
-        g.move("draw (last)", { trusted: true }); // player 1 announces
-        g.move("draw", { trusted: true }); // player 2
-        g.move("draw", { trusted: true }); // player 1's resolving turn - falls short under target-10
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        g.move("discard", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // player 1's resolving turn - falls short under target-10
         expect(g.eliminated).to.deep.equal([1]);
         expect(g.gameover).eq(true); // only player 2 remains
         expect(g.winner).to.deep.equal([2]);
@@ -438,7 +477,7 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         g.move("place m0", { trusted: true }); // player 1
         g.move("place n0", { trusted: true }); // player 2, elsewhere
         // player 1's turn again after player 2's placement
-        g.move("draw", { trusted: true });
+        g.move("discard", { trusted: true });
         // now player 2's turn - they have no piece on m0
         expect(() => g.move("activate m0")).to.throw();
     });
@@ -810,25 +849,25 @@ describe("Gnostica: handleClick", () => {
         expect(result.move).eq(`play ${uid}`);
     });
 
-    it("Pass immediately builds a submittable bare draw move", () => {
+    it("Pass immediately builds a submittable bare discard move", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
         const result = g.handleClick("", -1, -1, "_btn_pass");
         expect(result.valid).to.be.true;
-        expect(result.move).eq("draw");
+        expect(result.move).eq("discard");
     });
 
     it("Declare appends last to an in-progress move, and toggles it back off", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
-        const seed = g.handleClick("", -1, -1, "_btn_pass"); // "draw"
+        const seed = g.handleClick("", -1, -1, "_btn_pass"); // "discard"
         const declared = g.handleClick(seed.move, -1, -1, "_btn_declare");
         expect(declared.valid).to.be.true;
-        expect(declared.move).eq("draw (last)");
+        expect(declared.move).eq("discard (last)");
         const undeclared = g.handleClick(declared.move, -1, -1, "_btn_declare");
-        expect(undeclared.move).eq("draw");
+        expect(undeclared.move).eq("discard");
     });
 
     it("Declare works even with no base action chosen yet, and survives switching to a real action afterwards", () => {
@@ -838,7 +877,7 @@ describe("Gnostica: handleClick", () => {
         const declared = g.handleClick("", -1, -1, "_btn_declare"); // clicked first, no move string yet
         expect(declared.valid).to.be.true;
         expect(declared.complete).eq(-1); // still needs a real action - not submittable as-is
-        expect(declared.move).eq("(last)"); // the bare flag, not a guessed action like "draw"
+        expect(declared.move).eq("(last)"); // the bare flag, not a guessed action like "discard"
         // Picking a real action afterwards must carry the flag along, even
         // though clicking "Activate" here has nothing to do with declaring.
         const seed = g.handleClick(declared.move, -1, -1, "_btn_activate");
@@ -851,7 +890,7 @@ describe("Gnostica: handleClick", () => {
     });
 
     // The trickiest part of reattachLastFlag: a still-incomplete click
-    // result (e.g. Pass's own "draw", always legal on its own) gets
+    // result (e.g. Pass's own "discard", always legal on its own) gets
     // re-validated once "(last)" makes it a genuinely complete move -
     // catching a declare that's ONLY illegal because of the flag itself
     // (another player's announcement hasn't resolved yet), rather than
@@ -861,13 +900,13 @@ describe("Gnostica: handleClick", () => {
         g.move("place m0", { trusted: true }); // player 1
         g.move("place l0", { trusted: true }); // player 2
         g.move("place n0", { trusted: true }); // player 3
-        g.move("draw (last)", { trusted: true }); // player 1 announces
-        // player 2's turn - a bare "draw" (Pass) is perfectly legal on its
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        // player 2's turn - a bare "discard" (Pass) is perfectly legal on its
         // own; declaring on top of it must not be.
         const declared = g.handleClick("", -1, -1, "_btn_declare");
         expect(declared.move).eq("(last)");
         const passed = g.handleClick(declared.move, -1, -1, "_btn_pass");
-        expect(passed.move).eq("draw (last)");
+        expect(passed.move).eq("discard (last)");
         expect(passed.valid).to.be.false;
     });
 
@@ -945,17 +984,35 @@ describe("Gnostica: handleClick", () => {
         expect(activateBtn!.attributes).to.be.undefined;
     });
 
-    it("highlights Discard (not Pass) during a live draw preview, since the two share move text", () => {
+    it("collapses to the draw-count picker during a live discard preview, offering every legal count", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
-        g.move("draw", { partial: true }); // player 1's own live preview - passes/discards nothing
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const [uid1, uid2] = g.hands[0];
+        g.move(`discard ${uid1} ${uid2}`, { partial: true }); // player 1's own live preview, 2 discarded, no count chosen yet
+        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const drawBtn = bar!.buttons!.find(b => b.value === "draw");
-        const passBtn = bar!.buttons!.find(b => b.value === "pass");
-        expect(drawBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
-        expect(passBtn!.attributes).to.be.undefined; // known simplification: Pass and Discard are indistinguishable from lastmove alone
+        const values = bar!.buttons!.map(b => b.value);
+        // Pass and a bare "discard" share the exact same move text (known
+        // simplification - see cmdDiscard's own bare-seed docs), so this
+        // same collapse is unavoidably shown no matter which button
+        // actually got clicked to seed the preview.
+        expect(values).to.deep.equal(["drawcount_0", "drawcount_1", "drawcount_2"]);
+    });
+
+    it("clicking a draw-count button completes the move with that exact count", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const [uid1, uid2] = g.hands[0];
+        const seeded = g.handleClick("", -1, -1, `hand_${uid1}`);
+        const built = g.handleClick(seeded.move, -1, -1, `hand_${uid2}`);
+        expect(built.move).eq(`discard ${uid1} ${uid2}`);
+        const result = g.handleClick(built.move, -1, -1, "_btn_drawcount_1");
+        expect(result.valid).to.be.true;
+        expect(result.move).eq(`discard ${uid1} ${uid2} draw 1`);
+        g.move(result.move, { trusted: true });
+        expect(g.hands[0].length).eq(5); // 4 left after discarding 2, +1 drawn back
     });
 
     it("still highlights Use Territory during a live activate-declining-power preview (no results pushed)", () => {
@@ -1009,21 +1066,21 @@ describe("Gnostica: handleClick", () => {
         expect(result.valid).to.be.false;
     });
 
-    it("draw: clicking a hand card toggles it into a draw move, and clicking again toggles it back out", () => {
+    it("discard: clicking a hand card toggles it into a discard move, and clicking again toggles it back out", () => {
         const g = new GnosticaGame(2);
-        g.move("place m0", { trusted: true }); // draw requires pieces already on the board
+        g.move("place m0", { trusted: true }); // discard requires pieces already on the board
         g.move("place l0", { trusted: true }); // back to player 1's turn
         const uid = g.hands[0][0];
         const first = g.handleClick("", -1, -1, `hand_${uid}`);
         expect(first.valid).to.be.true;
-        expect(first.move).eq(`draw ${uid}`);
+        expect(first.move).eq(`discard ${uid}`);
         expect(first.complete).eq(0); // same auto-submit guard as place/orient
         const second = g.handleClick(first.move, -1, -1, `hand_${uid}`);
         expect(second.valid).to.be.true;
-        expect(second.move).eq("draw");
+        expect(second.move).eq("discard");
     });
 
-    it("draw: rejects a hand-card click for a card not in the acting player's hand", () => {
+    it("discard: rejects a hand-card click for a card not in the acting player's hand", () => {
         const g = new GnosticaGame(2);
         const uid = g.hands[1][0]; // player 2's card, player 1 is acting
         const result = g.handleClick("", -1, -1, `hand_${uid}`);
@@ -1051,7 +1108,7 @@ describe("Gnostica: handleClick", () => {
     // piece of the engine, not a click-building bug). Without honouring
     // `partial`, every preview call fully committed: advanced the turn,
     // drew for real, and pushed onto the stack - so a player toggling
-    // multiple hand cards into one draw move would see each card
+    // multiple hand cards into one discard move would see each card
     // discarded and immediately replaced one at a time, rather than the
     // whole batch resolving together only once the move is truly
     // submitted.
@@ -1064,20 +1121,20 @@ describe("Gnostica: handleClick", () => {
         const beforeStackLength = g.stack.length;
         const beforeHandLength = g.hands[0].length;
 
-        g.move(`draw ${uid}`, { partial: true });
+        g.move(`discard ${uid}`, { partial: true });
 
         expect(g.currplayer, "partial move should not advance the turn").eq(beforePlayer);
         expect(g.stack.length, "partial move should not push onto the stack").eq(beforeStackLength);
         // The discard itself did happen (that's the whole point of a
         // preview - the card should visibly disappear), but a partial
-        // draw deliberately does NOT redraw yet, so the hand is smaller
+        // discard deliberately does NOT redraw yet, so the hand is smaller
         // rather than being backfilled with a card the player hasn't
         // earned by finishing their discard selection.
         expect(g.hands[0].length).eq(beforeHandLength - 1);
         expect(g.hands[0]).to.not.include(uid);
     });
 
-    it("a partial draw only discards - the actual redraw happens once, on final (non-partial) submission", () => {
+    it("a partial discard only discards - the actual redraw happens once, on final (non-partial) submission", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
@@ -1088,17 +1145,17 @@ describe("Gnostica: handleClick", () => {
         // every click) rather than accumulating on top of a previous
         // preview - so this clones fresh each time, just as real usage does.
         const preview1 = g.clone();
-        preview1.move(`draw ${uid1}`, { partial: true });
+        preview1.move(`discard ${uid1}`, { partial: true });
         expect(preview1.hands[0].length).eq(5);
 
         const preview2 = g.clone();
-        preview2.move(`draw ${uid1} ${uid2}`, { partial: true });
+        preview2.move(`discard ${uid1} ${uid2}`, { partial: true });
         expect(preview2.hands[0].length).eq(4);
 
         // The real game is untouched by any preview made on a clone.
         expect(g.hands[0].length).eq(6);
 
-        g.move(`draw ${uid1} ${uid2}`, { trusted: true }); // final submission
+        g.move(`discard ${uid1} ${uid2}`, { trusted: true }); // final submission
         expect(g.hands[0].length).eq(6);
         expect(g.hands[0]).to.not.include(uid1);
         expect(g.hands[0]).to.not.include(uid2);
@@ -1386,11 +1443,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
-        // The full top-level set (play/orient/draw/pass) is gone, save for
+        // The full top-level set (play/orient/discard/pass) is gone, save for
         // the one choice that got us here - no room to keep both levels.
         expect(values).to.not.include("play");
         expect(values).to.not.include("orient");
-        expect(values).to.not.include("draw");
+        expect(values).to.not.include("discard");
         expect(values).to.not.include("pass");
         expect(values[0]).eq("activate");
         expect(bar!.buttons![0].attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
@@ -1705,7 +1762,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         g.move("place l0", { trusted: true });
         const result = g.handleClick("", -1, -1, "_btn_pass");
         expect(result.valid).to.be.true;
-        expect(result.move).eq("draw");
+        expect(result.move).eq("discard");
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         expect(result.message).to.not.eq(directionMsg());
     });
@@ -2182,7 +2239,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
             g.board.get(0, 0)!.pieces = [new Piece(1, seq === 20 ? 2 : 1, "up")];
             g.move("activate m0", { partial: true });
             const values = buttonValues(g);
-            expect(values, `seq ${seq}`).to.deep.equal(["activate", "play", "orient", "draw", "pass", "declare"]);
+            expect(values, `seq ${seq}`).to.deep.equal(["activate", "play", "orient", "discard", "pass", "declare"]);
         }
     });
 

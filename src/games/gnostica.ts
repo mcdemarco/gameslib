@@ -1104,15 +1104,17 @@ export class GnosticaGame extends GameBase {
         // head and no count has been chosen yet, offer every legal count
         // from 0 up to the room left in a 6-card hand as its own button,
         // fully replacing the top-level bar (same shape as hermitTeleport/
-        // magicianChoice's own button sets below). Recomputed fresh every
-        // render off the live move's own already-toggled discard uids, so
-        // the offered range shrinks/grows correctly as the player keeps
-        // clicking hand cards.
+        // magicianChoice's own button sets below). this.hands already
+        // reflects the live move's own discard uids by the time this runs
+        // - move(..., {partial: true}) already ran cmdDiscard's own
+        // discard loop to get here (see its docs), it only stopped short
+        // of the redraw - so the room left is just 6 minus the CURRENT
+        // hand length, no separate subtraction of the discard list needed.
         if (this.liveMove !== undefined) {
             const liveParsed = this.parseMove(this.liveMove);
             if (liveParsed.head?.toLowerCase() === "discard" && !liveParsed.rest.includes("draw")) {
                 const hand = this.hands[this.currplayer - 1] ?? [];
-                const maxDraw = Math.max(0, 6 - (hand.length - liveParsed.rest.length));
+                const maxDraw = Math.max(0, 6 - hand.length);
                 const countButtons: ButtonBarButton[] = [];
                 for (let n = 0; n <= maxDraw; n++) {
                     countButtons.push({ label: `Draw ${n}`, value: `drawcount_${n}` });
@@ -2532,7 +2534,7 @@ export class GnosticaGame extends GameBase {
             const countStr = args[drawIdx + 1];
             const parsedCount = countStr === undefined ? NaN : Number(countStr);
             if (!Number.isInteger(parsedCount) || parsedCount < 0 || parsedCount > maxDraw) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_DRAW_COUNT", { count: countStr, max: maxDraw }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw }));
             }
             count = parsedCount;
         }
@@ -2576,7 +2578,7 @@ export class GnosticaGame extends GameBase {
             const countStr = args[drawIdx + 1];
             const count = countStr === undefined ? NaN : Number(countStr);
             if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
-                return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { count: countStr, max: maxDraw });
+                return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw });
             }
         }
         return undefined;
