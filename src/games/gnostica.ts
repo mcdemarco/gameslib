@@ -65,7 +65,7 @@ const CARDINAL_COS_SIN: Record<Exclude<Orientation, "up">, [number, number]> = {
     N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
 };
 
-// A minion's board location - shorthand used while resolving activate/play.
+// A minion's board location - shorthand used while resolving use/play.
 interface IMinionRef {
     x: number;
     y: number;
@@ -130,8 +130,8 @@ interface IParsedMove {
     malformedStep: string[] | undefined;
 }
 
-// Click support for minor arcana's single suit-power step (major arcana
-// chaining is out of scope for this pass - see parsePendingStep()).
+// Click support for minor arcana's single suit-power step (major arcana's
+// own chained steps reuse this same table - see parsePendingStep()).
 // One entry per suit+mode: the button label, whether the mode's target is a
 // whole cell (assertValidCellTarget) or a specific piece within one
 // (assertValidPieceTarget, which additionally always allows self regardless
@@ -217,14 +217,14 @@ const SPECIAL_MIN_TOKENS: Record<SpecialPower, number> = {
     worldUseAny: Infinity,
 };
 
-// The engine-side view of an in-progress "activate"/"play" click sequence -
+// The engine-side view of an in-progress "use"/"play" click sequence -
 // reconstructed fresh from the move string on every call (same philosophy
 // as isPendingFirstPlacement/highlightedButtonValues, not persisted
 // anywhere). `minion` always defaults to the first eligible piece (see
 // eligibleMinionsForActivate/Play's own docs on why disambiguating between
 // several eligible minions by click is out of scope this pass). Undefined
 // whenever there's nothing here for the click flow to do - no
-// activate/play in progress, no eligible minions at all, or Fool/World
+// use/play in progress, no eligible minions at all, or Fool/World
 // (not resolvable through the engine at all yet).
 //
 // Exactly one of `suitUid` or `special` is ever set for a given pending
@@ -532,7 +532,7 @@ export class GnosticaGame extends GameBase {
     // Move parsing
     //
     // Grammar: a comma/semicolon/slash-delimited list of segments naming
-    // the turn's action (plus, for "activate"/"play", 0+ further segments
+    // the turn's action (plus, for "use"/"play", 0+ further segments
     // chaining suit/major-arcana power steps). A trailing "(last)" suffix
     // on the WHOLE move string - not a segment of its own, always at the
     // very end - announces the player's final turn. It's deliberately a
@@ -593,7 +593,7 @@ export class GnosticaGame extends GameBase {
         // structure, read-only - see its own docs). Throws
         // UserFacingError on any illegal move.
         //
-        // Segment 0 is always the turn's top-level action. For "activate"/
+        // Segment 0 is always the turn's top-level action. For "use"/
         // "play", 0 or 1 further segments follow - a single suit-power step
         // (minor arcana always grants exactly one power, and it's always
         // optional). Major arcana cards (which can chain up to 3 power
@@ -697,15 +697,9 @@ export class GnosticaGame extends GameBase {
     // legality check is a direct query against live (unmutated) state, or
     // a checkX call from gnostica/powers.ts (the same predicate the
     // matching mutating function calls before mutating - see powers.ts's
-    // own docs on why that split keeps the two from drifting apart). Replaces the old
-    // "clone this, try running the move on the clone, catch whatever it throws"
-    // approach: that mechanism silently discarded every specific reason a
-    // suit-power move was illegal, since the thrown GnosticaRulesError
-    // wasn't a UserFacingError and the catch block only ever unwrapped
-    // UserFacingError's `.client` - every powers.ts failure surfaced as the
-    // generic INVALID_MOVE fallback instead of its real message. Fixed as a
-    // side effect here: every validateX/checkX failure below carries its
-    // own key straight through to the returned message.
+    // own docs on why that split keeps the two from drifting apart). Every
+    // validateX/checkX failure below carries its own key straight through
+    // to the returned message, rather than collapsing to a generic fallback.
     public validateMove(m: string): IValidationResult {
         const parsed = this.parseMove(m);
         if (parsed.head === undefined) {
@@ -995,7 +989,7 @@ export class GnosticaGame extends GameBase {
     // The six top-level turn choices, as buttons - see the class-level docs
     // above render() for why: a bare click on a cell/piece the acting
     // player already occupies is genuinely ambiguous between "orient this"
-    // and "activate this card", and there's no second click region per
+    // and "use this card", and there's no second click region per
     // cell to disambiguate with. None of these are legal with zero board
     // pieces (place is the only option then, and needs no button - a
     // direct empty-cell click already builds it). "Declare" only makes
@@ -1010,7 +1004,7 @@ export class GnosticaGame extends GameBase {
     // `r.how !== undefined` excludes Cups' "own"/"enemy" modes, which also
     // push a `type:"place"` result (see applyCups) - those can only ever
     // happen once the acting player already has committed board presence
-    // (activate/play both require it), so they can never actually BE a
+    // (use/play both require it), so they can never actually BE a
     // pending first placement; without this check they'd still falsely
     // match the shape above (same result type, a `where` the current
     // player now occupies) and collapse the button bar back down to the
@@ -1041,7 +1035,7 @@ export class GnosticaGame extends GameBase {
     }
 
     // Which button(s) to bold, based on this.liveMove (see move()'s own
-    // docs) - unlike this.results, which some actions (e.g. an activate
+    // docs) - unlike this.results, which some actions (e.g. a use
     // that declines its power) never populate at all, liveMove is set
     // uniformly for every kind of in-progress preview. "Declare" is a
     // modifier, not a top-level choice, so it can be highlighted alongside
@@ -1068,7 +1062,7 @@ export class GnosticaGame extends GameBase {
         if (this.gameover) {
             return undefined;
         }
-        // A live preview of "activate"/"play" can only ever have STARTED
+        // A live preview of "use"/"play" can only ever have STARTED
         // with the acting player already having board presence - both
         // throw via move()'s own top-level hasPiecesOnBoard gate otherwise
         // - so a piece count
@@ -1950,9 +1944,9 @@ export class GnosticaGame extends GameBase {
 
     // Click support for the top-level turn choice (via the button bar from
     // getActionButtons()) plus the simple, single-segment actions - place,
-    // orient, activate/play with power declined, and toggling hand cards
-    // into a discard's uid list. activate/play's chained power steps
-    // aren't click-driven yet (deliberately scoped out of this pass).
+    // orient, use/play with power declined, and toggling hand cards
+    // into a discard's uid list. use/play's chained power steps are handled
+    // further down (parsePendingStep and friends).
     //
     // "Declare" is handled up front, separately from everything else -
     // it's the one click that operates on the "(last)" flag directly
@@ -2002,7 +1996,7 @@ export class GnosticaGame extends GameBase {
                 if (value.startsWith("mode_")) {
                     // "mode_<suitUid>_<mode>" - see getActionButtons()'s own
                     // pendingMinor branch, which only ever offers one of
-                    // these once a minor-arcana activate/play is already
+                    // these once a minor-arcana use/play is already
                     // seeded (0 steps taken yet).
                     const [, suitUid, mode] = value.split("_");
                     const pending = this.parsePendingStep(move);
@@ -2239,7 +2233,7 @@ export class GnosticaGame extends GameBase {
             // whatever neighbour was clicked, never the player's final
             // word on it - Cups "own"'s new-piece facing sets this too,
             // separately, in handlePendingStepBoardClick) and
-            // POWER_STILL_OPTIONAL (activate/play's bare "<cell>"/"<uid>"
+            // POWER_STILL_OPTIONAL (use/play's bare "<uid>"
             // state right after picking the card, before any suit mode or
             // power step - the move is already legal as a decline, but
             // picking a power is the more usual next step; the "play"
@@ -2296,7 +2290,7 @@ export class GnosticaGame extends GameBase {
                 // Once a minor-arcana power step's mode is already chosen,
                 // a board click is target/arg cycling for that step first -
                 // see handlePendingStepBoardClick's own docs. Falls
-                // through to the ordinary activate/play handling below only
+                // through to the ordinary use/play handling below only
                 // when the click doesn't match one of that step's own
                 // interactive targets (undefined).
                 const pending = this.parsePendingStep(move, { preferCurrent: true });
@@ -2340,7 +2334,7 @@ export class GnosticaGame extends GameBase {
                 }
                 if (head === "play") {
                     // "play" has no cell of its own to re-pick the way
-                    // "activate" does below - a board click here only ever
+                    // "use" does below - a board click here only ever
                     // means pending-step cycling (handled above); anything
                     // else is ambiguous.
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
@@ -2505,10 +2499,9 @@ export class GnosticaGame extends GameBase {
     // "discard [uid...] [draw <n>]" - discard the named hand cards, then
     // draw back: exactly <n> if "draw <n>" is given (0 up to however much
     // room is left in a 6-card hand - it's always legal to draw fewer than
-    // the max), or as many as possible if "draw <n>" is omitted entirely
-    // (the only behaviour before this command could under-draw on
-    // purpose). Reshuffles the discard pile into the draw pile if it runs
-    // dry, same as every other draw-pile-exhaustion spot - see
+    // the max), or as many as possible if "draw <n>" is omitted entirely.
+    // Reshuffles the discard pile into the draw pile if it runs dry, same
+    // as every other draw-pile-exhaustion spot - see
     // reshuffleIfDrawPileEmpty's twin logic in gnostica/powers.ts (this one
     // can't share that helper directly, since it mutates this.drawPile/
     // this.discardPile rather than a PowerContext's).
@@ -2594,11 +2587,10 @@ export class GnosticaGame extends GameBase {
     }
 
     // ============================================================
-    // Activate / play a card - minor arcana only for now. Each minor card
-    // has exactly one suit power, always optional, used by exactly one
-    // minion. Major arcana (which can chain up to 3 power steps across
-    // several minions, per MAJOR_ARCANA in gnostica/majorArcana.ts) is
-    // deliberately not handled here yet.
+    // Use / play a card - both minor and major arcana. Each minor card has
+    // exactly one suit power, always optional, used by exactly one minion.
+    // Major arcana can chain up to 3 power steps across several minions
+    // (see MAJOR_ARCANA in gnostica/majorArcana.ts).
     // ============================================================
 
     private buildPowerContext(): PowerContext {
@@ -2975,11 +2967,9 @@ export class GnosticaGame extends GameBase {
         }
     }
 
-    // No "incomplete step, still declined" tolerance here (unlike
-    // validateMinorPower) - major arcana chaining isn't click-driven yet,
-    // so applyPowerStep never needed that leniency and this mirrors it
-    // exactly: a missing/unrecognized mode surfaces as a real BAD_MODE
-    // failure from validateSuitPrimitive, not a silent no-op.
+    // Mirrors applyPowerStep's own "incomplete step, still declined"
+    // tolerance (same rationale as validateMinorPower's) - see the inline
+    // comments below and applyPowerStep's own docs.
     private validatePowerStep(
         step: PowerStep, minions: IMinionRef[], tokens: string[], def: MajorArcanaDef, stepIndex: number, totalSteps: number,
     ): StepValidation {
@@ -3824,11 +3814,11 @@ export class GnosticaGame extends GameBase {
         return this;
     }
 
-    // Stub covering only the two turn types implemented so far
-    // (place/discard) - expand once activate/play exist. `custom-randomization`
-    // is declared precisely because full `moves()` enumeration of every
-    // legal chained-power target combination is combinatorially infeasible
-    // (see Homeworlds' own precedent), not merely deferred.
+    // Stub covering only place/discard - use/play (both fully implemented
+    // elsewhere) aren't candidates here yet. `custom-randomization` is
+    // declared precisely because full `moves()` enumeration of every legal
+    // chained-power target combination is combinatorially infeasible (see
+    // Homeworlds' own precedent), not merely deferred.
     public randomMove(): string {
         if (!this.hasPiecesOnBoard(this.currplayer)) {
             const candidates: string[] = [];
