@@ -618,7 +618,7 @@ export class GnosticaGame extends GameBase {
         };
         const requireValidStepShapes = () => {
             if (parsed.malformedStep !== undefined) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_STEP", { step: parsed.malformedStep.join(" ") }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") }));
             }
         };
         // Place is always a player's ENTIRE turn - one gate here, ahead of
@@ -723,7 +723,7 @@ export class GnosticaGame extends GameBase {
         };
         const requireValidStepShapes = (): IValidationResult | undefined => {
             if (parsed.malformedStep !== undefined) {
-                return this.invalid("apgames:validation.gnostica.BAD_STEP", { step: parsed.malformedStep.join(" ") });
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") });
             }
             return undefined;
         };
@@ -840,8 +840,13 @@ export class GnosticaGame extends GameBase {
     // resolvePieceRefOrThrow's own notFoundKey param on the apply* side).
     private invalidPieceRef(kind: "malformed" | "not_found" | "ambiguous", ref: string | undefined, notFoundKey = "NO_SUCH_PIECE"): IValidationResult {
         switch (kind) {
-            case "malformed": return this.invalid("apgames:validation.gnostica.BAD_PIECE_REF", { ref });
-            case "not_found": return this.invalid(`apgames:validation.gnostica.${notFoundKey}`, { ref });
+            case "malformed": return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_PIECE_REF", ref });
+            // notFoundKey is sometimes overridden to a key with its own
+            // real text (e.g. NOT_AN_ELIGIBLE_MINION) - only the shared
+            // default collapses into INVALID_MOVE.
+            case "not_found": return notFoundKey === "NO_SUCH_PIECE"
+                ? this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE", ref })
+                : this.invalid(`apgames:validation.gnostica.${notFoundKey}`, { ref });
             case "ambiguous": return this.invalid("apgames:validation.gnostica.AMBIGUOUS_PIECE_REF", { ref });
         }
     }
@@ -957,7 +962,10 @@ export class GnosticaGame extends GameBase {
         if (result.kind === "ok") {
             return result.ref;
         }
-        const key = result.kind === "malformed" ? "BAD_PIECE_REF" : result.kind === "ambiguous" ? "AMBIGUOUS_PIECE_REF" : notFoundKey;
+        if (result.kind === "malformed" || (result.kind === "not_found" && notFoundKey === "NO_SUCH_PIECE")) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: result.kind === "malformed" ? "BAD_PIECE_REF" : "NO_SUCH_PIECE", ref }));
+        }
+        const key = result.kind === "ambiguous" ? "AMBIGUOUS_PIECE_REF" : notFoundKey;
         throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${key}`, { ref }));
     }
 
@@ -1521,8 +1529,10 @@ export class GnosticaGame extends GameBase {
         if (result.kind === "ok") {
             return result.ref;
         }
-        const key = result.kind === "malformed" ? "BAD_PIECE_REF" : result.kind === "ambiguous" ? "AMBIGUOUS_PIECE_REF" : "NO_SUCH_PIECE";
-        throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${key}`, { ref: suffix }));
+        if (result.kind === "ambiguous") {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.AMBIGUOUS_PIECE_REF", { ref: suffix }));
+        }
+        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: result.kind === "malformed" ? "BAD_PIECE_REF" : "NO_SUCH_PIECE", ref: suffix }));
     }
 
     // Assembles a full move string from a pending step's own already-typed
@@ -2210,7 +2220,7 @@ export class GnosticaGame extends GameBase {
                 }
                 const candidates = this.discardPile.filter(uid => matchesBucket(uid) && !selected.includes(uid));
                 if (candidates.length === 0) {
-                    return { move: this.pendingMoveString(pendingForDiscard), valid: false, message: i18next.t("apgames:validation.gnostica.NOT_IN_DISCARD", { uid: key }) };
+                    return { move: this.pendingMoveString(pendingForDiscard), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD", uid: key }) };
                 }
                 const picked = candidates[Math.floor(Math.random() * candidates.length)];
                 return rebuildDiscard([...selected, picked]);
@@ -2278,7 +2288,7 @@ export class GnosticaGame extends GameBase {
                 } else {
                     const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
                     if (myPieceIdx === -1) {
-                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_SUCH_PIECE", { ref: cell }) };
+                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE", ref: cell }) };
                     }
                     newmove = `orient ${this.pieceRefStr(x, y, myPieceIdx)} U`;
                 }
@@ -2566,7 +2576,7 @@ export class GnosticaGame extends GameBase {
         const seen = new Set<string>();
         for (const uid of discardUids) {
             if (seen.has(uid)) {
-                return this.invalid("apgames:validation.gnostica.DUPLICATE_CARD", { uid });
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid });
             }
             seen.add(uid);
             if (!hand.includes(uid)) {
@@ -2729,7 +2739,7 @@ export class GnosticaGame extends GameBase {
             // needs no power resolution at all, so only reject when a step
             // is actually attempted.
             if ((def.uid === "00" || def.uid === "21") && stepSegments.length > 0) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.FOOL_WORLD_NOT_YET_SUPPORTED"));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "FOOL_WORLD_NOT_YET_SUPPORTED" }));
             }
             this.applyMajorPower(def, eligible, stepSegments);
         } else {
@@ -2741,7 +2751,7 @@ export class GnosticaGame extends GameBase {
         if (card.major) {
             const def = getMajorArcanaDef(card as MajorCard);
             if ((def.uid === "00" || def.uid === "21") && stepSegments.length > 0) {
-                return this.invalid("apgames:validation.gnostica.FOOL_WORLD_NOT_YET_SUPPORTED");
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "FOOL_WORLD_NOT_YET_SUPPORTED" });
             }
             const majorResult = this.validateMajorPower(def, eligible, stepSegments);
             return majorResult;
@@ -2762,11 +2772,11 @@ export class GnosticaGame extends GameBase {
             return; // power declined - always optional
         }
         if (stepSegments.length > 1) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MINOR_ONE_STEP_ONLY"));
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "MINOR_ONE_STEP_ONLY" }));
         }
         const [minionRef, mode, ...rest] = stepSegments[0];
         if (minionRef === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED"));
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }));
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, eligible, "NOT_AN_ELIGIBLE_MINION");
         if (mode === undefined) {
@@ -2790,11 +2800,11 @@ export class GnosticaGame extends GameBase {
             return undefined; // power declined - always optional
         }
         if (stepSegments.length > 1) {
-            return this.invalid("apgames:validation.gnostica.MINOR_ONE_STEP_ONLY");
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "MINOR_ONE_STEP_ONLY" });
         }
         const [minionRef, mode, ...rest] = stepSegments[0];
         if (minionRef === undefined) {
-            return this.invalid("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED");
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" });
         }
         const result = this.resolvePieceRef(minionRef, eligible);
         if (result.kind !== "ok") {
@@ -2825,7 +2835,7 @@ export class GnosticaGame extends GameBase {
     // detection between steps.
     private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][]): void {
         if (stepSegments.length > def.powers.length) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.TOO_MANY_POWER_STEPS"));
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
         }
         let minions = [...eligible];
         for (let i = 0; i < stepSegments.length; i++) {
@@ -2840,7 +2850,7 @@ export class GnosticaGame extends GameBase {
 
     private validateMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
         if (stepSegments.length > def.powers.length) {
-            return this.invalid("apgames:validation.gnostica.TOO_MANY_POWER_STEPS");
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
         }
         let minions = [...eligible];
         for (let i = 0; i < stepSegments.length; i++) {
@@ -2870,7 +2880,7 @@ export class GnosticaGame extends GameBase {
         }
         const [minionRef, ...rest] = tokens;
         if (minionRef === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED"));
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }));
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
         if ("primitive" in step) {
@@ -2942,7 +2952,7 @@ export class GnosticaGame extends GameBase {
             case "magicianChoice":
                 return this.applyMagicianChoice(minion, rest);
             default:
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.SPECIAL_NOT_YET_SUPPORTED", { special: step.special }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_YET_SUPPORTED", special: step.special }));
         }
     }
 
@@ -2963,7 +2973,7 @@ export class GnosticaGame extends GameBase {
         }
         const [minionRef, ...rest] = tokens;
         if (minionRef === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.POWER_STEP_ARGS_REQUIRED") };
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }) };
         }
         const result = this.resolvePieceRef(minionRef, minions);
         if (result.kind !== "ok") {
@@ -3024,7 +3034,7 @@ export class GnosticaGame extends GameBase {
             case "magicianChoice":
                 return this.validateMagicianChoice(minion, rest);
             default:
-                return { failed: true, result: this.invalid("apgames:validation.gnostica.SPECIAL_NOT_YET_SUPPORTED", { special: step.special }) };
+                return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_YET_SUPPORTED", special: step.special }) };
         }
     }
 
@@ -3254,7 +3264,7 @@ export class GnosticaGame extends GameBase {
                 const target = targetResult.ref;
                 const dist = parseInt(distStr, 10);
                 if (Number.isNaN(dist)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_NUMBER", { value: distStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: distStr }) };
                 }
                 if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
@@ -3282,7 +3292,7 @@ export class GnosticaGame extends GameBase {
                 const [distStr] = rest;
                 const dist = parseInt(distStr, 10);
                 if (Number.isNaN(dist)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_NUMBER", { value: distStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: distStr }) };
                 }
                 const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, dist);
                 if (failure) {
@@ -3419,7 +3429,7 @@ export class GnosticaGame extends GameBase {
                 const target = targetResult.ref;
                 const pips = parseInt(pipsStr, 10);
                 if (Number.isNaN(pips)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_NUMBER", { value: pipsStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: pipsStr }) };
                 }
                 if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
@@ -3448,7 +3458,7 @@ export class GnosticaGame extends GameBase {
                 const [tx, ty] = coords;
                 const pips = parseInt(pipsStr, 10);
                 if (Number.isNaN(pips)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_NUMBER", { value: pipsStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: pipsStr }) };
                 }
                 const failure = checkAttackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
                 if (failure) {

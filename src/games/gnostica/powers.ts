@@ -257,7 +257,7 @@ export const checkCreateEnemy = (
     const t = ctx.board.get(targetX, targetY);
     const victim = t?.pieces[victimIndex];
     if (victim === undefined) {
-        return { key: "NO_VICTIM_THERE" };
+        return { key: "INVALID_MOVE", params: { reason: "NO_VICTIM_THERE" } };
     }
     if (victim.owner === ctx.currplayer) {
         return { key: "MUST_TARGET_ENEMY" };
@@ -557,7 +557,7 @@ export const checkGrowTerritory = (
     }
     const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
     if (!pile.includes(newCardUid)) {
-        return { key: opts.replacementSource === "discard" ? "NOT_IN_DISCARD" : "NOT_IN_HAND", params: { uid: newCardUid } };
+        return { key: opts.replacementSource === "discard" ? "INVALID_MOVE" : "NOT_IN_HAND", params: { uid: newCardUid } };
     }
     const newCard = allCards().find(c => c.uid === newCardUid);
     if (newCard === undefined) {
@@ -687,7 +687,7 @@ export const checkAttackTerritory = (
     }
     const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
     if (!pile.includes(newCardUid)) {
-        return { key: opts.replacementSource === "discard" ? "NOT_IN_DISCARD" : "NOT_IN_HAND", params: { uid: newCardUid } };
+        return { key: opts.replacementSource === "discard" ? "INVALID_MOVE" : "NOT_IN_HAND", params: { uid: newCardUid } };
     }
     const newCard = allCards().find(c => c.uid === newCardUid);
     if (newCard === undefined) {
@@ -986,11 +986,11 @@ export const checkJudgementDraw = (
     const seen = new Set<string>();
     for (const uid of cardUids) {
         if (seen.has(uid)) {
-            return { key: "DUPLICATE_CARD", params: { uid } };
+            return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
         }
         seen.add(uid);
         if (!ctx.discardPile.includes(uid)) {
-            return { key: "NOT_IN_DISCARD", params: { uid } };
+            return { key: "INVALID_MOVE", params: { reason: "NOT_IN_DISCARD", uid } };
         }
     }
     return undefined;
@@ -1021,7 +1021,7 @@ export const checkHighPriestess = (ctx: PowerContext, discardUids: string[]): Po
     const seen = new Set<string>();
     for (const uid of discardUids) {
         if (seen.has(uid)) {
-            return { key: "DUPLICATE_CARD", params: { uid } };
+            return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
         }
         seen.add(uid);
         if (!ctx.hand.includes(uid)) {
