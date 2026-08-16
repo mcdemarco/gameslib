@@ -386,7 +386,7 @@ export class GnosticaGame extends GameBase {
             { uid: "no-majors" }
         ],
         categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
-        flags: ["experimental", "no-moves", "custom-randomization", "player-stashes"],
+        flags: ["experimental", "no-moves", "custom-randomization", "player-stashes", "autopass"],
     };
 
     public numplayers!: number;
@@ -691,15 +691,23 @@ export class GnosticaGame extends GameBase {
         const headLower = parsed.head.toLowerCase();
 
         // The "bidding" variant's own opening procedure - see cmdBid's/
-        // cmdRedraw's own docs. Structurally unlike every other head
-        // below: no power steps, no "(last)" announcement, and their own
-        // bespoke currplayer advancement (next bidder/redrawer, or a
-        // phase transition) instead of the generic nextPlayer() call
-        // every other move falls through to - so both are handled
-        // entirely here rather than folded into the switch below.
-        if (headLower === "bid" || headLower === "redraw") {
-            const expectedHead = this.phase === "bidding" ? "bid" : this.phase === "redraw" ? "redraw" : undefined;
-            if (headLower !== expectedHead) {
+        // cmdRedraw's/cmdPass's own docs. Structurally unlike every other
+        // head below: no power steps, no "(last)" announcement, and their
+        // own bespoke currplayer advancement (next bidder/redrawer, a
+        // phase transition, or a single nextPlayer() hop) instead of the
+        // generic nextPlayer() call every other move falls through to -
+        // so all three are handled entirely here rather than folded into
+        // the switch below. "pass" only ever exists to let the 2-player
+        // variant's own bid winner sit out the loser's first redraw (see
+        // mustPassBeforeRedraw's own docs) - the "autopass" flag means a
+        // real server auto-submits it via moves() the instant it's the
+        // only legal option, so a human player should never actually see
+        // or click a "pass" prompt themselves.
+        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
+            if (headLower === "bid" && this.phase !== "bidding") {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
+            }
+            if ((headLower === "redraw" || headLower === "pass") && this.phase !== "redraw") {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
@@ -707,8 +715,10 @@ export class GnosticaGame extends GameBase {
             }
             if (headLower === "bid") {
                 this.cmdBid(parsed.rest, partial);
-            } else {
+            } else if (headLower === "redraw") {
                 this.cmdRedraw(parsed.rest, partial);
+            } else {
+                this.cmdPass(partial);
             }
             this.lastmove = m;
             this.liveMove = partial ? m : undefined;
@@ -824,17 +834,21 @@ export class GnosticaGame extends GameBase {
             return undefined;
         };
 
-        // Mirrors move()'s own bid/redraw/phase gates - see their docs.
+        // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
         const headLower = parsed.head.toLowerCase();
-        if (headLower === "bid" || headLower === "redraw") {
-            const expectedHead = this.phase === "bidding" ? "bid" : this.phase === "redraw" ? "redraw" : undefined;
-            if (headLower !== expectedHead) {
+        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
+            if (headLower === "bid" && this.phase !== "bidding") {
+                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+            }
+            if ((headLower === "redraw" || headLower === "pass") && this.phase !== "redraw") {
                 return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
                 return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
             }
-            const failure = headLower === "bid" ? this.validateBid(parsed.rest) : this.validateRedraw(parsed.rest);
+            const failure = headLower === "bid" ? this.validateBid(parsed.rest)
+                : headLower === "redraw" ? this.validateRedraw(parsed.rest)
+                : this.validatePass();
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
         if (this.phase !== "main") {
@@ -879,7 +893,7 @@ export class GnosticaGame extends GameBase {
     // of the string is being parsed. See this file's "Move parsing" docs
     // above for why.
     private static readonly LAST_FLAG_RE = /\s*\(last\)\s*$/i;
-    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw"];
+    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw", "pass"];
 
     // Every step's first token is always either a piece ref (every suit
     // primitive and special power except one) or a card uid (High
@@ -2710,7 +2724,25 @@ export class GnosticaGame extends GameBase {
         this.redrawOrder = order;
         this.redrawPos = 0;
         this.phase = "redraw";
-        this.currplayer = order[0];
+        if (this.numplayers === 2) {
+            // Never assign currplayer to an arbitrary value here (reduces
+            // exposure to any risk around directly reassigning it - see
+            // task #38). currplayer is always player 2 at this exact
+            // point (bidding is fixed player-1-then-player-2 order, and
+            // this only runs once both have bid), so ordinary rotation
+            // takes it to player 1 next - the loser if player 2 won, or
+            // the winner (who isn't allowed to redraw yet) if player 1
+            // won. In the latter case mustPassBeforeRedraw() reports it,
+            // and the "autopass" flag (see gameinfo's own flags, and
+            // moves() below) means a real server auto-submits "pass" for
+            // player 1 the instant it's their only legal option, landing
+            // on player 2 - exactly "the loser draws first," just reached
+            // through the same rotation every other turn already uses
+            // instead of a direct jump.
+            this.nextPlayer();
+        } else {
+            this.currplayer = order[0];
+        }
     }
 
     // "redraw <uid...>" - the acting player's free choice of cards from
@@ -2742,39 +2774,54 @@ export class GnosticaGame extends GameBase {
 
         this.redrawPos += 1;
         if (this.redrawPos < this.numplayers) {
-            this.currplayer = this.redrawOrder[this.redrawPos];
+            if (this.numplayers === 2) {
+                // Ordinary rotation, not a direct jump (see beginRedraw's
+                // own docs on why that matters) - with exactly two
+                // players "whoever's next" is unconditionally "the other
+                // one," so this can never disagree with the required
+                // redraw order the way an arbitrary array-indexed jump
+                // could for 3+ players.
+                this.nextPlayer();
+            } else {
+                this.currplayer = this.redrawOrder[this.redrawPos];
+            }
         } else {
             // Everyone has redrawn - the pool is now exactly empty (see
             // resolveBidRound's own accounting) and normal play begins.
+            // redrawOrder always ends with the bid winner (see
+            // beginRedraw's own docs - it's built to cycle back around to
+            // them last), so whoever just submitted THIS, the final
+            // redraw, already IS the winner - currplayer needs no further
+            // adjustment for any player count, and for 2 players in
+            // particular, no closing pass is needed either (the one pass
+            // this variant ever needs, when it's needed at all, already
+            // happened back at beginRedraw()).
             this.phase = "main";
-            if (this.numplayers === 2) {
-                // Two players only: never assign currplayer to an
-                // arbitrary value here - reduces exposure to any risk
-                // around directly reassigning it to the bid winner (see
-                // task #38). With exactly two players, "the winner goes
-                // first" and "player 1 auto-passes an empty first turn,
-                // then it's player 2's turn" are exactly equivalent -
-                // passing costs nothing here, since every hand is already
-                // back to exactly 6 cards by this point (nothing to
-                // discard, nothing to draw). currplayer only ever holds
-                // its ordinary default (1) or a value reached through
-                // nextPlayer()'s own +1 rotation - the same path every
-                // other turn in the game already takes, bidding or not.
-                this.currplayer = 1;
-                if (this.bidWinner === 2) {
-                    this.results.push({ type: "pass", who: 1, why: "bidding" });
-                    this.nextPlayer();
-                }
-            } else {
-                // "The winner goes first, turns proceeding clockwise" -
-                // nextPlayer()'s own +1 rotation needs no changes at all
-                // from here.
+            if (this.numplayers !== 2) {
                 this.currplayer = this.bidWinner!;
             }
         }
     }
 
+    // True exactly when the 2-player bidding variant's own "loser draws
+    // first" rule blocks `player` from redrawing right now: they won the
+    // bid, and the loser hasn't taken their own (first) redraw yet. Only
+    // meaningful for exactly 2 players - the 3+ player redraw order is
+    // still steered directly via redrawOrder/redrawPos (see beginRedraw's
+    // own docs), so currplayer is always already correct there and this
+    // always reports false. Shared by validateRedraw (reject a redraw
+    // attempt from the blocked winner), validatePass/cmdPass (the only
+    // situation where passing is legal), moves() (the "autopass" flag's
+    // own signal - see its docs), and randomMove().
+    private mustPassBeforeRedraw(player: playerid): boolean {
+        return this.phase === "redraw" && this.numplayers === 2
+            && this.redrawPos === 0 && player === this.bidWinner;
+    }
+
     private validateRedraw(args: string[]): IValidationResult | undefined {
+        if (this.mustPassBeforeRedraw(this.currplayer)) {
+            return this.invalid("apgames:validation.gnostica.MUST_PASS_FIRST");
+        }
         const hand = this.hands[this.currplayer - 1];
         const needed = 6 - hand.length;
         if (args.length !== needed) {
@@ -2791,6 +2838,50 @@ export class GnosticaGame extends GameBase {
             }
         }
         return undefined;
+    }
+
+    // "pass" - exists purely for the 2-player bidding variant's own bid
+    // winner to sit out the loser's first redraw (see
+    // mustPassBeforeRedraw's own docs). Not a general-purpose pass: it's
+    // illegal anywhere else, including the main phase (a bare "discard"
+    // already fills that role there). A real server auto-submits this via
+    // the "autopass" flag + moves() the instant it's the only legal
+    // option, so a human should never actually need to submit it by hand.
+    private cmdPass(partial = false): void {
+        const failure = this.validatePass();
+        if (failure !== undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", failure.message);
+        }
+        if (partial) {
+            return;
+        }
+        this.results.push({ type: "pass", who: this.currplayer, why: "bidding" });
+        this.nextPlayer();
+    }
+
+    private validatePass(): IValidationResult | undefined {
+        if (!this.mustPassBeforeRedraw(this.currplayer)) {
+            return this.invalid("apgames:validation.gnostica.NOTHING_TO_PASS");
+        }
+        return undefined;
+    }
+
+    // The "autopass" flag's own signal (see gameinfo's own flags): a real
+    // server calls this after every move resolves and, if it returns
+    // exactly ["pass"], auto-submits "pass" on that player's behalf
+    // rather than waiting for real input - see mustPassBeforeRedraw's own
+    // docs for the one situation that actually triggers here. This is
+    // deliberately NOT a general move enumerator (that's what the
+    // "no-moves"/"custom-randomization" flags + randomMove() are for) -
+    // every other situation returns [] ("not enumerating, but nothing is
+    // forced"), matching this library's own established convention (see
+    // e.g. knightline.ts's identical use of "autopass" + moves()).
+    public moves(player?: playerid): string[] {
+        const p = (player ?? this.currplayer) as playerid;
+        if (this.mustPassBeforeRedraw(p)) {
+            return ["pass"];
+        }
+        return [];
     }
 
     // "place <cell> [orientation]" - only legal with zero pieces on board;
@@ -4249,6 +4340,9 @@ export class GnosticaGame extends GameBase {
             return `bid ${1 + Math.floor(Math.random() * hand.length)}`;
         }
         if (this.phase === "redraw") {
+            if (this.mustPassBeforeRedraw(this.currplayer)) {
+                return "pass";
+            }
             const needed = 6 - this.hands[this.currplayer - 1].length;
             const picks = (shuffle(this.biddingPool) as string[]).slice(0, needed);
             return `redraw ${picks.join(" ")}`.trim();
