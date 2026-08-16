@@ -3930,7 +3930,7 @@ export class GnosticaGame extends GameBase {
                     if (!("hand_UNKNOWN" in legend)) {
                         legend.hand_UNKNOWN = [
                             { name: "piece-square", scale: 1 },
-                            { text: "?", scale: 0.5, colour: "_context_strokes" },
+                            { text: "?", scale: 0.5, colour: "_context_strokes", orientation: "vertical" },
                         ];
                     }
                     handKeys.push("hand_UNKNOWN");
@@ -4185,6 +4185,12 @@ export class GnosticaGame extends GameBase {
     // summarize a category rather than depict an actual card - see
     // buildDeckSummaryArea); `rankText` overrides the upper-left text
     // (same purpose - a count like "3x" instead of a real rank/numeral).
+    // Every glyph EXCEPT the plain background square carries
+    // `orientation: "vertical"` (same pattern as magnate.ts's own card
+    // faces) - the renderer re-corrects a "vertical" glyph's own content
+    // upright after applying board rotation, so rank text and suit/power
+    // icons stay legible if the board is ever shown rotated for a given
+    // seat, while their nudged positions still rotate normally with it.
     private buildCardFace(card: TarotCard, compact: boolean, opts: { borderless?: boolean; rankText?: string } = {}): Glyph[] {
         const stack: Glyph[] = [{ name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 }];
 
@@ -4216,6 +4222,7 @@ export class GnosticaGame extends GameBase {
             nudge: { dx: rankShiftX, dy: rankShiftY },
             rotate: majorRotation,
             fontFamily: "Georgia,serif",
+            orientation: "vertical",
         });
 
         const icons = card.major
@@ -4238,9 +4245,9 @@ export class GnosticaGame extends GameBase {
         // sheet's always-printed circles - the icon (if any) is composed on
         // top of it. Flat fill, no opacity blending.
         const pushCircle = (xdir: number, ydir: number, iconName?: string) => {
-            stack.push({ name: "piece", scale: circleScale, colour: "_context_board", nudge: { dx: xdir * corner, dy: ydir * corner } });
+            stack.push({ name: "piece", scale: circleScale, colour: "_context_board", nudge: { dx: xdir * corner, dy: ydir * corner }, orientation: "vertical" });
             if (iconName !== undefined) {
-                stack.push({ name: iconName, scale: iconScale, nudge: { dx: xdir * iconShift, dy: ydir * iconShift } });
+                stack.push({ name: iconName, scale: iconScale, nudge: { dx: xdir * iconShift, dy: ydir * iconShift }, orientation: "vertical" });
             }
         };
 
