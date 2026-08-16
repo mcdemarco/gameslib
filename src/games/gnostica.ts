@@ -4445,6 +4445,25 @@ export class GnosticaGame extends GameBase {
     // throws MUST_PLACE_FIRST), so under-enumerating candidates isn't
     // just a coverage gap, it risks returning nothing legal at all in a
     // forced-re-placement-after-wipeout scenario.
+    // Weighted random pick: each item's weight (always > 0) is its
+    // relative probability. Used to bias randomMove()'s own choices
+    // toward outcomes that are ordinarily stronger - a card cell over a
+    // bare wasteland for placement, a higher-value card for use/play -
+    // without ever ruling the weaker options out entirely, the same way
+    // a human player occasionally still takes the less obvious option.
+    private weightedPick<T>(items: T[], weight: (item: T) => number): T {
+        const weights = items.map(weight);
+        const total = weights.reduce((a, b) => a + b, 0);
+        let r = Math.random() * total;
+        for (let i = 0; i < items.length; i++) {
+            r -= weights[i];
+            if (r <= 0) {
+                return items[i];
+            }
+        }
+        return items[items.length - 1]; // floating-point safety net
+    }
+
     private randomPlaceMove(): string {
         const candidates = this.emptyNonVoidCells();
         // Structurally shouldn't happen (the board always has somewhere
@@ -4455,7 +4474,11 @@ export class GnosticaGame extends GameBase {
         if (candidates.length === 0) {
             return "";
         }
-        const [x, y] = candidates[Math.floor(Math.random() * candidates.length)];
+        // Landing on an existing card gives immediate access to its
+        // power, so it's weighted 3x over a bare wasteland cell - a
+        // strong preference, not a requirement (see weightedPick's own
+        // docs).
+        const [x, y] = this.weightedPick(candidates, ([cx, cy]) => this.board.classify(cx, cy) === "territory" ? 3 : 1);
         const orientations: Orientation[] = ["U", ...cardinalOrientations];
         const orientation = orientations[Math.floor(Math.random() * orientations.length)];
         return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
@@ -4519,7 +4542,11 @@ export class GnosticaGame extends GameBase {
             if (onBoard.length === 0) {
                 return undefined;
             }
-            const { uid, eligible } = onBoard[Math.floor(Math.random() * onBoard.length)];
+            // Prefer a higher-value card - its own point value doubles as
+            // a natural "how good is this option" weight (see
+            // weightedPick's own docs) - without ever ruling out a lesser
+            // one.
+            const { uid, eligible } = this.weightedPick(onBoard, ({ uid: u }) => cardPointValue(allCards().find(c => c.uid === u)));
             const card = allCards().find(c => c.uid === uid)!;
             const chain = this.buildRandomChain(card, eligible);
             return [`use ${uid}`, ...chain.map(tokens => tokens.join(" "))].join(", ");
@@ -4528,7 +4555,7 @@ export class GnosticaGame extends GameBase {
         if (hand.length === 0) {
             return undefined;
         }
-        const uid = hand[Math.floor(Math.random() * hand.length)];
+        const uid = this.weightedPick(hand, u => cardPointValue(allCards().find(c => c.uid === u)));
         const card = allCards().find(c => c.uid === uid)!;
         const eligible = this.eligibleMinionsForPlay();
         // cmdPlay removes the played card from hand before resolving its
