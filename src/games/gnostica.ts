@@ -1638,13 +1638,13 @@ export class GnosticaGame extends GameBase {
     // "face up"; clicking one of its four orthogonal neighbours means
     // "face that way" - one click always states the intended direction
     // outright, rather than stepping through up to 5 states via a toggle.
-    // Every one of a piece's neighbours is guaranteed to be inside the
-    // current render window (padded by exactly 1 beyond the board's own
-    // bounding box - see render()'s own docs) and, since void cells now
-    // render an invisible-but-clickable placeholder there too, guaranteed
-    // clickable regardless of whether that neighbour is a territory,
-    // wasteland, or void. Returns undefined when `toX,toY` is neither the
-    // piece's own cell nor an orthogonal neighbour of it.
+    // A territory or wasteland neighbour is always independently
+    // clickable in the grid; a void neighbour is not (see render()'s own
+    // docs) - clicking a piece toward a void direction instead comes
+    // through as a buffer click (see handleClickCore's own docs on
+    // reading one back), landing here with the exact same toX,toY either
+    // way. Returns undefined when `toX,toY` is neither the piece's own
+    // cell nor an orthogonal neighbour of it.
     private orientationTowardClick(fromX: number, fromY: number, toX: number, toY: number): Orientation | undefined {
         if (fromX === toX && fromY === toY) {
             return "U";
@@ -1656,21 +1656,6 @@ export class GnosticaGame extends GameBase {
             }
         }
         return undefined;
-    }
-
-    // A void cell only ever matters to click-to-orient (see
-    // orientationTowardClick) as the facing target of a piece sitting on a
-    // WASTELAND cell next door - a piece on an actual territory can never
-    // have a void neighbour at all (any neighbour of a card-bearing cell is
-    // itself at worst a wasteland, by classify()'s own definition), so this
-    // only needs to check wasteland neighbours, not territory ones too.
-    private voidCellNeedsClickTarget(x: number, y: number): boolean {
-        return this.board.neighbors(x, y).some(([nx, ny]) => {
-            if (this.board.classify(nx, ny) !== "wasteland") {
-                return false;
-            }
-            return (this.board.get(nx, ny)?.pieces.length ?? 0) > 0;
-        });
     }
 
     // Best-effort filter over which modes are worth offering as buttons
@@ -2493,8 +2478,24 @@ export class GnosticaGame extends GameBase {
 
             const minX = this.board.minX - 1;
             const minY = this.board.minY - 1;
-            const x = col + minX;
-            const y = row + minY;
+            // A click on a rendered buffer segment (see cmdOrient's own
+            // docs on when this.buffers gets populated) - same contract
+            // pacru.ts/azacru.ts already use for their own `buffer`
+            // areas: the renderer reports an out-of-window row/col and
+            // passes the segment's own absolute board coordinates via
+            // `piece` instead, comma-separated. Every other `piece`
+            // convention that also uses an out-of-window row/col
+            // (_btn_/hand_/discard_ - see above) has already returned by
+            // this point, so reaching here with row/col invalid can only
+            // mean a buffer click.
+            let x: number;
+            let y: number;
+            if ((row < 0 || col < 0) && piece !== undefined && /^-?\d+,-?\d+$/.test(piece)) {
+                [x, y] = piece.split(",").map(s => parseInt(s, 10));
+            } else {
+                x = col + minX;
+                y = row + minY;
+            }
             const cell = GnosticaBoard.coords2algebraic(x, y);
 
             let newmove: string;
@@ -3038,6 +3039,29 @@ export class GnosticaGame extends GameBase {
         const piece = this.board.get(x, y)!.pieces[index];
         if (piece.owner !== this.currplayer) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_YOUR_MINION"));
+        }
+        // A wasteland cell is only ever adjacent to a single side of the
+        // board's own stored extent at a time (never a corner) - if this
+        // one sits on that edge, reorienting outward from it needs a
+        // buffer there, since every void cell now renders as a plain,
+        // unclickable "-" (Pacru's own "buffer" approach, not an
+        // expanded/padded void ring - see handleClickCore's own docs on
+        // reading a buffer click back). Recomputed on every orient click
+        // (this.buffers itself is reset at the top of every move() call),
+        // so this always reflects wherever the CURRENTLY selected piece
+        // actually sits, not whichever piece a previous click picked -
+        // and deliberately ignores the piece's own (pre-existing)
+        // orientation entirely.
+        if (this.board.classify(x, y) === "wasteland") {
+            if (x === this.board.minX) {
+                this.buffers.push("W");
+            } else if (x === this.board.maxX) {
+                this.buffers.push("E");
+            } else if (y === this.board.minY) {
+                this.buffers.push("N");
+            } else if (y === this.board.maxY) {
+                this.buffers.push("S");
+            }
         }
         const orientation = this.parseOrientation(orientationStr);
         piece.orientation = orientation;
@@ -5240,16 +5264,11 @@ export class GnosticaGame extends GameBase {
         const width = maxX - minX + 1;
         const height = maxY - minY + 1;
 
-        // A void cell only gets a real (invisible-but-clickable) legend
-        // entry when a piece might actually need to click it - see
-        // voidCellNeedsClickTarget's own docs for exactly when that is.
-        // Every other void cell stays the bare "-" the renderer leaves
-        // with no legend entry (and no clickable region) at all, to avoid
-        // padding the rendered board out with clickable-but-pointless
-        // space. Re-rendering happens after every click/commit, so a void
-        // cell that only becomes relevant once a piece lands on the
-        // wasteland next to it picks up its click target on the very next
-        // render - nothing is ever permanently unreachable.
+        // Every void cell is the bare "-" the renderer leaves with no
+        // legend entry (and no clickable region) at all - a wasteland
+        // piece that needs to face into one gets a `buffer` area instead
+        // (see cmdOrient's own docs on this.buffers), not a click target
+        // baked into the grid itself.
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
         legend.hand_UNKNOWN = [
             { name: "piece-square", scale: 1 },
@@ -5262,7 +5281,7 @@ export class GnosticaGame extends GameBase {
             const rowCells: string[] = [];
             for (let x = minX; x <= maxX; x++) {
                 const cls = this.board.classify(x, y);
-                if (cls === "void" && !this.voidCellNeedsClickTarget(x, y)) {
+                if (cls === "void") {
                     rowCells.push("-");
                     continue;
                 }
@@ -5724,8 +5743,10 @@ export class GnosticaGame extends GameBase {
         } else if (cls === "wasteland") {
             stack.push({ name: "piece-square-dashed", scale: 1 });
         } else {
-            // A void cell needing a click target (see voidCellNeedsClickTarget)
-            // still needs a legend entry, but stays fully invisible.
+            // Void, in principle - the main render loop already short-
+            // circuits every void cell to a bare "-" before this is ever
+            // called, so this is just a defensive fallback, not a real
+            // path.
             stack.push({ name: "piece-square-borderless", scale: 1, opacity: 0 });
         }
         const pieces = t?.pieces ?? [];
