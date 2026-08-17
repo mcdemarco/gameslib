@@ -96,6 +96,145 @@ describe("Gnostica: setup", () => {
     });
 });
 
+describe("Gnostica: hand sort order", () => {
+    it("a fresh non-bidding game deals hands already in rank order: majors first, then minors grouped by suit and ranked within it", () => {
+        const g = new GnosticaGame(3);
+        for (const hand of g.hands) {
+            const cards = hand.map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
+            let lastWasMajor = true;
+            let lastSuitSeq = -Infinity;
+            let lastRankSeq = -Infinity;
+            for (const c of cards) {
+                if (c.major) {
+                    expect(lastWasMajor, `major ${c.uid} appears after a minor`).to.be.true;
+                } else {
+                    lastWasMajor = false;
+                    const suitSeq = c.suit.seq;
+                    const rankSeq = c.rank.seq;
+                    if (suitSeq === lastSuitSeq) {
+                        expect(rankSeq).to.be.greaterThan(lastRankSeq);
+                    } else {
+                        expect(suitSeq).to.be.greaterThan(lastSuitSeq);
+                        lastRankSeq = -Infinity;
+                    }
+                    lastSuitSeq = suitSeq;
+                    lastRankSeq = rankSeq;
+                }
+            }
+        }
+    });
+
+    it("the bidding variant leaves hands in raw draw order through the bidding phase itself, then sorts once it resolves", () => {
+        const g = new GnosticaGame(2, ["bidding"]);
+        // Force a hand that's already known to be UNSORTED (a minor
+        // before a major), so a spurious pass (already-sorted-by-luck)
+        // can't hide a bug. major(21) (The World) is the highest-seq
+        // major in the deck - bidding it guarantees player 1 wins
+        // outright regardless of player 2's own uncontrolled random
+        // hand (any major they might hold is seq <= 21 too, at best a
+        // tie the code breaks toward the lower-numbered player anyway).
+        g.hands[0] = [card("2R").uid, major(21).uid, card("AC").uid, "3C", "4C", "5C"];
+        const beforeBid = [...g.hands[0]];
+        // Position 2 (still hand-order, not sorted) is the major.
+        g.move("bid 2", { trusted: true });
+        // The bid card isn't actually pulled from hand until the round
+        // resolves (see resolveBidRound's own docs) - hand order must
+        // stay completely untouched by the bid itself.
+        expect(g.hands[0]).to.deep.equal(beforeBid);
+        g.move("bid 1", { trusted: true }); // player 2 - resolves the round (P1's major always wins)
+        expect(g.bidWinner).eq(1);
+        expect(g.phase).eq("redraw");
+        // Now sorted: the bid major is gone (spent on the bid), so
+        // what's left is minors sorted by suit/rank.
+        const cards = g.hands[0].map(uid => minorCards.find(c => c.uid === uid)!);
+        for (let i = 1; i < cards.length; i++) {
+            const a = cards[i - 1], b = cards[i];
+            expect(a.suit.seq < b.suit.seq || (a.suit.seq === b.suit.seq && a.rank.seq < b.rank.seq)).to.be.true;
+        }
+    });
+
+    it("stays sorted after an ordinary main-phase hand mutation (discard/draw)", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.hands[0] = [card("5R").uid, major(1).uid, card("AC").uid, card("2C").uid, card("KS").uid, "3D"];
+        g.move("discard 5R", { trusted: true }); // draws back to 6, then re-sorts
+        const cards = g.hands[0].map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
+        let lastWasMajor = true;
+        let lastSuitSeq = -Infinity;
+        let lastRankSeq = -Infinity;
+        for (const c of cards) {
+            if (c.major) {
+                expect(lastWasMajor).to.be.true;
+            } else {
+                lastWasMajor = false;
+                if (c.suit.seq === lastSuitSeq) {
+                    expect(c.rank.seq).to.be.greaterThan(lastRankSeq);
+                } else {
+                    expect(c.suit.seq).to.be.greaterThan(lastSuitSeq);
+                    lastRankSeq = -Infinity;
+                }
+                lastSuitSeq = c.suit.seq;
+                lastRankSeq = c.rank.seq;
+            }
+        }
+    });
+});
+
+describe("Gnostica: new-card hand highlight", () => {
+    type HandArea = { type: string; pieces?: string[]; label?: string };
+    type RenderRep = { legend: Record<string, unknown>; areas?: HandArea[] };
+
+    const player1HandArea = (rep: RenderRep): HandArea | undefined =>
+        rep.areas?.find(a => a.type === "pieces" && a.pieces?.some(p => p.startsWith("hand_")));
+
+    it("tags a newly drawn card with its own legend entry once it becomes that player's turn again", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.hands[0] = [card("AC").uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid];
+        g.drawPile = [card("7C").uid, ...g.drawPile.filter(uid => uid !== card("7C").uid)];
+        g.move("discard AC", { trusted: true }); // player 1 discards AC, draws 7C back
+        expect(g.hands[0]).to.include(card("7C").uid);
+        g.move("discard", { trusted: true }); // player 2's turn - now back to player 1
+        expect(g.currplayer).eq(1);
+
+        const rep = g.render() as RenderRep;
+        const handArea = player1HandArea(rep);
+        const newKey = `hand_${card("7C").uid}_new`;
+        expect(newKey in rep.legend).to.be.true;
+        expect(handArea?.pieces).to.include(newKey);
+        // A card that was already there before last turn stays untagged.
+        expect(handArea?.pieces).to.include(`hand_${card("2C").uid}`);
+        expect(handArea?.pieces).to.not.include(`hand_${card("2C").uid}_new`);
+    });
+
+    it("the highlight disappears once the player starts building this turn's own move", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.hands[0] = [card("AC").uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid];
+        g.drawPile = [card("7C").uid, ...g.drawPile.filter(uid => uid !== card("7C").uid)];
+        g.move("discard AC", { trusted: true });
+        g.move("discard", { trusted: true });
+        expect(g.currplayer).eq(1);
+        // Confirm it WOULD show first, so this test isn't vacuous.
+        expect(player1HandArea(g.render() as RenderRep)?.pieces).to.include(`hand_${card("7C").uid}_new`);
+
+        g.move("discard", { partial: true, trusted: true }); // simulates the player's own first click
+        const rep = g.render() as RenderRep;
+        const handArea = player1HandArea(rep);
+        expect(handArea?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+    });
+
+    it("does not highlight anything on a player's very first turn", () => {
+        const g = new GnosticaGame(2);
+        const rep = g.render() as RenderRep;
+        const handArea = player1HandArea(rep);
+        expect(handArea?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+    });
+});
+
 describe("Gnostica: place", () => {
     it("places a small piece on an empty territory, defaulting to U", () => {
         const g = new GnosticaGame(2);
@@ -240,6 +379,42 @@ describe("Gnostica: turn order", () => {
         expect(g.currplayer).eq(3);
         g.move("discard", { trusted: true });
         expect(g.currplayer).eq(1);
+    });
+});
+
+describe("Gnostica: turn order legend", () => {
+    type KeyArea = { type: string; list?: { piece: string; name: string }[] };
+    const keyArea = (g: GnosticaGame): KeyArea | undefined =>
+        (g.render() as { areas?: KeyArea[] }).areas?.find(a => a.type === "key");
+
+    it("does not appear for the default (non-bidding) variant, even with 3+ players", () => {
+        const g = new GnosticaGame(3);
+        expect(keyArea(g)).to.be.undefined;
+    });
+
+    it("does not appear for a 2-player bidding game - nothing to legend with only two players", () => {
+        const g = new GnosticaGame(2, ["bidding"]);
+        expect(keyArea(g)).to.be.undefined;
+    });
+
+    it("appears for a 3+ player bidding game, defaulting to plain ascending order while still mid-bid", () => {
+        const g = new GnosticaGame(3, ["bidding"]);
+        const area = keyArea(g);
+        expect(area).to.not.be.undefined;
+        expect(area!.list!.map(e => e.name)).to.deep.equal(["1st", "2nd", "3rd"]);
+    });
+
+    it("reorders to start from the bid winner once the round resolves", () => {
+        const g = new GnosticaGame(3, ["bidding"]);
+        g.hands[0] = [card("KS").uid, "AC", "2C", "3C", "4C", "5C"];
+        g.hands[1] = [major(21).uid, "AR", "2R", "3R", "4R", "5R"]; // The World - unbeatable
+        g.hands[2] = [card("QS").uid, "AD", "2D", "3D", "4D", "5D"];
+        g.move("bid 1", { trusted: true });
+        g.move("bid 1", { trusted: true }); // player 2's major wins
+        g.move("bid 1", { trusted: true });
+        expect(g.bidWinner).eq(2);
+        const area = keyArea(g)!;
+        expect(area.list!.map(e => e.piece)).to.deep.equal(["turnorder_p2", "turnorder_p3", "turnorder_p1"]);
     });
 });
 
