@@ -889,15 +889,12 @@ describe("Gnostica: render", () => {
         expect(new Set(coords).size, "every piece should have a distinct nudge").eq(coords.length);
     });
 
-    // Every piece's own orthogonal neighbours are always inside the render
-    // window (see the class-level docs on render()), but a void cell is
-    // only given a real, clickable legend entry when it might actually be
-    // needed - a piece on the WASTELAND cell next door that could orient
-    // toward it (see voidCellNeedsClickTarget's docs: a piece on an actual
-    // territory can never have a void neighbour at all). Otherwise it stays
-    // the bare "-" placeholder, to avoid padding the rendered board out
-    // with clickable-but-pointless space.
-    it("only renders a void cell's click target once a piece is on the wasteland next to it", () => {
+    // Void cells are never individually clickable in the grid - a
+    // wasteland minion facing into one instead gets a `buffer` area on
+    // whichever single side of the board's own stored extent it sits on
+    // (see cmdOrient's own docs). This is the Pacru-style replacement for
+    // the earlier "expand the void" approach.
+    it("never renders a void cell as a clickable target, even once a piece is on the wasteland next to it", () => {
         const g = new GnosticaGame(2);
         const before = g.render() as { pieces: string };
         expect(before.pieces).to.include("-"); // no pieces anywhere yet - every void cell is bare
@@ -910,7 +907,34 @@ describe("Gnostica: render", () => {
         g.board.store.set(2, 1, new Territory(undefined, [new Piece(1, 1, "U")]));
 
         const after = g.render() as { pieces: string };
-        expect(after.pieces).to.include("k_void_"); // (3,1) is now a real, clickable placeholder
+        expect(after.pieces).to.not.include("k_void_");
+    });
+
+    it("shows a buffer on the single board edge a wasteland minion sits on, once it starts reorienting", () => {
+        const g = new GnosticaGame(2);
+        // (2,0) becomes the board's own new eastern edge (maxX): the
+        // initial 3x3 deal only reaches x=1, and (2,0)'s own y=0 isn't
+        // also a min/max boundary, so this is unambiguously an east-only
+        // case, not a corner.
+        g.board.store.set(2, 0, new Territory(undefined, [new Piece(1, 1, "U")]));
+        (g as unknown as { saveState: () => void }).saveState();
+        expect(g.board.classify(2, 0)).eq("wasteland");
+        expect(g.board.maxX).eq(2);
+
+        const ref = `${GnosticaBoard.coords2algebraic(2, 0)}.1`;
+        g.move(`orient ${ref} N`, { trusted: true });
+        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        expect(rep.board.buffer?.show).to.deep.equal(["E"]);
+    });
+
+    it("shows no buffer for a minion sitting on a real territory", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2 - keeps their own board presence legal
+        const ref = `${GnosticaBoard.coords2algebraic(0, 0)}.1`;
+        g.move(`orient ${ref} N`, { trusted: true });
+        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        expect(rep.board.buffer).to.be.undefined;
     });
 });
 
@@ -1964,6 +1988,27 @@ describe("Gnostica: click-to-orient messaging", () => {
         const result = g.handleClick("orient", row, col);
         expect(result.valid).to.be.true;
         expect(result.move).eq("orient m0.1 U");
+        expect(result.message).eq(directionMsg());
+    });
+
+    // A wasteland minion facing into the void reads its target from a
+    // buffer click instead - same contract pacru.ts/azacru.ts already use
+    // for their own `buffer` areas: an out-of-window row/col (-1,-1 here,
+    // matching every other non-cell click in this file) plus the clicked
+    // segment's own absolute board coordinates via `piece`, comma-separated.
+    it("orient: a buffer click on the void side of a wasteland minion sets that facing", () => {
+        const g = new GnosticaGame(2);
+        g.board.store.set(2, 0, new Territory(undefined, [new Piece(1, 1, "U")]));
+        (g as unknown as { saveState: () => void }).saveState();
+        const ref = `${GnosticaBoard.coords2algebraic(2, 0)}.1`;
+
+        const [row, col] = rowColFor(g, 2, 0);
+        const selected = g.handleClick("orient", row, col);
+        expect(selected.move).eq(`orient ${ref} U`);
+
+        const result = g.handleClick(selected.move!, -1, -1, "3,0"); // one step east - the void side
+        expect(result.valid).to.be.true;
+        expect(result.move).eq(`orient ${ref} E`);
         expect(result.message).eq(directionMsg());
     });
 
