@@ -936,6 +936,56 @@ describe("Gnostica: render", () => {
         const rep = g.render() as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer).to.be.undefined;
     });
+
+    // The other four flows that can also orient a piece into the void -
+    // see addBufferIfWasteland's own docs on why all five need this, not
+    // just the top-level "orient" command above.
+    it("shows a buffer when placing directly onto an edge wasteland", () => {
+        const g = new GnosticaGame(2);
+        expect(g.board.classify(2, 0)).eq("wasteland");
+        const cell = GnosticaBoard.coords2algebraic(2, 0);
+        g.move(`place ${cell} N`, { trusted: true });
+        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        expect(rep.board.buffer?.show).to.deep.equal(["E"]);
+    });
+
+    it("shows a buffer when Cups 'own' creates a new piece on an edge wasteland", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 1, 0, () => aceOfCups());
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // facing (2,0)
+        expect(g.board.classify(2, 0)).eq("wasteland");
+        const minionCell = GnosticaBoard.coords2algebraic(1, 0);
+        const targetCell = GnosticaBoard.coords2algebraic(2, 0);
+        g.move(`use ${aceOfCups().uid}, ${minionCell}.1 own ${targetCell} U`, { trusted: true });
+        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        expect(rep.board.buffer?.show).to.deep.equal(["E"]);
+    });
+
+    it("shows a buffer when orientAny (Devil) targets a piece on an edge wasteland", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 1, 0, () => major(15)); // The Devil
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // acting minion, facing (2,0)
+        g.board.store.set(2, 0, new Territory(undefined, [new Piece(2, 1, "S")])); // enemy target, on an edge wasteland
+        expect(g.board.classify(2, 0)).eq("wasteland");
+        const minionCell = GnosticaBoard.coords2algebraic(1, 0);
+        const targetCell = GnosticaBoard.coords2algebraic(2, 0);
+        g.move(`use ${major(15).uid}, ${minionCell}.1 ${targetCell}.1 N`, { trusted: true });
+        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        expect(rep.board.buffer?.show).to.deep.equal(["E"]);
+    });
+
+    it("shows a buffer when hierophantReplace targets a piece on an edge wasteland", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 1, 0, () => major(5)); // The Hierophant
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // acting minion, facing (2,0)
+        g.board.store.set(2, 0, new Territory(undefined, [new Piece(2, 1, "S")])); // enemy target, on an edge wasteland
+        expect(g.board.classify(2, 0)).eq("wasteland");
+        const minionCell = GnosticaBoard.coords2algebraic(1, 0);
+        const targetCell = GnosticaBoard.coords2algebraic(2, 0);
+        g.move(`use ${major(5).uid}, ${minionCell}.1 ${targetCell}.1 N`, { trusted: true });
+        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        expect(rep.board.buffer?.show).to.deep.equal(["E"]);
+    });
 });
 
 describe("Gnostica: handleClick", () => {
@@ -944,8 +994,13 @@ describe("Gnostica: handleClick", () => {
     // that exact formula so tests can go from absolute board coords to the
     // row/col a real click would report.
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        const minX = g.board.minX - 1;
-        const minY = g.board.minY - 1;
+        // Must match handleClickCore's own window exactly (see
+        // renderWindow's own docs - territory bounds, not the raw
+        // board.minX/maxX/minY/maxY, which also includes cardless
+        // wasteland cells a piece may have been pushed onto) - reusing
+        // the game's own private computation directly rather than
+        // duplicating its logic here, so the two can never drift apart.
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
 
@@ -1482,8 +1537,13 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
 // representative commit per suit prove the resulting move actually works.
 describe("Gnostica: handleClick - minor arcana power steps", () => {
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        const minX = g.board.minX - 1;
-        const minY = g.board.minY - 1;
+        // Must match handleClickCore's own window exactly (see
+        // renderWindow's own docs - territory bounds, not the raw
+        // board.minX/maxX/minY/maxY, which also includes cardless
+        // wasteland cells a piece may have been pushed onto) - reusing
+        // the game's own private computation directly rather than
+        // duplicating its logic here, so the two can never drift apart.
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
 
@@ -1956,8 +2016,13 @@ describe("Gnostica: click-to-orient messaging", () => {
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        const minX = g.board.minX - 1;
-        const minY = g.board.minY - 1;
+        // Must match handleClickCore's own window exactly (see
+        // renderWindow's own docs - territory bounds, not the raw
+        // board.minX/maxX/minY/maxY, which also includes cardless
+        // wasteland cells a piece may have been pushed onto) - reusing
+        // the game's own private computation directly rather than
+        // duplicating its logic here, so the two can never drift apart.
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
     const directionMsg = () => i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE");
@@ -2054,8 +2119,13 @@ describe("Gnostica: power-still-optional messaging", () => {
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        const minX = g.board.minX - 1;
-        const minY = g.board.minY - 1;
+        // Must match handleClickCore's own window exactly (see
+        // renderWindow's own docs - territory bounds, not the raw
+        // board.minX/maxX/minY/maxY, which also includes cardless
+        // wasteland cells a piece may have been pushed onto) - reusing
+        // the game's own private computation directly rather than
+        // duplicating its logic here, so the two can never drift apart.
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
     const powerMsg = () => i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL");
@@ -2113,8 +2183,13 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        const minX = g.board.minX - 1;
-        const minY = g.board.minY - 1;
+        // Must match handleClickCore's own window exactly (see
+        // renderWindow's own docs - territory bounds, not the raw
+        // board.minX/maxX/minY/maxY, which also includes cardless
+        // wasteland cells a piece may have been pushed onto) - reusing
+        // the game's own private computation directly rather than
+        // duplicating its logic here, so the two can never drift apart.
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
     const buttonValues = (g: GnosticaGame): (string | undefined)[] => {
@@ -2236,8 +2311,13 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        const minX = g.board.minX - 1;
-        const minY = g.board.minY - 1;
+        // Must match handleClickCore's own window exactly (see
+        // renderWindow's own docs - territory bounds, not the raw
+        // board.minX/maxX/minY/maxY, which also includes cardless
+        // wasteland cells a piece may have been pushed onto) - reusing
+        // the game's own private computation directly rather than
+        // duplicating its logic here, so the two can never drift apart.
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
     const buttonValues = (g: GnosticaGame): (string | undefined)[] => {
