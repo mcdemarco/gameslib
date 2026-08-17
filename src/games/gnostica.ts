@@ -2512,16 +2512,25 @@ export class GnosticaGame extends GameBase {
             // docs on when this.buffers gets populated) - same contract
             // pacru.ts/azacru.ts already use for their own `buffer`
             // areas: the renderer reports an out-of-window row/col and
-            // passes the segment's own absolute board coordinates via
-            // `piece` instead, comma-separated. Every other `piece`
-            // convention that also uses an out-of-window row/col
-            // (_btn_/hand_/discard_ - see above) has already returned by
-            // this point, so reaching here with row/col invalid can only
-            // mean a buffer click.
+            // passes the segment's own coordinates via `piece` instead,
+            // comma-separated as "col,row" - but (confirmed empirically
+            // against the real renderer, not just by reading pacru's own
+            // source) still WINDOW-RELATIVE, the exact same frame the
+            // ordinary row/col params use, not raw absolute board
+            // coordinates - a buffer segment one step beyond the window's
+            // own edge reports the next relative index past it (e.g.
+            // "5,2" for a 5-wide window's own east buffer, row 2), which
+            // still needs the same +minX/+minY offset every other click
+            // gets. Every other `piece` convention that also uses an
+            // out-of-window row/col (_btn_/hand_/discard_ - see above)
+            // has already returned by this point, so reaching here with
+            // row/col invalid can only mean a buffer click.
             let x: number;
             let y: number;
             if ((row < 0 || col < 0) && piece !== undefined && /^-?\d+,-?\d+$/.test(piece)) {
-                [x, y] = piece.split(",").map(s => parseInt(s, 10));
+                const [relCol, relRow] = piece.split(",").map(s => parseInt(s, 10));
+                x = relCol + minX;
+                y = relRow + minY;
             } else {
                 x = col + minX;
                 y = row + minY;
