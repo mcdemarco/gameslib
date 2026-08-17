@@ -425,6 +425,12 @@ export const movePiece = (
 
     const srcT = getTerritory(ctx, targetX, targetY);
     const moved = srcT.removeAt(targetIndex);
+    // The source cell never gets a piece back from this function (it
+    // either lands elsewhere or is destroyed in the void below) - prune
+    // it now if that was its last occupant, so an empty wasteland
+    // doesn't linger in the board's own stored map (see
+    // GnosticaBoard.pruneIfEmpty's own docs).
+    ctx.board.pruneIfEmpty(targetX, targetY);
     // A genuine final landing in the void destroys the piece. A relaxed
     // mid-chain waypoint (skipLandingCheck, Chariot) must NOT - the piece
     // still needs to be sitting there for the chain's next step to act on.
@@ -655,6 +661,7 @@ export const attackPiece = (
     if (resultSize === 0) {
         returnToStash(ctx, victim.owner, victim.size);
         t.removeAt(targetIndex);
+        ctx.board.pruneIfEmpty(targetX, targetY);
         return;
     }
     if (!opts.skipStashCheck) {
@@ -895,6 +902,7 @@ export const hermitMovePiece = (
     }
     const srcT = getTerritory(ctx, targetX, targetY);
     const moved = srcT.removeAt(targetIndex);
+    ctx.board.pruneIfEmpty(targetX, targetY);
     if (moved.owner === ctx.currplayer && newOrientation !== undefined) {
         moved.orientation = newOrientation;
     }
