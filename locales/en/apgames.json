@@ -4057,6 +4057,12 @@
                 "name": "Hide 9x9 piece highlight"
             }
         },
+        "gnostica": {
+            "larger-cards": {
+                "description": "Display board cards larger when unoccupied.",
+                "name": "Show larger cards"
+            }
+        },
         "go": {
             "show-controlled-areas": {
                 "description": "Highlight the areas currently controlled by each player.",

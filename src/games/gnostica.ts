@@ -1,4 +1,4 @@
-import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IScores, IValidationResult } from "./_base";
+import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IRenderOpts, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
@@ -398,6 +398,7 @@ export class GnosticaGame extends GameBase {
         ],
         categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
         flags: ["experimental", "no-moves", "custom-randomization", "player-stashes", "autopass", "scores"],
+        displays: [{ uid: "larger-cards" }],
     };
 
     public numplayers!: number;
@@ -5180,7 +5181,18 @@ export class GnosticaGame extends GameBase {
     // absolute (GnosticaBoard.coords2algebraic doesn't shift as the board
     // grows, unlike Knight Line's own notation), so this only needs ONE
     // extra coordinate layer (window-relative row/col), not two.
-    public render(): APRenderRep {
+    public render(opts?: IRenderOpts): APRenderRep {
+        let altDisplay: string | undefined;
+        if (opts !== undefined) {
+            altDisplay = opts.altDisplay;
+        }
+        let largerCards = false;
+        if (altDisplay !== undefined) {
+            if (altDisplay === "larger-cards") {
+                largerCards = true;
+            }
+        }
+
         const minX = this.board.minX - 1;
         const maxX = this.board.maxX + 1;
         const minY = this.board.minY - 1;
@@ -5212,7 +5224,7 @@ export class GnosticaGame extends GameBase {
                 const t = this.board.get(x, y);
                 const key = this.cellRenderKey(t, cls);
                 if (!(key in legend)) {
-                    legend[key] = this.buildCellGlyph(t, cls);
+                    legend[key] = this.buildCellGlyph(t, cls, largerCards);
                     const players = t?.card !== undefined ? t.playersPresent() : undefined;
                     if (players !== undefined && players.size === 1) {
                         const [owner] = players;
@@ -5247,7 +5259,7 @@ export class GnosticaGame extends GameBase {
             rowLabels.push((y === 0 ? 0 : -y).toString());
         }
 
-        // One area per player's hand, full-size (non-compact) card faces.
+        // One area per player's hand, full-size (non-spaced) card faces.
         // Per-viewer redaction (blanking opponents' hand uids to "") is the
         // back end's job, same as every other Decktet-hand game in this
         // repo - this class just has to render whatever it's actually
@@ -5574,23 +5586,17 @@ export class GnosticaGame extends GameBase {
     // buildDeckSummaryArea); `rankText` overrides the upper-left text
     // (same purpose - a count like "3x" instead of a real rank/numeral).
     // Every glyph EXCEPT the plain background square carries
-    // `orientation: "vertical"` (same pattern as magnate.ts's own card
-    // faces) - the renderer re-corrects a "vertical" glyph's own content
-    // upright after applying board rotation, so rank text and suit/power
-    // icons stay legible if the board is ever shown rotated for a given
-    // seat, while their nudged positions still rotate normally with it.
-    private buildCardFace(card: TarotCard, compact: boolean, opts: { borderless?: boolean; rankText?: string; background?: string } = {}): Glyph[] {
+    // `orientation: "vertical"` - correction for rotation.
+    private buildCardFace(card: TarotCard, spaced: boolean, opts: { borderless?: boolean; rankText?: string; background?: string } = {}): Glyph[] {
         const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 };
         if (opts.background !== undefined) {
             backdrop.colour = opts.background;
         }
         const stack: Glyph[] = [backdrop];
 
-        // `compact` (board tiles, which also have to fit up to 3+ pieces in
+        // `spaced` (board tiles, which also have to fit up to 3+ pieces in
         // the same small square) pushes the four corners further out and
-        // shrinks everything in them, versus the roomier sizing tuned for a
-        // card shown alone. The non-compact numbers below are the ones
-        // already tuned by eye for card format - left untouched.
+        // shrinks everything in them, versus the normal card layout.
         let rankText = opts.rankText;
         if (rankText === undefined) {
             rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
@@ -5598,13 +5604,13 @@ export class GnosticaGame extends GameBase {
                 rankText += "\u00A0";
             }
         }
-        const rankScale = compact ? 0.25 : 0.45;
-        const corner = compact ? BOARD_TILE_GRID_CORNER : 250;
-        let rankShiftX = compact ? -675 : -corner;
+        const rankScale = spaced ? 0.25 : 0.45;
+        const corner = spaced ? BOARD_TILE_GRID_CORNER : 250;
+        let rankShiftX = spaced ? -675 : -corner;
         let rankShiftY = rankShiftX;
         if (card.major) {
-            rankShiftX += compact ? 675 : 250;
-            rankShiftY += compact ? -175 : -175;
+            rankShiftX += spaced ? 675 : 250;
+            rankShiftY += spaced ? -175 : -175;
         }
         const majorRotation = card.major ? -45 : 0;
         stack.push({
@@ -5620,22 +5626,16 @@ export class GnosticaGame extends GameBase {
         const icons = card.major
             ? getMajorArcanaIcons(card as MajorCard)
             : (card as MinorCard).suit.glyph !== undefined ? [(card as MinorCard).suit.glyph!] : [];
-        const circleScale = compact ? 0.25 : 0.45;
-        const iconScale = compact ? 0.15 : 0.30;
+        const circleScale = spaced ? 0.25 : 0.45;
+        const iconScale = spaced ? 0.15 : 0.30;
         // The renderer positions a glyph via a scale-INDEPENDENT anchor
         // (nudge - 250 in its internal 500-unit canvas) and only then
         // applies that glyph's own scale around that anchor, so two glyphs
         // sharing one nudge only share a visual centre when they also share
         // scale - confirmed by inspecting the rendered <use> elements'
         // actual x/y/transform. `iconShift` compensates so a smaller-scaled
-        // icon still lands centred on its larger coin. The non-compact value
-        // (375) was tuned by eye; the compact value is only scaled
-        // proportionally to the corner change (unverified - the exact
-        // number likely needs the same by-eye check the original did).
-        const iconShift = compact ? 1075 : 375;
-        // A solid "piece" circle backdrop, matching the physical sticker
-        // sheet's always-printed circles - the icon (if any) is composed on
-        // top of it. Flat fill, no opacity blending.
+        // icon still lands centred on its larger coin.
+        const iconShift = spaced ? 1075 : 375;
         const pushCircle = (xdir: number, ydir: number, iconName?: string) => {
             stack.push({ name: "piece", scale: circleScale, colour: "_context_board", nudge: { dx: xdir * corner, dy: ydir * corner }, orientation: "vertical" });
             if (iconName !== undefined) {
@@ -5657,13 +5657,14 @@ export class GnosticaGame extends GameBase {
     }
 
     // A board tile has to show the card AND up to 3 pieces in the same
-    // small square, so it uses the compact card face (smaller rank/circle
+    // small square, so it uses the spaced card face (smaller rank/circle
     // sizing) rather than the roomier default meant for a card shown alone
     // (e.g. a hand, once that's rendered).
-    private buildCellGlyph(t: Territory | undefined, cls: CellClass): Glyph | [Glyph, ...Glyph[]] {
+    private buildCellGlyph(t: Territory | undefined, cls: CellClass, largerCards: boolean): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
         if (t?.card !== undefined) {
-            stack.push(...this.buildCardFace(t.card, true));
+            const dontSpace = largerCards && t.playersPresent().size === 0;
+            stack.push(...this.buildCardFace(t.card, !dontSpace));
         } else if (cls === "wasteland") {
             stack.push({ name: "piece-square-dashed", scale: 1 });
         } else {
