@@ -1326,7 +1326,7 @@ export class GnosticaGame extends GameBase {
                 const hand = this.hands[this.currplayer - 1] ?? [];
                 const maxDraw = Math.max(0, 6 - hand.length);
                 const countButtons: ButtonBarButton[] = [];
-                for (let n = 0; n <= maxDraw; n++) {
+                for (let n = maxDraw; n >= 0; n--) {
                     countButtons.push({ label: `Draw ${n}`, value: `drawcount_${n}` });
                 }
                 return countButtons as [ButtonBarButton, ...ButtonBarButton[]];
