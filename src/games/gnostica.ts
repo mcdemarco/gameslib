@@ -9,7 +9,7 @@ import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { Territory, ITerritory, cardPointValue } from "./gnostica/Territory";
 import { Piece, Orientation, cardinalOrientations } from "./gnostica/Piece";
 import {
-    Stash, PowerContext, PowerFailure, takeFromStash, hasStashAvailable,
+    Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
     createOwn, createEnemy, createTerritory,
     movePiece, moveTerritory,
     growPiece, growTerritory,
@@ -4422,10 +4422,21 @@ export class GnosticaGame extends GameBase {
         }
     }
 
+    // Rules text: an eliminated player discards their hand. Their board
+    // pieces aren't addressed explicitly, but every other piece-removal
+    // path in this file (see powers.ts) returns the piece to its owner's
+    // stash rather than deleting it outright, so this follows suit.
     private eliminatePlayer(player: playerid): void {
+        const ctx = this.buildPowerContext();
         for (const [, , t] of this.board.entries()) {
+            for (const p of t.pieces) {
+                if (p.owner === player) {
+                    returnToStash(ctx, p.owner, p.size);
+                }
+            }
             t.pieces = t.pieces.filter(p => p.owner !== player);
         }
+        this.discardPile.push(...this.hands[player - 1]);
         this.hands[player - 1] = [];
         this.eliminated.push(player);
         this.results.push({ type: "eliminated", who: player.toString() });
