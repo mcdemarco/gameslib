@@ -686,7 +686,8 @@
     "USE": {
         "camelot_castle_move_one": "{{player}} used has 1 more castle move.",
         "camelot_castle_move_other": "{{player}} used has {{count}} more castle moves.",
-        "camelot_castle_move_none": "{{player}} has no more castle moves."
+        "camelot_castle_move_none": "{{player}} has no more castle moves.",
+        "gnostica": "{{player}} used territory {{what}}."
     },
     "SCRIBE": {
         "no_formation": "no formations",

@@ -448,6 +448,8 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.move("place m0", { trusted: true }); // player 1
         g.move("place l0", { trusted: true }); // player 2
         g.move("place n0", { trusted: true }); // player 3
+        const hand = [...g.hands[0]];
+        expect(g.stashes.get(1)).to.deep.equal([4, 5, 5]); // one small piece placed
         g.move("discard (last)", { trusted: true }); // player 1 announces
         g.move("discard", { trusted: true }); // player 2
         g.move("discard", { trusted: true }); // player 3
@@ -455,6 +457,14 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         expect(g.eliminated).to.deep.equal([1]);
         expect(g.hands[0]).to.deep.equal([]);
         expect(g.gameover).eq(false); // players 2 and 3 remain
+        // Rules text: an eliminated player discards their hand.
+        for (const uid of hand) {
+            expect(g.discardPile).to.include(uid);
+        }
+        // The board piece placed above is gone AND returned to stash,
+        // rather than just vanishing.
+        expect(g.board.get(0, 0)!.pieces.some(p => p.owner === 1)).eq(false);
+        expect(g.stashes.get(1)).to.deep.equal([5, 5, 5]);
     });
 
     it("declares the sole remaining player the winner if elimination leaves only one player standing", () => {
