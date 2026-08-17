@@ -821,7 +821,7 @@ export class GnosticaGame extends GameBase {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
             }
             this.lastTurnAnnouncedBy = this.currplayer;
-            this.results.push({ type: "announce", payload: ["lastTurn", this.currplayer] });
+            this.results.push({ type: "declare" });
         }
 
         if (wasAnnounced) {
@@ -2833,7 +2833,7 @@ export class GnosticaGame extends GameBase {
         if (partial) {
             return;
         }
-        this.results.push({ type: "deckDraw", count: args.length, from: "pool" });
+        this.results.push({ type: "deckDraw", what: args.join(","), from: "pool" });
 
         this.redrawPos += 1;
         if (this.redrawPos < this.numplayers) {
@@ -3216,6 +3216,7 @@ export class GnosticaGame extends GameBase {
         if (eligible.length === 0) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid }));
         }
+        this.results.push({ type: "use", what: t.card!.uid });
         this.applyCardPower(t.card!, eligible, stepSegments);
     }
 
@@ -3258,7 +3259,7 @@ export class GnosticaGame extends GameBase {
         }
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
-        this.results.push({ type: "deckDraw", count: 0, what: uid, from: "hand" });
+        this.results.push({ type: "deckDraw", what: uid, from: "hand" });
 
         const eligible = this.eligibleMinionsForPlay();
         this.applyCardPower(card, eligible, stepSegments);
@@ -5795,5 +5796,110 @@ export class GnosticaGame extends GameBase {
             glyph: { name: `pyramid-up-${sizeNames[i]}`, colour: player },
             movePart: (i + 1).toString(),
         }));
+    }
+
+    public chat(node: string[], player: string, results: APMoveResult[], r: APMoveResult): boolean {
+        let resolved = false;
+        switch (r.type) {
+            case "announce":
+                node.push(i18next.t("apresults:ANNOUNCE.tradeHands", { player, target: `Player ${r.payload[2] as number + 1}` }));
+                resolved = true;
+                break;
+            case "select":
+                node.push(i18next.t("apresults:SELECT.gnostica", { player }));
+                resolved = true;
+                break;
+            case "deckDraw":
+                switch (r.from) {
+                    case "pool":
+                        node.push(i18next.t("apresults:DECKDRAW.gnostica_pool", { player, what: r.what }));
+                        resolved = true;
+                        break;
+                    case "discard":
+                        node.push(i18next.t("apresults:DECKDRAW.gnostica_discard", { player, count: r.count }));
+                        resolved = true;
+                        break;
+                    case "deck":
+                        node.push(i18next.t("apresults:DECKDRAW.gnostica_deck", { player, count: r.count }));
+                        resolved = true;
+                        break;
+                    case "hand":
+                        node.push(i18next.t("apresults:DECKDRAW.gnostica_hand", { player, what: r.what }));
+                        resolved = true;
+                        break;
+                }
+                break;
+            case "declare":
+                node.push(i18next.t("apresults:DECLARE.gnostica", { player }));
+                resolved = true;
+                break;
+            case "orient":
+                node.push(i18next.t("apresults:ORIENT.gnostica", { player, where: r.where, facing: r.facing }));
+                resolved = true;
+                break;
+            case "use":
+                node.push(i18next.t("apresults:USE.gnostica", { player, what: r.what }));
+                resolved = true;
+                break;
+            case "discover":
+                node.push(i18next.t("apresults:DISCOVER.default", { player, where: r.where }));
+                resolved = true;
+                break;
+            case "destroy":
+                if (r.what !== undefined) {
+                    node.push(i18next.t("apresults:DESTROY.gnostica_piece", { player, what: r.what }));
+                } else {
+                    node.push(i18next.t("apresults:DESTROY.gnostica_tile", { player, where: r.where }));
+                }
+                resolved = true;
+                break;
+            case "move":
+                switch (r.how) {
+                    case "rod-piece":
+                        node.push(i18next.t("apresults:MOVE.gnostica_rod_piece", { player, from: r.from, to: r.to }));
+                        resolved = true;
+                        break;
+                    case "rod-tile":
+                        node.push(i18next.t("apresults:MOVE.gnostica_rod_tile", { player, from: r.from, to: r.to }));
+                        resolved = true;
+                        break;
+                    case "hermit-piece":
+                        node.push(i18next.t("apresults:MOVE.gnostica_hermit_piece", { player, from: r.from, to: r.to }));
+                        resolved = true;
+                        break;
+                    case "hermit-tile":
+                        node.push(i18next.t("apresults:MOVE.gnostica_hermit_tile", { player, from: r.from, to: r.to }));
+                        resolved = true;
+                        break;
+                }
+                break;
+            case "place":
+                switch (r.how) {
+                    case "cups-own":
+                        node.push(i18next.t("apresults:PLACE.gnostica_own", { player, where: r.where }));
+                        resolved = true;
+                        break;
+                    case "cups-enemy":
+                        node.push(i18next.t("apresults:PLACE.gnostica_enemy", { player, where: r.where }));
+                        resolved = true;
+                        break;
+                }
+                break;
+            case "convert":
+                if (r.into.startsWith("size-")) {
+                    node.push(i18next.t("apresults:CONVERT.gnostica_piece", { player, what: r.what, into: r.into, where: r.where }));
+                } else if (r.into.startsWith("owner-")) {
+                    node.push(i18next.t("apresults:CONVERT.gnostica_hierophant", { player, where: r.where }));
+                } else {
+                    node.push(i18next.t("apresults:CONVERT.gnostica_tile", { player, what: r.what, into: r.into, where: r.where }));
+                }
+                resolved = true;
+                break;
+            case "eliminated":
+                node.push(i18next.t("apresults:ELIMINATED.default", { player }));
+                resolved = true;
+                break;
+        }
+        return resolved;
     }
 }

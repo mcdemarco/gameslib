@@ -173,6 +173,9 @@
     "CONVERT": {
         "complete": "{{player}} turned a {{what}} into a {{into}} at {{where}}.",
         "courtesan": "King and courtesan swapped positions at {{where}}.",
+        "gnostica_hierophant": "{{player}} converted an enemy piece to their own at {{where}}.",
+        "gnostica_piece": "{{player}} grew a piece to {{into}} at {{where}}.",
+        "gnostica_tile": "{{player}} grew a territory into {{into}} at {{where}}.",
         "magnate_deed": "{{player}} completed their deeded card {{what}} in district {{where}}.",
         "magnate_trade": "{{player}} traded three {{what}} tokens in for one {{into}}.",
         "moonsquad": "{{player}} recruited a squad.",
@@ -197,16 +200,16 @@
         "quincunx_one": "{{player}} drew {{count}} card.",
         "quincunx_other": "{{player}} drew {{count}} cards.",
         "evenatodds": "{{player}} drew a tile from the boneyard.",
-        "gnostica_deck_one": "{{player}} drew {{count}} card.",
-        "gnostica_deck_other": "{{player}} drew {{count}} cards.",
-        "gnostica_discard_one": "{{player}} drew {{count}} card from the discard pile.",
-        "gnostica_discard_other": "{{player}} drew {{count}} cards from the discard pile.",
-        "gnostica_hand": "{{player}} played {{what}} from their hand."
+        "gnostica_deck": "{{player}} drew {{count}} card(s) from the deck.",
+        "gnostica_discard": "{{player}} drew {{count}} card(s) from the discard pile.",
+        "gnostica_hand": "{{player}} played card {{what}}.",
+        "gnostica_pool": "{{player}} drew card(s) {{what}} from the bidding pool."
     },
     "DECLARE": {
         "biscuit": "{{player}} has gone out!",
         "emu": "Year {{year}} has ended.",
         "frogger": "The crocodiles advanced.",
+        "gnostica": "{{player}} declared their last turn.",
         "mchess": "{{player}} has \"called the clock.\" If no capture is made in the next seven turns, the game will end and be scored.",
         "renju": "{{player}} has declared {{count}} tentative fifths."
     },
@@ -241,7 +244,8 @@
             "minimal_one": "{{count}} friendly piece was destroyed.",
             "minimal_other": "{{count}} friendly pieces were destroyed."
         },
-        "gnostica": "{{player}} destroyed {{what}}.",
+        "gnostica_piece": "{{player}} destroyed {{what}}.",
+        "gnostica_tile": "{{player}} destroyed {{what}} at {{where}}.",
         "logger": "{{player}} felled a tree at {{where}}.",
         "mattock": "{{player}} mined at {{where}}.",
         "string": "String {{where}} broke under the strain."
@@ -322,10 +326,6 @@
         "ball_drop_other": "{{count}} balls dropped from {{from}} to {{to}}.",
         "bao": "Initial direction of movement: {{direction}}.",
         "blockade": "{{player}} moved a piece from {{from}} to {{to}}.",
-        "hermit-piece": "{{player}} teleported a minion from {{from}} to {{to}}.",
-        "hermit-tile": "{{player}} teleported the territory at {{from}} to {{to}}.",
-        "rod-piece": "{{player}} moved a minion from {{from}} to {{to}}.",
-        "rod-tile": "{{player}} pushed the territory at {{from}} to {{to}}.",
         "byte": {
             "full": "{{player}} moved a full stack from {{from}} to {{to}}.",
             "partial_one": "{{player}} moved {{count}} checker from {{from}} to {{to}}.",
@@ -360,6 +360,10 @@
         "frogger_forward": "{{player}} used {{card}} to move a frog forward from {{from}} to {{to}}.",
         "gess_one": "{{player}} moved a 3x3 piece containing {{count}} stone from {{from}} to {{to}}.",
         "gess_other": "{{player}} moved a 3x3 piece containing {{count}} stones from {{from}} to {{to}}.",
+        "gnostica_hermit_piece": "{{player}} teleported a minion from {{from}} to {{to}}.",
+        "gnostica_hermit_tile": "{{player}} teleported the territory at {{from}} to {{to}}.",
+        "gnostica_rod_piece": "{{player}} moved a minion from {{from}} to {{to}}.",
+        "gnostica_rod_tile": "{{player}} pushed the territory at {{from}} to {{to}}.",
         "hexentafl_king": "{{player}} moved the king from {{from}} to {{to}}.",
         "iqishiqi": "{{player}} moved neutral stone {{from}} to {{to}}.",
         "knightline": "{{player}} moved {{what}} pieces from {{from}} to {{to}}.",
@@ -399,6 +403,7 @@
     "NULLIFY_CLAIM": "Towers may not be claimed on the last turn of the game. The claim at {{where}} was nullified.",
     "ORIENT": {
         "crosshairs": "{{player}} turned a plane at {{where}} to face {{facing}}.",
+        "gnostica": "{{player}} oriented a minion at {{where}} {{facing}}.",
         "nowhat": "{{player}} turned a piece at {{where}} to face {{facing}}."
     },
     "PASS": {
@@ -454,8 +459,6 @@
         "crosshairs_cloud": "{{player}} placed a cloud at {{where}}.",
         "conhex": "{{player}} placed a piece at vertex {{where}}.",
         "connecticut": "{{player}} placed a triomino at {{where}}.",
-        "cups-enemy": "{{player}} added a copy of an enemy minion to {{where}}.",
-        "cups-own": "{{player}} added one of their own minions to {{where}}.",
         "boxes": "{{player}} adds a line at {{where}}.",
         "boxes_claim1": "{{player}} adds a line at {{where}}, claiming {{box}}.",
         "boxes_claim2": "{{player}} adds a line at {{where}}, claiming {{box1}} and {{box2}}.",
@@ -470,6 +473,8 @@
         "entrapment_roamer": "{{player}} placed a roamer at {{where}}.",
         "evenatodds": "{{player}} placed the {{what}} domino at {{where}}.",
         "epam": "{{player}} placed a stone at {{where}}.",
+        "gnostica_enemy": "{{player}} added an enemy minion to {{where}}.",
+        "gnostica_own": "{{player}} added one of their own minions to {{where}}.",
         "gorogo_henge": "{{player}} placed a henge piece at {{where}}.",
         "gorogo_piece": "{{player}} placed a piece at {{where}}.",
         "iqishiqi": "{{player}} placed a shared stone at {{where}}.",
@@ -613,6 +618,7 @@
     "SCORE_REPORT": "{{player}}'s score is now {{score}}.",
     "SELECT": {
         "fnap": "{{player}} selected the tile {{tile}}.",
+        "gnostica": "{{player}} selected a bid card.",
         "resolve": "{{player}} selects the piece in a crosscut at {{where}}.",
         "slyde_fixed_opponent": "{{player}} changed the state of their opponent's piece at {{where}} from mobile to fixed.",
         "slyde_fixed_self": "{{player}} changed the state of their own piece at {{where}} from mobile to fixed.",
