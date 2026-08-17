@@ -4453,13 +4453,14 @@ export class GnosticaGame extends GameBase {
     // stash rather than deleting it outright, so this follows suit.
     private eliminatePlayer(player: playerid): void {
         const ctx = this.buildPowerContext();
-        for (const [, , t] of this.board.entries()) {
+        for (const [x, y, t] of this.board.entries()) {
             for (const p of t.pieces) {
                 if (p.owner === player) {
                     returnToStash(ctx, p.owner, p.size);
                 }
             }
             t.pieces = t.pieces.filter(p => p.owner !== player);
+            this.board.pruneIfEmpty(x, y);
         }
         this.discardPile.push(...this.hands[player - 1]);
         this.hands[player - 1] = [];
