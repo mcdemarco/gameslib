@@ -2975,7 +2975,7 @@ export class GnosticaGame extends GameBase {
         // etc.) - it isn't manufactured out of nothing.
         takeFromStash(this.buildPowerContext(), this.currplayer, 1);
         territory.add(new Piece(this.currplayer, 1, orientation));
-        this.results.push({ type: "place", where: cellStr });
+        this.results.push({ type: "place", where: cellStr, how: "initial" });
     }
 
     private validatePlace(args: string[]): IValidationResult | undefined {
@@ -3690,7 +3690,7 @@ export class GnosticaGame extends GameBase {
                 } else {
                     createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 }
-                this.results.push({ type: "discover", where: cellStr });
+                this.results.push({ type: "place", where: cellStr, how: "territory" });
                 return {};
             }
             default:
@@ -5802,7 +5802,7 @@ export class GnosticaGame extends GameBase {
         let resolved = false;
         switch (r.type) {
             case "announce":
-                node.push(i18next.t("apresults:ANNOUNCE.tradeHands", { player, target: `Player ${r.payload[2] as number + 1}` }));
+                node.push(i18next.t("apresults:ANNOUNCE.gnostica", { player, target: `Player ${r.payload[2]}` }));
                 resolved = true;
                 break;
             case "select":
@@ -5883,6 +5883,14 @@ export class GnosticaGame extends GameBase {
                         node.push(i18next.t("apresults:PLACE.gnostica_enemy", { player, where: r.where }));
                         resolved = true;
                         break;
+                    case "territory":
+                        node.push(i18next.t("apresults:PLACE.gnostica_territory", { player, where: r.where }));
+                        resolved = true;
+                        break;
+                    case "initial":
+                        node.push(i18next.t("apresults:PLACE.gnostica_initial", { player, where: r.where }));
+                        resolved = true;
+                        break;
                 }
                 break;
             case "convert":
@@ -5896,7 +5904,7 @@ export class GnosticaGame extends GameBase {
                 resolved = true;
                 break;
             case "eliminated":
-                node.push(i18next.t("apresults:ELIMINATED.default", { player }));
+                node.push(i18next.t("apresults:ELIMINATED", { player }));
                 resolved = true;
                 break;
         }
