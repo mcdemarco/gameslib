@@ -58,15 +58,15 @@ export class Territory implements ITerritory {
         return found;
     }
 
-    public ownersPresent(): Set<number> {
+    public playersPresent(): Set<number> {
         return new Set(this.pieces.map(p => p.owner));
     }
 
     // Scoring rule: a territory counts for `player` only if it holds at
     // least one of their pieces and nobody else's.
     public isUncontestedBy(player: number): boolean {
-        const owners = this.ownersPresent();
-        return owners.size === 1 && owners.has(player);
+        const players = this.playersPresent();
+        return players.size === 1 && players.has(player);
     }
 
     public pointValue(): TerritoryPointValue {
