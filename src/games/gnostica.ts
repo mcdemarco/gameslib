@@ -3025,7 +3025,7 @@ export class GnosticaGame extends GameBase {
         }
         const orientation = this.parseOrientation(orientationStr);
         piece.orientation = orientation;
-        this.results.push({ type: "orient", where: ref, facing: orientation });
+        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: ref, facing: orientation });
     }
 
     private validateOrient(args: string[]): IValidationResult | undefined {
@@ -3786,13 +3786,14 @@ export class GnosticaGame extends GameBase {
                 // in the void destroys the piece instead of moving it -
                 // see movePiece's own docs.
                 const destroyedInVoid = opts.skipLandingCheck !== true && this.board.classify(destX, destY) === "void";
+                const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
                 movePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, newOrientation, opts);
                 if (destroyedInVoid) {
-                    this.results.push({ type: "destroy", what: targetRef });
+                    this.results.push({ type: "destroy", where: origin, what: targetRef });
                     return {};
                 }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
-                this.results.push({ type: "move", from: targetRef, to: dest, how: "rod-piece" });
+                this.results.push({ type: "move", from: origin, to: dest, what: targetRef, how: "rod-piece" });
                 if (movedOwner === this.currplayer) {
                     const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                     return { newMinion: { x: destX, y: destY, index: newIndex } };
@@ -3888,7 +3889,7 @@ export class GnosticaGame extends GameBase {
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 growPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, newOrientation);
-                this.results.push({ type: "convert", what: `size-${beforeSize}`, into: `size-${beforeSize + 1}`, where: targetRef });
+                this.results.push({ type: "convert", what: `size-${beforeSize}`, into: `size-${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
                 if (owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
                     return { newMinion: { x: target.x, y: target.y, index: newIndex } };
@@ -3967,7 +3968,7 @@ export class GnosticaGame extends GameBase {
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 attackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, newOrientation, opts);
-                this.results.push({ type: "destroy", what: targetRef });
+                this.results.push({ type: "destroy", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: targetRef });
                 const resultSize = beforeSize - pips;
                 if (resultSize > 0 && owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
@@ -4048,7 +4049,12 @@ export class GnosticaGame extends GameBase {
         const [orientationStr] = rest;
         const orientation = this.parseOrientation(orientationStr);
         orientMinion(this.buildPowerContext(), minion.x, minion.y, minion.index, orientation);
-        this.results.push({ type: "orient", where: `${minion.x},${minion.y}.${minion.index}`, facing: orientation });
+        this.results.push({
+            type: "orient",
+            where: GnosticaBoard.coords2algebraic(minion.x, minion.y),
+            what: this.pieceRefStr(minion.x, minion.y, minion.index),
+            facing: orientation,
+        });
         return { newMinion: minion };
     }
 
@@ -4073,7 +4079,7 @@ export class GnosticaGame extends GameBase {
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const orientation = this.parseOrientation(orientationStr);
         orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
-        this.results.push({ type: "orient", where: targetRef, facing: orientation });
+        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: targetRef, facing: orientation });
         return owner === this.currplayer ? { newMinion: target } : {};
     }
 
@@ -4101,7 +4107,7 @@ export class GnosticaGame extends GameBase {
         const target = this.resolvePieceRefOrThrow(targetRef);
         const orientation = this.parseOrientation(orientationStr);
         hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
-        this.results.push({ type: "convert", what: targetRef, into: `owner-${this.currplayer}`, where: targetRef });
+        this.results.push({ type: "convert", what: targetRef, into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
         const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
         return { newMinion: { x: target.x, y: target.y, index: newIndex } };
     }
@@ -4137,8 +4143,9 @@ export class GnosticaGame extends GameBase {
             const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
             const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
             const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
+            const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
             hermitMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY, newOrientation);
-            this.results.push({ type: "move", from: targetRef, to: destCellStr, how: "hermit-piece" });
+            this.results.push({ type: "move", from: origin, to: destCellStr, what: targetRef, how: "hermit-piece" });
             if (owner === this.currplayer) {
                 const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                 return { newMinion: { x: destX, y: destY, index: newIndex } };
@@ -5227,6 +5234,11 @@ export class GnosticaGame extends GameBase {
         // wasteland next to it picks up its click target on the very next
         // render - nothing is ever permanently unreachable.
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
+        legend.hand_UNKNOWN = [
+            { name: "piece-square", scale: 1 },
+            { text: "?", scale: 0.5, colour: "_context_strokes", orientation: "vertical" },
+        ];
+        
         const pieceRows: string[] = [];
         const markers: MarkerOutline[] = [];
         for (let y = minY; y <= maxY; y++) {
@@ -5276,12 +5288,6 @@ export class GnosticaGame extends GameBase {
         }
 
         // One area per player's hand, full-size (non-spaced) card faces.
-        // Per-viewer redaction (blanking opponents' hand uids to "") is the
-        // back end's job, same as every other Decktet-hand game in this
-        // repo - this class just has to render whatever it's actually
-        // given, including a placeholder for any uid it can't resolve
-        // (an opponent's redacted "" entry, matching emu.ts's own
-        // "UNKNOWN" convention), rather than assuming every uid is real.
         const areas: (AreaPieces | AreaButtonBar | AreaKey)[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
             const hand = this.hands[p - 1] ?? [];
@@ -5293,12 +5299,6 @@ export class GnosticaGame extends GameBase {
             for (const uid of hand) {
                 const card = allCards().find(c => c.uid === uid);
                 if (card === undefined) {
-                    if (!("hand_UNKNOWN" in legend)) {
-                        legend.hand_UNKNOWN = [
-                            { name: "piece-square", scale: 1 },
-                            { text: "?", scale: 0.5, colour: "_context_strokes", orientation: "vertical" },
-                        ];
-                    }
                     handKeys.push("hand_UNKNOWN");
                     continue;
                 }
@@ -5309,14 +5309,14 @@ export class GnosticaGame extends GameBase {
                 const isNew = newUids.has(uid);
                 const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
                 if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(card, false, isNew ? { background: "#ffd700" } : {}) as [Glyph, ...Glyph[]];
+                    legend[key] = this.buildCardFace(card, false, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
                 }
                 handKeys.push(key);
             }
             areas.push({
                 type: "pieces",
                 pieces: handKeys as [string, ...string[]],
-                label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p }),
+                label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurnAnnouncedBy && this.lastTurnAnnouncedBy === p ? "(declarer)" : "" }),
                 // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter
                 // than the default auto-wrap-at-board-width spacing, and a
                 // fixed width (hands are always <=6 cards) rather than
@@ -5351,6 +5351,23 @@ export class GnosticaGame extends GameBase {
             });
         }
 
+        // The declaration round banner.
+        if (this.lastTurnAnnouncedBy !== undefined) {
+            if (!("Warning" in legend)) {
+                legend.Warning = [
+                    { name: "piece-borderless", colour: "_context_background" },
+                    { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
+                ];
+            }
+            areas.push({
+                type: "pieces",
+                pieces: ["Warning"],
+                label: i18next.t("apgames:validation.gnostica.LABEL_WARNING"),
+                spacing: 0.25,
+                width: 1,
+            });
+        }
+        
         // The literal drawPile array isn't used for the draw-pile summary -
         // its order/contents are exactly as hidden from this viewer as an
         // opponent's redacted hand uids, so "what's left to draw" is
@@ -5378,29 +5395,6 @@ export class GnosticaGame extends GameBase {
         );
         if (discardArea !== undefined) {
             areas.push(discardArea);
-        }
-
-        // The declaration round window - from a player's own "(last)"
-        // announcement until their next turn (when resolveAnnouncedTurn()
-        // decides win-or-eliminate) - gets an unmissable banner, borrowing
-        // magnate.ts's own "Warning" glyph trick: a plain AreaPieces entry
-        // whose one "piece" is a red warning-triangle glyph rather than a
-        // real game piece, with the actual message carried by the area's
-        // own label.
-        if (this.lastTurnAnnouncedBy !== undefined) {
-            if (!("Warning" in legend)) {
-                legend.Warning = [
-                    { name: "piece-borderless", colour: "_context_background" },
-                    { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
-                ];
-            }
-            areas.push({
-                type: "pieces",
-                pieces: ["Warning"],
-                label: i18next.t("apgames:validation.gnostica.LABEL_WARNING"),
-                spacing: 0.25,
-                width: 1,
-            });
         }
 
         // Only the bidding variant can ever make turn order diverge from
@@ -5861,7 +5855,7 @@ export class GnosticaGame extends GameBase {
                 resolved = true;
                 break;
             case "orient":
-                node.push(i18next.t("apresults:ORIENT.gnostica", { player, where: r.where, facing: r.facing }));
+                node.push(i18next.t("apresults:ORIENT.gnostica", { player, where: r.where, what: r.what, facing: r.facing }));
                 resolved = true;
                 break;
             case "use":
