@@ -1594,6 +1594,37 @@ export class GnosticaGame extends GameBase {
         return [minion.x + dx, minion.y + dy];
     }
 
+    // The shared board window every renderable/clickable grid scan uses -
+    // one ring beyond the CARD-bearing (territory) cells' own bounding
+    // box, deliberately NOT this.board's own raw minX/maxX/minY/maxY
+    // (which also includes cardless wasteland cells a piece has been
+    // pushed/teleported onto). Padding by 1 beyond a wasteland cell
+    // rather than a territory overshoots into genuine void - a piece can
+    // never legally end up more than 1 step from SOME territory (landing
+    // further out either destroys it - Rods - or is outright illegal -
+    // Hermit/place), so every legally-occupied wasteland cell is always
+    // already within 1 step of a territory and therefore always inside
+    // this window too, with no need to separately account for the raw
+    // stored-cell bounds at all. Falls back to a trivial single-cell
+    // window if there are somehow no territories at all (shouldn't
+    // happen once the game has actually started).
+    private renderWindow(): { minX: number; maxX: number; minY: number; maxY: number } {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const [x, y, t] of this.board.entries()) {
+            if (t.card === undefined) {
+                continue;
+            }
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+        if (!Number.isFinite(minX)) {
+            return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+        }
+        return { minX: minX - 1, maxX: maxX + 1, minY: minY - 1, maxY: maxY + 1 };
+    }
+
     // Inverse of resolvePieceRef: the shortest ref that resolves back to
     // this exact piece within the same pool (see resolvePieceRef's docs -
     // omitted here, defaults to every piece at the cell). Tries pips alone,
@@ -2476,8 +2507,7 @@ export class GnosticaGame extends GameBase {
                 return rebuildDiscard([...selected, picked]);
             }
 
-            const minX = this.board.minX - 1;
-            const minY = this.board.minY - 1;
+            const { minX, minY } = this.renderWindow();
             // A click on a rendered buffer segment (see cmdOrient's own
             // docs on when this.buffers gets populated) - same contract
             // pacru.ts/azacru.ts already use for their own `buffer`
@@ -4622,18 +4652,15 @@ export class GnosticaGame extends GameBase {
     }
 
     // Every cell that's both non-void and currently holds zero pieces -
-    // scanned over the same padded window render() uses (board's own
-    // min/max +/-1 in each direction), NOT just `board.entries()` (which
-    // only yields cells with a stored Territory object - see
-    // randomPlaceMove's own docs on why that under-enumerates). Shared by
-    // randomPlaceMove (a legal initial-placement target) and
-    // buildRandomHermitTokens (a legal teleport destination - hermit's
-    // own rules use the identical "empty territory or wasteland" shape).
+    // scanned over the same window render() uses (see renderWindow's own
+    // docs), NOT just `board.entries()` (which only yields cells with a
+    // stored Territory object - see randomPlaceMove's own docs on why
+    // that under-enumerates). Shared by randomPlaceMove (a legal
+    // initial-placement target) and buildRandomHermitTokens (a legal
+    // teleport destination - hermit's own rules use the identical "empty
+    // territory or wasteland" shape).
     private emptyNonVoidCells(): [number, number][] {
-        const minX = this.board.minX - 1;
-        const maxX = this.board.maxX + 1;
-        const minY = this.board.minY - 1;
-        const maxY = this.board.maxY + 1;
+        const { minX, maxX, minY, maxY } = this.renderWindow();
         const cells: [number, number][] = [];
         for (let x = minX; x <= maxX; x++) {
             for (let y = minY; y <= maxY; y++) {
@@ -5236,15 +5263,17 @@ export class GnosticaGame extends GameBase {
         return stepSegments;
     }
 
-    // Standard grid renderer over a window recomputed from the board's live
-    // bounding box every call (the "Knight Line" pattern - see the plan:
-    // there's no fixed board size, so the visible window has to track
-    // wherever territories currently are, padded by one empty ring so
-    // placement/push destinations just outside the current bounds are still
-    // visible and clickable). Gnostica's algebraic notation is already
-    // absolute (GnosticaBoard.coords2algebraic doesn't shift as the board
-    // grows, unlike Knight Line's own notation), so this only needs ONE
-    // extra coordinate layer (window-relative row/col), not two.
+    // Standard grid renderer over a window recomputed every call (the
+    // "Knight Line" pattern - see the plan: there's no fixed board size,
+    // so the visible window has to track wherever territories currently
+    // are). See renderWindow's own docs for exactly how the bounds are
+    // derived - one ring beyond the territories themselves, which always
+    // reaches every legally-occupied wasteland too without ever
+    // overshooting into genuine void beyond one. Gnostica's algebraic
+    // notation is already absolute (GnosticaBoard.coords2algebraic
+    // doesn't shift as the board grows, unlike Knight Line's own
+    // notation), so this only needs ONE extra coordinate layer
+    // (window-relative row/col), not two.
     public render(opts?: IRenderOpts): APRenderRep {
         let altDisplay: string | undefined;
         if (opts !== undefined) {
@@ -5257,10 +5286,7 @@ export class GnosticaGame extends GameBase {
             }
         }
 
-        const minX = this.board.minX - 1;
-        const maxX = this.board.maxX + 1;
-        const minY = this.board.minY - 1;
-        const maxY = this.board.maxY + 1;
+        const { minX, maxX, minY, maxY } = this.renderWindow();
         const width = maxX - minX + 1;
         const height = maxY - minY + 1;
 
