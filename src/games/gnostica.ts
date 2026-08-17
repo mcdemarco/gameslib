@@ -313,6 +313,17 @@ interface IMoveState extends IIndividualState {
     board: UnboundedSquareBoard<Territory>;
     // Card uids per player, index 0 = player 1.
     hands: string[][];
+    // Each player's own hand exactly as it stood the last time THEY
+    // started a new turn (frozen the instant they make their first move
+    // of that turn - see move()'s own docs) - the comparison point
+    // render()'s "new card" highlight diffs the current hand against.
+    // Deliberately NOT the same thing as `hands` a move ago: it only
+    // updates at the START of a player's own turn, so it still reflects
+    // whatever they had BEFORE their last turn's own draw/trade/etc.,
+    // making that turn's changes visible as "new" going into their NEXT
+    // one - not just changes caused by other players while they weren't
+    // acting.
+    handBaseline: string[][];
     drawPile: string[];
     discardPile: string[];
     stashes: Map<playerid, Stash>;
@@ -393,6 +404,7 @@ export class GnosticaGame extends GameBase {
     public currplayer!: playerid;
     public board!: GnosticaBoard;
     public hands: string[][] = [];
+    public handBaseline: string[][] = [];
     public drawPile: string[] = [];
     public discardPile: string[] = [];
     public stashes!: Map<playerid, Stash>;
@@ -438,6 +450,16 @@ export class GnosticaGame extends GameBase {
             const hands: string[][] = [];
             for (let p = 0; p < this.numplayers; p++) {
                 hands.push(deck.draw(6).map(c => c.uid));
+            }
+            // Kept in rank order from the very start for the default,
+            // non-bidding variant (phase is "main" immediately) - see
+            // sortHandsIfNotBidding's own docs for why the bidding
+            // variant's own initial deal stays in draw order instead
+            // (bid <n> names a card by its current position in hand).
+            if (!this.variants.includes("bidding")) {
+                for (const hand of hands) {
+                    hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
+                }
             }
 
             // The starting 3x3 grid is built directly (not via
@@ -489,6 +511,11 @@ export class GnosticaGame extends GameBase {
                 currplayer: 1,
                 board: board.store,
                 hands,
+                // Starting hand doubles as each player's own first
+                // baseline - nothing highlights as "new" on anyone's
+                // opening turn (see move()'s own docs on when this
+                // updates from here on).
+                handBaseline: hands.map(h => [...h]),
                 drawPile,
                 discardPile: [],
                 stashes,
@@ -540,6 +567,7 @@ export class GnosticaGame extends GameBase {
         // touches the snapshot stored in the stack.
         this.board = new GnosticaBoard(state.board).clone();
         this.hands = state.hands.map(h => [...h]);
+        this.handBaseline = state.handBaseline.map(h => [...h]);
         this.drawPile = [...state.drawPile];
         this.discardPile = [...state.discardPile];
         this.stashes = new Map([...state.stashes.entries()].map(([k, v]) => [k, [...v] as Stash]));
@@ -564,6 +592,7 @@ export class GnosticaGame extends GameBase {
             currplayer: this.currplayer,
             board: this.board.clone().store,
             hands: this.hands.map(h => [...h]),
+            handBaseline: this.handBaseline.map(h => [...h]),
             drawPile: [...this.drawPile],
             discardPile: [...this.discardPile],
             stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
@@ -655,6 +684,22 @@ export class GnosticaGame extends GameBase {
         }
         this.results = [];
 
+        // Freezes the acting player's hand exactly as it stood BEFORE
+        // this turn's own mutations - the comparison point render()'s
+        // "new card" highlight (see newHandCardUids's own docs) diffs
+        // the current hand against. Captured here, not at the end of
+        // the turn, so whatever changes THIS turn makes (a draw, a
+        // trade, etc.) still show as "new" the next time it's this
+        // player's turn - not just changes some OTHER player caused in
+        // between. Real commits only: every partial preview call runs
+        // on a disposable, freshly-reconstructed instance (see this
+        // method's own docs) whose mutations never reach saveState(),
+        // so updating handBaseline there would never actually persist -
+        // pointless busywork on every click.
+        if (!partial) {
+            this.handBaseline[this.currplayer - 1] = [...this.hands[this.currplayer - 1]];
+        }
+
         // Parses and executes `m` against `this` - the one place move
         // grammar is interpreted (validateMove mirrors this exact
         // structure, read-only - see its own docs). Throws
@@ -725,6 +770,7 @@ export class GnosticaGame extends GameBase {
             if (partial) {
                 return this;
             }
+            this.sortHandsIfNotBidding();
             this.saveState();
             return this;
         }
@@ -801,6 +847,7 @@ export class GnosticaGame extends GameBase {
         }
         this.nextPlayer();
         this.checkEOG();
+        this.sortHandsIfNotBidding();
         this.saveState();
         return this;
     }
@@ -4271,6 +4318,63 @@ export class GnosticaGame extends GameBase {
         this.currplayer = next;
     }
 
+    // Physical-card-style sort key: every major arcana first (Fool..
+    // World, their own 0-21 sequence), then minors grouped by suit
+    // (Cups, Rods, Discs, Swords - suits' own Component sequence),
+    // ranked Ace..King within each suit. Static (no board/phase
+    // dependency) so both the constructor's own initial deal and
+    // sortHandsIfNotBidding() can share it.
+    private static handSortKey(uid: string): number {
+        const card = allCards().find(c => c.uid === uid);
+        if (card === undefined) {
+            return Number.MAX_SAFE_INTEGER;
+        }
+        if (card.major) {
+            return (card as MajorCard).seq; // 0..21 - always sorts before any minor
+        }
+        const minor = card as MinorCard;
+        return 1000 + minor.suit.seq * 100 + minor.rank.seq;
+    }
+
+    // Skipped entirely during the "bidding" phase itself, where
+    // "bid <n>" names a card by its CURRENT position in hand -
+    // reordering mid-bid would silently pick a different card than the
+    // one a player actually meant. Applies from the moment bidding
+    // resolves (redraw phase) onward, and always in the default,
+    // non-bidding variant (phase is never "bidding" there at all - see
+    // the constructor's own initial sort for that starting case). Called
+    // once per real commit, covering every hand mutation that move()
+    // might have just made (deckDraw/discard/play/redraw/tradeHands/
+    // judgementDraw/highPriestess) without needing to sort at each
+    // individual call site.
+    private sortHandsIfNotBidding(): void {
+        if (this.phase === "bidding") {
+            return;
+        }
+        for (const hand of this.hands) {
+            hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
+        }
+    }
+
+    // Cards in `player`'s hand that weren't there as of the start of
+    // their last turn (see move()'s own docs on handBaseline) - render()
+    // uses this to highlight them. Only ever non-empty for the CURRENT
+    // player, and only until they've started building THIS turn's own
+    // move: `liveMove` is transient and never survives serialization,
+    // but that's exactly right here - render() only ever runs either
+    // with no move() call at all (the idle view, before any click, where
+    // liveMove is still unset) or immediately after one ON THAT SAME
+    // instance (liveMove correctly reflecting THAT call's own move
+    // string) - see move()'s own docs on why every partial preview call
+    // reconstructing a fresh instance per click doesn't break this.
+    private newHandCardUids(player: playerid): Set<string> {
+        if (player !== this.currplayer || this.liveMove !== undefined) {
+            return new Set();
+        }
+        const baseline = new Set(this.handBaseline[player - 1] ?? []);
+        return new Set((this.hands[player - 1] ?? []).filter(uid => !baseline.has(uid)));
+    }
+
     private scoreFor(player: playerid): number {
         let total = 0;
         for (const [, , t] of this.board.entries()) {
@@ -4383,6 +4487,20 @@ export class GnosticaGame extends GameBase {
         if (!this.hasPiecesOnBoard(this.currplayer)) {
             return this.randomPlaceMove();
         }
+        // Once eligible to declare (own score already at/above target,
+        // and nobody else has an active declaration pending - see
+        // move()'s own ALREADY_ANNOUNCED gate), sometimes append the
+        // "(last)" suffix to whatever move is about to be returned.
+        // Without this, a game played purely by randomMove() could never
+        // actually end - gameover/winner/elimination are only ever
+        // decided inside resolveAnnouncedTurn(), which itself only runs
+        // on the turn following a real declaration (see its own docs).
+        // Not unconditional even once eligible - a real player might
+        // wait for a wider safety margin first, same as this file's own
+        // "prefer, don't require" weighting elsewhere in randomMove().
+        const canAnnounce = (this.lastTurnAnnouncedBy === undefined || this.lastTurnAnnouncedBy === this.currplayer)
+            && this.scoreFor(this.currplayer) >= this.targetScore();
+        const announce = canAnnounce && Math.random() < 0.25;
         // "discard" is always unconditionally legal once the player has
         // board presence (any subset of hand, no draw suffix required),
         // so shuffling every head into the try-order and falling all the
@@ -4395,7 +4513,8 @@ export class GnosticaGame extends GameBase {
                 if (candidate === undefined) {
                     continue;
                 }
-                const check = this.validateMove(candidate);
+                const finalCandidate = announce ? `${candidate} (last)` : candidate;
+                const check = this.validateMove(finalCandidate);
                 if (!check.valid || check.complete !== 1) {
                     continue;
                 }
@@ -4411,8 +4530,8 @@ export class GnosticaGame extends GameBase {
                 // handed back as "the" move, matching how click-support's
                 // own preview already verifies via clone+real-apply rather
                 // than trusting prediction.
-                this.clone().move(candidate, { trusted: false });
-                return candidate;
+                this.clone().move(finalCandidate, { trusted: false });
+                return finalCandidate;
             } catch {
                 // A speculative chain can hit a still-open engine edge case
                 // (see task #45 - a later step's own acting minion landing
@@ -4424,7 +4543,7 @@ export class GnosticaGame extends GameBase {
                 continue;
             }
         }
-        return "discard";
+        return announce ? "discard (last)" : "discard";
     }
 
     private buildRandomHeadMove(head: string): string | undefined {
@@ -4495,6 +4614,23 @@ export class GnosticaGame extends GameBase {
             }
         }
         return items[items.length - 1]; // floating-point safety net
+    }
+
+    // A full ordering, not just one pick: repeated weightedPick-without-
+    // replacement. Used where a caller needs to TRY candidates in order
+    // until one validates (findRandomPrimitiveChoice's own retry loop) -
+    // higher-weight candidates tend to land earlier and so get tried
+    // (and kept) first, but every candidate is still reachable if the
+    // earlier ones all fail validation.
+    private weightedShuffle<T>(items: T[], weight: (item: T) => number): T[] {
+        const pool = [...items];
+        const result: T[] = [];
+        while (pool.length > 0) {
+            const picked = this.weightedPick(pool, weight);
+            pool.splice(pool.indexOf(picked), 1);
+            result.push(picked);
+        }
+        return result;
     }
 
     private randomPlaceMove(): string {
@@ -4626,6 +4762,26 @@ export class GnosticaGame extends GameBase {
         return [selfRef, ...facingRefs];
     }
 
+    // Same target set as pieceTargetRefs, but keeping each ref's owner
+    // alongside it - used only to weight R.piece/D.piece/S.piece
+    // candidates toward "grow/reposition your own minion, attack
+    // someone else's" (see buildRandomModeArgCandidates's own docs).
+    // Every OTHER pieceTargetRefs caller (tradeHands, orientAny,
+    // hierophantReplace, hermitTeleport) has no such constructive/
+    // destructive distinction to weight, so it isn't worth widening the
+    // shared helper's own return type for them.
+    private pieceTargetRefsWithOwner(minion: IMinionRef): { ref: string; owner: number }[] {
+        const [tx, ty] = this.minorTargetCell(minion);
+        const selfOwner = this.board.get(minion.x, minion.y)!.pieces[minion.index].owner;
+        const selfRef = this.pieceRefStr(minion.x, minion.y, minion.index);
+        if (tx === minion.x && ty === minion.y) {
+            return [{ ref: selfRef, owner: selfOwner }];
+        }
+        const targetT = this.board.get(tx, ty);
+        const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: this.pieceRefStr(tx, ty, i), owner: p.owner }));
+        return [{ ref: selfRef, owner: selfOwner }, ...facing];
+    }
+
     // Adapts legalMinorModes' own switch to a raw minion rather than an
     // IPendingStep (reconstructed from a move string, not convenient
     // here) - same per-mode legality rules, just read directly off the
@@ -4662,57 +4818,83 @@ export class GnosticaGame extends GameBase {
     // guess, since several of these (a hand card matching an exact
     // value, a specific victim among several) have a narrow or empty
     // legal set that blind random guessing would miss far more often
-    // than it hit. The caller shuffles this list and tries each against
-    // validateSuitPrimitive until one passes (or the list runs out).
-    private buildRandomModeArgCandidates(minion: IMinionRef, suitUid: string, mode: string): string[][] {
+    // than it hit. Each candidate carries a weight (see weightedPick's
+    // own docs) biasing findRandomPrimitiveChoice's search toward
+    // constructive actions (grow/create) landing on the acting player's
+    // OWN minion/territory, and destructive actions (attack) landing on
+    // someone else's or a neutral one - a piece/territory-shrinking
+    // action against your own side, or a growing one that only helps an
+    // opponent, is rarely what a player actually wants, even though the
+    // rules allow it. Modes with no self/other choice at all in their
+    // own target set (C.own/C.enemy/C.new/R.tile, each always self-only,
+    // enemy-only, or plain territory) get a flat weight of 1 throughout.
+    private buildRandomModeArgCandidates(minion: IMinionRef, suitUid: string, mode: string): { args: string[]; weight: number }[] {
         const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
         const [tx, ty] = this.minorTargetCell(minion);
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
         const targetT = this.board.get(tx, ty);
         const hand = this.hands[this.currplayer - 1];
         const orientations: Orientation[] = ["U", ...cardinalOrientations];
-        const pieceTargets = this.pieceTargetRefs(minion);
+        const pieceTargets = this.pieceTargetRefsWithOwner(minion);
         const pips = Array.from({ length: piece.size }, (_, i) => String(i + 1));
         const cardsWorth = (value: number) => hand.filter(uid => {
             const c = allCards().find(cc => cc.uid === uid);
             return c !== undefined && cardPointValue(c) === value;
         });
+        const flat = (candidates: string[][]): { args: string[]; weight: number }[] => candidates.map(args => ({ args, weight: 1 }));
+        // Growing/attacking a territory benefits whoever currently profits
+        // from it uncontested - a cell nobody profits from yet (contested,
+        // or genuinely neutral) counts as "not the acting player's own"
+        // for this purpose, same as an outright enemy-controlled one.
+        const benefitsSelf = targetT?.isUncontestedBy(this.currplayer) ?? false;
 
         switch (`${suitUid}.${mode}`) {
             case "C.own":
-                return orientations.map(o => [targetCell, o]);
+                return flat(orientations.map(o => [targetCell, o]));
             case "C.enemy":
-                return (targetT?.pieces ?? [])
+                return flat((targetT?.pieces ?? [])
                     .map((p, i) => ({ p, i }))
                     .filter(({ p }) => p.owner !== this.currplayer)
-                    .map(({ i }) => [targetCell, this.victimRefStr(tx, ty, i)]);
+                    .map(({ i }) => [targetCell, this.victimRefStr(tx, ty, i)]));
             case "C.new":
-                return cardsWorth(1).map(uid => [targetCell, uid]);
+                return flat(cardsWorth(1).map(uid => [targetCell, uid]));
             case "R.piece":
-                return pieceTargets.flatMap(ref => pips.map(d => [ref, d]));
+                // Moving your own minion is ordinary positioning; shoving
+                // an enemy's is a real but less common destructive tactic
+                // (e.g. into the void) - lean toward self without ruling
+                // the other out.
+                return pieceTargets.flatMap(({ ref, owner }) =>
+                    pips.map(d => ({ args: [ref, d], weight: owner === this.currplayer ? 2 : 1 })));
             case "R.tile":
-                return pips.map(d => [d]);
+                return flat(pips.map(d => [d]));
             case "D.piece":
-                return pieceTargets.map(ref => [ref]);
+                // Growing is constructive - strongly favor your own
+                // minion over an enemy's.
+                return pieceTargets.map(({ ref, owner }) => ({ args: [ref], weight: owner === this.currplayer ? 3 : 1 }));
             case "D.tile": {
                 const current = targetT?.pointValue() ?? 0;
-                return [...cardsWorth(current + 1), ...cardsWorth(current + 2)].map(uid => [targetCell, uid]);
+                const weight = benefitsSelf ? 3 : 1;
+                return [...cardsWorth(current + 1), ...cardsWorth(current + 2)].map(uid => ({ args: [targetCell, uid], weight }));
             }
             case "S.piece":
-                return pieceTargets.flatMap(ref => pips.map(p => [ref, p]));
+                // Attacking is destructive - strongly favor an enemy's
+                // minion over your own.
+                return pieceTargets.flatMap(({ ref, owner }) =>
+                    pips.map(p => ({ args: [ref, p], weight: owner === this.currplayer ? 1 : 3 })));
             case "S.tile": {
                 const current = targetT?.pointValue() ?? 0;
-                const results: string[][] = [];
+                const weight = benefitsSelf ? 1 : 3;
+                const results: { args: string[]; weight: number }[] = [];
                 for (const p of pips) {
                     const resultValue = current - Number(p);
                     if (resultValue < 0) {
                         continue;
                     }
                     if (resultValue === 0) {
-                        results.push([targetCell, p]);
+                        results.push({ args: [targetCell, p], weight });
                     } else {
                         for (const uid of cardsWorth(resultValue)) {
-                            results.push([targetCell, p, uid]);
+                            results.push({ args: [targetCell, p, uid], weight });
                         }
                     }
                 }
@@ -4725,11 +4907,13 @@ export class GnosticaGame extends GameBase {
 
     // Searches for one legal (minion, mode, args) combination for a suit
     // primitive - shuffled minion pool, shuffled legal modes per minion,
-    // shuffled arg candidates per mode, first fully-validated combination
-    // wins. Returns the raw pieces (not yet assembled into a move-string
-    // token array) since magicianChoice needs the same raw minion to
-    // build its own doubly-wrapped step; buildRandomStepTokens below is
-    // the thin wrapper that assembles tokens for direct suit-mode use.
+    // weighted-shuffled arg candidates per mode (see
+    // buildRandomModeArgCandidates's own docs on the weighting), first
+    // fully-validated combination wins. Returns the raw pieces (not yet
+    // assembled into a move-string token array) since magicianChoice
+    // needs the same raw minion to build its own doubly-wrapped step;
+    // buildRandomStepTokens below is the thin wrapper that assembles
+    // tokens for direct suit-mode use.
     private findRandomPrimitiveChoice(
         suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>,
     ): { minion: IMinionRef; mode: string; args: string[] } | undefined {
@@ -4738,8 +4922,9 @@ export class GnosticaGame extends GameBase {
         for (const minion of pool) {
             const modes = shuffle(this.legalModesForMinion(minion, suitUid, ignoreCapacity)) as string[];
             for (const mode of modes) {
-                const candidates = shuffle(this.buildRandomModeArgCandidates(minion, suitUid, mode)) as string[][];
-                for (const args of candidates) {
+                const candidates = this.buildRandomModeArgCandidates(minion, suitUid, mode);
+                const ordered = this.weightedShuffle(candidates, c => c.weight);
+                for (const { args } of ordered) {
                     const check = this.validateSuitPrimitive(suitUid, minion, mode, args, opts);
                     if (!check.failed) {
                         return { minion, mode, args };
@@ -5065,6 +5250,7 @@ export class GnosticaGame extends GameBase {
             if (hand.length === 0) {
                 continue;
             }
+            const newUids = this.newHandCardUids(p as playerid);
             const handKeys: string[] = [];
             for (const uid of hand) {
                 const card = allCards().find(c => c.uid === uid);
@@ -5078,9 +5264,14 @@ export class GnosticaGame extends GameBase {
                     handKeys.push("hand_UNKNOWN");
                     continue;
                 }
-                const key = `hand_${uid}`;
+                // A card just added to hand (see newHandCardUids's own
+                // docs) gets its own tagged legend entry - same face,
+                // just tinted so it's easy to spot regardless of where
+                // rank-order sorting happened to place it.
+                const isNew = newUids.has(uid);
+                const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
                 if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
+                    legend[key] = this.buildCardFace(card, false, isNew ? { background: "#ffd700" } : {}) as [Glyph, ...Glyph[]];
                 }
                 handKeys.push(key);
             }
@@ -5151,17 +5342,17 @@ export class GnosticaGame extends GameBase {
             areas.push(discardArea);
         }
 
-        // With only 2 players, turn order is trivially "you, then them" -
-        // nothing worth a legend for. With 3+, the bidding variant's own
-        // "winner goes first" rule (see beginRedraw's own docs) means
-        // turn order can genuinely diverge from player number, so it's
-        // worth spelling out explicitly rather than leaving players to
-        // infer it from watching currplayer hop around. Defaults to
-        // plain ascending order (1..N) whenever bidWinner isn't set yet
-        // (the default, non-bidding variant; or the bidding variant
-        // still mid-bid) - exactly the sequence nextPlayer()'s own +1
-        // rotation already produces in that case.
-        if (this.numplayers >= 3) {
+        // Only the bidding variant can ever make turn order diverge from
+        // plain player-number order (its own "winner goes first" rule -
+        // see beginRedraw's own docs) - the default variant always
+        // rotates 1,2,3,...,N, so a legend there would just be
+        // redundant clutter restating the obvious. With only 2 players,
+        // turn order is trivially "you, then them" either way - nothing
+        // worth a legend for regardless of variant. Defaults to plain
+        // ascending order (1..N) whenever bidWinner isn't set yet (still
+        // mid-bid) - exactly the sequence nextPlayer()'s own +1 rotation
+        // already produces in that case.
+        if (this.numplayers >= 3 && this.variants.includes("bidding")) {
             const start = this.bidWinner ?? 1;
             const list: AreaKey["list"] = [];
             let p = start;
@@ -5377,8 +5568,12 @@ export class GnosticaGame extends GameBase {
     // upright after applying board rotation, so rank text and suit/power
     // icons stay legible if the board is ever shown rotated for a given
     // seat, while their nudged positions still rotate normally with it.
-    private buildCardFace(card: TarotCard, compact: boolean, opts: { borderless?: boolean; rankText?: string } = {}): Glyph[] {
-        const stack: Glyph[] = [{ name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 }];
+    private buildCardFace(card: TarotCard, compact: boolean, opts: { borderless?: boolean; rankText?: string; background?: string } = {}): Glyph[] {
+        const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 };
+        if (opts.background !== undefined) {
+            backdrop.colour = opts.background;
+        }
+        const stack: Glyph[] = [backdrop];
 
         // `compact` (board tiles, which also have to fit up to 3+ pieces in
         // the same small square) pushes the four corners further out and
