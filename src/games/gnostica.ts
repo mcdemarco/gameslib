@@ -1364,7 +1364,10 @@ export class GnosticaGame extends GameBase {
         const selected = topLevel.find(b => b.value === pendingMinor.head);
         const declareBtn = topLevel.find(b => b.value === "declare");
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-        buttons.push({ label: "→", value: "_spacer" });
+
+        const spacerLabel = pendingMinor.suitUid ? MAGICIAN_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
+        buttons.push({ label: spacerLabel, value: "_spacer",  attributes: [{ name: "font-style", value: "italic" }] });
+
         if (pendingMinor.special === "hermitTeleport") {
             const chosen = pendingMinor.rest[0];
             for (const [mode, config] of Object.entries(HERMIT_MODES)) {
