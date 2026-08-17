@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, I
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { reviver, shuffle, UserFacingError } from "../common";
+import { Direction, reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
@@ -428,6 +428,7 @@ export class GnosticaGame extends GameBase {
     public bidWinner: playerid | undefined;
     public redrawOrder: playerid[] = [];
     public redrawPos = 0;
+    private buffers: Direction[] = [];
 
     private targetScore(): number {
         if (this.variants.includes("target-8")) {
@@ -529,6 +530,7 @@ export class GnosticaGame extends GameBase {
                 bidWinner: undefined,
                 redrawOrder: [],
                 redrawPos: 0,
+                buffer: undefined
             };
             this.stack = [fresh];
         } else {
@@ -684,6 +686,7 @@ export class GnosticaGame extends GameBase {
             }
         }
         this.results = [];
+        this.buffers = [];
 
         // Freezes the acting player's hand exactly as it stood BEFORE
         // this turn's own mutations - the comparison point render()'s
@@ -5460,6 +5463,12 @@ export class GnosticaGame extends GameBase {
                     fg: "_context_strokes",
                     bg: "_context_board",
                     opacity: 0,
+                },
+                buffer: this.buffers.length === 0 ? undefined : {
+                    separated: true,
+                    width: 0.2,
+                    pattern: "dots",
+                    show: [...this.buffers] as ("N" | "E" | "S" | "W")[],
                 },
                 markers,
             },
