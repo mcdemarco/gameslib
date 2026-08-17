@@ -3026,6 +3026,7 @@ export class GnosticaGame extends GameBase {
         // etc.) - it isn't manufactured out of nothing.
         takeFromStash(this.buildPowerContext(), this.currplayer, 1);
         territory.add(new Piece(this.currplayer, 1, orientation));
+        this.addBufferIfWasteland(x, y);
         this.results.push({ type: "place", where: cellStr, how: "initial" });
     }
 
@@ -3070,32 +3071,39 @@ export class GnosticaGame extends GameBase {
         if (piece.owner !== this.currplayer) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_YOUR_MINION"));
         }
-        // A wasteland cell is only ever adjacent to a single side of the
-        // board's own stored extent at a time (never a corner) - if this
-        // one sits on that edge, reorienting outward from it needs a
-        // buffer there, since every void cell now renders as a plain,
-        // unclickable "-" (Pacru's own "buffer" approach, not an
-        // expanded/padded void ring - see handleClickCore's own docs on
-        // reading a buffer click back). Recomputed on every orient click
-        // (this.buffers itself is reset at the top of every move() call),
-        // so this always reflects wherever the CURRENTLY selected piece
-        // actually sits, not whichever piece a previous click picked -
-        // and deliberately ignores the piece's own (pre-existing)
-        // orientation entirely.
-        if (this.board.classify(x, y) === "wasteland") {
-            if (x === this.board.minX) {
-                this.buffers.push("W");
-            } else if (x === this.board.maxX) {
-                this.buffers.push("E");
-            } else if (y === this.board.minY) {
-                this.buffers.push("N");
-            } else if (y === this.board.maxY) {
-                this.buffers.push("S");
-            }
-        }
+        this.addBufferIfWasteland(x, y);
         const orientation = this.parseOrientation(orientationStr);
         piece.orientation = orientation;
         this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: this.stripCellFromRef(ref), facing: orientation });
+    }
+
+    // Any board cell whose facing might get set/adjusted by a click -
+    // reorienting an existing minion (cmdOrient), a newly placed one
+    // (cmdPlace), a newly created one (Cups "own"), or a special power's
+    // own target (orientMinion/orientAny/hierophantReplace) - needs a
+    // buffer on the correct side if it's on a wasteland, since every void
+    // cell renders as a plain, unclickable "-" (Pacru's own "buffer"
+    // approach, not an expanded/padded void ring - see handleClickCore's
+    // own docs on reading a buffer click back). A wasteland cell is only
+    // ever adjacent to a single side of the board's own stored (territory)
+    // extent at a time (never a corner). Recomputed on every call
+    // (this.buffers itself is reset at the top of every move() call), so
+    // this always reflects wherever the CURRENTLY relevant piece actually
+    // sits - and deliberately ignores that piece's own (pre-existing)
+    // orientation entirely.
+    private addBufferIfWasteland(x: number, y: number): void {
+        if (this.board.classify(x, y) !== "wasteland") {
+            return;
+        }
+        if (x === this.board.minX) {
+            this.buffers.push("W");
+        } else if (x === this.board.maxX) {
+            this.buffers.push("E");
+        } else if (y === this.board.minY) {
+            this.buffers.push("N");
+        } else if (y === this.board.maxY) {
+            this.buffers.push("S");
+        }
     }
 
     private validateOrient(args: string[]): IValidationResult | undefined {
@@ -3744,6 +3752,7 @@ export class GnosticaGame extends GameBase {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const orientation = this.parseOrientation(orientationStr);
                 createOwn(ctx, minion.x, minion.y, minion.index, tx, ty, orientation, opts);
+                this.addBufferIfWasteland(tx, ty);
                 this.results.push({ type: "place", where: cellStr, how: "cups-own" });
                 const newIndex = this.board.get(tx, ty)!.pieces.length - 1;
                 return { newMinion: { x: tx, y: ty, index: newIndex } };
@@ -4119,6 +4128,7 @@ export class GnosticaGame extends GameBase {
         const [orientationStr] = rest;
         const orientation = this.parseOrientation(orientationStr);
         orientMinion(this.buildPowerContext(), minion.x, minion.y, minion.index, orientation);
+        this.addBufferIfWasteland(minion.x, minion.y);
         this.results.push({
             type: "orient",
             where: GnosticaBoard.coords2algebraic(minion.x, minion.y),
@@ -4149,6 +4159,7 @@ export class GnosticaGame extends GameBase {
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const orientation = this.parseOrientation(orientationStr);
         orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
+        this.addBufferIfWasteland(target.x, target.y);
         this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.stripCellFromRef(targetRef), facing: orientation });
         return owner === this.currplayer ? { newMinion: target } : {};
     }
@@ -4177,6 +4188,7 @@ export class GnosticaGame extends GameBase {
         const target = this.resolvePieceRefOrThrow(targetRef);
         const orientation = this.parseOrientation(orientationStr);
         hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
+        this.addBufferIfWasteland(target.x, target.y);
         this.results.push({ type: "convert", what: this.stripCellFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
         const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
         return { newMinion: { x: target.x, y: target.y, index: newIndex } };
