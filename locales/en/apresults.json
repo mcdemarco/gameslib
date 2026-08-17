@@ -244,7 +244,7 @@
             "minimal_one": "{{count}} friendly piece was destroyed.",
             "minimal_other": "{{count}} friendly pieces were destroyed."
         },
-        "gnostica_piece": "{{player}} destroyed {{what}}.",
+        "gnostica_piece": "{{player}} destroyed a {{what}}-pip minion.",
         "gnostica_tile": "{{player}} destroyed {{what}} at {{where}}.",
         "logger": "{{player}} felled a tree at {{where}}.",
         "mattock": "{{player}} mined at {{where}}.",
@@ -362,7 +362,7 @@
         "gess_other": "{{player}} moved a 3x3 piece containing {{count}} stones from {{from}} to {{to}}.",
         "gnostica_hermit_piece": "{{player}} teleported a {{what}} minion from {{from}} to {{to}}.",
         "gnostica_hermit_tile": "{{player}} teleported the territory at {{from}} to {{to}}.",
-        "gnostica_rod_piece": "{{player}} moved minion {{what}} from {{from}} to {{to}}.",
+        "gnostica_rod_piece": "{{player}} moved a {{what}}-pip minion from {{from}} to {{to}}.",
         "gnostica_rod_tile": "{{player}} pushed the territory at {{from}} to {{to}}.",
         "hexentafl_king": "{{player}} moved the king from {{from}} to {{to}}.",
         "iqishiqi": "{{player}} moved neutral stone {{from}} to {{to}}.",
@@ -403,7 +403,7 @@
     "NULLIFY_CLAIM": "Towers may not be claimed on the last turn of the game. The claim at {{where}} was nullified.",
     "ORIENT": {
         "crosshairs": "{{player}} turned a plane at {{where}} to face {{facing}}.",
-        "gnostica": "{{player}} oriented a {{what}} minion at {{where}} {{facing}}.",
+        "gnostica": "{{player}} oriented a {{what}}-pip minion at {{where}} {{facing}}.",
         "nowhat": "{{player}} turned a piece at {{where}} to face {{facing}}."
     },
     "PASS": {

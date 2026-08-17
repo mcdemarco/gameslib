@@ -1618,6 +1618,19 @@ export class GnosticaGame extends GameBase {
         return `${cell}.${piece.size}.${piece.orientation}.${piece.owner}`;
     }
 
+    // Strips the leading `<cell>.` off a pieceRefStr-shaped string (see
+    // its own docs on the exact format), leaving just the disambiguating
+    // minion detail (size, and orientation/owner only if needed) - for
+    // threading a minion's identity into a result's own `what` without
+    // duplicating the cell a sibling `where`/`from`/`to` field already
+    // carries. Cell notation itself never contains a "." (see
+    // GnosticaBoard.coords2algebraic), so the first one is always the
+    // cell/detail boundary.
+    private stripCellFromRef(ref: string): string {
+        const idx = ref.indexOf(".");
+        return idx === -1 ? ref : ref.slice(idx + 1);
+    }
+
     // Click-to-orient: clicking the cell a piece already occupies means
     // "face up"; clicking one of its four orthogonal neighbours means
     // "face that way" - one click always states the intended direction
@@ -3025,7 +3038,7 @@ export class GnosticaGame extends GameBase {
         }
         const orientation = this.parseOrientation(orientationStr);
         piece.orientation = orientation;
-        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: ref, facing: orientation });
+        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: this.stripCellFromRef(ref), facing: orientation });
     }
 
     private validateOrient(args: string[]): IValidationResult | undefined {
@@ -3789,11 +3802,11 @@ export class GnosticaGame extends GameBase {
                 const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
                 movePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, newOrientation, opts);
                 if (destroyedInVoid) {
-                    this.results.push({ type: "destroy", where: origin, what: targetRef });
+                    this.results.push({ type: "destroy", where: origin, what: this.stripCellFromRef(targetRef) });
                     return {};
                 }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
-                this.results.push({ type: "move", from: origin, to: dest, what: targetRef, how: "rod-piece" });
+                this.results.push({ type: "move", from: origin, to: dest, what: this.stripCellFromRef(targetRef), how: "rod-piece" });
                 if (movedOwner === this.currplayer) {
                     const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                     return { newMinion: { x: destX, y: destY, index: newIndex } };
@@ -3968,7 +3981,7 @@ export class GnosticaGame extends GameBase {
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 attackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, newOrientation, opts);
-                this.results.push({ type: "destroy", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: targetRef });
+                this.results.push({ type: "destroy", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.stripCellFromRef(targetRef) });
                 const resultSize = beforeSize - pips;
                 if (resultSize > 0 && owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
@@ -4052,7 +4065,7 @@ export class GnosticaGame extends GameBase {
         this.results.push({
             type: "orient",
             where: GnosticaBoard.coords2algebraic(minion.x, minion.y),
-            what: this.pieceRefStr(minion.x, minion.y, minion.index),
+            what: this.stripCellFromRef(this.pieceRefStr(minion.x, minion.y, minion.index)),
             facing: orientation,
         });
         return { newMinion: minion };
@@ -4079,7 +4092,7 @@ export class GnosticaGame extends GameBase {
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const orientation = this.parseOrientation(orientationStr);
         orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
-        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: targetRef, facing: orientation });
+        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.stripCellFromRef(targetRef), facing: orientation });
         return owner === this.currplayer ? { newMinion: target } : {};
     }
 
@@ -4107,7 +4120,7 @@ export class GnosticaGame extends GameBase {
         const target = this.resolvePieceRefOrThrow(targetRef);
         const orientation = this.parseOrientation(orientationStr);
         hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
-        this.results.push({ type: "convert", what: targetRef, into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
+        this.results.push({ type: "convert", what: this.stripCellFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
         const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
         return { newMinion: { x: target.x, y: target.y, index: newIndex } };
     }
@@ -4145,7 +4158,7 @@ export class GnosticaGame extends GameBase {
             const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
             const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
             hermitMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY, newOrientation);
-            this.results.push({ type: "move", from: origin, to: destCellStr, what: targetRef, how: "hermit-piece" });
+            this.results.push({ type: "move", from: origin, to: destCellStr, what: this.stripCellFromRef(targetRef), how: "hermit-piece" });
             if (owner === this.currplayer) {
                 const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                 return { newMinion: { x: destX, y: destY, index: newIndex } };
@@ -5877,7 +5890,7 @@ export class GnosticaGame extends GameBase {
             case "move":
                 switch (r.how) {
                     case "rod-piece":
-                        node.push(i18next.t("apresults:MOVE.gnostica_rod_piece", { player, from: r.from, to: r.to }));
+                        node.push(i18next.t("apresults:MOVE.gnostica_rod_piece", { player, what: r.what, from: r.from, to: r.to }));
                         resolved = true;
                         break;
                     case "rod-tile":
