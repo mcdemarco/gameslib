@@ -1303,7 +1303,7 @@ describe("Gnostica: handleClick", () => {
         // simplification - see cmdDiscard's own bare-seed docs), so this
         // same collapse is unavoidably shown no matter which button
         // actually got clicked to seed the preview.
-        expect(values).to.deep.equal(["drawcount_0", "drawcount_1", "drawcount_2"]);
+        expect(values).to.deep.equal(["drawcount_2", "drawcount_1", "drawcount_0"]);
     });
 
     it("clicking a draw-count button completes the move with that exact count", () => {
@@ -2060,7 +2060,10 @@ describe("Gnostica: click-to-orient messaging", () => {
     // buffer click instead - same contract pacru.ts/azacru.ts already use
     // for their own `buffer` areas: an out-of-window row/col (-1,-1 here,
     // matching every other non-cell click in this file) plus the clicked
-    // segment's own absolute board coordinates via `piece`, comma-separated.
+    // segment's own coordinates via `piece`, comma-separated - but
+    // (confirmed against the real renderer, not just pacru's own source)
+    // still WINDOW-RELATIVE, the same frame rowColFor's own row/col are,
+    // not raw absolute board coordinates.
     it("orient: a buffer click on the void side of a wasteland minion sets that facing", () => {
         const g = new GnosticaGame(2);
         g.board.store.set(2, 0, new Territory(undefined, [new Piece(1, 1, "U")]));
@@ -2071,7 +2074,8 @@ describe("Gnostica: click-to-orient messaging", () => {
         const selected = g.handleClick("orient", row, col);
         expect(selected.move).eq(`orient ${ref} U`);
 
-        const result = g.handleClick(selected.move!, -1, -1, "3,0"); // one step east - the void side
+        const [rowVoid, colVoid] = rowColFor(g, 3, 0); // one step east - the void side
+        const result = g.handleClick(selected.move!, -1, -1, `${colVoid},${rowVoid}`);
         expect(result.valid).to.be.true;
         expect(result.move).eq(`orient ${ref} E`);
         expect(result.message).eq(directionMsg());
