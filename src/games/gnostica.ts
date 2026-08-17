@@ -1,6 +1,6 @@
 import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
@@ -5200,6 +5200,7 @@ export class GnosticaGame extends GameBase {
         // render - nothing is ever permanently unreachable.
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
         const pieceRows: string[] = [];
+        const markers: MarkerOutline[] = [];
         for (let y = minY; y <= maxY; y++) {
             const rowCells: string[] = [];
             for (let x = minX; x <= maxX; x++) {
@@ -5212,6 +5213,15 @@ export class GnosticaGame extends GameBase {
                 const key = this.cellRenderKey(t, cls);
                 if (!(key in legend)) {
                     legend[key] = this.buildCellGlyph(t, cls);
+                    const players = t?.card !== undefined ? t.playersPresent() : undefined;
+                    if (players !== undefined && players.size === 1) {
+                        const [owner] = players;
+                        markers.push({
+                            type: "outline",
+                            colour: owner,
+                            points: [{row: y - minY, col: x - minX}],
+                        });
+                    }
                 }
                 rowCells.push(key);
             }
@@ -5392,6 +5402,7 @@ export class GnosticaGame extends GameBase {
                     bg: "_context_board",
                     opacity: 0,
                 },
+                markers,
             },
             legend,
             pieces: pieceRows.join("\n"),
