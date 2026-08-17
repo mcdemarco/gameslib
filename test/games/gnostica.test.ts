@@ -30,7 +30,29 @@ const forceCardAt = (g: GnosticaGame, x: number, y: number, cardFn: () => TarotC
             t.card = undefined;
         }
     }
-    g.board.get(x, y)!.card = target;
+    const t = g.board.get(x, y);
+    if (t !== undefined) {
+        t.card = target;
+    } else {
+        g.board.store.set(x, y, new Territory(target));
+    }
+};
+
+// Wipes the constructor's own randomly-dealt initial 3x3 grid entirely,
+// so a test can build a fully deterministic board from scratch instead
+// of relying on forceCardAt alone - forceCardAt only controls its OWN
+// target cell; every other cell (and every other card's random position)
+// is still whatever the constructor happened to deal, which occasionally
+// collides with a test's own assumptions (e.g. forceCardAt's own
+// duplicate-clearing wiping out a DIFFERENT cell the test still needed a
+// card at, if that card was randomly dealt there too). Use together with
+// forceCardAt (now tolerant of a missing Territory) to name every cell a
+// test actually cares about, leaving everything else void/wasteland by
+// construction rather than by chance.
+const clearBoard = (g: GnosticaGame): void => {
+    for (const [x, y] of g.board.store.getAllPositions()) {
+        g.board.store.delete(x, y);
+    }
 };
 
 describe("Gnostica: setup", () => {
@@ -158,6 +180,13 @@ describe("Gnostica: hand sort order", () => {
         g.move("place m0", { trusted: true });
         g.move("place n0", { trusted: true });
         g.hands[0] = [card("5R").uid, major(1).uid, card("AC").uid, card("2C").uid, card("KS").uid, "3D"];
+        // Fully deterministic: the real draw below could otherwise
+        // (rarely) pull a duplicate of one of these same forced cards
+        // straight back out of the draw pile, if the constructor's own
+        // random deal happened to leave it there too - direct hand pokes
+        // like this one don't remove the card from drawPile on their own.
+        const forcedUids = new Set(g.hands[0]);
+        g.drawPile = g.drawPile.filter(uid => !forcedUids.has(uid));
         g.move("discard 5R", { trusted: true }); // draws back to 6, then re-sorts
         const cards = g.hands[0].map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
         let lastWasMajor = true;
@@ -603,9 +632,15 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
 
     it("Rods (tile): pushes the pointed-at territory further away", () => {
         const g = new GnosticaGame(2);
+        // Fully deterministic (see clearBoard's own docs): the random
+        // initial deal could otherwise occasionally put the Ace of Rods
+        // itself at n0, which forceCardAt's own duplicate-clearing would
+        // then wipe out from there, leaving no territory to push.
+        clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfRods());
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
-        g.move("place l0", { trusted: true }); // player 2
+        g.move("place l0", { trusted: true }); // player 2, onto the wasteland beside m0
         g.move(`use ${aceOfRods().uid}, m0.1 tile 1`, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
@@ -740,7 +775,13 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
 
     it("Lovers (move, then create): a pushed own piece becomes a minion for the second step", () => {
         const g = new GnosticaGame(2);
+        // Fully deterministic (see clearBoard's own docs): the random
+        // initial deal could otherwise occasionally put The Lovers
+        // itself at n0, which forceCardAt's own duplicate-clearing would
+        // then wipe out from under piece B, stranding it off-territory.
+        clearBoard(g);
         forceCardAt(g, 0, 0, () => major(6)); // The Lovers
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - any real card, distinct from The Lovers
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, pointing at n0
         g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")]; // own piece B, already on n0 (not on the Lovers)
         // A (m0) pushes B (n0) one space east to o0, reorienting it "U";
@@ -2203,8 +2244,14 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
     };
 
     it("Lovers (move, then create): step 2's Cups buttons appear only once step 1 is complete; a board click still redirects step 1's default target; the chained click sequence resolves correctly", () => {
+        // Fully deterministic (see clearBoard's own docs): the random
+        // initial deal could otherwise occasionally put The Lovers
+        // itself at n0, which forceCardAt's own duplicate-clearing would
+        // then wipe out from under piece B, stranding it off-territory.
         const setup = (game: GnosticaGame) => {
+            clearBoard(game);
             forceCardAt(game, 0, 0, () => major(6)); // The Lovers
+            forceCardAt(game, 1, 0, () => aceOfDiscs()); // n0 - any real card, distinct from The Lovers
             game.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, pointing at n0
             game.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")]; // own piece B, already on n0
         };
@@ -2561,7 +2608,13 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
 
     it("Hanged Man (move, then tradeHands): a click on a cell already 'claimed' by step 1 still starts step 2, not step 1's own refinement", () => {
         const g = new GnosticaGame(2);
+        // Fully deterministic (see clearBoard's own docs): the random
+        // initial deal could otherwise occasionally put The Hanged Man
+        // itself at n0, which forceCardAt's own duplicate-clearing would
+        // then wipe out, leaving no territory there to push.
+        clearBoard(g);
         forceCardAt(g, 0, 0, () => major(12)); // The Hanged Man
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, facing n0
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
