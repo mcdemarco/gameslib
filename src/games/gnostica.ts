@@ -1215,13 +1215,17 @@ export class GnosticaGame extends GameBase {
         if (this.liveMove === undefined) {
             return false;
         }
-        return this.results.some(r => {
-            if (r.type !== "place" || r.where === undefined || r.how !== undefined) {
-                return false;
-            }
-            const [px, py] = GnosticaBoard.algebraic2coords(r.where);
-            return this.board.get(px, py)?.pieces.some(p => p.owner === this.currplayer) ?? false;
-        });
+        // cmdPlace/validatePlace unconditionally reject "place" once the
+        // acting player already has ANY board presence (ALREADY_ON_BOARD)
+        // - so a live "place" preview can only ever be that player's
+        // first piece ever, with no other case to distinguish. Reading
+        // this off this.liveMove directly (same approach as the
+        // midPowerStep check just above) avoids depending on
+        // this.results' own shape: results exist to describe game events
+        // for chat/history, not to signal UI state, so a chat-only change
+        // there (e.g. tagging place's own result with `how: "initial"`)
+        // has no business breaking this check - and previously did.
+        return this.parseMove(this.liveMove).head?.toLowerCase() === "place";
     }
 
     // Which button(s) to bold, based on this.liveMove (see move()'s own
@@ -5376,6 +5380,29 @@ export class GnosticaGame extends GameBase {
             areas.push(discardArea);
         }
 
+        // The declaration round window - from a player's own "(last)"
+        // announcement until their next turn (when resolveAnnouncedTurn()
+        // decides win-or-eliminate) - gets an unmissable banner, borrowing
+        // magnate.ts's own "Warning" glyph trick: a plain AreaPieces entry
+        // whose one "piece" is a red warning-triangle glyph rather than a
+        // real game piece, with the actual message carried by the area's
+        // own label.
+        if (this.lastTurnAnnouncedBy !== undefined) {
+            if (!("Warning" in legend)) {
+                legend.Warning = [
+                    { name: "piece-borderless", colour: "_context_background" },
+                    { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
+                ];
+            }
+            areas.push({
+                type: "pieces",
+                pieces: ["Warning"],
+                label: i18next.t("apgames:validation.gnostica.LABEL_WARNING"),
+                spacing: 0.25,
+                width: 1,
+            });
+        }
+
         // Only the bidding variant can ever make turn order diverge from
         // plain player-number order (its own "winner goes first" rule -
         // see beginRedraw's own docs) - the default variant always
@@ -5841,8 +5868,8 @@ export class GnosticaGame extends GameBase {
                 node.push(i18next.t("apresults:USE.gnostica", { player, what: r.what }));
                 resolved = true;
                 break;
-            case "discover":
-                node.push(i18next.t("apresults:DISCOVER.default", { player, where: r.where }));
+            case "pass":
+                node.push(i18next.t("apresults:PASS.gnostica_bids", { player }));
                 resolved = true;
                 break;
             case "destroy":
