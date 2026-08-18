@@ -190,7 +190,7 @@ const HERMIT_MODES: Record<string, { label: string }> = {
 // The four suits magicianChoice lets the player pick between, in button
 // order - reuses MINOR_MODES[suitUid] once chosen (see IPendingStep's own
 // `prefix` field).
-const MAGICIAN_SUITS: { uid: string; label: string }[] = [
+const ALL_SUITS: { uid: string; label: string }[] = [
     { uid: "C", label: "Cups" },
     { uid: "R", label: "Rods" },
     { uid: "D", label: "Discs" },
@@ -1534,7 +1534,7 @@ export class GnosticaGame extends GameBase {
 
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
 
-        const spacerLabel = pendingMinor.suitUid ? MAGICIAN_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
+        const spacerLabel = pendingMinor.suitUid ? ALL_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
         buttons.push({ label: spacerLabel, value: "_spacer",  attributes: [{ name: "font-style", value: "italic" }] });
 
         if (pendingMinor.special === "hermitTeleport") {
@@ -1547,7 +1547,7 @@ export class GnosticaGame extends GameBase {
                 buttons.push(button);
             }
         } else if (pendingMinor.special === "magicianChoice") {
-            for (const suit of MAGICIAN_SUITS) {
+            for (const suit of ALL_SUITS) {
                 buttons.push({ label: suit.label, value: `magician_${suit.uid}` });
             }
         } else {
@@ -1746,7 +1746,7 @@ export class GnosticaGame extends GameBase {
         special: SpecialPower, head: "use" | "play", headArg: string,
         eligible: IMinionRef[], minions: IMinionRef[], priorSteps: string[], tokens: string[],
     ): IPendingStep {
-        if (special === "magicianChoice" && MAGICIAN_SUITS.some(s => s.uid === tokens[1])) {
+        if (special === "magicianChoice" && ALL_SUITS.some(s => s.uid === tokens[1])) {
             const suitUid = tokens[1];
             const [, , mode, ...rest] = tokens;
             const { minion, ambiguous, candidates } = this.resolveStepMinion(tokens, minions);
@@ -5559,7 +5559,7 @@ export class GnosticaGame extends GameBase {
     // legality, then verify the doubly-wrapped shape via
     // validateMagicianChoice as this step's own final check.
     private buildRandomMagicianChoiceTokens(minions: IMinionRef[]): string[] | undefined {
-        for (const suit of shuffle([...MAGICIAN_SUITS]) as typeof MAGICIAN_SUITS) {
+        for (const suit of shuffle([...ALL_SUITS]) as typeof ALL_SUITS) {
             const choice = this.findRandomPrimitiveChoice(suit.uid, minions, {});
             if (choice === undefined) {
                 continue;
