@@ -1,11 +1,11 @@
-export type PieceSize = 1 | 2 | 3;
+export type Pips = 1 | 2 | 3;
 export type Orientation = "N" | "E" | "S" | "W" | "U";
 
 export const cardinalOrientations: Orientation[] = ["N", "E", "S", "W"];
 
 export interface IPiece {
     owner: number;
-    size: PieceSize;
+    size: Pips;
     orientation: Orientation;
 }
 
@@ -14,10 +14,10 @@ export interface IPiece {
 // targets only its own space).
 export class Piece implements IPiece {
     public owner: number;
-    public size: PieceSize;
+    public size: Pips;
     public orientation: Orientation;
 
-    constructor(owner: number, size: PieceSize, orientation: Orientation = "U") {
+    constructor(owner: number, size: Pips, orientation: Orientation = "U") {
         this.owner = owner;
         this.size = size;
         this.orientation = orientation;
