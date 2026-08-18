@@ -115,15 +115,7 @@ type PieceRefResolution =
     | { kind: "not_found" }
     | { kind: "ambiguous" };
 
-// parseMove's result - one canonical structural parse of a move
-// string, shared by every consumer (validateMove, move,
-// parsePendingStep, highlightedButtonValues, handleClick) instead of
-// each re-deriving head/args/steps and the "(last)" flag independently.
-// Purely structural - like Magnate's own parseMove/pickleMove pair, this
-// never checks legality against game state (that stays the
-// validateX/checkX layer's job); it only answers "what does this string
-// SAY, and is it at least well-formed enough to be worth asking that
-// question." stringifyMove is its exact inverse.
+// See parseMove()/pickleMove() for details.
 interface IParsedMove {
     announceLast: boolean;
     // undefined only for a genuinely empty move (or one that's just
@@ -669,13 +661,13 @@ export class GnosticaGame extends GameBase {
     // rather than something every consumer has to notice and skip past
     // on its own.
     //
-    // parseMove/stringifyMove (below) are this grammar's single
+    // parseMove/pickleMove (below) are this grammar's single
     // structural parser/serializer pair - every reader (validateMove,
     // move, parsePendingStep, highlightedButtonValues,
     // handleClick) calls the former instead of re-deriving head/args/
     // steps/announceLast independently, and handleClick's declare
     // handling calls the latter instead of string-level regex surgery.
-    // Purely structural, like Magnate's own parseMove/pickleMove pair -
+    // Purely structural,
     // never checks legality against game state, only "is the head a
     // recognized keyword, and does each power step at least look
     // plausible" (isStepShapeValid's own docs explain why that can't go
@@ -1050,7 +1042,7 @@ export class GnosticaGame extends GameBase {
         };
     }
 
-    private stringifyMove(p: IParsedMove): string {
+    private pickleMove(p: IParsedMove): string {
         const segments = p.head === undefined ? [] : [[p.head, ...p.rest].join(" "), ...p.stepSegments.map(s => s.join(" "))];
         const base = segments.join(", ");
         return p.announceLast ? (base.length === 0 ? "(last)" : `${base} (last)`) : base;
@@ -2378,9 +2370,9 @@ export class GnosticaGame extends GameBase {
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         const parsed = this.parseMove(move);
         if (piece === "_btn_declare") {
-            return this.provisionalResult(this.stringifyMove({ ...parsed, announceLast: !parsed.announceLast }));
+            return this.provisionalResult(this.pickleMove({ ...parsed, announceLast: !parsed.announceLast }));
         }
-        const bareMove = this.stringifyMove({ ...parsed, announceLast: false });
+        const bareMove = this.pickleMove({ ...parsed, announceLast: false });
         const result = this.handleClickCore(bareMove, row, col, piece);
         return this.reattachLastFlag(result, parsed.announceLast);
     }
@@ -2400,7 +2392,7 @@ export class GnosticaGame extends GameBase {
         if (!announceLast || result.move === undefined) {
             return result;
         }
-        const combined = this.stringifyMove({ ...this.parseMove(result.move), announceLast: true });
+        const combined = this.pickleMove({ ...this.parseMove(result.move), announceLast: true });
         if (result.valid && result.complete !== -1) {
             return this.provisionalResult(combined);
         }
