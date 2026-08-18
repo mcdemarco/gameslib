@@ -1896,6 +1896,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     // is actually facing an enemy, that's what the default should target.
     it("Swords (piece): with a piece in the facing cell, defaults to attacking THAT instead of self", () => {
         const g = new GnosticaGame(2);
+        clearBoard(g); // fully deterministic - see clearBoard's own docs
         forceCardAt(g, 0, 0, () => aceOfSwords());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place n0 W", { trusted: true }); // player 2, on the facing cell
@@ -1906,7 +1907,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.1 piece n0.1 1`);
         g.move(modeClick.move, { trusted: true });
         expect(g.board.get(0, 0)!.pieces.length).eq(1); // the acting player's own minion survives
-        expect(g.board.get(1, 0)!.pieces.length).eq(0); // the enemy piece is destroyed instead
+        // n0 has no card of its own (cleared above) - once its only piece
+        // is destroyed, pruneIfEmpty deletes the cell outright rather than
+        // leaving an empty Territory behind (see pruneIfEmpty's own docs),
+        // so board.get(1,0) itself becomes undefined, not just empty.
+        expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // the enemy piece is destroyed instead
         expect(g.stashes.get(2)![0]).eq(5); // returned to ITS owner's stash
     });
 

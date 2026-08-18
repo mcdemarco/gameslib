@@ -189,10 +189,12 @@ export class GnosticaBoard {
 
     // Moves only the CARD from (fromX,fromY) to (toX,toY) - per the rules,
     // pieces never travel with a pushed territory, they stay exactly where
-    // they were. If the destination already holds pieces (or a Territory
-    // shell), the incoming card slides in under them. Returns the same
-    // "evicted at the departure side" list as destroyTerritory (arrival can
-    // only promote cells, never strand anyone there).
+    // they were. The destination is always wasteland (the caller already
+    // enforced that), so it may already hold pieces of its own, stored as
+    // a cardless Territory object - the incoming card slides in under
+    // them by attaching to that SAME object, not a fresh one. Returns the
+    // same "evicted at the departure side" list as destroyTerritory
+    // (arrival can only promote cells, never strand anyone there).
     public pushTerritory(fromX: number, fromY: number, toX: number, toY: number): IEvicted[] {
         const src = this.cells.get(fromX, fromY);
         if (src === undefined || src.card === undefined) {
