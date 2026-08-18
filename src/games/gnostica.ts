@@ -6,7 +6,7 @@ import { Direction, reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
-import { Territory, ITerritory, cardPointValue } from "./gnostica/Territory";
+import { CellContents, ICellContents, cardPointValue } from "./gnostica/CellContents";
 import { Piece, Orientation, cardinalOrientations } from "./gnostica/Piece";
 import {
     Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
@@ -69,7 +69,7 @@ const CARDINAL_COS_SIN: Record<Exclude<Orientation, "U">, [number, number]> = {
 // `piece` is set only for a newMinion predicted by a non-mutating validate*
 // step (see validateCups/validateRods/validateHermitStep's "own"/"piece"
 // cases): since validation never actually mutates the board, a piece
-// created/moved onto a cell with no stored Territory object yet has nowhere
+// created/moved onto a cell with no stored CellContents object yet has nowhere
 // real to read owner/size/orientation from until the move is actually
 // committed - this snapshot carries that data along instead. Every other
 // producer of an IMinionRef (the real apply* mutation path, and any ref
@@ -326,7 +326,7 @@ interface IPendingStep {
 // uses - see IPendingStep/parsePendingStep. See docs on `move()` below.
 interface IMoveState extends IIndividualState {
     currplayer: playerid;
-    board: UnboundedSquareBoard<Territory>;
+    board: UnboundedSquareBoard<CellContents>;
     // Card uids per player, index 0 = player 1.
     hands: string[][];
     // Each player's own hand exactly as it stood the last time THEY
@@ -518,7 +518,7 @@ export class GnosticaGame extends GameBase {
             let boardIdx = 0;
             for (let x = -1; x <= 1; x++) {
                 for (let y = -1; y <= 1; y++) {
-                    board.store.set(x, y, new Territory(boardCards[boardIdx]));
+                    board.store.set(x, y, new CellContents(boardCards[boardIdx]));
                     boardIdx++;
                 }
             }
@@ -574,10 +574,10 @@ export class GnosticaGame extends GameBase {
             this.stack = [...state.stack];
             // Two-step rehydration (see GnosticaBoard.rehydrate's own docs):
             // JSON.parse+reviver only restores the outer UnboundedSquareBoard
-            // wrapper; every stored Territory still needs its own
+            // wrapper; every stored CellContents still needs its own
             // deserialize() pass to become a real class instance again.
             this.stack.forEach(s => {
-                s.board = GnosticaBoard.rehydrate(s.board as UnboundedSquareBoard<ITerritory>);
+                s.board = GnosticaBoard.rehydrate(s.board as UnboundedSquareBoard<ICellContents>);
             });
         }
         this.load();
@@ -3313,7 +3313,7 @@ export class GnosticaGame extends GameBase {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PLACE_OCCUPIED", { cell: cellStr }));
         }
         if (territory === undefined) {
-            territory = new Territory(undefined);
+            territory = new CellContents(undefined);
             this.board.store.set(x, y, territory);
         }
         // Your very first piece comes from your own stash, same as every
@@ -4118,7 +4118,7 @@ export class GnosticaGame extends GameBase {
                 }
                 // The new piece is always pushed to the end - its
                 // pre-mutation length here IS its post-mutation index. The
-                // target cell may not have a stored Territory yet (a
+                // target cell may not have a stored CellContents yet (a
                 // genuinely untouched wasteland), so this ref carries its
                 // own piece data rather than relying on a later board read.
                 const newIndex = this.board.get(tx, ty)?.pieces.length ?? 0;
@@ -4245,7 +4245,7 @@ export class GnosticaGame extends GameBase {
                     return { failed: false };
                 }
                 if (movedPiece.owner === this.currplayer) {
-                    // The destination may not have a stored Territory yet (a
+                    // The destination may not have a stored CellContents yet (a
                     // genuinely untouched wasteland), so this ref carries
                     // its own piece data rather than relying on a later
                     // board read - see IMinionRef's own docs.
@@ -4585,7 +4585,7 @@ export class GnosticaGame extends GameBase {
             }
             const movedPiece = this.board.get(target.x, target.y)!.pieces[target.index];
             if (movedPiece.owner === this.currplayer) {
-                // The destination may not have a stored Territory yet (a
+                // The destination may not have a stored CellContents yet (a
                 // genuinely untouched wasteland), so this ref carries its
                 // own piece data rather than relying on a later board read -
                 // see IMinionRef's own docs.
@@ -4999,7 +4999,7 @@ export class GnosticaGame extends GameBase {
     // Every cell that's both non-void and currently holds zero pieces -
     // scanned over the same window render() uses (see renderWindow's own
     // docs), NOT just `board.entries()` (which only yields cells with a
-    // stored Territory object - see randomPlaceMove's own docs on why
+    // stored CellContents object - see randomPlaceMove's own docs on why
     // that under-enumerates). Shared by randomPlaceMove (a legal
     // initial-placement target) and buildRandomHermitTokens (a legal
     // teleport destination - hermit's own rules use the identical "empty
@@ -5025,7 +5025,7 @@ export class GnosticaGame extends GameBase {
     // Candidate cells are scanned the same padded window render() uses
     // (board's own min/max +/-1 in each direction), NOT just
     // `board.entries()` - entries() only yields cells with a stored
-    // Territory object, but a never-touched wasteland adjacent to an
+    // CellContents object, but a never-touched wasteland adjacent to an
     // existing territory (classify() derives wasteland-ness from
     // NEIGHBORING cards, not from whether the cell itself was ever
     // stored) is an equally legal placement target. This matters a lot
@@ -6081,7 +6081,7 @@ export class GnosticaGame extends GameBase {
     // only ever grows entries for combinations actually on the board, built
     // fresh each render() call, matching Knight Line's encodePiece/
     // createPiece pattern.
-    private cellRenderKey(t: Territory | undefined, cls: CellClass): string {
+    private cellRenderKey(t: CellContents | undefined, cls: CellClass): string {
         const cardPart = t?.card !== undefined ? t.card.uid : (cls === "wasteland" ? "waste" : "void");
         // Piece.id() (owner+size+orientation, no punctuation) - legend keys
         // end up as literal DOM ids in the renderer, and a "." breaks
@@ -6182,7 +6182,7 @@ export class GnosticaGame extends GameBase {
     // small square, so it uses the spaced card face (smaller rank/circle
     // sizing) rather than the roomier default meant for a card shown alone
     // (e.g. a hand, once that's rendered).
-    private buildCellGlyph(t: Territory | undefined, cls: CellClass, largerCards: boolean): Glyph | [Glyph, ...Glyph[]] {
+    private buildCellGlyph(t: CellContents | undefined, cls: CellClass, largerCards: boolean): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
         if (t?.card !== undefined) {
             const dontSpace = largerCards && t.playersPresent().size === 0;
@@ -6206,10 +6206,10 @@ export class GnosticaGame extends GameBase {
         return stack as [Glyph, ...Glyph[]];
     }
 
-    // Pieces are never allowed to visually stack/overlap, but a territory
+    // Pieces are never allowed to visually stack/overlap, but a cell
     // can legitimately hold more than 3 (some major arcana powers bypass
-    // Territory's normal capacity check - see Territory.canAdd()), so this
-    // can't just be a fixed 3-slot table.
+    // CellContents' normal capacity check - see CellContents.canAdd()), so
+    // this can't just be a fixed 3-slot table.
     //
     // Up to 5 pieces: each piece's own orientation names its preferred cell
     // in the tile's 3x3 grid (PIECE_GRID_SLOTS/PIECE_GRID_PREFERRED_INDEX) -

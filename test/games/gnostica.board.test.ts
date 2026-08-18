@@ -2,7 +2,7 @@
 import "mocha";
 import { expect } from "chai";
 import { Piece } from "../../src/games/gnostica/Piece";
-import { Territory } from "../../src/games/gnostica/Territory";
+import { CellContents } from "../../src/games/gnostica/CellContents";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { minorCards, majorCards } from "../../src/common/tarot";
 import { UnboundedSquareBoard } from "../../src/common/unbounded-square-board";
@@ -32,9 +32,9 @@ describe("Gnostica: Piece", () => {
     });
 });
 
-describe("Gnostica: Territory", () => {
+describe("Gnostica: CellContents", () => {
     it("enforces the 3-piece capacity by default", () => {
-        const t = new Territory(aceOfCups());
+        const t = new CellContents(aceOfCups());
         t.add(new Piece(1, 1));
         t.add(new Piece(1, 1));
         t.add(new Piece(2, 1));
@@ -43,7 +43,7 @@ describe("Gnostica: Territory", () => {
     });
 
     it("can bypass capacity when told to (Empress/Emperor)", () => {
-        const t = new Territory(aceOfCups());
+        const t = new CellContents(aceOfCups());
         t.add(new Piece(1, 1));
         t.add(new Piece(1, 1));
         t.add(new Piece(1, 1));
@@ -52,14 +52,14 @@ describe("Gnostica: Territory", () => {
     });
 
     it("scores 0/1/2/3 by card kind", () => {
-        expect(new Territory().pointValue()).eq(0);
-        expect(new Territory(aceOfCups()).pointValue()).eq(1);
-        expect(new Territory(kingOfSwords()).pointValue()).eq(2);
-        expect(new Territory(theFool()).pointValue()).eq(3);
+        expect(new CellContents().pointValue()).eq(0);
+        expect(new CellContents(aceOfCups()).pointValue()).eq(1);
+        expect(new CellContents(kingOfSwords()).pointValue()).eq(2);
+        expect(new CellContents(theFool()).pointValue()).eq(3);
     });
 
     it("is uncontested only when exactly one owner is present", () => {
-        const t = new Territory(aceOfCups());
+        const t = new CellContents(aceOfCups());
         expect(t.isUncontestedBy(1)).eq(false); // empty
         t.add(new Piece(1, 1));
         expect(t.isUncontestedBy(1)).eq(true);
@@ -70,8 +70,8 @@ describe("Gnostica: Territory", () => {
     });
 
     it("round-trips through deserialize", () => {
-        const t = new Territory(kingOfSwords(), [new Piece(1, 3, "S")]);
-        const revived = Territory.deserialize(JSON.parse(JSON.stringify(t)));
+        const t = new CellContents(kingOfSwords(), [new Piece(1, 3, "S")]);
+        const revived = CellContents.deserialize(JSON.parse(JSON.stringify(t)));
         expect(revived.card?.uid).eq("KS");
         expect(revived.pieces.length).eq(1);
         expect(revived.pieces[0].orientation).eq("S");
@@ -82,7 +82,7 @@ describe("Gnostica: Territory", () => {
 describe("Gnostica: GnosticaBoard classification", () => {
     it("classifies a lone territory's neighbours as wasteland, everything further out as void", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
         expect(b.classify(0, 0)).eq("territory");
         expect(b.classify(1, 0)).eq("wasteland");
         expect(b.classify(-1, 0)).eq("wasteland");
@@ -94,7 +94,7 @@ describe("Gnostica: GnosticaBoard classification", () => {
 
     it("does not chain wasteland-adjacency transitively", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
         // (2,0) is a neighbour of the wasteland (1,0), not of the territory itself
         expect(b.classify(1, 0)).eq("wasteland");
         expect(b.classify(2, 0)).eq("void");
@@ -104,7 +104,7 @@ describe("Gnostica: GnosticaBoard classification", () => {
         const b = new GnosticaBoard();
         for (let x = -1; x <= 1; x++) {
             for (let y = -1; y <= 1; y++) {
-                b.store.set(x, y, new Territory(aceOfCups()));
+                b.store.set(x, y, new CellContents(aceOfCups()));
             }
         }
         for (let x = -1; x <= 1; x++) {
@@ -122,8 +122,8 @@ describe("Gnostica: GnosticaBoard classification", () => {
 describe("Gnostica: GnosticaBoard mutations", () => {
     it("creates a territory only on a wasteland, preserving pieces already sitting there", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
-        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "W")]));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
+        b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "W")]));
 
         expect(() => b.createTerritory(2, 0, twoOfCups())).to.throw(); // void, not wasteland
         b.createTerritory(1, 0, twoOfCups());
@@ -135,7 +135,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("grows/shrinks a territory's card in place without touching its pieces", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         b.growTerritory(0, 0, kingOfSwords());
         expect(b.get(0, 0)!.card?.uid).eq("KS");
         expect(b.get(0, 0)!.pieces.length).eq(1);
@@ -146,8 +146,8 @@ describe("Gnostica: GnosticaBoard mutations", () => {
     it("destroys a territory and returns evicted pieces from cells that collapse into the void", () => {
         const b = new GnosticaBoard();
         // A single isolated territory with a piece sitting on its wasteland neighbour.
-        b.store.set(0, 0, new Territory(aceOfCups()));
-        b.store.set(1, 0, new Territory(undefined, [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
+        b.store.set(1, 0, new CellContents(undefined, [new Piece(2, 1, "U")]));
 
         const evicted = b.destroyTerritory(0, 0);
         // (1,0) had no other territory neighbour, so it collapses to void and evicts.
@@ -160,9 +160,9 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("does not evict a wasteland piece if another territory still keeps it adjacent", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
-        b.store.set(2, 0, new Territory(aceOfCups()));
-        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
+        b.store.set(2, 0, new CellContents(aceOfCups()));
+        b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "U")]));
 
         const evicted = b.destroyTerritory(0, 0);
         expect(evicted.length).eq(0);
@@ -172,9 +172,9 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("pushes only the card, leaving pieces behind at the departure cell", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         // A second territory keeps (0,0) from collapsing to void after the card leaves.
-        b.store.set(-1, 0, new Territory(twoOfCups()));
+        b.store.set(-1, 0, new CellContents(twoOfCups()));
 
         b.pushTerritory(0, 0, 1, 0);
         expect(b.get(0, 0)!.card).to.be.undefined;
@@ -184,9 +184,9 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("slides a pushed card in under pieces already at the destination", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
-        b.store.set(-1, 0, new Territory(twoOfCups())); // keeps (0,0) alive after push
-        b.store.set(1, 0, new Territory(undefined, [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
+        b.store.set(-1, 0, new CellContents(twoOfCups())); // keeps (0,0) alive after push
+        b.store.set(1, 0, new CellContents(undefined, [new Piece(2, 1, "U")]));
 
         b.pushTerritory(0, 0, 1, 0);
         const dest = b.get(1, 0)!;
@@ -197,10 +197,10 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 
     it("evicts pieces stranded at the departure side of a push", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         // Pushed two spaces away (not adjacent to the source), so the
         // departure cell has no card next door to keep it a wasteland.
-        b.store.set(5, 0, new Territory(twoOfCups())); // far enough not to help (0,0)
+        b.store.set(5, 0, new CellContents(twoOfCups())); // far enough not to help (0,0)
 
         const evicted = b.pushTerritory(0, 0, 2, 0);
         expect(evicted.length).eq(1);
@@ -212,17 +212,17 @@ describe("Gnostica: GnosticaBoard mutations", () => {
 describe("Gnostica: GnosticaBoard rehydration", () => {
     it("round-trips a populated board through JSON.stringify/parse", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "N")]));
-        b.store.set(1, 0, new Territory(theFool()));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 2, "N")]));
+        b.store.set(1, 0, new CellContents(theFool()));
 
-        const raw = JSON.parse(JSON.stringify({ board: b.store }, replacer), reviver) as { board: UnboundedSquareBoard<Territory> };
+        const raw = JSON.parse(JSON.stringify({ board: b.store }, replacer), reviver) as { board: UnboundedSquareBoard<CellContents> };
         const fixed = GnosticaBoard.rehydrate(raw.board);
         const revived = new GnosticaBoard(fixed);
 
         expect(revived.get(0, 0)?.card?.uid).eq("AC");
         expect(revived.get(0, 0)?.pieces[0].orientation).eq("N");
         expect(revived.get(1, 0)?.card?.uid).eq("00");
-        // and the rehydrated instance is a real Territory with working methods, not a plain object
+        // and the rehydrated instance is a real CellContents with working methods, not a plain object
         expect(revived.get(0, 0)?.pointValue()).eq(1);
         expect(revived.get(1, 0)?.pointValue()).eq(3);
     });

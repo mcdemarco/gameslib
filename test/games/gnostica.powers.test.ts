@@ -2,7 +2,7 @@
 import "mocha";
 import { expect } from "chai";
 import { Piece } from "../../src/games/gnostica/Piece";
-import { Territory } from "../../src/games/gnostica/Territory";
+import { CellContents } from "../../src/games/gnostica/CellContents";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { minorCards, majorCards } from "../../src/common/tarot";
 import {
@@ -37,7 +37,7 @@ const makeCtx = (board: GnosticaBoard, overrides: Partial<PowerContext> = {}): P
 describe("Gnostica powers: Cups (create)", () => {
     it("adds an own small piece to the target cell, consuming the stash", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b);
         createOwn(ctx, 0, 0, 0, 0, 0, "N");
         const t = b.get(0, 0)!;
@@ -48,7 +48,7 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("refuses to add past the 3-piece cap unless ignoreCapacity is set", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1), new Piece(1, 1), new Piece(1, 1)]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1), new Piece(1, 1), new Piece(1, 1)]));
         const ctx = makeCtx(b);
         expect(() => createOwn(ctx, 0, 0, 0, 0, 0, "N")).to.throw();
         createOwn(ctx, 0, 0, 0, 0, 0, "N", { ignoreCapacity: true });
@@ -57,8 +57,8 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("only targets its own cell (up) or the pointed-at adjacent cell", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "N")]));
-        b.store.set(1, 0, new Territory(twoOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "N")]));
+        b.store.set(1, 0, new CellContents(twoOfCups()));
         const ctx = makeCtx(b);
         // minion at (0,0) points N, so (1,0) - to the east - is not a legal target
         expect(() => createOwn(ctx, 0, 0, 0, 1, 0, "N")).to.throw();
@@ -66,14 +66,14 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("refuses to create an own piece in the void (a minion on an isolated wasteland facing away from any card)", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
         // A minion sitting on a wasteland (adjacent to (0,0)'s card, but
         // no card of its own), facing further away from it - (2,0) is
         // void, not adjacent to any card at all. Reproduces a real bug:
         // a piece created here had no way to ever be evicted (unlike a
         // MOVED piece landing in the void, which movePiece destroys as
         // it goes), so it just sat there permanently.
-        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "E")]));
         const ctx = makeCtx(b);
         expect(() => createOwn(ctx, 1, 0, 0, 2, 0, "N")).to.throw();
         expect(b.get(2, 0)).to.be.undefined;
@@ -81,7 +81,7 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("copies an enemy piece's own small piece, matching its orientation, from the enemy's stash", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 1, "W")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 1, "W")]));
         const ctx = makeCtx(b);
         createEnemy(ctx, 0, 0, 0, 0, 0, 1);
         const t = b.get(0, 0)!;
@@ -93,15 +93,15 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("refuses to copy your own piece", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U"), new Piece(1, 1, "W")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(1, 1, "W")]));
         const ctx = makeCtx(b);
         expect(() => createEnemy(ctx, 0, 0, 0, 0, 0, 1)).to.throw();
     });
 
     it("refuses to create an enemy copy in the void, same as createOwn", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
-        b.store.set(1, 0, new Territory(undefined, [new Piece(1, 1, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
+        b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "E")]));
         const ctx = makeCtx(b);
         expect(() => createEnemy(ctx, 1, 0, 0, 2, 0, 0)).to.throw();
         expect(b.get(2, 0)).to.be.undefined;
@@ -109,7 +109,7 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("creates a new territory on a wasteland from a spot card in hand", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         const ctx = makeCtx(b, { hand: ["2C"] });
         createTerritory(ctx, 0, 0, 0, 1, 0, "2C");
         expect(b.get(1, 0)!.card?.uid).eq("2C");
@@ -118,29 +118,29 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("refuses to create a territory with a non-spot card", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         const ctx = makeCtx(b, { hand: ["KS"] });
         expect(() => createTerritory(ctx, 0, 0, 0, 1, 0, "KS")).to.throw();
     });
 
     it("refuses to create a territory on a wasteland occupied by enemies", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "W")]));
-        b.store.set(-1, 0, new Territory(undefined, [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "W")]));
+        b.store.set(-1, 0, new CellContents(undefined, [new Piece(2, 1, "U")]));
         const ctx = makeCtx(b, { hand: ["2C"] });
         expect(() => createTerritory(ctx, 0, 0, 0, -1, 0, "2C")).to.throw();
     });
 
     it("refuses to create a territory in the void", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         const ctx = makeCtx(b, { hand: ["2C"] });
         expect(() => createTerritory(ctx, 0, 0, 0, 5, 5, "2C")).to.throw();
     });
 
     it("Wheel of Fortune's random-draw mode pulls from the draw pile instead of hand", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         const ctx = makeCtx(b, { drawPile: ["3C"] });
         createTerritory(ctx, 0, 0, 0, 1, 0, undefined, { allowRandomDraw: true });
         expect(b.get(1, 0)!.card?.uid).eq("3C");
@@ -149,7 +149,7 @@ describe("Gnostica powers: Cups (create)", () => {
 
     it("Wheel of Fortune's random-draw mode reshuffles the discard pile once the draw pile runs dry", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         const ctx = makeCtx(b, { drawPile: [], discardPile: ["3C"] });
         createTerritory(ctx, 0, 0, 0, 1, 0, undefined, { allowRandomDraw: true });
         expect(b.get(1, 0)!.card?.uid).eq("3C");
@@ -160,8 +160,8 @@ describe("Gnostica powers: Cups (create)", () => {
 describe("Gnostica powers: Rods (move)", () => {
     it("moves the minion itself up to its size in the direction it points", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 2, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups()));
         const ctx = makeCtx(b);
         movePiece(ctx, 0, 0, 0, 0, 0, 0, 1, "N");
         expect(b.get(0, 0)!.pieces.length).eq(0);
@@ -172,16 +172,16 @@ describe("Gnostica powers: Rods (move)", () => {
 
     it("a minion standing up cannot use a rod at all", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b);
         expect(() => movePiece(ctx, 0, 0, 0, 0, 0, 0, 1, undefined)).to.throw();
     });
 
     it("pushes a targeted piece in the cell it's pointing at, retaining an enemy's orientation", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "S")]));
-        b.store.set(2, 0, new Territory(threeOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 1, "S")]));
+        b.store.set(2, 0, new CellContents(threeOfCups()));
         const ctx = makeCtx(b);
         movePiece(ctx, 0, 0, 0, 1, 0, 0, 1, "N"); // acting player 1 tries to reorient the pushed enemy piece to N
         expect(b.get(1, 0)!.pieces.length).eq(0);
@@ -191,13 +191,13 @@ describe("Gnostica powers: Rods (move)", () => {
 
     it("cannot move zero spaces, beyond its size, or into a full cell", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(1, 1), new Piece(1, 1), new Piece(1, 1)]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(1, 1), new Piece(1, 1), new Piece(1, 1)]));
         const ctxFull = makeCtx(b);
         expect(() => movePiece(ctxFull, 0, 0, 0, 0, 0, 0, 1, undefined)).to.throw(); // destination already has 3
 
         const b2 = new GnosticaBoard();
-        b2.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
+        b2.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         const ctxVoid = makeCtx(b2);
         expect(() => movePiece(ctxVoid, 0, 0, 0, 0, 0, 0, 5, undefined)).to.throw(); // beyond size 1
         expect(() => movePiece(ctxVoid, 0, 0, 0, 0, 0, 0, 0, undefined)).to.throw(); // zero spaces
@@ -214,7 +214,7 @@ describe("Gnostica powers: Rods (move)", () => {
         // carded cell is always still a wasteland (adjacent) - only a
         // size-2+ piece moving 2+ spaces can actually clear the wasteland
         // border and reach genuine void.
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 2, "E")]));
         const ctx = makeCtx(b);
         movePiece(ctx, 0, 0, 0, 0, 0, 0, 2, undefined); // 2 spaces east of (0,0) - void, no card in reach
         expect(b.has(2, 0)).eq(false); // no phantom territory left behind
@@ -223,7 +223,7 @@ describe("Gnostica powers: Rods (move)", () => {
 
     it("a relaxed mid-chain waypoint in the void does NOT destroy the piece - it must still be there for the next step", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "E")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 2, "E")]));
         const ctx = makeCtx(b);
         movePiece(ctx, 0, 0, 0, 0, 0, 0, 2, undefined, { skipLandingCheck: true });
         expect(b.get(2, 0)!.pieces.length).eq(1); // still on the board, sitting in the void
@@ -232,8 +232,8 @@ describe("Gnostica powers: Rods (move)", () => {
 
     it("ignoreCapacity (Emperor) lets a push land on an already-full cell", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(1, 1), new Piece(1, 1), new Piece(1, 1)]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(1, 1), new Piece(1, 1), new Piece(1, 1)]));
         const ctx = makeCtx(b);
         movePiece(ctx, 0, 0, 0, 0, 0, 0, 1, undefined, { ignoreCapacity: true });
         expect(b.get(1, 0)!.pieces.length).eq(4);
@@ -241,8 +241,8 @@ describe("Gnostica powers: Rods (move)", () => {
 
     it("pushes the pointed-at territory, never the minion's own", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 3, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 3, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups()));
         const ctx = makeCtx(b);
         // Legality is checked against the board as it stands before the push,
         // so (2,0) still counts as a wasteland (adjacent to (1,0)'s card,
@@ -262,10 +262,10 @@ describe("Gnostica powers: Rods (move)", () => {
         // making this eviction unreachable, since the minion is always
         // right next door to whatever it pushes.
         const b = new GnosticaBoard();
-        b.store.set(-1, 0, new Territory(threeOfCups())); // keeps (0,0) a wasteland throughout
-        b.store.set(0, 0, new Territory(undefined, [new Piece(1, 3, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(1, 1, "U")]));
-        b.store.set(5, 0, new Territory(aceOfCups())); // keeps the landing spot a legal wasteland
+        b.store.set(-1, 0, new CellContents(threeOfCups())); // keeps (0,0) a wasteland throughout
+        b.store.set(0, 0, new CellContents(undefined, [new Piece(1, 3, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(5, 0, new CellContents(aceOfCups())); // keeps the landing spot a legal wasteland
         const ctx = makeCtx(b);
         moveTerritory(ctx, 0, 0, 0, 3); // (1,0) -> (4,0), adjacent to (5,0)
         expect(b.get(4, 0)!.card?.uid).eq("2C");
@@ -275,14 +275,14 @@ describe("Gnostica powers: Rods (move)", () => {
 
     it("refuses to push a territory occupied by enemies, into the void, or beyond size", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 1, "U")]));
         const ctx = makeCtx(b);
         expect(() => moveTerritory(ctx, 0, 0, 0, 1)).to.throw(); // enemy-occupied
 
         const b2 = new GnosticaBoard();
-        b2.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b2.store.set(1, 0, new Territory(twoOfCups()));
+        b2.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b2.store.set(1, 0, new CellContents(twoOfCups()));
         const ctx2 = makeCtx(b2);
         expect(() => moveTerritory(ctx2, 0, 0, 0, 5)).to.throw(); // beyond size, lands in void
     });
@@ -291,7 +291,7 @@ describe("Gnostica powers: Rods (move)", () => {
 describe("Gnostica powers: Discs (grow)", () => {
     it("grows a piece one size larger from that piece owner's stash, freeing the old size back", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b);
         growPiece(ctx, 0, 0, 0, 0, 0, 0, "N");
         const t = b.get(0, 0)!;
@@ -301,19 +301,19 @@ describe("Gnostica powers: Discs (grow)", () => {
 
     it("cannot grow a large piece further, or grow without the next size available", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(3, 3, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(3, 3, "U")]));
         const ctx = makeCtx(b);
         expect(() => growPiece(ctx, 0, 0, 0, 0, 0, 0, undefined)).to.throw();
 
         const b2 = new GnosticaBoard();
-        b2.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b2.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx2 = makeCtx(b2, { stashes: new Map([[1, [5, 0, 5] as Stash], [2, fullStash()]]) });
         expect(() => growPiece(ctx2, 0, 0, 0, 0, 0, 0, undefined)).to.throw();
     });
 
     it("grows a territory by exactly one point, discarding the old card", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b, { hand: ["KS"] });
         growTerritory(ctx, 0, 0, 0, 0, 0, "KS");
         expect(b.get(0, 0)!.card?.uid).eq("KS");
@@ -322,7 +322,7 @@ describe("Gnostica powers: Discs (grow)", () => {
 
     it("refuses to grow by more than one point without skipLadder, or to a card of equal/lower value", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b, { hand: ["00"] }); // major, worth 3 - too far without skipLadder
         expect(() => growTerritory(ctx, 0, 0, 0, 0, 0, "00")).to.throw();
         expect(ctx.hand).to.deep.equal(["00"]); // failed attempt returns the card to hand
@@ -334,7 +334,7 @@ describe("Gnostica powers: Discs (grow)", () => {
 
     it("Strength's skipLadder allows jumping a spot card straight to a major arcana", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b, { hand: ["00"] });
         growTerritory(ctx, 0, 0, 0, 0, 0, "00", { skipLadder: true });
         expect(b.get(0, 0)!.card?.uid).eq("00");
@@ -342,7 +342,7 @@ describe("Gnostica powers: Discs (grow)", () => {
 
     it("Star's replacementSource=discard draws the new card from the discard pile instead of hand", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b, { discardPile: ["KS"] });
         growTerritory(ctx, 0, 0, 0, 0, 0, "KS", { replacementSource: "discard" });
         expect(b.get(0, 0)!.card?.uid).eq("KS");
@@ -351,7 +351,7 @@ describe("Gnostica powers: Discs (grow)", () => {
 
     it("refuses to grow a territory occupied by enemies", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(2, 1, "U")]));
         const ctx = makeCtx(b, { hand: ["KS"] });
         expect(() => growTerritory(ctx, 0, 0, 0, 0, 0, "KS")).to.throw();
     });
@@ -360,7 +360,7 @@ describe("Gnostica powers: Discs (grow)", () => {
 describe("Gnostica powers: Swords (attack)", () => {
     it("shrinks a piece, replacing it with a smaller piece from the VICTIM's own stash", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 3, "U"), new Piece(2, 2, "N")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 3, "U"), new Piece(2, 2, "N")]));
         const ctx = makeCtx(b);
         attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined);
         const t = b.get(0, 0)!;
@@ -370,7 +370,7 @@ describe("Gnostica powers: Swords (attack)", () => {
 
     it("destroys a piece outright at 0 pips, returning its full size to the victim's stash", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "U"), new Piece(1, 2, "N")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 2, "U"), new Piece(1, 2, "N")]));
         const ctx = makeCtx(b);
         attackPiece(ctx, 0, 0, 0, 0, 0, 1, 2, undefined);
         expect(b.get(0, 0)!.pieces.length).eq(1);
@@ -379,7 +379,7 @@ describe("Gnostica powers: Swords (attack)", () => {
 
     it("cannot shrink to a size unavailable in the victim's stash, unless skipStashCheck is set", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 3, "N")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 3, "N")]));
         const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, [5, 0, 5] as Stash]]) });
         expect(() => attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined)).to.throw();
         attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined, { skipStashCheck: true }); // Death's shortcut
@@ -388,7 +388,7 @@ describe("Gnostica powers: Swords (attack)", () => {
 
     it("may not attack for more pips than the victim has, or for zero", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 3, "U"), new Piece(2, 1, "N")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 3, "U"), new Piece(2, 1, "N")]));
         const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, fullStash()]]) });
         expect(() => attackPiece(ctx, 0, 0, 0, 0, 0, 1, 2, undefined)).to.throw(); // victim only has 1 pip
         expect(() => attackPiece(ctx, 0, 0, 0, 0, 0, 1, 0, undefined)).to.throw(); // zero pips
@@ -396,7 +396,7 @@ describe("Gnostica powers: Swords (attack)", () => {
 
     it("shrinks a territory's value, discarding the old card and requiring an exact-value replacement", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(theFool(), [new Piece(1, 3, "U")])); // worth 3
+        b.store.set(0, 0, new CellContents(theFool(), [new Piece(1, 3, "U")])); // worth 3
         const ctx = makeCtx(b, { hand: ["KS"] }); // worth 2
         attackTerritory(ctx, 0, 0, 0, 0, 0, 1, "KS");
         expect(b.get(0, 0)!.card?.uid).eq("KS");
@@ -413,8 +413,8 @@ describe("Gnostica powers: Swords (attack)", () => {
         // into the void as a side effect can belong to anyone, and is
         // returned to its owner's stash the same way.
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 3, "U"), new Piece(1, 1, "N")]));
-        b.store.set(1, 0, new Territory(undefined, [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 3, "U"), new Piece(1, 1, "N")]));
+        b.store.set(1, 0, new CellContents(undefined, [new Piece(2, 1, "U")]));
         const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, fullStash()]]) });
         attackTerritory(ctx, 0, 0, 0, 0, 0, 1, undefined); // aceOfCups is worth 1, so 1 pip destroys it
         expect(b.has(0, 0)).eq(false);
@@ -430,7 +430,7 @@ describe("Gnostica powers: Swords (attack)", () => {
 
     it("refuses a replacement card that isn't worth exactly the post-attack value", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(theFool(), [new Piece(3, 3, "U")]));
+        b.store.set(0, 0, new CellContents(theFool(), [new Piece(3, 3, "U")]));
         const ctx = makeCtx(b, { hand: ["AC"] }); // worth 1, but attacking for 1 pip should leave value 2
         expect(() => attackTerritory(ctx, 0, 0, 0, 0, 0, 1, "AC")).to.throw();
         expect(ctx.hand).to.deep.equal(["AC"]); // failed attempt returns the card to hand
@@ -438,7 +438,7 @@ describe("Gnostica powers: Swords (attack)", () => {
 
     it("refuses to attack a territory occupied by enemies", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(theFool(), [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(theFool(), [new Piece(2, 1, "U")]));
         const ctx = makeCtx(b, { hand: ["KS"] });
         expect(() => attackTerritory(ctx, 0, 0, 0, 0, 0, 1, "KS")).to.throw();
     });
@@ -447,7 +447,7 @@ describe("Gnostica powers: Swords (attack)", () => {
 describe("Gnostica powers: special (major arcana)", () => {
     it("orientMinion reorients any of the acting player's own minions, with no adjacency restriction", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "N")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "N")]));
         const ctx = makeCtx(b);
         orientMinion(ctx, 0, 0, 0, "W");
         expect(b.get(0, 0)!.pieces[0].orientation).eq("W");
@@ -455,15 +455,15 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("orientMinion refuses to reorient an opponent's piece", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(2, 1, "N")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(2, 1, "N")]));
         const ctx = makeCtx(b);
         expect(() => orientMinion(ctx, 0, 0, 0, "W")).to.throw();
     });
 
     it("orientAny (Devil) can reorient an opponent's piece, but only a legally-targeted one", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "S")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 1, "S")]));
         const ctx = makeCtx(b);
         orientAny(ctx, 0, 0, 0, 1, 0, 0, "N");
         expect(b.get(1, 0)!.pieces[0].orientation).eq("N");
@@ -471,16 +471,16 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("orientAny still enforces the minion's own self/adjacent targeting rule", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "N")])); // points N, not E
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "S")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "N")])); // points N, not E
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 1, "S")]));
         const ctx = makeCtx(b);
         expect(() => orientAny(ctx, 0, 0, 0, 1, 0, 0, "N")).to.throw();
     });
 
     it("Hierophant replaces a target piece with the acting player's own, same size, from their stash", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 2, "S")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 2, "S")]));
         const ctx = makeCtx(b);
         hierophantReplace(ctx, 0, 0, 0, 1, 0, 0, "N");
         const dest = b.get(1, 0)!;
@@ -491,16 +491,16 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("Hierophant cannot replace with a size the acting player doesn't have", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 3, "S")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 3, "S")]));
         const ctx = makeCtx(b, { stashes: new Map([[1, [5, 5, 0] as Stash], [2, fullStash()]]) });
         expect(() => hierophantReplace(ctx, 0, 0, 0, 1, 0, 0, "N")).to.throw();
     });
 
     it("Hermit moves a piece to any completely empty cell on the board, ignoring adjacency", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
-        b.store.set(9, 9, new Territory(twoOfCups())); // far away, empty of pieces
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(9, 9, new CellContents(twoOfCups())); // far away, empty of pieces
         const ctx = makeCtx(b);
         hermitMovePiece(ctx, 0, 0, 0, 0, 0, 0, 9, 9, "S");
         expect(b.get(0, 0)!.pieces.length).eq(0);
@@ -509,8 +509,8 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("Hermit refuses a destination that already holds a piece, or the void", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
-        b.store.set(9, 9, new Territory(twoOfCups(), [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(9, 9, new CellContents(twoOfCups(), [new Piece(2, 1, "U")]));
         const ctx = makeCtx(b);
         expect(() => hermitMovePiece(ctx, 0, 0, 0, 0, 0, 0, 9, 9, undefined)).to.throw(); // occupied
         expect(() => hermitMovePiece(ctx, 0, 0, 0, 0, 0, 0, 50, 50, undefined)).to.throw(); // void
@@ -518,10 +518,10 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("Hermit moves a territory to any wasteland, leaving its pieces behind, evicting anyone stranded", () => {
         const b = new GnosticaBoard();
-        b.store.set(-1, 0, new Territory(threeOfCups())); // keeps (0,0) a wasteland throughout
-        b.store.set(0, 0, new Territory(undefined, [new Piece(1, 1, "E")])); // minion on a wasteland, pointing at (1,0)
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(1, 1, "U")]));
-        b.store.set(9, 9, new Territory(aceOfCups())); // keeps the landing spot a legal wasteland
+        b.store.set(-1, 0, new CellContents(threeOfCups())); // keeps (0,0) a wasteland throughout
+        b.store.set(0, 0, new CellContents(undefined, [new Piece(1, 1, "E")])); // minion on a wasteland, pointing at (1,0)
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(9, 9, new CellContents(aceOfCups())); // keeps the landing spot a legal wasteland
         const ctx = makeCtx(b);
         hermitMoveTerritory(ctx, 0, 0, 0, 1, 0, 9, 8);
         expect(b.has(1, 0)).eq(false); // stranded, evicted
@@ -531,8 +531,8 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("trade hands swaps the acting player's hand with the targeted piece owner's, in place", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "E")]));
-        b.store.set(1, 0, new Territory(twoOfCups(), [new Piece(2, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 1, "U")]));
         const mine = ["AC", "2C"];
         const theirs = ["KS"];
         const ctx = makeCtx(b, { hand: mine });
@@ -545,7 +545,7 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("Judgement draws chosen cards from the discard pile, capped at pips and at the 6-card hand limit", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 2, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 2, "U")]));
         const ctx = makeCtx(b, { hand: ["AC", "2C", "3C"], discardPile: ["KS", "00"] });
         judgementDraw(ctx, 0, 0, 0, ["KS", "00"]);
         expect(ctx.hand).to.deep.equal(["AC", "2C", "3C", "KS", "00"]);
@@ -554,7 +554,7 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("Judgement refuses to draw more than the minion's pip count", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups(), [new Piece(1, 1, "U")]));
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         const ctx = makeCtx(b, { discardPile: ["KS", "00"] });
         expect(() => judgementDraw(ctx, 0, 0, 0, ["KS", "00"])).to.throw();
     });
@@ -615,7 +615,7 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("World validates the chosen major arcana card is actually on the board, and returns its definition", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(theFool()));
+        b.store.set(0, 0, new CellContents(theFool()));
         const ctx = makeCtx(b);
         const def = worldChoosePower(ctx, "00");
         expect(def.name).eq("The Fool");
@@ -623,7 +623,7 @@ describe("Gnostica powers: special (major arcana)", () => {
 
     it("World refuses to borrow the power of a major arcana card that isn't on the board", () => {
         const b = new GnosticaBoard();
-        b.store.set(0, 0, new Territory(aceOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
         const ctx = makeCtx(b);
         expect(() => worldChoosePower(ctx, "00")).to.throw();
     });

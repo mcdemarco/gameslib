@@ -6,7 +6,7 @@ import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/Piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
-import { Territory } from "../../src/games/gnostica/Territory";
+import { CellContents } from "../../src/games/gnostica/CellContents";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
 const theWorld = () => majorCards.find(c => c.seq === 21)!;
@@ -34,7 +34,7 @@ const forceCardAt = (g: GnosticaGame, x: number, y: number, cardFn: () => TarotC
     if (t !== undefined) {
         t.card = target;
     } else {
-        g.board.store.set(x, y, new Territory(target));
+        g.board.store.set(x, y, new CellContents(target));
     }
 };
 
@@ -46,7 +46,7 @@ const forceCardAt = (g: GnosticaGame, x: number, y: number, cardFn: () => TarotC
 // collides with a test's own assumptions (e.g. forceCardAt's own
 // duplicate-clearing wiping out a DIFFERENT cell the test still needed a
 // card at, if that card was randomly dealt there too). Use together with
-// forceCardAt (now tolerant of a missing Territory) to name every cell a
+// forceCardAt (now tolerant of missing CellContents) to name every cell a
 // test actually cares about, leaving everything else void/wasteland by
 // construction rather than by chance.
 const clearBoard = (g: GnosticaGame): void => {
@@ -930,8 +930,8 @@ describe("Gnostica: render", () => {
         }
     });
 
-    // A territory can legitimately exceed the normal 3-piece capacity (some
-    // major arcana powers bypass Territory.canAdd()'s check), and pyramids
+    // A cell can legitimately exceed the normal 3-piece capacity (some
+    // major arcana powers bypass CellContents.canAdd()'s check), and pyramids
     // must never be rendered stacked/overlapping. Regression test for
     // exactly that bug: the old fixed 3-slot nudge table silently reused
     // slot 1's coordinates for every piece beyond the 3rd.
@@ -966,7 +966,7 @@ describe("Gnostica: render", () => {
         // (1,1)); its own east neighbour (3,1) is void.
         expect(g.board.classify(2, 1)).eq("wasteland");
         expect(g.board.classify(3, 1)).eq("void");
-        g.board.store.set(2, 1, new Territory(undefined, [new Piece(1, 1, "U")]));
+        g.board.store.set(2, 1, new CellContents(undefined, [new Piece(1, 1, "U")]));
 
         const after = g.render() as { pieces: string };
         expect(after.pieces).to.not.include("k_void_");
@@ -978,7 +978,7 @@ describe("Gnostica: render", () => {
         // initial 3x3 deal only reaches x=1, and (2,0)'s own y=0 isn't
         // also a min/max boundary, so this is unambiguously an east-only
         // case, not a corner.
-        g.board.store.set(2, 0, new Territory(undefined, [new Piece(1, 1, "U")]));
+        g.board.store.set(2, 0, new CellContents(undefined, [new Piece(1, 1, "U")]));
         (g as unknown as { saveState: () => void }).saveState();
         expect(g.board.classify(2, 0)).eq("wasteland");
         expect(g.board.maxX).eq(2);
@@ -1027,7 +1027,7 @@ describe("Gnostica: render", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 1, 0, () => major(15)); // The Devil
         g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // acting minion, facing (2,0)
-        g.board.store.set(2, 0, new Territory(undefined, [new Piece(2, 1, "S")])); // enemy target, on an edge wasteland
+        g.board.store.set(2, 0, new CellContents(undefined, [new Piece(2, 1, "S")])); // enemy target, on an edge wasteland
         expect(g.board.classify(2, 0)).eq("wasteland");
         const minionCell = GnosticaBoard.coords2algebraic(1, 0);
         const targetCell = GnosticaBoard.coords2algebraic(2, 0);
@@ -1040,7 +1040,7 @@ describe("Gnostica: render", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 1, 0, () => major(5)); // The Hierophant
         g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // acting minion, facing (2,0)
-        g.board.store.set(2, 0, new Territory(undefined, [new Piece(2, 1, "S")])); // enemy target, on an edge wasteland
+        g.board.store.set(2, 0, new CellContents(undefined, [new Piece(2, 1, "S")])); // enemy target, on an edge wasteland
         expect(g.board.classify(2, 0)).eq("wasteland");
         const minionCell = GnosticaBoard.coords2algebraic(1, 0);
         const targetCell = GnosticaBoard.coords2algebraic(2, 0);
@@ -1909,7 +1909,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.board.get(0, 0)!.pieces.length).eq(1); // the acting player's own minion survives
         // n0 has no card of its own (cleared above) - once its only piece
         // is destroyed, pruneIfEmpty deletes the cell outright rather than
-        // leaving an empty Territory behind (see pruneIfEmpty's own docs),
+        // leaving empty CellContents behind (see pruneIfEmpty's own docs),
         // so board.get(1,0) itself becomes undefined, not just empty.
         expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // the enemy piece is destroyed instead
         expect(g.stashes.get(2)![0]).eq(5); // returned to ITS owner's stash
@@ -2233,12 +2233,12 @@ describe("Gnostica: validateMove architecture (non-mutating validator)", () => {
     });
 
     // Second bug found while building this refactor: Cups "own"/"enemy"
-    // previously looked up the target cell with the throwing getTerritory()
-    // helper, which threw on a genuinely untouched wasteland (no stored
-    // Territory object at all, since one is only ever created for a cell
-    // that already has a card or a piece) - inconsistent with
-    // movePiece/hermitMovePiece, which already handle exactly
-    // this case by creating one on the fly. Now fixed to match.
+    // previously looked up the target cell with the throwing
+    // getCellContents() helper, which threw on a genuinely untouched
+    // wasteland (no stored CellContents object at all, since one is only
+    // ever created for a cell that already has a card or a piece) -
+    // inconsistent with movePiece/hermitMovePiece, which already handle
+    // exactly this case by creating one on the fly. Now fixed to match.
     it("Cups (own) can target a genuinely untouched wasteland, not just an existing territory", () => {
         const g = new GnosticaGame(2);
         const [cx, cy] = [1, 1]; // a corner of the initial 3x3
@@ -2426,7 +2426,7 @@ describe("Gnostica: click-to-orient messaging", () => {
     // not raw absolute board coordinates.
     it("orient: a buffer click on the void side of a wasteland minion sets that facing", () => {
         const g = new GnosticaGame(2);
-        g.board.store.set(2, 0, new Territory(undefined, [new Piece(1, 1, "U")]));
+        g.board.store.set(2, 0, new CellContents(undefined, [new Piece(1, 1, "U")]));
         (g as unknown as { saveState: () => void }).saveState();
         const ref = `${GnosticaBoard.coords2algebraic(2, 0)}.1`;
 
