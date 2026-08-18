@@ -68,14 +68,13 @@ const takeFromPile = (pile: string[], uid: string): TarotCard => {
 };
 
 // Reshuffles the discard pile into the draw pile in place whenever the
-// draw pile is empty, per the rules' unconditional "reshuffle the discard
-// pile whenever the draw pile is exhausted" - mirrors cmdDraw's own
+// draw pile is empty. - mirrors cmdDraw's own
 // reshuffle in gnostica.ts. Mutates the arrays in place (push/splice)
 // rather than reassigning ctx.drawPile/ctx.discardPile, since those are
 // the same array instances GnosticaGame's this.drawPile/this.discardPile
 // point to - a reassignment here wouldn't be visible there. No-op if the
 // draw pile isn't actually empty, or if there's nothing to reshuffle.
-const reshuffleIfDrawPileEmpty = (ctx: PowerContext): void => {
+const reshuffle = (ctx: PowerContext): void => {
     if (ctx.drawPile.length > 0 || ctx.discardPile.length === 0) {
         return;
     }
@@ -353,7 +352,7 @@ export const createTerritory = (
     }
     let card: TarotCard;
     if (opts.allowRandomDraw) {
-        reshuffleIfDrawPileEmpty(ctx);
+        reshuffle(ctx);
         const drawnUid = ctx.drawPile.shift() as string;
         card = cardByUid(drawnUid);
         if (cardPointValue(card) !== 1) {
@@ -1068,7 +1067,7 @@ export const highPriestess = (ctx: PowerContext, discardUids: string[]): void =>
         ctx.discardPile.push(uid);
     }
     while (ctx.hand.length < 6) {
-        reshuffleIfDrawPileEmpty(ctx);
+        reshuffle(ctx);
         if (ctx.drawPile.length === 0) {
             break; // nothing left anywhere
         }
@@ -1086,7 +1085,7 @@ export const highPriestess = (ctx: PowerContext, discardUids: string[]): void =>
 // this section's own header comment on why this isn't split into a
 // checkX/mutating pair yet.
 export const fool = (ctx: PowerContext): TarotCard => {
-    reshuffleIfDrawPileEmpty(ctx);
+    reshuffle(ctx);
     const uid = ctx.drawPile.shift();
     if (uid === undefined) {
         throw new GnosticaRulesError("DRAW_PILE_EMPTY");

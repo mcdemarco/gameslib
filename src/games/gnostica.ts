@@ -3437,7 +3437,7 @@ export class GnosticaGame extends GameBase {
     // the max), or as many as possible if "draw <n>" is omitted entirely.
     // Reshuffles the discard pile into the draw pile if it runs dry, same
     // as every other draw-pile-exhaustion spot - see
-    // reshuffleIfDrawPileEmpty's twin logic in gnostica/powers.ts (this one
+    // reshuffle logic in gnostica/powers.ts (this one
     // can't share that helper directly, since it mutates this.drawPile/
     // this.discardPile rather than a PowerContext's).
     //
