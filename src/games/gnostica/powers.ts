@@ -1,7 +1,7 @@
 import { DirectionCardinal, shuffle } from "../../common";
 import { TarotCard, MajorCard, allCards } from "../../common/tarot";
 import { GnosticaBoard, IEvicted } from "./board";
-import { Territory, cardPointValue } from "./Territory";
+import { CellContents, cardPointValue } from "./CellContents";
 import { Piece, PieceSize, Orientation } from "./Piece";
 import { PrimitiveOpts, MAJOR_ARCANA, MajorArcanaDef } from "./majorArcana";
 
@@ -118,7 +118,7 @@ export const hasStashAvailable = (ctx: PowerContext, player: number, size: Piece
     return s !== undefined && s[size - 1] > 0;
 };
 
-const getTerritory = (ctx: PowerContext, x: number, y: number): Territory => {
+const getCellContents = (ctx: PowerContext, x: number, y: number): CellContents => {
     const t = ctx.board.get(x, y);
     if (t === undefined) {
         throw new GnosticaRulesError("NO_TERRITORY_TRACKED", { x, y });
@@ -127,7 +127,7 @@ const getTerritory = (ctx: PowerContext, x: number, y: number): Territory => {
 };
 
 const getPiece = (ctx: PowerContext, x: number, y: number, index: number): Piece => {
-    const t = getTerritory(ctx, x, y);
+    const t = getCellContents(ctx, x, y);
     const p = t.pieces[index];
     if (p === undefined) {
         throw new GnosticaRulesError("NO_PIECE_THERE", { x, y, index });
@@ -224,7 +224,7 @@ export const checkCreateOwn = (
         return { key: "TARGET_IS_VOID" };
     }
     // The target cell may be a genuinely untouched wasteland (no stored
-    // Territory object at all, since one is only ever created for a cell
+    // CellContents object at all, since one is only ever created for a cell
     // that already has a card or a piece) - that's zero pieces there, not
     // an error. movePiece/hermitMovePiece already handle an
     // absent destination the same way; this mirrors them.
@@ -247,7 +247,7 @@ export const createOwn = (
     takeFromStash(ctx, ctx.currplayer, 1);
     let t = ctx.board.get(targetX, targetY);
     if (t === undefined) {
-        t = new Territory(undefined);
+        t = new CellContents(undefined);
         ctx.board.store.set(targetX, targetY, t);
     }
     t.add(new Piece(ctx.currplayer, 1, orientation), opts.ignoreCapacity);
@@ -294,7 +294,7 @@ export const createEnemy = (
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
-    const t = getTerritory(ctx, targetX, targetY);
+    const t = getCellContents(ctx, targetX, targetY);
     const victim = t.pieces[victimIndex];
     takeFromStash(ctx, victim.owner, 1);
     t.add(new Piece(victim.owner, 1, victim.orientation), opts.ignoreCapacity);
@@ -423,7 +423,7 @@ export const movePiece = (
     const destX = targetX + dx * dist;
     const destY = targetY + dy * dist;
 
-    const srcT = getTerritory(ctx, targetX, targetY);
+    const srcT = getCellContents(ctx, targetX, targetY);
     const moved = srcT.removeAt(targetIndex);
     // The source cell never gets a piece back from this function (it
     // either lands elsewhere or is destroyed in the void below) - prune
@@ -443,10 +443,10 @@ export const movePiece = (
     }
     let destT = ctx.board.get(destX, destY);
     if (destT === undefined) {
-        destT = new Territory(undefined);
+        destT = new CellContents(undefined);
         ctx.board.store.set(destX, destY, destT);
     }
-    // A relaxed landing (Chariot's waypoint) must bypass Territory.add()'s
+    // A relaxed landing (Chariot's waypoint) must bypass CellContents.add()'s
     // own capacity enforcement too, not just the pre-check above - passing
     // "through" a 3+ piece cell means briefly exceeding it, transiently.
     destT.add(moved, opts.ignoreCapacity || opts.skipLandingCheck);
@@ -548,7 +548,7 @@ export const growPiece = (
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
-    const t = getTerritory(ctx, targetX, targetY);
+    const t = getCellContents(ctx, targetX, targetY);
     const target = t.pieces[targetIndex];
     const grownSize = nextSize(target.size);
     takeFromStash(ctx, target.owner, grownSize);
@@ -603,7 +603,7 @@ export const growTerritory = (
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
-    const t = getTerritory(ctx, targetX, targetY);
+    const t = getCellContents(ctx, targetX, targetY);
     const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
     const newCard = takeFromPile(pile, newCardUid);
     ctx.discardPile.push((t.card as TarotCard).uid);
@@ -655,7 +655,7 @@ export const attackPiece = (
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
-    const t = getTerritory(ctx, targetX, targetY);
+    const t = getCellContents(ctx, targetX, targetY);
     const victim = t.pieces[targetIndex];
     const resultSize = victim.size - pips;
     if (resultSize === 0) {
@@ -734,7 +734,7 @@ export const attackTerritory = (
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
-    const t = getTerritory(ctx, targetX, targetY);
+    const t = getCellContents(ctx, targetX, targetY);
     const current = t.pointValue();
     const oldUid = (t.card as TarotCard).uid;
     const resultValue = current - pips;
@@ -861,7 +861,7 @@ export const hierophantReplace = (
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
-    const t = getTerritory(ctx, targetX, targetY);
+    const t = getCellContents(ctx, targetX, targetY);
     const target = t.pieces[targetIndex];
     takeFromStash(ctx, ctx.currplayer, target.size);
     returnToStash(ctx, target.owner, target.size);
@@ -900,7 +900,7 @@ export const hermitMovePiece = (
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
-    const srcT = getTerritory(ctx, targetX, targetY);
+    const srcT = getCellContents(ctx, targetX, targetY);
     const moved = srcT.removeAt(targetIndex);
     ctx.board.pruneIfEmpty(targetX, targetY);
     if (moved.owner === ctx.currplayer && newOrientation !== undefined) {
@@ -908,7 +908,7 @@ export const hermitMovePiece = (
     }
     let dt = ctx.board.get(destX, destY);
     if (dt === undefined) {
-        dt = new Territory(undefined);
+        dt = new CellContents(undefined);
         ctx.board.store.set(destX, destY, dt);
     }
     dt.add(moved);

@@ -1,7 +1,7 @@
 import { UnboundedSquareBoard } from "../../common/unbounded-square-board";
 import { DirectionCardinal, orthDirections } from "../../common";
 import { TarotCard } from "../../common/tarot";
-import { Territory, ITerritory } from "./Territory";
+import { CellContents, ICellContents } from "./CellContents";
 import { Piece } from "./Piece";
 
 export type CellClass = "territory" | "wasteland" | "void";
@@ -24,29 +24,29 @@ const DELTAS: Record<DirectionCardinal, [number, number]> = {
 const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
 const revColLabels = [...colLabels].reverse();
 
-// Wraps UnboundedSquareBoard<Territory> and adds Gnostica's board concepts on
-// top of its existing set/get/delete primitives: territory vs. wasteland vs.
-// void classification (derived, not stored), and the create/destroy/grow/
-// shrink/push mutations, each responsible for evicting any pieces left
+// Wraps UnboundedSquareBoard<CellContents> and adds Gnostica's board concepts
+// on top of its existing set/get/delete primitives: territory vs. wasteland
+// vs. void classification (derived, not stored), and the create/destroy/
+// grow/shrink/push mutations, each responsible for evicting any pieces left
 // stranded in a newly-void cell (general rule: they're returned to the
 // owner's stash - see docs on destroyTerritory/pushTerritory below for the
 // one documented exception, which is applied by the caller in
 // src/games/gnostica/powers.ts, not here).
 export class GnosticaBoard {
-    private cells: UnboundedSquareBoard<Territory>;
+    private cells: UnboundedSquareBoard<CellContents>;
 
-    constructor(cells?: UnboundedSquareBoard<Territory>) {
-        this.cells = cells ?? new UnboundedSquareBoard<Territory>();
+    constructor(cells?: UnboundedSquareBoard<CellContents>) {
+        this.cells = cells ?? new UnboundedSquareBoard<CellContents>();
     }
 
     // The live UnboundedSquareBoard this wraps. This is what actually gets
     // stored in IMoveState (never a GnosticaBoard instance) - see
     // GnosticaBoard.rehydrate() for why.
-    public get store(): UnboundedSquareBoard<Territory> {
+    public get store(): UnboundedSquareBoard<CellContents> {
         return this.cells;
     }
 
-    public get(x: number, y: number): Territory | undefined {
+    public get(x: number, y: number): CellContents | undefined {
         return this.cells.get(x, y);
     }
 
@@ -63,7 +63,7 @@ export class GnosticaBoard {
     public get minY(): number { return this.cells.minY; }
     public get maxY(): number { return this.cells.maxY; }
 
-    public *entries(): IterableIterator<[number, number, Territory]> {
+    public *entries(): IterableIterator<[number, number, CellContents]> {
         yield* this.cells;
     }
 
@@ -96,7 +96,7 @@ export class GnosticaBoard {
         return "void";
     }
 
-    // Deletes {x,y}'s own stored Territory once it's become empty (no
+    // Deletes {x,y}'s own stored CellContents once it's become empty (no
     // card, no pieces) - the invariant this class's own header comment
     // promises ("a wasteland with no pieces on it is never actually
     // stored on the board"), but which only destroyTerritory/
@@ -105,7 +105,7 @@ export class GnosticaBoard {
     // still adjacent to a card-bearing neighbour) that loses its last
     // piece - e.g. it moves, is destroyed, or its owner is eliminated -
     // never reclassifies to "void" at all, so it was never pruned: the
-    // empty Territory stayed in the map forever, artificially inflating
+    // empty CellContents stayed in the map forever, artificially inflating
     // minX/maxX/minY/maxY (and so the rendered window) even though
     // nothing was actually there anymore. Deliberately classify()-
     // agnostic - emptiness alone is the only thing that matters here.
@@ -148,7 +148,7 @@ export class GnosticaBoard {
         if (existing !== undefined) {
             existing.card = card;
         } else {
-            this.cells.set(x, y, new Territory(card));
+            this.cells.set(x, y, new CellContents(card));
         }
     }
 
@@ -191,7 +191,7 @@ export class GnosticaBoard {
     // pieces never travel with a pushed territory, they stay exactly where
     // they were. The destination is always wasteland (the caller already
     // enforced that), so it may already hold pieces of its own, stored as
-    // a cardless Territory object - the incoming card slides in under
+    // a cardless CellContents object - the incoming card slides in under
     // them by attaching to that SAME object, not a fresh one. Returns the
     // same "evicted at the departure side" list as destroyTerritory
     // (arrival can only promote cells, never strand anyone there).
@@ -209,7 +209,7 @@ export class GnosticaBoard {
         // that in-between state as void.
         let dest = this.cells.get(toX, toY);
         if (dest === undefined) {
-            dest = new Territory(card);
+            dest = new CellContents(card);
             this.cells.set(toX, toY, dest);
         } else {
             dest.card = card;
@@ -223,7 +223,7 @@ export class GnosticaBoard {
     }
 
     public clone(): GnosticaBoard {
-        const cloned = new UnboundedSquareBoard<Territory>();
+        const cloned = new UnboundedSquareBoard<CellContents>();
         for (const [x, y, t] of this.cells) {
             cloned.set(x, y, t.clone());
         }
@@ -232,18 +232,18 @@ export class GnosticaBoard {
 
     // Rehydration after JSON.parse(str, reviver). GnosticaBoard itself is
     // never serialized/deserialized - IMoveState.board stores the raw
-    // UnboundedSquareBoard<Territory> directly (mirrors homeworlds.ts's
+    // UnboundedSquareBoard<CellContents> directly (mirrors homeworlds.ts's
     // System[] and trax.ts/knightline.ts's own board field), and the game
     // class is expected to call this on that field before use. Two rounds of
     // fix-up are needed: UnboundedSquareBoard.from() only restores the Map
-    // wrapper itself, so every stored Territory value still comes back as a
-    // plain object and needs its own Territory.deserialize() pass to become
-    // a real instance with methods again.
-    public static rehydrate(raw: UnboundedSquareBoard<ITerritory>): UnboundedSquareBoard<Territory> {
+    // wrapper itself, so every stored CellContents value still comes back as
+    // a plain object and needs its own CellContents.deserialize() pass to
+    // become a real instance with methods again.
+    public static rehydrate(raw: UnboundedSquareBoard<ICellContents>): UnboundedSquareBoard<CellContents> {
         const wrapped = UnboundedSquareBoard.from(raw);
-        const fixed = new UnboundedSquareBoard<Territory>();
+        const fixed = new UnboundedSquareBoard<CellContents>();
         for (const [x, y, t] of wrapped) {
-            fixed.set(x, y, Territory.deserialize(t));
+            fixed.set(x, y, CellContents.deserialize(t));
         }
         return fixed;
     }
