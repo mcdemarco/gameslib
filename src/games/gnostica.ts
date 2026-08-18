@@ -342,6 +342,15 @@ interface IMoveState extends IIndividualState {
     handBaseline: string[][];
     drawPile: string[];
     discardPile: string[];
+    // discardPile exactly as it stood before the most recently completed
+    // real move's own mutations (mirrors handBaseline's own timing - see
+    // move()'s docs) - render()'s discard-pile "just discarded" highlight
+    // diffs the current pile against this. Unlike handBaseline, there's
+    // only one shared pile (always fully public, unlike a hand), so this
+    // isn't per-player and isn't gated on whose turn it is - it simply
+    // shows whatever the LAST move added, until the NEXT move (by anyone)
+    // updates the baseline again.
+    discardBaseline: string[];
     stashes: Map<playerid, Stash>;
     eliminated: playerid[];
     lastTurnAnnouncedBy: playerid | undefined;
@@ -424,6 +433,7 @@ export class GnosticaGame extends GameBase {
     public handBaseline: string[][] = [];
     public drawPile: string[] = [];
     public discardPile: string[] = [];
+    public discardBaseline: string[] = [];
     public stashes!: Map<playerid, Stash>;
     public eliminated: playerid[] = [];
     public lastTurnAnnouncedBy: playerid | undefined;
@@ -536,6 +546,7 @@ export class GnosticaGame extends GameBase {
                 handBaseline: hands.map(h => [...h]),
                 drawPile,
                 discardPile: [],
+                discardBaseline: [],
                 stashes,
                 eliminated: [],
                 lastTurnAnnouncedBy: undefined,
@@ -589,6 +600,7 @@ export class GnosticaGame extends GameBase {
         this.handBaseline = state.handBaseline.map(h => [...h]);
         this.drawPile = [...state.drawPile];
         this.discardPile = [...state.discardPile];
+        this.discardBaseline = [...state.discardBaseline];
         this.stashes = new Map([...state.stashes.entries()].map(([k, v]) => [k, [...v] as Stash]));
         this.eliminated = [...state.eliminated];
         this.lastTurnAnnouncedBy = state.lastTurnAnnouncedBy;
@@ -614,6 +626,7 @@ export class GnosticaGame extends GameBase {
             handBaseline: this.handBaseline.map(h => [...h]),
             drawPile: [...this.drawPile],
             discardPile: [...this.discardPile],
+            discardBaseline: [...this.discardBaseline],
             stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
             eliminated: [...this.eliminated],
             lastTurnAnnouncedBy: this.lastTurnAnnouncedBy,
@@ -718,6 +731,10 @@ export class GnosticaGame extends GameBase {
         // pointless busywork on every click.
         if (!partial) {
             this.handBaseline[this.currplayer - 1] = [...this.hands[this.currplayer - 1]];
+            // Same timing/reasoning as handBaseline just above, but for
+            // the single shared discard pile - see discardBaseline's own
+            // docs on why this one isn't per-player.
+            this.discardBaseline = [...this.discardPile];
         }
 
         // Parses and executes `m` against `this` - the one place move
@@ -2388,7 +2405,9 @@ export class GnosticaGame extends GameBase {
         // each click REPLACES any earlier pick rather than accumulating
         // (mirrors "play <uid>"'s own single-click-replaces behaviour).
         if (this.phase === "bidding" && piece?.startsWith("hand_")) {
-            const uid = piece.slice("hand_".length);
+            // Same "_new" stripping as the main-phase hand-card handler -
+            // see its own docs.
+            const uid = piece.slice("hand_".length).replace(/_new$/, "");
             const hand = this.hands[this.currplayer - 1] ?? [];
             const idx = hand.indexOf(uid);
             if (idx === -1) {
@@ -2568,7 +2587,14 @@ export class GnosticaGame extends GameBase {
             // playing the card outright ("play"), or toggling it into a
             // discard's uid list (the default, if no mode is active).
             if (piece !== undefined && piece.startsWith("hand_")) {
-                const uid = piece.slice("hand_".length);
+                // A just-drawn card's own rendered/clickable identifier
+                // carries a "_new" suffix (see newHandCardUids's own docs
+                // on the highlight this drives) distinct from its real
+                // uid - stripped here so a real click on one still
+                // resolves correctly. No real uid can end in "_new"
+                // itself (every uid is a bare rank+suit or 2-digit major
+                // code), so this is unambiguous.
+                const uid = piece.slice("hand_".length).replace(/_new$/, "");
                 const hand = this.hands[this.currplayer - 1] ?? [];
                 if (!hand.includes(uid)) {
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
@@ -2644,7 +2670,12 @@ export class GnosticaGame extends GameBase {
             // add/remove without the player ever seeing which card it was
             // until it's actually in their hand.
             if (piece !== undefined && piece.startsWith("discard_")) {
-                const key = piece.slice("discard_".length);
+                // Same "_new" stripping as the hand-card click just above,
+                // for a just-discarded card's own tag (see
+                // newDiscardUids's own docs) - neither a bare major uid
+                // nor a "<suit>_spot"/"<suit>_royal" bucket key can end in
+                // "_new" for real, so this is unambiguous here too.
+                const key = piece.slice("discard_".length).replace(/_new$/, "");
                 const pendingForDiscard = this.parsePendingStep(move, { preferCurrent: true });
                 if (pendingForDiscard?.special !== "judgementDraw") {
                     return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
@@ -4726,6 +4757,22 @@ export class GnosticaGame extends GameBase {
         return new Set((this.hands[player - 1] ?? []).filter(uid => !baseline.has(uid)));
     }
 
+    // Cards added to the discard pile by the most recently completed move
+    // (see move()'s own docs on discardBaseline) - render() highlights
+    // them the same way newHandCardUids highlights a just-drawn hand
+    // card. Not scoped to a specific viewer the way newHandCardUids is
+    // (the discard pile is always fully public) and clears the instant
+    // ANY player's next move is submitted, not just the acting player's
+    // own next turn - there's only one shared pile, so "whose turn is
+    // it" isn't a meaningful gate here.
+    private newDiscardUids(): Set<string> {
+        if (this.liveMove !== undefined) {
+            return new Set();
+        }
+        const baseline = new Set(this.discardBaseline);
+        return new Set(this.discardPile.filter(uid => !baseline.has(uid)));
+    }
+
     private scoreFor(player: playerid): number {
         let total = 0;
         for (const [, , t] of this.board.entries()) {
@@ -5771,7 +5818,7 @@ export class GnosticaGame extends GameBase {
         // The discard pile is always face-up/public, unlike hands or the
         // draw pile, so its own contents are read directly.
         const discardArea = this.buildDeckSummaryArea(
-            this.discardPile, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
+            this.discardPile, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"), this.newDiscardUids()
         );
         if (discardArea !== undefined) {
             areas.push(discardArea);
@@ -5897,12 +5944,19 @@ export class GnosticaGame extends GameBase {
     // as its own full card face, per the design brief. Returns undefined
     // for an empty pile (no area to show).
     private buildDeckSummaryArea(
-        uids: string[], keyPrefix: string, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string
+        uids: string[], keyPrefix: string, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string,
+        newUids: Set<string> = new Set(),
     ): AreaPieces | undefined {
         if (uids.length === 0) {
             return undefined;
         }
+        // Split each minor bucket's own count into "new" (just discarded -
+        // see newDiscardUids's own docs) and the rest, so only the actual
+        // just-discarded cards get tinted rather than the whole bucket
+        // (which, once a suit/category has been discarded from more than
+        // once, would otherwise include plenty of much older cards too).
         const counts = new Map<string, number>();
+        const newCounts = new Map<string, number>();
         const majorUids: string[] = [];
         for (const uid of uids) {
             const card = allCards().find(c => c.uid === uid);
@@ -5915,6 +5969,9 @@ export class GnosticaGame extends GameBase {
                 const minor = card as MinorCard;
                 const bucket = `${minor.suit.uid}_${minor.rank.court ? "royal" : "spot"}`;
                 counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+                if (newUids.has(uid)) {
+                    newCounts.set(bucket, (newCounts.get(bucket) ?? 0) + 1);
+                }
             }
         }
 
@@ -5926,32 +5983,48 @@ export class GnosticaGame extends GameBase {
                 if (count === undefined) {
                     continue;
                 }
-                const key = `${keyPrefix}_${bucket}`;
-                if (!(key in legend)) {
-                    // Built via buildCardFace itself - same already-tuned
-                    // corner/circle numbers as every other card face,
-                    // rather than a second, separately-guessed composition.
-                    // A representative rank (any court rank for "royal",
-                    // any non-court rank for "spot") drives the exact same
-                    // icon/circle layout a real card of that category would
-                    // get; only the background (borderless, no card-square)
-                    // and the rank-corner text (a count, not a real rank)
-                    // are overridden.
-                    const representativeRank = ranks.find(r => r.court === (category === "royal"))!;
-                    const representative = new MinorCard({ rank: representativeRank, suit });
-                    legend[key] = this.buildCardFace(representative, false, {
-                        borderless: true,
-                        rankText: `${count}x`,
-                    }) as [Glyph, ...Glyph[]];
+                // Built via buildCardFace itself - same already-tuned
+                // corner/circle numbers as every other card face, rather
+                // than a second, separately-guessed composition. A
+                // representative rank (any court rank for "royal", any
+                // non-court rank for "spot") drives the exact same icon/
+                // circle layout a real card of that category would get;
+                // only the background (borderless, no card-square) and
+                // the rank-corner text (a count, not a real rank) are
+                // overridden.
+                const representativeRank = ranks.find(r => r.court === (category === "royal"))!;
+                const representative = new MinorCard({ rank: representativeRank, suit });
+                const newCount = newCounts.get(bucket) ?? 0;
+                const oldCount = count - newCount;
+                if (oldCount > 0) {
+                    const key = `${keyPrefix}_${bucket}`;
+                    if (!(key in legend)) {
+                        legend[key] = this.buildCardFace(representative, false, {
+                            borderless: true,
+                            rankText: `${oldCount}x`,
+                        }) as [Glyph, ...Glyph[]];
+                    }
+                    pieces.push(key);
                 }
-                pieces.push(key);
+                if (newCount > 0) {
+                    const key = `${keyPrefix}_${bucket}_new`;
+                    if (!(key in legend)) {
+                        legend[key] = this.buildCardFace(representative, false, {
+                            borderless: true,
+                            rankText: `${newCount}x`,
+                            background: "#ccc",
+                        }) as [Glyph, ...Glyph[]];
+                    }
+                    pieces.push(key);
+                }
             }
         }
         for (const uid of majorUids.sort()) {
-            const key = `${keyPrefix}_${uid}`;
+            const isNew = newUids.has(uid);
+            const key = isNew ? `${keyPrefix}_${uid}_new` : `${keyPrefix}_${uid}`;
             if (!(key in legend)) {
                 const card = allCards().find(c => c.uid === uid)!;
-                legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
+                legend[key] = this.buildCardFace(card, false, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
             }
             pieces.push(key);
         }

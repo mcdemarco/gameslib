@@ -262,6 +262,27 @@ describe("Gnostica: new-card hand highlight", () => {
         const handArea = player1HandArea(rep);
         expect(handArea?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
     });
+
+    // Regression: the "_new" suffix is part of the CLICKABLE piece
+    // identifier too (AreaPieces reuses the same string for both the
+    // legend key and what the renderer reports back on click), not just
+    // a cosmetic legend tag - a real click on a highlighted card must
+    // still resolve to its own real uid.
+    it("a real click on the highlighted card (its actual _new-suffixed piece id) still resolves, not 'not in hand'", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.hands[0] = [card("AC").uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid];
+        g.drawPile = [card("7C").uid, ...g.drawPile.filter(uid => uid !== card("7C").uid)];
+        g.move("discard AC", { trusted: true });
+        g.move("discard", { trusted: true });
+        expect(g.currplayer).eq(1);
+        const newKey = `hand_${card("7C").uid}_new`;
+        expect(player1HandArea(g.render() as RenderRep)?.pieces).to.include(newKey); // sanity - not vacuous
+        const click = g.handleClick("", -1, -1, newKey);
+        expect(click.valid).to.be.true;
+        expect(click.move).eq(`discard ${card("7C").uid}`);
+    });
 });
 
 describe("Gnostica: place", () => {
@@ -1519,6 +1540,10 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
     it("buckets discard-pile minors by suit and spot/royalty, and shows majors as individual cards", () => {
         const g = new GnosticaGame(2);
         g.discardPile = ["AC", "2C", "KC", "07"]; // 2 spot cups, 1 royal cup, 1 major
+        // Matches the discard pile itself, so none of these register as
+        // "just discarded" (see newDiscardUids's own docs) - this test is
+        // about the bucketing/grouping shape, not the highlight.
+        g.discardBaseline = [...g.discardPile];
         const rep = g.render() as { legend: Record<string, unknown>; areas?: { label: string; pieces?: string[] }[] };
         const discardArea = rep.areas?.find(a => a.pieces?.some(p => p.startsWith("discard_")));
         expect(discardArea, "expected a discard-pile area").to.not.be.undefined;
@@ -1565,6 +1590,93 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
         const after = g.render() as { legend: Record<string, { text?: string }[]> };
         const afterText = after.legend.draw_C_spot.find(gl => gl.text !== undefined)!.text;
         expect(afterText, "AC is now hidden too, so all 10 spot cups are unknown").eq("10x");
+    });
+});
+
+// Mirrors "Gnostica: new-card hand highlight" - a card added to the
+// discard pile by the most recently completed move gets the same tint as
+// a just-drawn hand card (see newDiscardUids's own docs), except it's not
+// scoped to a specific viewer (the pile is always public) or gated on
+// whose turn it is (there's only one shared pile).
+describe("Gnostica: discard-pile 'just discarded' highlight", () => {
+    type DiscardRenderRep = { legend: Record<string, { colour?: string; text?: string }[]>; areas?: { pieces?: string[] }[] };
+    const discardArea = (rep: DiscardRenderRep) => rep.areas?.find(a => a.pieces?.some(p => p.startsWith("discard_")));
+
+    it("tags a card discarded on the most recent move, tinted the same #ccc as a new hand card", () => {
+        // A major arcana card specifically - unlike a minor, it gets its
+        // own individual legend entry rather than folding into a suit/
+        // category bucket (see the next test for that case).
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.hands[0] = [major(3).uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid];
+        g.move(`discard ${major(3).uid}`, { trusted: true });
+        const rep = g.render() as DiscardRenderRep;
+        const newKey = `discard_${major(3).uid}_new`;
+        expect(discardArea(rep)?.pieces).to.include(newKey);
+        expect(rep.legend[newKey].some(gl => gl.colour === "#ccc")).to.be.true;
+    });
+
+    it("a minor card only tints its own share of the bucket, not the whole count", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.discardPile = [card("2C").uid]; // one spot cup already discarded earlier
+        g.discardBaseline = [...g.discardPile]; // ...not on the move about to happen
+        g.hands[0] = [card("AC").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid, card("7C").uid];
+        g.move("discard AC", { trusted: true }); // a second spot cup, discarded just now
+        const rep = g.render() as DiscardRenderRep;
+        const pieces = discardArea(rep)?.pieces ?? [];
+        expect(pieces).to.include("discard_C_spot"); // the older one, untinted
+        expect(pieces).to.include("discard_C_spot_new"); // just this move's own
+        expect(rep.legend.discard_C_spot.some(gl => gl.text === "1x")).to.be.true;
+        expect(rep.legend.discard_C_spot_new.some(gl => gl.text === "1x")).to.be.true;
+        expect(rep.legend.discard_C_spot_new.some(gl => gl.colour === "#ccc")).to.be.true;
+    });
+
+    it("clears once the next move is submitted, even by a different player", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.hands[0] = [card("AC").uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid];
+        g.move("discard AC", { trusted: true });
+        g.move("discard", { trusted: true }); // player 2's own turn
+        const rep = g.render() as DiscardRenderRep;
+        expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+    });
+
+    it("a live preview of the player's own in-progress move doesn't highlight it early", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place n0", { trusted: true });
+        g.hands[0] = [card("AC").uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid];
+        g.move("discard AC", { partial: true, trusted: true }); // simulates the player's own first click
+        const rep = g.render() as DiscardRenderRep;
+        expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+    });
+
+    // Regression: same "_new" suffix stripping as the hand-card click -
+    // AreaPieces reuses the pieces[] entry as both the legend key and the
+    // clickable identifier, so a real click on a highlighted discard-pile
+    // card (Judgement's own picker) must still resolve to its real uid/
+    // bucket, not fall through to "not a recognized click".
+    it("a real click on the highlighted discard-pile card (Judgement) still resolves correctly", () => {
+        const g = new GnosticaGame(2);
+        const rowColFor = (x: number, y: number): [number, number] => {
+            const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+            return [y - minY, x - minX];
+        };
+        forceCardAt(g, 0, 0, () => major(20)); // Judgement
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        g.hands[0] = g.hands[0].slice(0, 5); // room for 1 more (a full 6-card hand has none)
+        g.discardPile = [major(3).uid]; // baseline left empty - "new" by default
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const newKey = `discard_${major(3).uid}_new`;
+        const click = g.handleClick(cellClick.move, -1, -1, newKey);
+        expect(click.valid).to.be.true;
+        expect(click.move).eq(`use ${major(20).uid}, m0.1 ${major(3).uid}`);
     });
 });
 
