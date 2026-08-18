@@ -3356,27 +3356,37 @@ export class GnosticaGame extends GameBase {
     // reorienting an existing minion (cmdOrient), a newly placed one
     // (cmdPlace), a newly created one (Cups "own"), or a special power's
     // own target (orientMinion/orientAny/hierophantReplace) - needs a
-    // buffer on the correct side if it's on a wasteland, since every void
-    // cell renders as a plain, unclickable "-" (Pacru's own "buffer"
-    // approach, not an expanded/padded void ring - see handleClickCore's
-    // own docs on reading a buffer click back). A wasteland cell is only
-    // ever adjacent to a single side of the board's own stored (territory)
-    // extent at a time (never a corner). Recomputed on every call
-    // (this.buffers itself is reset at the top of every move() call), so
-    // this always reflects wherever the CURRENTLY relevant piece actually
-    // sits - and deliberately ignores that piece's own (pre-existing)
-    // orientation entirely.
+    // buffer on a given side only if facing that way points at a void
+    // cell that's ALSO outside the rendered window (renderWindow's own
+    // docs on why that's not the same thing as this.board's raw
+    // minX/maxX/minY/maxY). A void cell still inside the window is a
+    // perfectly ordinary click target - orientationTowardClick doesn't
+    // care what's classified there, and handleClickCore's row/col math
+    // is the same for every in-window cell regardless of its glyph - so
+    // no buffer (Pacru's own "buffer" approach, not an expanded/padded
+    // void ring - see handleClickCore's own docs on reading a buffer
+    // click back) is needed there at all. Checked independently per side
+    // (not else-if) since a piece parked at a genuine corner of the
+    // board's own stored extent can legitimately need two at once.
+    // Recomputed on every call (this.buffers itself is reset at the top
+    // of every move() call), so this always reflects wherever the
+    // CURRENTLY relevant piece actually sits - and deliberately ignores
+    // that piece's own (pre-existing) orientation entirely.
     private addBufferIfWasteland(x: number, y: number): void {
         if (this.board.classify(x, y) !== "wasteland") {
             return;
         }
-        if (x === this.board.minX) {
+        const win = this.renderWindow();
+        if (x === this.board.minX && x - 1 < win.minX) {
             this.buffers.push("W");
-        } else if (x === this.board.maxX) {
+        }
+        if (x === this.board.maxX && x + 1 > win.maxX) {
             this.buffers.push("E");
-        } else if (y === this.board.minY) {
+        }
+        if (y === this.board.minY && y - 1 < win.minY) {
             this.buffers.push("N");
-        } else if (y === this.board.maxY) {
+        }
+        if (y === this.board.maxY && y + 1 > win.maxY) {
             this.buffers.push("S");
         }
     }
