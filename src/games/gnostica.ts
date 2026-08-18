@@ -270,10 +270,10 @@ interface IPendingStep {
     // completely unmodified once suitUid is set to the chosen letter.
     prefix: string[];
     // Every one of the acting player's own pieces eligible to act here -
-    // `minion` is always minions[0] (see this interface's own docs), but
-    // the full list is kept too so a minion-selector ref can still be
-    // generated correctly (disambiguated only against the player's own
-    // OTHER eligible minions, never a co-located enemy piece - see
+    // the full list is kept (regardless of which one `minion` currently
+    // resolves to) so a minion-selector ref can still be generated
+    // correctly (disambiguated only against the player's own OTHER
+    // eligible minions, never a co-located enemy piece - see
     // resolvePieceRef's docs on the "minion-selector" pool).
     eligible: IMinionRef[];
     // eligible, plus any newMinion chained in from earlier COMPLETE steps
@@ -281,7 +281,18 @@ interface IPendingStep {
     // own chaining loop) - identical to `eligible` for a minor card, or
     // for a major card's own first step.
     minions: IMinionRef[];
+    // Resolved from this step's own already-typed leading minionRef token
+    // against `minions`, or `minions[0]` as a preview default when that
+    // token is missing/unresolved - see resolveStepMinion's own docs.
+    // `minionAmbiguous` is what actually gates whether that default is
+    // trustworthy: true means more than one minion is eligible AND none
+    // has been pinned down yet, so `minion` here is only a placeholder -
+    // getActionButtons() shows a minion-picker button set instead of
+    // mode/special buttons in that case (see its own docs), and every
+    // click helper that reads `pending.minion` directly should only be
+    // reached once this is false.
     minion: IMinionRef;
+    minionAmbiguous: boolean;
     // Earlier complete power-step segments of the same major-arcana
     // activation, verbatim raw text - preserved as-is by every move
     // string this step's own click helpers build. Always [] for a minor
@@ -1156,6 +1167,28 @@ export class GnosticaGame extends GameBase {
         throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${key}`, { ref }));
     }
 
+    // Resolves a step's own leading minionRef token (`tokens[0]`, if
+    // present) against `pool`, falling back to `pool[0]` as a preview
+    // default whenever it's missing or doesn't resolve. `ambiguous` is
+    // true only when there's real work left for the player to do here -
+    // more than one minion eligible AND none pinned down yet - never when
+    // the pool has just one member (nothing to pick between, regardless of
+    // what's typed) or when a valid ref is already present. Shared by
+    // every IPendingStep-building branch in parsePendingStep/
+    // buildSpecialPending; getActionButtons() uses the paired flag to
+    // decide whether a minion-picker button set is still needed before
+    // mode/special buttons make sense (see its own docs).
+    private resolveStepMinion(tokens: string[] | undefined, pool: IMinionRef[]): { minion: IMinionRef; ambiguous: boolean } {
+        if (pool.length <= 1) {
+            return { minion: pool[0], ambiguous: false };
+        }
+        const resolved = tokens !== undefined && tokens.length > 0 ? this.resolvePieceRef(tokens[0], pool) : undefined;
+        if (resolved?.kind === "ok") {
+            return { minion: resolved.ref, ambiguous: false };
+        }
+        return { minion: pool[0], ambiguous: true };
+    }
+
     // A syntactically-complete move that the click flow itself built up
     // (as opposed to one the user finished typing) is still provisional -
     // place/orient's orientation and discard's uid/count list are all optional
@@ -1337,6 +1370,56 @@ export class GnosticaGame extends GameBase {
         if (pendingMinor === undefined) {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
+
+        // Once a power step's own modes are on offer, there isn't room to
+        // also keep the full top-level set around - only the one choice
+        // that got us here (Use Territory/Use Hand Card) stays, followed
+        // by a non-interactive spacer button (the schema has no dedicated
+        // divider type) and this step's own mode buttons. Declare stays
+        // available throughout (it's an orthogonal end-of-turn flourish,
+        // not a step in this particular choice), tacked on at the end
+        // rather than lost.
+        const selected = topLevel.find(b => b.value === pendingMinor.head);
+        const declareBtn = topLevel.find(b => b.value === "declare");
+
+        // More than one of the acting player's own pieces is eligible for
+        // THIS step and none has been picked yet (see resolveStepMinion's
+        // own docs) - offer one button per eligible minion, pre-empting
+        // every other branch below (mode buttons, hermitTeleport/
+        // magicianChoice's own sets, or the uncollapsed bar a pure
+        // click-driven special power would otherwise fall through to).
+        // Clicking one types just that minion's ref as this step's own
+        // leading token (see handleClickCore's "minion_" dispatch) -
+        // nothing else about the step is decided yet, so the very next
+        // getActionButtons() call picks up exactly where the single-minion
+        // case always has, now with `minion` no longer just a placeholder.
+        if (pendingMinor.minionAmbiguous) {
+            const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
+            buttons.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
+            const seenRefs = new Set<string>();
+            for (const m of pendingMinor.minions) {
+                const ref = this.pieceRefStr(m.x, m.y, m.index, pendingMinor.minions);
+                // Two genuinely identical pieces (same owner/size/orientation
+                // at the same cell) share the same shortest ref - resolvePieceRef
+                // already treats that as "resolves to the first match, not an
+                // error" (see its own docs), so a second button for the same
+                // ref would just be an inert duplicate, not a real choice.
+                if (seenRefs.has(ref)) {
+                    continue;
+                }
+                seenRefs.add(ref);
+                // The ref itself (not just the cell) - two eligible minions
+                // can share a cell (different pip sizes) or a whole "play"
+                // pool can span the entire board, so the cell alone isn't
+                // always enough to tell buttons apart at a glance.
+                buttons.push({ label: ref, value: `minion_${ref}` });
+            }
+            if (declareBtn !== undefined) {
+                buttons.push(declareBtn);
+            }
+            return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+        }
+
         // orientMinion/tradeHands/orientAny/hierophantReplace/
         // judgementDraw/highPriestess are pure click-driven (board or
         // AreaPieces clicks, no mode to pick via button) - leave the bar
@@ -1353,16 +1436,6 @@ export class GnosticaGame extends GameBase {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        // Once a power step's own modes are on offer, there isn't room to
-        // also keep the full top-level set around - only the one choice
-        // that got us here (Use Territory/Use Hand Card) stays, followed
-        // by a non-interactive spacer button (the schema has no dedicated
-        // divider type) and this step's own mode buttons. Declare stays
-        // available throughout (it's an orthogonal end-of-turn flourish,
-        // not a step in this particular choice), tacked on at the end
-        // rather than lost.
-        const selected = topLevel.find(b => b.value === pendingMinor.head);
-        const declareBtn = topLevel.find(b => b.value === "declare");
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
 
         const spacerLabel = pendingMinor.suitUid ? MAGICIAN_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
@@ -1482,8 +1555,10 @@ export class GnosticaGame extends GameBase {
         }
         if (!card.major) {
             const suitUid = (card as MinorCard).suit.uid;
-            const [, mode, ...rest] = parsed.stepSegments[0] ?? []; // stepSegments[0][0] is the minionRef - always eligible[0] by construction
-            return { head, headArg, suitUid, prefix: [], eligible, minions: eligible, minion: eligible[0], priorSteps: [], opts: {}, mode, rest };
+            const segment = parsed.stepSegments[0] ?? []; // segment[0] is the minionRef, if typed yet - see resolveStepMinion
+            const [, mode, ...rest] = segment;
+            const { minion, ambiguous } = this.resolveStepMinion(segment, eligible);
+            return { head, headArg, suitUid, prefix: [], eligible, minions: eligible, minion, minionAmbiguous: ambiguous, priorSteps: [], opts: {}, mode, rest };
         }
 
         const def = getMajorArcanaDef(card as MajorCard);
@@ -1517,7 +1592,8 @@ export class GnosticaGame extends GameBase {
                     // different suit's mode button to actually move on; see
                     // the two call sites this flag is passed from in
                     // handleClickCore).
-                    return { head, headArg, suitUid: suitUidForStep, prefix: [], eligible, minions, minion: minions[0], priorSteps, opts, mode, rest };
+                    const { minion, ambiguous } = this.resolveStepMinion(tokens, minions);
+                    return { head, headArg, suitUid: suitUidForStep, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts, mode, rest };
                 }
             } else {
                 const minTokens = SPECIAL_MIN_TOKENS[step.special];
@@ -1544,7 +1620,8 @@ export class GnosticaGame extends GameBase {
         if ("primitive" in step) {
             const suitUid = this.primitiveToSuit(step.primitive);
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, def.powers.length, step.opts);
-            return { head, headArg, suitUid, prefix: [], eligible, minions, minion: minions[0], priorSteps, opts, mode: undefined, rest: [] };
+            const { minion, ambiguous } = this.resolveStepMinion(undefined, minions);
+            return { head, headArg, suitUid, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts, mode: undefined, rest: [] };
         }
         return this.buildSpecialPending(step.special, head, headArg, eligible, minions, priorSteps, []);
     }
@@ -1552,12 +1629,13 @@ export class GnosticaGame extends GameBase {
     // Builds the `special`-flavored branch of IPendingStep - `tokens` is
     // this step's own already-typed segment (or [] for a brand new one),
     // still including its own leading minionRef (except highPriestess,
-    // which has none at all - see IPendingStep's own docs). `minion` is
-    // set to minions[0] even for highPriestess (unused by its own click
-    // handler, but the field isn't optional and minions is guaranteed
-    // non-empty by this point regardless of which special power it is -
-    // the general "must own a piece at the activated cell" rule, not
-    // anything specific to a particular power).
+    // which has none at all - see IPendingStep's own docs). highPriestess
+    // never targets a specific minion at all (its own click handler
+    // ignores `pending.minion` entirely), so it's hardcoded to
+    // {minion: minions[0], ambiguous: false} regardless of pool size -
+    // resolveStepMinion would otherwise misread tokens[0] there (a
+    // hand-card uid, not a piece ref) as an unresolved minionRef and
+    // wrongly report ambiguity.
     //
     // magicianChoice is the one exception: once a suit letter is chosen
     // (tokens[1]), the rest of its own grammar (<mode> <args...>) is
@@ -1575,10 +1653,14 @@ export class GnosticaGame extends GameBase {
         if (special === "magicianChoice" && MAGICIAN_SUITS.some(s => s.uid === tokens[1])) {
             const suitUid = tokens[1];
             const [, , mode, ...rest] = tokens;
-            return { head, headArg, suitUid, prefix: [suitUid], eligible, minions, minion: minions[0], priorSteps, opts: {}, mode, rest };
+            const { minion, ambiguous } = this.resolveStepMinion(tokens, minions);
+            return { head, headArg, suitUid, prefix: [suitUid], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts: {}, mode, rest };
         }
         const rest = special === "highPriestess" ? tokens : tokens.slice(1);
-        return { head, headArg, special, prefix: [], eligible, minions, minion: minions[0], priorSteps, opts: {}, mode: undefined, rest };
+        const { minion, ambiguous } = special === "highPriestess"
+            ? { minion: minions[0], ambiguous: false }
+            : this.resolveStepMinion(tokens, minions);
+        return { head, headArg, special, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts: {}, mode: undefined, rest };
     }
 
     // The single valid cell a minor suit-power step may affect, per
@@ -2284,6 +2366,28 @@ export class GnosticaGame extends GameBase {
             }
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
+                if (value.startsWith("minion_")) {
+                    // "minion_<ref>" - see getActionButtons()'s own
+                    // minionAmbiguous branch, offered whenever more than one
+                    // of the acting player's own pieces is eligible for the
+                    // current step and none has been picked yet. Types just
+                    // the chosen minion's ref as this step's leading token -
+                    // nothing else about the step (mode, special args) is
+                    // decided here, so the resulting move is exactly as
+                    // "still building" as an empty step ever was, just no
+                    // longer ambiguous about which minion is acting.
+                    const ref = value.slice("minion_".length);
+                    const pending = this.parsePendingStep(move);
+                    if (pending === undefined || !pending.minionAmbiguous) {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    const resolved = this.resolvePieceRef(ref, pending.minions);
+                    if (resolved.kind !== "ok") {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    const minionRef = this.pieceRefStr(resolved.ref.x, resolved.ref.y, resolved.ref.index, pending.minions);
+                    return this.provisionalResult(this.assembleStepMove(pending, [minionRef]));
+                }
                 if (value.startsWith("mode_")) {
                     // "mode_<suitUid>_<mode>" - see getActionButtons()'s own
                     // pendingMinor branch, which only ever offers one of
@@ -4974,13 +5078,31 @@ export class GnosticaGame extends GameBase {
                     .map(({ i }) => [targetCell, this.victimRefStr(tx, ty, i)]));
             case "C.new":
                 return flat(cardsWorth(1).map(uid => [targetCell, uid]));
-            case "R.piece":
+            case "R.piece": {
                 // Moving your own minion is ordinary positioning; shoving
                 // an enemy's is a real but less common destructive tactic
                 // (e.g. into the void) - lean toward self without ruling
-                // the other out.
-                return pieceTargets.flatMap(({ ref, owner }) =>
-                    pips.map(d => ({ args: [ref, d], weight: owner === this.currplayer ? 2 : 1 })));
+                // the other out. Within "move your own minion" candidates
+                // specifically, also lean toward whatever distance lands it
+                // on a territory cell rather than a bare wasteland - moving
+                // your own piece off a productive cell for no reason isn't
+                // something a real player would usually choose, even though
+                // the rules allow it (an enemy's piece gets no such
+                // preference: walking it off into the wasteland is a
+                // legitimate destructive use of the same mode).
+                const [dx, dy] = this.board.delta(piece.orientation as Exclude<Orientation, "U">);
+                const selfRef = this.pieceRefStr(minion.x, minion.y, minion.index);
+                return pieceTargets.flatMap(({ ref, owner }) => {
+                    const [bx, by] = ref === selfRef ? [minion.x, minion.y] : [tx, ty];
+                    return pips.map(d => {
+                        const dist = Number(d);
+                        const ownWeight = owner === this.currplayer ? 2 : 1;
+                        const landsOnTerritory = owner === this.currplayer
+                            && this.board.classify(bx + dx * dist, by + dy * dist) === "territory";
+                        return { args: [ref, d], weight: ownWeight * (landsOnTerritory ? 2 : 1) };
+                    });
+                });
+            }
             case "R.tile":
                 return flat(pips.map(d => [d]));
             case "D.piece":
@@ -5036,9 +5158,41 @@ export class GnosticaGame extends GameBase {
         const ignoreCapacity = opts.ignoreCapacity === true;
         const pool = shuffle([...minions]) as IMinionRef[];
         for (const minion of pool) {
-            const modes = shuffle(this.legalModesForMinion(minion, suitUid, ignoreCapacity)) as string[];
-            for (const mode of modes) {
-                const candidates = this.buildRandomModeArgCandidates(minion, suitUid, mode);
+            const modeCandidates = this.legalModesForMinion(minion, suitUid, ignoreCapacity)
+                .map(mode => ({ mode, candidates: this.buildRandomModeArgCandidates(minion, suitUid, mode) }));
+            // R.piece's own best candidate weight already tells us whether
+            // ANY way of using it here actually lands the acting player's
+            // own minion on a territory cell (see buildRandomModeArgCandidates's
+            // R.piece case - that combination alone reaches weight 4). When
+            // it doesn't - every option either moves an enemy or stubbornly
+            // strands your own piece in the wasteland (a fixed 1-space hop
+            // for a size-1 minion has no better distance to pick) - this
+            // mode is a comparatively weak choice for THIS minion
+            // specifically, so it's down-weighted against this minion's
+            // other legal modes rather than picked on equal footing.
+            // C.own's own target cell is entirely fixed by the minion's
+            // facing (no arg choice to weight the way R.piece has) - landing
+            // a new own piece on an already-established territory keeps it
+            // immediately productive, while landing on bare wasteland is
+            // the normal "push into new ground" use of the mode, still
+            // legal and often the only option a minion actually has. Both
+            // cases favor the acting player's own placement; still legal,
+            // still sometimes chosen - "prefer, don't require" (see
+            // weightedPick's own docs), same philosophy as every other
+            // weighting in this file.
+            const modeWeight = ({ mode, candidates }: { mode: string; candidates: { weight: number }[] }): number => {
+                const key = `${suitUid}.${mode}`;
+                if (key === "R.piece" && candidates.length > 0) {
+                    return Math.max(...candidates.map(c => c.weight)) >= 4 ? 3 : 1;
+                }
+                if (key === "C.own") {
+                    const [tx, ty] = this.minorTargetCell(minion);
+                    return this.board.classify(tx, ty) === "territory" ? 3 : 1;
+                }
+                return 3;
+            };
+            const orderedModes = this.weightedShuffle(modeCandidates, modeWeight);
+            for (const { mode, candidates } of orderedModes) {
                 const ordered = this.weightedShuffle(candidates, c => c.weight);
                 for (const { args } of ordered) {
                     const check = this.validateSuitPrimitive(suitUid, minion, mode, args, opts);

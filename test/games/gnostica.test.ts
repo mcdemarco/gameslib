@@ -1868,6 +1868,119 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 });
 
+describe("Gnostica: handleClick - minion disambiguation", () => {
+    const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        return [y - minY, x - minX];
+    };
+
+    it("use: multiple eligible minions at the activated cell offer a minion-picker bar; picking one seeds it for the mode buttons that follow", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        // Two of player 1's own minions share the activated cell - one
+        // facing "U" (can't use a rod at all), one facing "E" (can) - so
+        // which one gets seeded is directly observable in which mode
+        // buttons show up afterward.
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 1, "E")];
+        g.move(`use ${aceOfRods().uid}`, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("minion_m0.1.U");
+        expect(values).to.include("minion_m0.1.E");
+        expect(values).to.not.include("mode_R_piece"); // not offered until a minion is actually chosen
+        const picked = g.handleClick(`use ${aceOfRods().uid}`, -1, -1, "_btn_minion_m0.1.E");
+        expect(picked.move).eq(`use ${aceOfRods().uid}, m0.1.E`);
+        g.move(picked.move, { partial: true });
+        const rep2 = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
+        const values2 = bar2!.buttons!.map(b => b.value);
+        expect(values2.some(v => v?.startsWith("minion_"))).to.be.false; // no minion buttons left once resolved
+        expect(values2).to.include("mode_R_piece"); // legal now - the "E"-facing minion was actually seeded
+        const modeClick = g.handleClick(picked.move, -1, -1, "_btn_mode_R_piece");
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.1.E piece m0.1.E 1`);
+    });
+
+    it("play: multiple eligible minions on different cells offer a minion-picker bar; picking one seeds that minion, not just the first one found", () => {
+        // A fresh instance per checkpoint, exactly like the real click flow
+        // (every click reconstructs a fresh GnosticaGame via GameFactory,
+        // then does its own single move(..., {partial: true}) - see this
+        // describe block's own docs) - unlike "use", "play" mutates the
+        // hand (discards the card) on ANY partial apply, so reusing one
+        // instance across two separate partial calls would make the
+        // second's own re-validation see the card already gone from hand.
+        const setup = (): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => card("AC"));
+            forceCardAt(g, 1, 0, () => card("AD"));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // m0
+            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // n0
+            const uid = "2R";
+            g.hands[0] = g.hands[0].filter(u => u !== uid);
+            g.hands[0].push(uid);
+            return g;
+        };
+        const uid = "2R";
+        const g = setup();
+        g.move(`play ${uid}`, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("minion_m0.1");
+        expect(values).to.include("minion_n0.1");
+        const picked = g.handleClick(`play ${uid}`, -1, -1, "_btn_minion_n0.1");
+        expect(picked.move).eq(`play ${uid}, n0.1`);
+        const g2 = setup();
+        g2.move(picked.move, { partial: true });
+        const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
+        expect(bar2!.buttons!.map(b => b.value)).to.include("mode_R_piece");
+        const modeClick = g2.handleClick(picked.move, -1, -1, "_btn_mode_R_piece");
+        // n0's own piece, not m0's - proves the CHOSEN minion (not just
+        // eligible[0]) is what the rest of the step actually acts on.
+        expect(modeClick.move).eq(`play ${uid}, n0.1 piece n0.1 1`);
+    });
+
+    it("does not offer a minion picker when only one minion is eligible", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        g.move(`use ${aceOfCups().uid}`, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values.some(v => v?.startsWith("minion_"))).to.be.false;
+        expect(values).to.include("mode_C_own"); // straight to mode buttons, exactly as before this feature
+    });
+
+    it("orientMinion (a pure click-driven special power): the minion picker still pre-empts the uncollapsed bar, and the chosen minion (not eligible[0]) is what a board click actually reorients", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(3)); // The Empress - step 1 is orientMinion
+        // Same cell, different sizes so the refs are trivially distinct.
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 2, "U")];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        expect(cellClick.move).eq(`use ${major(3).uid}`);
+        g.move(cellClick.move, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("minion_m0.1");
+        expect(values).to.include("minion_m0.2");
+        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_minion_m0.2");
+        expect(picked.move).eq(`use ${major(3).uid}, m0.2`);
+        const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
+        const result = g.handleClick(picked.move, rowE, colE);
+        expect(result.move).eq(`use ${major(3).uid}, m0.2 E`);
+        g.move(result.move, { trusted: true }); // declines step 2 (create)
+        expect(g.board.get(0, 0)!.pieces[0].orientation).eq("U"); // the size-1 minion, untouched
+        expect(g.board.get(0, 0)!.pieces[1].orientation).eq("E"); // the size-2 minion actually picked
+    });
+});
+
 // Regression tests for validateMove()'s rearchitecture: a genuine,
 // non-mutating validator (gnostica.ts's validateX tree + gnostica/powers.ts's
 // checkX functions) replacing the old "clone this, try running the move on
