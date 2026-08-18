@@ -1216,25 +1216,37 @@ describe("Gnostica: handleClick", () => {
         expect(result.move).eq(`play ${uid}`);
     });
 
-    it("Pass immediately builds a submittable bare discard move", () => {
+    it("Pass immediately builds a submittable, genuinely no-op discard/draw move", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
         const result = g.handleClick("", -1, -1, "_btn_pass");
         expect(result.valid).to.be.true;
+        // Not just "discard" - that bare form silently draws back to max,
+        // which isn't actually a pass. Pass needs explicit "draw 0" too.
+        expect(result.move).eq("discard draw 0");
+    });
+
+    it("Discard/Draw carries instructions, unlike Pass's own already-complete seed", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const result = g.handleClick("", -1, -1, "_btn_discard");
+        expect(result.valid).to.be.true;
         expect(result.move).eq("discard");
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL"));
     });
 
     it("Declare appends last to an in-progress move, and toggles it back off", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
-        const seed = g.handleClick("", -1, -1, "_btn_pass"); // "discard"
+        const seed = g.handleClick("", -1, -1, "_btn_pass"); // "discard draw 0"
         const declared = g.handleClick(seed.move, -1, -1, "_btn_declare");
         expect(declared.valid).to.be.true;
-        expect(declared.move).eq("discard (last)");
+        expect(declared.move).eq("discard draw 0 (last)");
         const undeclared = g.handleClick(declared.move, -1, -1, "_btn_declare");
-        expect(undeclared.move).eq("discard");
+        expect(undeclared.move).eq("discard draw 0");
     });
 
     it("Declare works even with no base action chosen yet, and survives switching to a real action afterwards", () => {
@@ -1269,12 +1281,12 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0", { trusted: true }); // player 2
         g.move("place n0", { trusted: true }); // player 3
         g.move("discard (last)", { trusted: true }); // player 1 announces
-        // player 2's turn - a bare "discard" (Pass) is perfectly legal on its
-        // own; declaring on top of it must not be.
+        // player 2's turn - "discard draw 0" (Pass) is perfectly legal on
+        // its own; declaring on top of it must not be.
         const declared = g.handleClick("", -1, -1, "_btn_declare");
         expect(declared.move).eq("(last)");
         const passed = g.handleClick(declared.move, -1, -1, "_btn_pass");
-        expect(passed.move).eq("discard (last)");
+        expect(passed.move).eq("discard draw 0 (last)");
         expect(passed.valid).to.be.false;
     });
 
@@ -1350,6 +1362,35 @@ describe("Gnostica: handleClick", () => {
         expect(orientBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
         const activateBtn = bar!.buttons!.find(b => b.value === "use");
         expect(activateBtn!.attributes).to.be.undefined;
+    });
+
+    it("bolds Pass, not Discard/Draw, when the live move is Pass's own bare seed - whether built by the Pass button or by hand", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        for (const liveMove of ["discard draw 0", "discard draw 0"]) {
+            g.move(liveMove, { partial: true });
+            const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+            const bar = rep.areas?.find(a => a.type === "buttonBar");
+            const passBtn = bar!.buttons!.find(b => b.value === "pass");
+            const discardBtn = bar!.buttons!.find(b => b.value === "discard");
+            expect(passBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold"), "Pass should be bold").to.be.true;
+            expect(discardBtn!.attributes, "Discard/Draw should not be bold").to.be.undefined;
+        }
+    });
+
+    it("still bolds Discard/Draw for a discard preview that isn't Pass-equivalent (draws more than 0)", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        g.hands[0] = g.hands[0].slice(0, 5); // leave room to draw
+        g.move("discard draw 1", { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const discardBtn = bar!.buttons!.find(b => b.value === "discard");
+        const passBtn = bar!.buttons!.find(b => b.value === "pass");
+        expect(discardBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
+        expect(passBtn!.attributes).to.be.undefined;
     });
 
     it("collapses to the draw-count picker during a live discard preview, offering every legal count", () => {
@@ -2418,7 +2459,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         g.move("place l0", { trusted: true });
         const result = g.handleClick("", -1, -1, "_btn_pass");
         expect(result.valid).to.be.true;
-        expect(result.move).eq("discard");
+        expect(result.move).eq("discard draw 0");
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         expect(result.message).to.not.eq(directionMsg());
     });

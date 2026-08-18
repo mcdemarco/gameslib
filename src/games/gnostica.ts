@@ -1351,10 +1351,27 @@ export class GnosticaGame extends GameBase {
             found.add("declare");
         }
         const head = parsed.head?.toLowerCase();
-        if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
+        if (head === "discard" && this.isPassEquivalent(parsed.rest)) {
+            // "discard draw 0" is Pass's own bare seed (see the Pass
+            // button's own click handler) - bold Pass instead of
+            // Discard/Draw, regardless of whether the player got there by
+            // clicking Pass or by hand-building an equivalent Discard/Draw
+            // move (0 discards, explicit draw 0).
+            found.add("pass");
+        } else if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
         }
         return found;
+    }
+
+    // A "discard [uid...] draw <n>" move is Pass-equivalent only when it
+    // discards nothing AND explicitly draws zero - an omitted "draw <n>"
+    // defaults to drawing the max at commit time (see cmdDiscard's own
+    // docs), so that's a real draw, not a pass.
+    private isPassEquivalent(rest: string[]): boolean {
+        const drawIdx = rest.indexOf("draw");
+        const discardUids = drawIdx === -1 ? rest : rest.slice(0, drawIdx);
+        return discardUids.length === 0 && drawIdx !== -1 && rest[drawIdx + 1] === "0";
     }
 
     private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
@@ -2548,12 +2565,15 @@ export class GnosticaGame extends GameBase {
                 }
                 switch (value) {
                     case "pass":
+                        // A genuine pass - explicitly zero discards AND
+                        // zero draw. Discard's own bare seed ("discard"
+                        // alone) is NOT equivalent to this: cmdDiscard
+                        // defaults an omitted "draw <n>" to the max, so it
+                        // silently draws a full hand back up rather than
+                        // actually passing.
+                        return this.provisionalResult("discard draw 0");
                     case "discard":
-                        // Discard's own bare seed is already a legal,
-                        // complete move on its own (discard nothing, draw
-                        // the max) - no different from Pass, so both just
-                        // build it.
-                        return this.provisionalResult("discard");
+                        return this.provisionalResult("discard", "apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL");
                     case "place":
                         // Not strictly necessary (an empty move already
                         // builds "place <cell>" directly from a bare board

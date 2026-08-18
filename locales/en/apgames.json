@@ -5787,6 +5787,7 @@
             "DESTINATION_HAS_ENEMY": "This move is not permitted when there are enemies in the target wasteland.",
             "DESTROYED_NEEDS_NO_CARD": "No replacement card is needed when destroying a territory.",
             "DIRECTION_STILL_ADJUSTABLE": "You may click another cell to change direction, if desired.",
+            "DISCARD_CARDS_OPTIONAL": "Click hand cards to discard, if desired, then submit - by default you'll draw back up to your hand's maximum.",
             "DRAW_PILE_EMPTY": "There are no cards to draw.",
             "HERMIT_NEEDS_EMPTY": "The Hermit (VIIII) cannot move a piece to an occupied card.",
             "INITIAL_INSTRUCTIONS": "Click one of the buttons to select your top-level action.",
