@@ -50,6 +50,8 @@ function boardClick(row, col, piece) {
         }
         var interim = JSON.stringify(render);
         window.localStorage.setItem("interim", interim);
+    } else {
+        window.localStorage.removeItem("interim");
     }
     renderGame();
     updateGameStatusPanel(game, gamename);
@@ -2533,14 +2535,30 @@ document.addEventListener("DOMContentLoaded", function(event) {
         }
     }
 
-    // Initial setup
-    const initiallyCollapsed = window.localStorage.getItem("sidebarCollapsed") === "true";
+    // Initial setup. With no saved preference yet, default to collapsed on
+    // narrow/mobile viewports (matching playground.css's own --media-breakpoint)
+    // - the sidebar's fixed 300px width otherwise eats most of a phone
+    // screen, squeezing the top bar's move input/buttons into a column too
+    // narrow to hold them and clipping them off the edge.
+    const savedSidebarCollapsed = window.localStorage.getItem("sidebarCollapsed");
+    const initiallyCollapsed = savedSidebarCollapsed !== null
+        ? savedSidebarCollapsed === "true"
+        : window.matchMedia("(max-width: 1000px)").matches;
     setSidebarState(initiallyCollapsed);
 
     // Event listener for the original collapse button
     collapseBtn.addEventListener('click', () => {
         const isCurrentlyCollapsed = sidebar.classList.contains('collapsed');
         setSidebarState(!isCurrentlyCollapsed); // Toggle state
+    });
+
+    // The hamburger button that replaces it in the top bar once collapsed
+    // (see .top-bar.sidebar-collapsed #openSidebarBtn in playground.css)
+    // was only ever grabbed as a DOM reference here, never actually wired
+    // to anything - harmless when the sidebar defaulted to expanded, but
+    // now that it defaults to collapsed on mobile this is a real dead end.
+    openSidebarBtn.addEventListener('click', () => {
+        setSidebarState(false);
     });
 
     document.getElementById("darkMode").addEventListener("click", () => {

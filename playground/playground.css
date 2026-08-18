@@ -25,9 +25,22 @@ html, body {
 body {
     transition: background-color 0.3s, color 0.3s;
     height: 100vh;
+    height: 100dvh; /* mobile browsers: account for the collapsing address bar */
     min-height: 0;
     background-color: var(--background-light);
     color: var(--text-light);
+    /* .top-bar and .main-container both used to independently claim
+     * 100vh, so together they were always taller than the actual
+     * viewport - normally invisible on desktop where the button row
+     * fits on one line, but on narrow/mobile widths .move-controls wraps
+     * onto several lines and the extra height pushed the top bar's own
+     * rows out of view, with no way to scroll back to them (overflow:
+     * hidden above). A flex column instead gives .top-bar exactly the
+     * height its content needs and lets .main-container (flex: 1 below)
+     * fill whatever's left, so nothing is ever taller than the viewport
+     * regardless of how many rows the button bar wraps into. */
+    display: flex;
+    flex-direction: column;
 }
 
 body[data-theme='dark'] {
@@ -85,7 +98,7 @@ body[data-theme='dark'] .collapsible summary {
     padding: 0.5rem;
     margin-top: 0;
     position: relative;
-    height: 100vh;
+    flex: 1 1 auto; /* fills whatever height .top-bar (see body's own docs) doesn't need */
     min-height: 0;
     box-sizing: border-box;
     transition: padding-left 0.3s;
@@ -97,6 +110,7 @@ body[data-theme='dark'] .collapsible summary {
     left: 0;
     width: var(--sidebar-width);
     height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
     transition: transform 0.3s;
     z-index: 100;
@@ -157,6 +171,7 @@ body[data-theme='dark'] .collapsible summary {
     justify-content: flex-start;
     padding: 0.5rem;
     transition: padding-left 0.3s;
+    flex-shrink: 0; /* keep its natural (possibly multi-row on mobile) height, never squeezed by .main-container */
 }
 .top-bar.sidebar-collapsed {
     padding-left: 1rem;
@@ -173,7 +188,7 @@ body[data-theme='dark'] .collapsible summary {
     flex: 1;
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%; /* fills .main-container's own real (flex, not 100vh) height */
     min-height: 0;
     margin-left: var(--sidebar-width);
     transition: margin-left 0.3s;
@@ -193,6 +208,11 @@ body[data-theme='dark'] .collapsible summary {
     gap: 0.5rem;
     flex-wrap: wrap;
     align-items: center;
+}
+#moveEntry {
+    /* Below 16px, iOS Safari auto-zooms the page on focus - on a layout
+     * this tight that reliably knocks the top bar half off-screen again. */
+    font-size: 16px;
 }
 
 #clickstatus {
@@ -393,15 +413,56 @@ body[data-theme='dark'] input[type="radio"] {
 
 /* Responsive adjustments */
 @media (max-width: 1000px) {
+    .top-bar {
+        padding: 0.35rem;
+    }
+    .move-controls {
+        gap: 0.35rem;
+    }
+    /* The framework's default button padding/font-size is sized for a
+     * single desktop row - stacked into 2-3 mobile rows (see .move-controls'
+     * own flex-wrap) it was eating most of the screen, squeezing the board
+     * down to whatever intrinsic height was left. Shrinking just these
+     * (not buttons elsewhere, e.g. in the sidebar or modals) keeps the
+     * whole control row compact without touching anything else. */
+    .move-controls button {
+        padding: 0.3em 0.6em;
+        font-size: 0.85em;
+    }
+    #openSidebarBtn {
+        padding: 4px 8px;
+        font-size: 1em;
+    }
+    #moveEntry {
+        /* Framework default is width:auto sized to content, which at
+         * mobile widths can force the whole row (and the rest of the
+         * button row after it) wider than the viewport - flex-basis lets
+         * it wrap onto its own line and shrink to fit instead. */
+        flex: 1 1 100%;
+        min-width: 0;
+        padding: 0.3em 0.5em;
+    }
     .board-container {
         flex-direction: column;
         max-height: none;
     }
     #drawing {
         width: 100%;
-        flex: initial;
-        height: auto !important;
-        min-height: 0 !important;
+        /* Grow to fill whatever vertical space the (now much shorter) top
+         * bar, #clickstatus and .game-info don't need, instead of sizing
+         * purely off the SVG's own intrinsic aspect ratio - that's what
+         * was leaving the board tiny even once the top bar stopped
+         * overflowing the screen. min-height is a floor for a short/wide
+         * board's own aspect ratio, not a fixed size - #drawing > svg's
+         * own max-width/max-height still shrink it to fit either way. Kept
+         * modest (not e.g. 45vh) specifically so it can't force the whole
+         * layout past the viewport by itself when #clickstatus's own
+         * message also needs room - .board-container's own overflow:
+         * hidden would otherwise silently clip the board's own bottom
+         * edge rather than actually shrinking it. */
+        flex: 1 1 auto;
+        min-height: 30vh;
+        height: auto;
         align-items: stretch !important;
         justify-content: flex-start !important;
         padding: 0 !important;
@@ -412,8 +473,8 @@ body[data-theme='dark'] input[type="radio"] {
         max-width: 100%;
         min-width: auto;
         order: 2;
-        flex: initial;
-        max-height: 40vh;
+        flex: 0 1 auto;
+        max-height: 30vh;
         overflow-y: auto;
         box-sizing: border-box;
     }
@@ -423,6 +484,14 @@ body[data-theme='dark'] input[type="radio"] {
     #clickstatus {
         height: auto;
         min-height: 0;
+        /* A long validation/status message used to be free to grow as
+         * tall as it needed, pushing (and on a short viewport, actually
+         * shrinking/clipping - see #drawing's own docs) the board below
+         * it. Capping it and scrolling internally instead keeps the
+         * board's own share of the screen stable regardless of message
+         * length. */
+        max-height: 4.5em;
+        overflow-y: auto;
     }
     .sidebar.collapsed + .play-area {
         margin-left: 0 !important;
