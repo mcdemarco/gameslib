@@ -1901,7 +1901,7 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.1.E piece m0.1.E 1`);
     });
 
-    it("play: multiple eligible minions on different cells offer a minion-picker bar; picking one seeds that minion, not just the first one found", () => {
+    it("play: a board-wide pool offers no buttons until a cell is clicked; clicking a cell with just one eligible minion there resolves it directly", () => {
         // A fresh instance per checkpoint, exactly like the real click flow
         // (every click reconstructs a fresh GnosticaGame via GameFactory,
         // then does its own single move(..., {partial: true}) - see this
@@ -1922,24 +1922,72 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
             return g;
         };
         const uid = "2R";
+        // "play"'s partial apply mutates the hand (discards the card) -
+        // one fresh instance per checkpoint whose button bar/click needs
+        // to see the card still there, same as this describe block's
+        // other "play" test.
         const g = setup();
-        g.move(`play ${uid}`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const seeded = g.handleClick("", -1, -1, "_btn_play");
+        const cardClick = g.handleClick(seeded.move, -1, -1, `hand_${uid}`);
+        expect(cardClick.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_CELL"));
+        const gBar = setup();
+        gBar.move(cardClick.move, { partial: true });
+        const rep = gBar.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        // No minion buttons yet - the pool spans two cells, nothing clicked.
+        expect(values.some(v => v?.startsWith("minion_"))).to.be.false;
+        const [row, col] = rowColFor(g, 1, 0); // n0 - only one of the pool's own minions there
+        const cellClick = g.handleClick(cardClick.move, row, col);
+        expect(cellClick.move).eq(`play ${uid}, n0.1`);
+        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL"));
+        const g2 = setup();
+        g2.move(cellClick.move, { partial: true });
+        const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
+        expect(bar2!.buttons!.map(b => b.value)).to.include("mode_R_piece");
+        const modeClick = g2.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
+        // n0's own piece, not m0's - proves the CLICKED cell (not just
+        // eligible[0]) is what the rest of the step actually acts on.
+        expect(modeClick.move).eq(`play ${uid}, n0.1 piece n0.1 1`);
+    });
+
+    it("play: clicking a cell with multiple eligible minions there narrows the picker to just that cell, not the whole board-wide pool", () => {
+        const setup = (): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => card("AC"));
+            forceCardAt(g, 1, 0, () => card("AD"));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 2, "E")]; // m0 - two, distinct sizes
+            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // n0 - just one
+            const uid = "2R";
+            g.hands[0] = g.hands[0].filter(u => u !== uid);
+            g.hands[0].push(uid);
+            return g;
+        };
+        const uid = "2R";
+        const g = setup();
+        const seeded = g.handleClick("", -1, -1, "_btn_play");
+        const cardClick = g.handleClick(seeded.move, -1, -1, `hand_${uid}`);
+        const [row, col] = rowColFor(g, 0, 0); // m0 - two of the pool's own minions there
+        const cellClick = g.handleClick(cardClick.move, row, col);
+        expect(cellClick.move).eq(`play ${uid}, m0`); // still-narrowing bare cell token, not a resolved ref
+        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON"));
+        const gBar = setup();
+        gBar.move(cellClick.move, { partial: true });
+        const rep = gBar.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("minion_m0.1");
-        expect(values).to.include("minion_n0.1");
-        const picked = g.handleClick(`play ${uid}`, -1, -1, "_btn_minion_n0.1");
-        expect(picked.move).eq(`play ${uid}, n0.1`);
+        expect(values).to.include("minion_m0.2");
+        expect(values).to.not.include("minion_n0.1"); // narrowed to m0 - n0's own piece isn't offered
+        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_minion_m0.2");
+        expect(picked.move).eq(`play ${uid}, m0.2`);
         const g2 = setup();
         g2.move(picked.move, { partial: true });
         const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
         expect(bar2!.buttons!.map(b => b.value)).to.include("mode_R_piece");
-        const modeClick = g2.handleClick(picked.move, -1, -1, "_btn_mode_R_piece");
-        // n0's own piece, not m0's - proves the CHOSEN minion (not just
-        // eligible[0]) is what the rest of the step actually acts on.
-        expect(modeClick.move).eq(`play ${uid}, n0.1 piece n0.1 1`);
     });
 
     it("does not offer a minion picker when only one minion is eligible", () => {
