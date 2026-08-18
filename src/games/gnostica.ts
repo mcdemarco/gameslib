@@ -287,12 +287,17 @@ interface IPendingStep {
     // `minionAmbiguous` is what actually gates whether that default is
     // trustworthy: true means more than one minion is eligible AND none
     // has been pinned down yet, so `minion` here is only a placeholder -
-    // getActionButtons() shows a minion-picker button set instead of
-    // mode/special buttons in that case (see its own docs), and every
-    // click helper that reads `pending.minion` directly should only be
-    // reached once this is false.
+    // every click helper that reads `pending.minion` directly should only
+    // be reached once this is false. `minionCandidates` is the (possibly
+    // cell-narrowed) set getActionButtons() actually renders a
+    // minion-picker button set from, and ONLY once every remaining
+    // candidate shares a single cell - see resolveStepMinion's own docs on
+    // why a still-multi-cell `minionCandidates` (an un-narrowed "play"
+    // pool) means a board click is needed before buttons make sense at
+    // all, while "use"'s own always-single-cell pool needs no such click.
     minion: IMinionRef;
     minionAmbiguous: boolean;
+    minionCandidates: IMinionRef[];
     // Earlier complete power-step segments of the same major-arcana
     // activation, verbatim raw text - preserved as-is by every move
     // string this step's own click helpers build. Always [] for a minor
@@ -984,8 +989,16 @@ export class GnosticaGame extends GameBase {
     // piece-target form - tops out at 6; discarding several cards at
     // once, Judgement or High Priestess, is the other realistic
     // outlier) - 12 leaves comfortable headroom without weakening the
-    // check.
-    private static readonly PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+\.[1-3](\.[nesu])?(\.\d+)?$/i;
+    // check. The pips-and-beyond suffix is OPTIONAL specifically so a
+    // BARE cell (no ".") also passes shape validation - not a real,
+    // resolvable piece ref (resolvePieceRef still rejects one on its own,
+    // unaffected by this), but the still-narrowing token a "click the
+    // cell your desired minion is on" board click embeds when that cell
+    // has more than one eligible minion (see resolveStepMinion's and
+    // handleClickCore's own docs) - tolerated the same "still declined,
+    // not yet resolved" way as an incomplete mode/args elsewhere in this
+    // file (see isMinionCellStillNarrowing's own docs).
+    private static readonly PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[nesu])?(\.\d+)?)?$/i;
     private static readonly CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
     private static readonly STEP_TOKEN_RE = /^[a-z0-9.-]+$/i;
     private static readonly MAX_STEP_TOKENS = 12;
@@ -1167,26 +1180,65 @@ export class GnosticaGame extends GameBase {
         throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${key}`, { ref }));
     }
 
+    // A bare cell token (no ".") - a "click the cell your desired minion
+    // is on" board click landed here (see handleClickCore's own docs)
+    // rather than a genuine, resolvable piece ref. Only meaningful when
+    // 2+ of `pool`'s own minions actually sit there - handleClickCore
+    // itself only ever embeds one when that's true (a single match there
+    // gets a full, resolving ref instead - see its own docs), but this
+    // stays defensive (a hand-typed move, or a stale click against a
+    // board that's since changed) rather than assuming it.
+    private isMinionCellStillNarrowing(tok: string, pool: IMinionRef[]): boolean {
+        if (tok.includes(".")) {
+            return false;
+        }
+        const coords = this.tryAlgebraic2coords(tok);
+        if (coords === undefined) {
+            return false;
+        }
+        const [cx, cy] = coords;
+        return pool.filter(m => m.x === cx && m.y === cy).length > 1;
+    }
+
     // Resolves a step's own leading minionRef token (`tokens[0]`, if
-    // present) against `pool`, falling back to `pool[0]` as a preview
-    // default whenever it's missing or doesn't resolve. `ambiguous` is
-    // true only when there's real work left for the player to do here -
-    // more than one minion eligible AND none pinned down yet - never when
-    // the pool has just one member (nothing to pick between, regardless of
-    // what's typed) or when a valid ref is already present. Shared by
-    // every IPendingStep-building branch in parsePendingStep/
-    // buildSpecialPending; getActionButtons() uses the paired flag to
-    // decide whether a minion-picker button set is still needed before
-    // mode/special buttons make sense (see its own docs).
-    private resolveStepMinion(tokens: string[] | undefined, pool: IMinionRef[]): { minion: IMinionRef; ambiguous: boolean } {
+    // present) against `pool`. Three outcomes: (a) it's already a full,
+    // valid piece ref - resolves definitively, ambiguous:false; (b) it's a
+    // bare cell token still narrowing among 2+ of the pool's own minions
+    // there (see isMinionCellStillNarrowing's own docs) - `candidates`
+    // narrows to just that cell's pool members, ambiguous:true; (c)
+    // neither (nothing typed yet, or unresolved) - `candidates` stays the
+    // full, un-narrowed pool. Never ambiguous when the pool has just one
+    // member, regardless of what's typed.
+    //
+    // `candidates` (as opposed to `pool` itself) is what getActionButtons()
+    // actually renders a minion-picker button set from, and ONLY once every
+    // remaining candidate shares a single cell (own docs there) - so a
+    // still-multi-cell `candidates` (outcome (c), "play"'s board-wide pool
+    // before any cell has been clicked) correctly shows no buttons at all
+    // yet, even though `ambiguous` is true. "use"'s own pool is always
+    // already single-cell by construction (eligibleMinionsForActivate),
+    // so outcome (c) there is immediately button-ready with no narrowing
+    // click needed - the two heads fall out of the same logic here without
+    // special-casing either.
+    private resolveStepMinion(
+        tokens: string[] | undefined, pool: IMinionRef[],
+    ): { minion: IMinionRef; ambiguous: boolean; candidates: IMinionRef[] } {
         if (pool.length <= 1) {
-            return { minion: pool[0], ambiguous: false };
+            return { minion: pool[0], ambiguous: false, candidates: pool };
         }
-        const resolved = tokens !== undefined && tokens.length > 0 ? this.resolvePieceRef(tokens[0], pool) : undefined;
-        if (resolved?.kind === "ok") {
-            return { minion: resolved.ref, ambiguous: false };
+        const tok = tokens?.[0];
+        if (tok !== undefined) {
+            const resolved = this.resolvePieceRef(tok, pool);
+            if (resolved.kind === "ok") {
+                return { minion: resolved.ref, ambiguous: false, candidates: pool };
+            }
+            if (this.isMinionCellStillNarrowing(tok, pool)) {
+                const coords = this.tryAlgebraic2coords(tok)!;
+                const narrowed = pool.filter(m => m.x === coords[0] && m.y === coords[1]);
+                return { minion: narrowed[0], ambiguous: true, candidates: narrowed };
+            }
         }
-        return { minion: pool[0], ambiguous: true };
+        return { minion: pool[0], ambiguous: true, candidates: pool };
     }
 
     // A syntactically-complete move that the click flow itself built up
@@ -1382,22 +1434,26 @@ export class GnosticaGame extends GameBase {
         const selected = topLevel.find(b => b.value === pendingMinor.head);
         const declareBtn = topLevel.find(b => b.value === "declare");
 
-        // More than one of the acting player's own pieces is eligible for
-        // THIS step and none has been picked yet (see resolveStepMinion's
-        // own docs) - offer one button per eligible minion, pre-empting
-        // every other branch below (mode buttons, hermitTeleport/
-        // magicianChoice's own sets, or the uncollapsed bar a pure
-        // click-driven special power would otherwise fall through to).
-        // Clicking one types just that minion's ref as this step's own
-        // leading token (see handleClickCore's "minion_" dispatch) -
+        // Every remaining candidate minion for THIS step already sits on
+        // the same cell - either "use"'s own pool, always single-cell by
+        // construction, or "play"'s board-wide pool once a board click has
+        // narrowed it down to one cell (see resolveStepMinion's and
+        // handleClickCore's own docs) - AND there's more than one of them,
+        // so a real choice is still needed. Offer one button per candidate,
+        // pre-empting every other branch below (mode buttons,
+        // hermitTeleport/magicianChoice's own sets, or the uncollapsed bar
+        // a pure click-driven special power would otherwise fall through
+        // to). Clicking one types just that minion's ref as this step's
+        // own leading token (see handleClickCore's "minion_" dispatch) -
         // nothing else about the step is decided yet, so the very next
         // getActionButtons() call picks up exactly where the single-minion
         // case always has, now with `minion` no longer just a placeholder.
-        if (pendingMinor.minionAmbiguous) {
+        const candidateCells = new Set(pendingMinor.minionCandidates.map(m => `${m.x},${m.y}`));
+        if (pendingMinor.minionAmbiguous && candidateCells.size === 1) {
             const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
             buttons.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
             const seenRefs = new Set<string>();
-            for (const m of pendingMinor.minions) {
+            for (const m of pendingMinor.minionCandidates) {
                 const ref = this.pieceRefStr(m.x, m.y, m.index, pendingMinor.minions);
                 // Two genuinely identical pieces (same owner/size/orientation
                 // at the same cell) share the same shortest ref - resolvePieceRef
@@ -1408,16 +1464,22 @@ export class GnosticaGame extends GameBase {
                     continue;
                 }
                 seenRefs.add(ref);
-                // The ref itself (not just the cell) - two eligible minions
-                // can share a cell (different pip sizes) or a whole "play"
-                // pool can span the entire board, so the cell alone isn't
-                // always enough to tell buttons apart at a glance.
                 buttons.push({ label: ref, value: `minion_${ref}` });
             }
             if (declareBtn !== undefined) {
                 buttons.push(declareBtn);
             }
             return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+        }
+        // Still ambiguous but spanning more than one cell ("play"'s
+        // board-wide pool, not yet narrowed) - no buttons make sense yet,
+        // the player needs to click the cell holding their desired minion
+        // first (see handleClickCore's own "narrow to this cell" handling,
+        // and the PICK_MINION_CELL message the click that got here already
+        // carries). Leave the bar uncollapsed, same as every other
+        // click-only stage.
+        if (pendingMinor.minionAmbiguous) {
+            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
         // orientMinion/tradeHands/orientAny/hierophantReplace/
@@ -1557,8 +1619,8 @@ export class GnosticaGame extends GameBase {
             const suitUid = (card as MinorCard).suit.uid;
             const segment = parsed.stepSegments[0] ?? []; // segment[0] is the minionRef, if typed yet - see resolveStepMinion
             const [, mode, ...rest] = segment;
-            const { minion, ambiguous } = this.resolveStepMinion(segment, eligible);
-            return { head, headArg, suitUid, prefix: [], eligible, minions: eligible, minion, minionAmbiguous: ambiguous, priorSteps: [], opts: {}, mode, rest };
+            const { minion, ambiguous, candidates } = this.resolveStepMinion(segment, eligible);
+            return { head, headArg, suitUid, prefix: [], eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, mode, rest };
         }
 
         const def = getMajorArcanaDef(card as MajorCard);
@@ -1592,8 +1654,8 @@ export class GnosticaGame extends GameBase {
                     // different suit's mode button to actually move on; see
                     // the two call sites this flag is passed from in
                     // handleClickCore).
-                    const { minion, ambiguous } = this.resolveStepMinion(tokens, minions);
-                    return { head, headArg, suitUid: suitUidForStep, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts, mode, rest };
+                    const { minion, ambiguous, candidates } = this.resolveStepMinion(tokens, minions);
+                    return { head, headArg, suitUid: suitUidForStep, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode, rest };
                 }
             } else {
                 const minTokens = SPECIAL_MIN_TOKENS[step.special];
@@ -1620,8 +1682,8 @@ export class GnosticaGame extends GameBase {
         if ("primitive" in step) {
             const suitUid = this.primitiveToSuit(step.primitive);
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, def.powers.length, step.opts);
-            const { minion, ambiguous } = this.resolveStepMinion(undefined, minions);
-            return { head, headArg, suitUid, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts, mode: undefined, rest: [] };
+            const { minion, ambiguous, candidates } = this.resolveStepMinion(undefined, minions);
+            return { head, headArg, suitUid, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode: undefined, rest: [] };
         }
         return this.buildSpecialPending(step.special, head, headArg, eligible, minions, priorSteps, []);
     }
@@ -1653,14 +1715,14 @@ export class GnosticaGame extends GameBase {
         if (special === "magicianChoice" && MAGICIAN_SUITS.some(s => s.uid === tokens[1])) {
             const suitUid = tokens[1];
             const [, , mode, ...rest] = tokens;
-            const { minion, ambiguous } = this.resolveStepMinion(tokens, minions);
-            return { head, headArg, suitUid, prefix: [suitUid], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts: {}, mode, rest };
+            const { minion, ambiguous, candidates } = this.resolveStepMinion(tokens, minions);
+            return { head, headArg, suitUid, prefix: [suitUid], eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode, rest };
         }
         const rest = special === "highPriestess" ? tokens : tokens.slice(1);
-        const { minion, ambiguous } = special === "highPriestess"
-            ? { minion: minions[0], ambiguous: false }
+        const { minion, ambiguous, candidates } = special === "highPriestess"
+            ? { minion: minions[0], ambiguous: false, candidates: minions }
             : this.resolveStepMinion(tokens, minions);
-        return { head, headArg, special, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, priorSteps, opts: {}, mode: undefined, rest };
+        return { head, headArg, special, prefix: [], eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode: undefined, rest };
     }
 
     // The single valid cell a minor suit-power step may affect, per
@@ -2381,7 +2443,11 @@ export class GnosticaGame extends GameBase {
                     if (pending === undefined || !pending.minionAmbiguous) {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
-                    const resolved = this.resolvePieceRef(ref, pending.minions);
+                    // Resolved against minionCandidates (the currently-shown
+                    // set), not the full minions pool - a button for a stale
+                    // move string shouldn't resolve against pieces that
+                    // aren't actually on offer anymore.
+                    const resolved = this.resolvePieceRef(ref, pending.minionCandidates);
                     if (resolved.kind !== "ok") {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
@@ -2534,7 +2600,20 @@ export class GnosticaGame extends GameBase {
                     return this.provisionalResult(this.assembleStepMove(pendingForCard, discards));
                 }
                 if (head === "play") {
-                    return this.provisionalResult(`play ${uid}`, "apgames:validation.gnostica.POWER_STILL_OPTIONAL");
+                    // "play"'s own pool can span the whole board - unlike
+                    // "use" (always single-cell by construction), the
+                    // player needs to click a cell before any minion
+                    // picker makes sense (see resolveStepMinion's/
+                    // getActionButtons()'s own docs) - flagged here so
+                    // that instruction actually reaches them, rather than
+                    // the generic "power still optional" wording.
+                    const freshPending = this.parsePendingStep(`play ${uid}`);
+                    const needsCellClick = freshPending?.minionAmbiguous === true
+                        && new Set(freshPending.minionCandidates.map(m => `${m.x},${m.y}`)).size > 1;
+                    return this.provisionalResult(
+                        `play ${uid}`,
+                        needsCellClick ? "apgames:validation.gnostica.PICK_MINION_CELL" : "apgames:validation.gnostica.POWER_STILL_OPTIONAL",
+                    );
                 }
                 // Any already-chosen "draw <n>" tail is deliberately
                 // dropped here rather than carried forward - the valid
@@ -2732,11 +2811,60 @@ export class GnosticaGame extends GameBase {
                 // docs - and only tries it when that's a genuinely FRESH,
                 // further-along step than `pending` itself represents.
                 const advanced = this.parsePendingStep(move);
+                // Some of the acting player's own minions are eligible for
+                // a step but the pool still spans more than one cell and
+                // none has been pinned down yet (see resolveStepMinion's/
+                // IPendingStep's own docs) - a board click here means
+                // "this is the cell my minion is on." Tried before every
+                // other board-click dispatch below (mode/special cycling),
+                // since none of that can mean anything sensible yet - it'd
+                // silently act through `pending.minion`'s placeholder
+                // default otherwise. Embeds the FULL ref of one of the
+                // clicked cell's own candidates - a full, resolving ref if
+                // exactly one of the pool's own minions is there (done,
+                // same as any other single-match resolution); a bare cell
+                // token (see isMinionCellStillNarrowing's own docs) if 2+
+                // are, still needing an actual picker pick since a cell
+                // alone doesn't say which one. A click matching ZERO of
+                // the pool's own minions isn't for this handler at all
+                // (returns undefined, falls through to the ordinary
+                // handling further down, which reports its own more
+                // specific "nothing legal there" message).
+                const tryNarrowMinion = (candidate: IPendingStep | undefined): IClickResult | undefined => {
+                    if (candidate === undefined || !candidate.minionAmbiguous) {
+                        return undefined;
+                    }
+                    const atCell = candidate.minions.filter(m => m.x === x && m.y === y);
+                    if (atCell.length === 0) {
+                        return undefined;
+                    }
+                    if (atCell.length === 1) {
+                        const ref = this.pieceRefStr(atCell[0].x, atCell[0].y, atCell[0].index, candidate.minions);
+                        return this.provisionalResult(
+                            this.assembleStepMove(candidate, [ref]),
+                            "apgames:validation.gnostica.POWER_STILL_OPTIONAL",
+                        );
+                    }
+                    return this.provisionalResult(
+                        this.assembleStepMove(candidate, [cell]),
+                        "apgames:validation.gnostica.PICK_MINION_BUTTON",
+                    );
+                };
                 if (advanced !== undefined && advanced.special !== undefined && advanced.rest.length === 0
                     && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1)) {
+                    const narrowed = tryNarrowMinion(advanced);
+                    if (narrowed !== undefined) {
+                        return narrowed;
+                    }
                     const result = this.handlePendingSpecialBoardClick(advanced, x, y, cell);
                     if (result !== undefined) {
                         return result;
+                    }
+                }
+                {
+                    const narrowed = tryNarrowMinion(pending);
+                    if (narrowed !== undefined) {
+                        return narrowed;
                     }
                 }
                 if (pending !== undefined && pending.mode !== undefined) {
@@ -3536,6 +3664,9 @@ export class GnosticaGame extends GameBase {
         if (minionRef === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }));
         }
+        if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
+            return; // cell chosen, which minion there is still undecided - still declined
+        }
         const minion = this.resolvePieceRefOrThrow(minionRef, eligible, "NOT_AN_ELIGIBLE_MINION");
         if (mode === undefined) {
             return; // minion earmarked, mode not chosen yet - still declined
@@ -3563,6 +3694,9 @@ export class GnosticaGame extends GameBase {
         const [minionRef, mode, ...rest] = stepSegments[0];
         if (minionRef === undefined) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" });
+        }
+        if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
+            return undefined; // cell chosen, which minion there is still undecided - still declined
         }
         const result = this.resolvePieceRef(minionRef, eligible);
         if (result.kind !== "ok") {
@@ -3639,6 +3773,9 @@ export class GnosticaGame extends GameBase {
         const [minionRef, ...rest] = tokens;
         if (minionRef === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }));
+        }
+        if (this.isMinionCellStillNarrowing(minionRef, minions)) {
+            return undefined; // cell chosen, which minion there is still undecided - still declined
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
         if ("primitive" in step) {
@@ -3730,6 +3867,9 @@ export class GnosticaGame extends GameBase {
         const [minionRef, ...rest] = tokens;
         if (minionRef === undefined) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }) };
+        }
+        if (this.isMinionCellStillNarrowing(minionRef, minions)) {
+            return { failed: false }; // cell chosen, which minion there is still undecided - still declined
         }
         const result = this.resolvePieceRef(minionRef, minions);
         if (result.kind !== "ok") {

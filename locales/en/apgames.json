@@ -5822,6 +5822,8 @@
             "PICK_CARDS_TO_REDRAW": "Click cards from the pool to draw your hand back up to 6.",
             "PICK_CELL_TO_PLACE": "Click a board cell to place your first minion.",
             "PICK_HAND_CARD_TO_PLAY": "Click a hand card to use its power.",
+            "PICK_MINION_BUTTON": "More than one minion is there - click a button below to choose which one.",
+            "PICK_MINION_CELL": "Click the cell containing the minion you want to use.",
             "PICK_PIECE_TO_ORIENT": "Choose the cell containing the piece you want to orient.",
             "PLACE_CELL_REQUIRED": "You must choose a board cell to place your first minion.",
             "PLACE_OCCUPIED": "Initial placements must be on an empty territory or wasteland space.",
