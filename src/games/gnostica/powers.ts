@@ -2,7 +2,7 @@ import { DirectionCardinal, shuffle } from "../../common";
 import { TarotCard, MajorCard, allCards } from "../../common/tarot";
 import { GnosticaBoard, IEvicted } from "./board";
 import { CellContents, cardPointValue } from "./CellContents";
-import { Piece, PieceSize, Orientation } from "./Piece";
+import { Piece, Pips, Orientation } from "./Piece";
 import { PrimitiveOpts, MAJOR_ARCANA, MajorArcanaDef } from "./majorArcana";
 
 // Per-size counts of pieces still in reserve (not on the board), indexed
@@ -94,7 +94,7 @@ const stashOf = (ctx: PowerContext, player: number): Stash => {
 // Exported: the engine also needs this directly for the base "place" turn
 // action (your first piece comes from your own stash, same as every other
 // piece that ever enters play).
-export const takeFromStash = (ctx: PowerContext, player: number, size: PieceSize): void => {
+export const takeFromStash = (ctx: PowerContext, player: number, size: Pips): void => {
     const s = stashOf(ctx, player);
     if (s[size - 1] <= 0) {
         throw new GnosticaRulesError("STASH_EMPTY", { player, size });
@@ -102,7 +102,7 @@ export const takeFromStash = (ctx: PowerContext, player: number, size: PieceSize
     s[size - 1] -= 1;
 };
 
-export const returnToStash = (ctx: PowerContext, player: number, size: PieceSize): void => {
+export const returnToStash = (ctx: PowerContext, player: number, size: Pips): void => {
     stashOf(ctx, player)[size - 1] += 1;
 };
 
@@ -113,7 +113,7 @@ export const returnToStash = (ctx: PowerContext, player: number, size: PieceSize
 // backstop).
 // Exported: the engine's own validatePlace needs it too, for the same
 // reason cmdPlace's takeFromStash call needs a non-throwing twin.
-export const hasStashAvailable = (ctx: PowerContext, player: number, size: PieceSize): boolean => {
+export const hasStashAvailable = (ctx: PowerContext, player: number, size: Pips): boolean => {
     const s = ctx.stashes.get(player);
     return s !== undefined && s[size - 1] > 0;
 };
@@ -513,7 +513,7 @@ export const moveTerritory = (
 // Discs - Grow
 // ============================================================
 
-const nextSize = (size: PieceSize): PieceSize => (size + 1) as PieceSize;
+const nextSize = (size: Pips): Pips => (size + 1) as Pips;
 
 // Replace the minion (or a targeted piece) with one exactly one size larger,
 // same owner, drawn from that owner's own stash.
@@ -640,7 +640,7 @@ export const checkAttackPiece = (
     if (resultSize < 0) {
         return { key: "TOO_FEW_PIPS", params: { size: victim.size, pips } };
     }
-    if (resultSize > 0 && !opts.skipStashCheck && !hasStashAvailable(ctx, victim.owner, resultSize as PieceSize)) {
+    if (resultSize > 0 && !opts.skipStashCheck && !hasStashAvailable(ctx, victim.owner, resultSize as Pips)) {
         return { key: "VICTIM_STASH_EMPTY", params: { player: victim.owner, size: resultSize } };
     }
     return undefined;
@@ -670,7 +670,7 @@ export const attackPiece = (
     returnToStash(ctx, victim.owner, victim.size);
     const orientation = victim.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
     t.removeAt(targetIndex);
-    t.add(new Piece(victim.owner, resultSize as PieceSize, orientation));
+    t.add(new Piece(victim.owner, resultSize as Pips, orientation));
 };
 
 // Shrink the targeted territory's value by up to `pips`, replacing its card
