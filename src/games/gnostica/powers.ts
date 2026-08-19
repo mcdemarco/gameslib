@@ -2,7 +2,7 @@ import { DirectionCardinal, shuffle } from "../../common";
 import { TarotCard, MajorCard, allCards } from "../../common/tarot";
 import { GnosticaBoard, IEvicted } from "./board";
 import { CellContents, cardPointValue } from "./cell";
-import { Piece, Pips, Orientation } from "./Piece";
+import { Piece, Pips, Orientation } from "./piece";
 import { PrimitiveOpts, MAJOR_ARCANA, MajorArcanaDef } from "./majorArcana";
 
 // Per-size counts of pieces still in reserve (not on the board), indexed

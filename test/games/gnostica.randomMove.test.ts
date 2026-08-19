@@ -2,7 +2,7 @@
 import "mocha";
 import { expect } from "chai";
 import { GnosticaGame } from "../../src/games/gnostica";
-import { Piece } from "../../src/games/gnostica/Piece";
+import { Piece } from "../../src/games/gnostica/piece";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
 const major = (seq: number) => majorCards.find(c => c.seq === seq)!;

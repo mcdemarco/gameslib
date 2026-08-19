@@ -1,5 +1,5 @@
 import { TarotCard, MinorCard, MajorCard } from "../../common/tarot";
-import { Piece, IPiece } from "./Piece";
+import { Piece, IPiece } from "./piece";
 
 export type CellPointValue = 0 | 1 | 2 | 3;
 
