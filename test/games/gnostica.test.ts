@@ -1589,7 +1589,6 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
         // Matches the discard pile itself, so none of these register as
         // "just discarded" (see newDiscardUids's own docs) - this test is
         // about the bucketing/grouping shape, not the highlight.
-        g.discardBaseline = [...g.discardPile];
         const rep = g.render() as { legend: Record<string, unknown>; areas?: { label: string; pieces?: string[] }[] };
         const discardArea = rep.areas?.find(a => a.pieces?.some(p => p.startsWith("discard_")));
         expect(discardArea, "expected a discard-pile area").to.not.be.undefined;
@@ -1668,7 +1667,6 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("place m0", { trusted: true });
         g.move("place n0", { trusted: true });
         g.discardPile = [card("2C").uid]; // one spot cup already discarded earlier
-        g.discardBaseline = [...g.discardPile]; // ...not on the move about to happen
         g.hands[0] = [card("AC").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid, card("7C").uid];
         g.move("discard AC", { trusted: true }); // a second spot cup, discarded just now
         const rep = g.render() as DiscardRenderRep;
@@ -1691,14 +1689,14 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
     });
 
-    it("a live preview of the player's own in-progress move doesn't highlight it early", () => {
+    it("a live preview of the player's own in-progress move highlights discards", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place n0", { trusted: true });
         g.hands[0] = [card("AC").uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid];
         g.move("discard AC", { partial: true, trusted: true }); // simulates the player's own first click
         const rep = g.render() as DiscardRenderRep;
-        expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+        expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.true;
     });
 
     // Regression: same "_new" suffix stripping as the hand-card click -
@@ -1715,7 +1713,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         forceCardAt(g, 0, 0, () => major(20)); // Judgement
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         g.hands[0] = g.hands[0].slice(0, 5); // room for 1 more (a full 6-card hand has none)
-        g.discardPile = [major(3).uid]; // baseline left empty - "new" by default
+        g.discardPile = [major(3).uid];
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
