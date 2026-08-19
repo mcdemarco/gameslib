@@ -471,16 +471,6 @@ export class GnosticaGame extends GameBase {
             for (let p = 0; p < this.numplayers; p++) {
                 hands.push(deck.draw(6).map(c => c.uid));
             }
-            // Kept in rank order from the very start for the default,
-            // non-bidding variant (phase is "main" immediately) - see
-            // sortHandsIfNotBidding's own docs for why the bidding
-            // variant's own initial deal stays in draw order instead
-            // (bid <n> names a card by its current position in hand).
-            if (!this.variants.includes("bidding")) {
-                for (const hand of hands) {
-                    hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
-                }
-            }
 
             // The starting 3x3 grid is built directly (not via
             // GnosticaBoard.createTerritory(), which requires the target to
@@ -490,14 +480,7 @@ export class GnosticaGame extends GameBase {
             let boardCards: TarotCard[];
             let drawPile: string[];
             if (this.variants.includes("no-majors")) {
-                // Only keeps majors off the OPENING board - they're still
-                // fully in the mix for hands (already dealt above) and the
-                // draw pile. Pulls 9 non-major cards out of what's left
-                // (still in shuffled order, so still a fair random sample),
-                // then reshuffles everything else (leftover non-majors +
-                // every major) back together so majors stay genuinely
-                // randomly distributed through the draw pile rather than
-                // clumping at one end.
+                // Pulls 9 non-major cards out then reshuffles.
                 const remaining = deck.cards;
                 const nonMajors = remaining.filter(c => !c.major);
                 boardCards = nonMajors.splice(0, 9);
@@ -507,11 +490,10 @@ export class GnosticaGame extends GameBase {
                 boardCards = deck.draw(9);
                 drawPile = deck.cards.map(c => c.uid);
             }
-            let boardIdx = 0;
+            
             for (let x = -1; x <= 1; x++) {
                 for (let y = -1; y <= 1; y++) {
-                    board.store.set(x, y, new CellContents(boardCards[boardIdx]));
-                    boardIdx++;
+                    board.store.set(x, y, new CellContents(boardCards.pop()));
                 }
             }
 
