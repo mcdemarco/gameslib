@@ -648,6 +648,80 @@ export class GnosticaGame extends GameBase {
         return new GnosticaGame(this.serialize());
     }
 
+    public validateMove(m: string): IValidationResult {
+        const parsed = this.parseMove(m);
+        if (parsed.head === undefined) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
+        }
+        if (!parsed.headRecognized) {
+            return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: [parsed.head, ...parsed.rest].join(" ") });
+        }
+
+        const requireNoSteps = (): IValidationResult | undefined => {
+            if (parsed.stepSegments.length > 0) {
+                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
+            }
+            return undefined;
+        };
+        const requireValidStepShapes = (): IValidationResult | undefined => {
+            if (parsed.malformedStep !== undefined) {
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") });
+            }
+            return undefined;
+        };
+
+        // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
+        const headLower = parsed.head.toLowerCase();
+        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
+            if (headLower === "bid" && this.phase !== "bidding") {
+                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+            }
+            if ((headLower === "redraw" || headLower === "pass") && this.phase !== "redraw") {
+                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+            }
+            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
+                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
+            }
+            const failure = headLower === "bid" ? this.validateBid(parsed.rest)
+                : headLower === "redraw" ? this.validateRedraw(parsed.rest)
+                : this.validatePass();
+            return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        }
+        if (this.phase !== "main") {
+            return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+        }
+        if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
+            return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
+        }
+        let failure: IValidationResult | undefined;
+        switch (headLower) {
+            case "place":
+                failure = requireNoSteps() ?? this.validatePlace(parsed.rest);
+                break;
+            case "orient":
+                failure = requireNoSteps() ?? this.validateOrient(parsed.rest);
+                break;
+            case "discard":
+                failure = requireNoSteps() ?? this.validateDiscard(parsed.rest);
+                break;
+            case "use":
+                failure = requireValidStepShapes() ?? this.validateActivate(parsed.rest, parsed.stepSegments);
+                break;
+            case "play":
+                failure = requireValidStepShapes() ?? this.validatePlay(parsed.rest, parsed.stepSegments);
+                break;
+        }
+        if (failure !== undefined) {
+            return failure;
+        }
+
+        if (parsed.announceLast && this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
+            return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
+        }
+
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+    }
+    
     // ============================================================
     // Move parsing
     //
@@ -674,11 +748,6 @@ export class GnosticaGame extends GameBase {
     // any deeper without already knowing which suit/power is involved -
     // the legality/field-level checking stays exactly where it already
     // lived, in validateMinorPower/validatePowerStep/validateCups etc.).
-    //
-    // validateMove() (below) is a real, non-mutating validator that
-    // walks this same grammar read-only, rather than mutating a
-    // throwaway clone and reporting whether it threw - see its own docs
-    // for why.
     // ============================================================
 
     public move(m: string, {trusted = false, partial = false, emulation = false} = {}): GnosticaGame {
@@ -840,8 +909,7 @@ export class GnosticaGame extends GameBase {
 
         }
         // A transient, unpersisted UI hint - NOT the same thing as
-        // this.lastmove (the actual recorded last move, part of official
-        // game state, serialized every real commit - see moveState()).
+        // this.lastmove
         // liveMove exists purely to answer "is there an in-progress
         // preview of the CURRENT player's own turn right now" for
         // getActionButtons()'s benefit: set to `m` for a partial preview
@@ -871,86 +939,6 @@ export class GnosticaGame extends GameBase {
         return this;
     }
 
-    // Walks the exact same move grammar move() does, but read-only - every
-    // legality check is a direct query against live (unmutated) state, or
-    // a checkX call from gnostica/powers.ts (the same predicate the
-    // matching mutating function calls before mutating - see powers.ts's
-    // own docs on why that split keeps the two from drifting apart). Every
-    // validateX/checkX failure below carries its own key straight through
-    // to the returned message, rather than collapsing to a generic fallback.
-    public validateMove(m: string): IValidationResult {
-        const parsed = this.parseMove(m);
-        if (parsed.head === undefined) {
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
-        }
-        if (!parsed.headRecognized) {
-            return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: [parsed.head, ...parsed.rest].join(" ") });
-        }
-
-        const requireNoSteps = (): IValidationResult | undefined => {
-            if (parsed.stepSegments.length > 0) {
-                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
-            }
-            return undefined;
-        };
-        const requireValidStepShapes = (): IValidationResult | undefined => {
-            if (parsed.malformedStep !== undefined) {
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") });
-            }
-            return undefined;
-        };
-
-        // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
-        const headLower = parsed.head.toLowerCase();
-        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
-            if (headLower === "bid" && this.phase !== "bidding") {
-                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
-            }
-            if ((headLower === "redraw" || headLower === "pass") && this.phase !== "redraw") {
-                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
-            }
-            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
-            }
-            const failure = headLower === "bid" ? this.validateBid(parsed.rest)
-                : headLower === "redraw" ? this.validateRedraw(parsed.rest)
-                : this.validatePass();
-            return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
-        }
-        if (this.phase !== "main") {
-            return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
-        }
-        if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
-            return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
-        }
-        let failure: IValidationResult | undefined;
-        switch (headLower) {
-            case "place":
-                failure = requireNoSteps() ?? this.validatePlace(parsed.rest);
-                break;
-            case "orient":
-                failure = requireNoSteps() ?? this.validateOrient(parsed.rest);
-                break;
-            case "discard":
-                failure = requireNoSteps() ?? this.validateDiscard(parsed.rest);
-                break;
-            case "use":
-                failure = requireValidStepShapes() ?? this.validateActivate(parsed.rest, parsed.stepSegments);
-                break;
-            case "play":
-                failure = requireValidStepShapes() ?? this.validatePlay(parsed.rest, parsed.stepSegments);
-                break;
-        }
-        if (failure !== undefined) {
-            return failure;
-        }
-
-        if (parsed.announceLast && this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
-            return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
-        }
-
-        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
-    }
 
     // The end-of-turn "declare" flag is always this exact trailing suffix
     // on the whole move string - never a comma-separated segment mixed in
