@@ -30,41 +30,6 @@ import i18next from "i18next";
 
 export type playerid = 1|2|3|4|5|6;
 
-// A board tile overlays a 3x3 grid: the 4 corners are the card face (rank
-// + suit/power icons, see buildCardFace), leaving 5 cells for pyramids -
-// one edge midpoint per cardinal facing, plus the exact centre for a "U"
-// (unfaced) piece. Orientation has exactly 5 values (N/E/S/W/U), a 1:1
-// match.
-const BOARD_TILE_GRID_CORNER = 650;
-// Pieces get their own (smaller) radius rather than sharing
-// BOARD_TILE_GRID_CORNER: the card corners are diagonal, so their true
-// distance from centre is BOARD_TILE_GRID_CORNER*sqrt(2); an edge midpoint
-// at the same magnitude is only BOARD_TILE_GRID_CORNER from centre - closer
-// in a straight line - but pieces are much bigger glyphs (scale 0.48 vs
-// 0.15-0.25 for icons) sitting flush against an axis rather than tucked
-// into a corner, so at equal magnitude they visibly poked outside the tile
-// (confirmed - not just a theoretical concern).
-const PIECE_GRID_RADIUS = 380;
-// Index in this array doubles as the slot's identity everywhere else -
-// PIECE_GRID_PREFERRED_INDEX below must stay in step with it.
-const PIECE_GRID_SLOTS: [number, number][] = [[0, -1], [0, 1], [1, 0], [-1, 0], [0, 0]]; // N, S, E, W, U
-const PIECE_GRID_PREFERRED_INDEX: Record<Orientation, number> = { N: 0, S: 1, E: 2, W: 3, U: 4 };
-
-// The renderer's own glyph-composition source (read directly, not
-// inferred): a placed glyph's `nudge` is applied via its <use> element's
-// x/y attributes, and only THEN is that already-positioned content rotated
-// (around the origin) via the glyph's own `rotate` - so `nudge` lives in
-// the glyph's local, PRE-rotation space, not screen space. A rotated
-// piece's nudge therefore has to be the inverse-rotated target position -
-// the piece's own rotation (already set to make it visually point the
-// right way, see pyramidGlyph()) then carries that nudge back around to
-// where it's actually meant to land on screen. [cos,sin] of each cardinal
-// rotation's angle, in exact integers (not Math.cos/sin, which introduces
-// float noise like 6.1e-17 at these multiples of 90deg).
-const CARDINAL_COS_SIN: Record<Exclude<Orientation, "U">, [number, number]> = {
-    N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
-};
-
 // A minion's board location - shorthand used while resolving use/play.
 // `piece` is set only for a newMinion predicted by a non-mutating validate*
 // step (see validateCups/validateRods/validateHermitStep's "own"/"piece"
@@ -6017,6 +5982,7 @@ export class GnosticaGame extends GameBase {
     // Every glyph EXCEPT the plain background square carries
     // `orientation: "vertical"` - correction for rotation.
     private buildCardFace(card: TarotCard, spaced: boolean, opts: { borderless?: boolean; rankText?: string; background?: string } = {}): Glyph[] {
+        const BOARD_TILE_GRID_CORNER = 650;        
         const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 };
         if (opts.background !== undefined) {
             backdrop.colour = opts.background;
@@ -6121,6 +6087,13 @@ export class GnosticaGame extends GameBase {
     // whatever cells are still free, in no particular order for now - a
     // first pass, not yet visually tuned the way the card face was.
     private pieceGridSlots(pieces: Piece[]): { dx: number; dy: number; scale: number }[] {
+        const PIECE_GRID_RADIUS = 380;
+        const PIECE_GRID_SLOTS: [number, number][] = [[0, -1], [0, 1], [1, 0], [-1, 0], [0, 0]]; // N, S, E, W, U
+        const PIECE_GRID_PREFERRED_INDEX: Record<Orientation, number> = { N: 0, S: 1, E: 2, W: 3, U: 4 };
+        const CARDINAL_COS_SIN: Record<Exclude<Orientation, "U">, [number, number]> = {
+    N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
+};
+
         const n = pieces.length;
         if (n === 0) {
             return [];
