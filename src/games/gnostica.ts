@@ -1719,6 +1719,11 @@ export class GnosticaGame extends GameBase {
         return idx === -1 ? ref : ref.slice(idx + 1);
     }
 
+    private getPipsFromRef(ref: string): string {
+        const idx = ref.indexOf(".");
+        return idx === -1 ? ref : ref.split(".")[1];
+    }
+
     private textFormat(ref: string): string {
         const parts = ref.split(".");
         return `${parts[1]}-pip pointing ${parts[2] == "U" ? "up" : parts[2]}`;
@@ -3248,7 +3253,7 @@ export class GnosticaGame extends GameBase {
         this.addBufferIfWasteland(x, y);
         const orientation = this.parseOrientation(orientationStr);
         piece.orientation = orientation;
-        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: this.stripCellFromRef(ref), facing: orientation });
+        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: this.getPipsFromRef(ref), facing: orientation });
     }
 
     // Any board cell whose facing might get set/adjusted by a click -
