@@ -3344,6 +3344,7 @@ export class GnosticaGame extends GameBase {
             this.discardPile.push(uid);
             this.discarded.push(uid);
         }
+        this.results.push({ type: "place", how: "discard", what: this.discarded.join(",") })
         if (partial) {
             return;
         }
@@ -6237,6 +6238,10 @@ export class GnosticaGame extends GameBase {
                         break;
                     case "initial":
                         node.push(i18next.t("apresults:PLACE.gnostica_initial", { player, where: r.where }));
+                        resolved = true;
+                        break;
+                   case "discard":
+                        node.push(i18next.t("apresults:PLACE.gnostica_discard", { player, what: r.what }));
                         resolved = true;
                         break;
                 }

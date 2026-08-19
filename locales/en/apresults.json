@@ -474,6 +474,7 @@
         "entrapment_roamer": "{{player}} placed a roamer at {{where}}.",
         "evenatodds": "{{player}} placed the {{what}} domino at {{where}}.",
         "epam": "{{player}} placed a stone at {{where}}.",
+        "gnostica_discard": "{{player}} discarded {{what}}.",
         "gnostica_enemy": "{{player}} added an enemy minion to {{where}}.",
         "gnostica_initial": "{{player}} placed their first minion at {{where}}.",
         "gnostica_own": "{{player}} added one of their own minions to {{where}}.",
