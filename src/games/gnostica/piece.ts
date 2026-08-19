@@ -2,6 +2,7 @@ export type Pips = 1 | 2 | 3;
 export type Orientation = "N" | "E" | "S" | "W" | "U";
 
 export const cardinalOrientations: Orientation[] = ["N", "E", "S", "W"];
+export const allOrientations: Orientation[] = ["N", "E", "S", "W", "U"];
 
 export interface IPiece {
     owner: number;
