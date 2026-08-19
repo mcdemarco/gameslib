@@ -4681,22 +4681,10 @@ export class GnosticaGame extends GameBase {
         this.currplayer = next;
     }
 
-    // Physical-card-style sort key: every major arcana first (Fool..
-    // World, their own 0-21 sequence), then minors grouped by suit
-    // (Cups, Rods, Discs, Swords - suits' own Component sequence),
-    // ranked Ace..King within each suit. Static (no board/phase
-    // dependency) so both the constructor's own initial deal and
-    // sortHandsIfNotBidding() can share it.
+    // Sort cards by their index in allCards.
     private static handSortKey(uid: string): number {
         const card = allCards().find(c => c.uid === uid);
-        if (card === undefined) {
-            return Number.MAX_SAFE_INTEGER;
-        }
-        if (card.major) {
-            return (card as MajorCard).seq; // 0..21 - always sorts before any minor
-        }
-        const minor = card as MinorCard;
-        return 1000 + minor.suit.seq * 100 + minor.rank.seq;
+        return card === undefined ? 100 : allCards().indexOf(card);
     }
 
     // Cards in `player`'s hand that weren't there as of the start of
@@ -5951,12 +5939,8 @@ export class GnosticaGame extends GameBase {
                 if (count === undefined) {
                     continue;
                 }
-                // Built via buildCardFace itself - same already-tuned
-                // corner/circle numbers as every other card face, rather
-                // than a second, separately-guessed composition. A
-                // representative rank (any court rank for "royal", any
-                // non-court rank for "spot") drives the exact same icon/
-                // circle layout a real card of that category would get;
+                // A representative rank (any court rank for "royal", any
+                // non-court rank for "spot") uses the usual card layout;
                 // only the background (borderless, no card-square) and
                 // the rank-corner text (a count, not a real rank) are
                 // overridden.
@@ -6088,12 +6072,7 @@ export class GnosticaGame extends GameBase {
             : (card as MinorCard).suit.glyph !== undefined ? [(card as MinorCard).suit.glyph!] : [];
         const circleScale = spaced ? 0.25 : 0.45;
         const iconScale = spaced ? 0.15 : 0.30;
-        // The renderer positions a glyph via a scale-INDEPENDENT anchor
-        // (nudge - 250 in its internal 500-unit canvas) and only then
-        // applies that glyph's own scale around that anchor, so two glyphs
-        // sharing one nudge only share a visual centre when they also share
-        // scale - confirmed by inspecting the rendered <use> elements'
-        // actual x/y/transform. `iconShift` compensates so a smaller-scaled
+        // `iconShift` compensates for nudging issues, so an
         // icon still lands centred on its larger coin.
         const iconShift = spaced ? 1075 : 375;
         const pushCircle = (xdir: number, ydir: number, iconName?: string) => {
