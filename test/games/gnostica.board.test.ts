@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
 import "mocha";
 import { expect } from "chai";
-import { Piece } from "../../src/games/gnostica/Piece";
+import { Piece } from "../../src/games/gnostica/piece";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { minorCards, majorCards } from "../../src/common/tarot";

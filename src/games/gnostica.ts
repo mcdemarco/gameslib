@@ -7,7 +7,7 @@ import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { CellContents, ICellContents, cardPointValue } from "./gnostica/cell";
-import { Piece, Orientation, cardinalOrientations } from "./gnostica/Piece";
+import { Piece, Orientation, cardinalOrientations } from "./gnostica/piece";
 import {
     Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
     createOwn, createEnemy, createTerritory,

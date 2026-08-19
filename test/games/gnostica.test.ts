@@ -4,7 +4,7 @@ import { expect } from "chai";
 import i18next from "i18next";
 import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
-import { Piece } from "../../src/games/gnostica/Piece";
+import { Piece } from "../../src/games/gnostica/piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
