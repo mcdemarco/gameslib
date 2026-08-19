@@ -4915,11 +4915,8 @@ export class GnosticaGame extends GameBase {
         if (candidates.length === 0) {
             return "";
         }
-        // Landing on an existing card gives immediate access to its
-        // power, so it's weighted 3x over a bare wasteland cell - a
-        // strong preference, not a requirement (see weightedPick's own
-        // docs).
-        const [x, y] = this.weightedPick(candidates, ([cx, cy]) => this.board.classify(cx, cy) === "territory" ? 3 : 1);
+        // Landing on an existing card is weighted 4x over a bare wasteland cell.
+        const [x, y] = this.weightedPick(candidates, ([cx, cy]) => this.board.classify(cx, cy) === "territory" ? 4 : 1);
         const orientations: Orientation[] = ["U", ...cardinalOrientations];
         const orientation = orientations[Math.floor(Math.random() * orientations.length)];
         return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
@@ -5549,16 +5546,18 @@ export class GnosticaGame extends GameBase {
                 const t = this.board.get(x, y);
                 const key = this.cellRenderKey(t, cls);
                 if (!(key in legend)) {
-                    legend[key] = this.buildCellGlyph(t, cls, largerCards);
+                    let owner = 0;
                     const players = t?.card !== undefined ? t.playersPresent() : undefined;
+                    
                     if (players !== undefined && players.size === 1) {
-                        const [owner] = players;
+                        [owner] = players;
                         markers.push({
                             type: "outline",
                             colour: owner,
                             points: [{row: y - minY, col: x - minX}],
                         });
                     }
+                    legend[key] = this.buildCellGlyph(t, cls, largerCards, owner);
                 }
                 rowCells.push(key);
             }
@@ -5608,7 +5607,7 @@ export class GnosticaGame extends GameBase {
                 const isNew = newUids.has(uid);
                 const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
                 if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(card, false, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
+                    legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
                 }
                 handKeys.push(key);
             }
@@ -5867,7 +5866,7 @@ export class GnosticaGame extends GameBase {
                 if (oldCount > 0) {
                     const key = `${keyPrefix}_${bucket}`;
                     if (!(key in legend)) {
-                        legend[key] = this.buildCardFace(representative, false, {
+                        legend[key] = this.buildCardFace(representative, false, 0, {
                             borderless: true,
                             rankText: `${oldCount}x`,
                         }) as [Glyph, ...Glyph[]];
@@ -5877,7 +5876,7 @@ export class GnosticaGame extends GameBase {
                 if (newCount > 0) {
                     const key = `${keyPrefix}_${bucket}_new`;
                     if (!(key in legend)) {
-                        legend[key] = this.buildCardFace(representative, false, {
+                        legend[key] = this.buildCardFace(representative, false, 0, {
                             borderless: true,
                             rankText: `${newCount}x`,
                             background: "#ccc",
@@ -5892,7 +5891,7 @@ export class GnosticaGame extends GameBase {
             const key = isNew ? `${keyPrefix}_${uid}_new` : `${keyPrefix}_${uid}`;
             if (!(key in legend)) {
                 const card = allCards().find(c => c.uid === uid)!;
-                legend[key] = this.buildCardFace(card, false, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
+                legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
             }
             pieces.push(key);
         }
@@ -5947,11 +5946,15 @@ export class GnosticaGame extends GameBase {
     // (same purpose - a count like "3x" instead of a real rank/numeral).
     // Every glyph EXCEPT the plain background square carries
     // `orientation: "vertical"` - correction for rotation.
-    private buildCardFace(card: TarotCard, spaced: boolean, opts: { borderless?: boolean; rankText?: string; background?: string } = {}): Glyph[] {
+    private buildCardFace(card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: string } = {}): Glyph[] {
         const BOARD_TILE_GRID_CORNER = 650;        
         const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 };
         if (opts.background !== undefined) {
             backdrop.colour = opts.background;
+        }
+        if (owner > 0) {
+            backdrop.colour = owner;
+            backdrop.opacity = 0.05;
         }
         const stack: Glyph[] = [backdrop];
 
@@ -6016,11 +6019,11 @@ export class GnosticaGame extends GameBase {
     // small square, so it uses the spaced card face (smaller rank/circle
     // sizing) rather than the roomier default meant for a card shown alone
     // (e.g. a hand, once that's rendered).
-    private buildCellGlyph(t: CellContents | undefined, cls: CellClass, largerCards: boolean): Glyph | [Glyph, ...Glyph[]] {
+    private buildCellGlyph(t: CellContents | undefined, cls: CellClass, largerCards: boolean, owner?: number): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
         if (t?.card !== undefined) {
             const dontSpace = largerCards && t.playersPresent().size === 0;
-            stack.push(...this.buildCardFace(t.card, !dontSpace));
+            stack.push(...this.buildCardFace(t.card, !dontSpace, owner));
         } else if (cls === "wasteland") {
             stack.push({ name: "piece-square-dashed", scale: 1 });
         } else {
