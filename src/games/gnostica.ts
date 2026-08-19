@@ -934,7 +934,6 @@ export class GnosticaGame extends GameBase {
             this.nextPlayer();
             this.checkEOG();
         }
-        this.sortHandsIfNotBidding();
         this.saveState();
         return this;
     }
@@ -4718,26 +4717,6 @@ export class GnosticaGame extends GameBase {
         return 1000 + minor.suit.seq * 100 + minor.rank.seq;
     }
 
-    // Skipped entirely during the "bidding" phase itself, where
-    // "bid <n>" names a card by its CURRENT position in hand -
-    // reordering mid-bid would silently pick a different card than the
-    // one a player actually meant. Applies from the moment bidding
-    // resolves (redraw phase) onward, and always in the default,
-    // non-bidding variant (phase is never "bidding" there at all - see
-    // the constructor's own initial sort for that starting case). Called
-    // once per real commit, covering every hand mutation that move()
-    // might have just made (deckDraw/discard/play/redraw/tradeHands/
-    // judgementDraw/highPriestess) without needing to sort at each
-    // individual call site.
-    private sortHandsIfNotBidding(): void {
-        if (this.phase === "bidding") {
-            return;
-        }
-        for (const hand of this.hands) {
-            hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
-        }
-    }
-
     // Cards in `player`'s hand that weren't there as of the start of
     // their last turn (see move()'s own docs on handBaseline) - render()
     // uses this to highlight them. Only ever non-empty for the CURRENT
@@ -5717,10 +5696,12 @@ export class GnosticaGame extends GameBase {
         // One area per player's hand, full-size (non-spaced) card faces.
         const areas: (AreaPieces | AreaButtonBar | AreaKey)[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
-            const hand = this.hands[p - 1] ?? [];
+            const hand = this.hands[p - 1].slice() ?? [];
             if (hand.length === 0) {
                 continue;
             }
+            //Hand sorting is now done in the render only.
+            hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
             const newUids = this.newHandCardUids(p as playerid);
             const handKeys: string[] = [];
             for (const uid of hand) {
