@@ -6,7 +6,7 @@ import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/Piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
-import { CellContents } from "../../src/games/gnostica/CellContents";
+import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
 const theWorld = () => majorCards.find(c => c.seq === 21)!;
