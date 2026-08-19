@@ -7,7 +7,7 @@ import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { CellContents, ICellContents, cardPointValue } from "./gnostica/cell";
-import { Piece, Orientation, cardinalOrientations } from "./gnostica/piece";
+import { Piece, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece";
 import {
     Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
     createOwn, createEnemy, createTerritory,
@@ -964,7 +964,7 @@ export class GnosticaGame extends GameBase {
             return undefined;
         }
         const dir = s.toUpperCase();
-        if (dir === "U" || (cardinalOrientations as string[]).includes(dir)) {
+        if ( (allOrientations as string[]).includes(dir)) {
             return dir as Orientation;
         }
         return undefined;
@@ -2870,11 +2870,8 @@ export class GnosticaGame extends GameBase {
     }
 
     private parseOrientation(s: string): Orientation {
-        if (s.toUpperCase() === "U") {
-            return "U";
-        }
         const dir = s.toUpperCase();
-        if ((cardinalOrientations as string[]).includes(dir)) {
+        if ((allOrientations as string[]).includes(dir)) {
             return dir as Orientation;
         }
         throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: s }));
@@ -4917,8 +4914,7 @@ export class GnosticaGame extends GameBase {
         }
         // Landing on an existing card is weighted 4x over a bare wasteland cell.
         const [x, y] = this.weightedPick(candidates, ([cx, cy]) => this.board.classify(cx, cy) === "territory" ? 4 : 1);
-        const orientations: Orientation[] = ["U", ...cardinalOrientations];
-        const orientation = orientations[Math.floor(Math.random() * orientations.length)];
+        const orientation = allOrientations[Math.floor(Math.random() * allOrientations.length)];
         return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
     }
 
@@ -4956,8 +4952,7 @@ export class GnosticaGame extends GameBase {
         }
         const { x, y, index } = ownPieces[Math.floor(Math.random() * ownPieces.length)];
         const ref = this.pieceRefStr(x, y, index);
-        const orientations: Orientation[] = ["U", ...cardinalOrientations];
-        const orientation = orientations[Math.floor(Math.random() * orientations.length)];
+        const orientation = allOrientations[Math.floor(Math.random() * allOrientations.length)];
         return `orient ${ref} ${orientation}`;
     }
 
@@ -5103,7 +5098,6 @@ export class GnosticaGame extends GameBase {
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
         const targetT = this.board.get(tx, ty);
         const hand = this.hands[this.currplayer - 1];
-        const orientations: Orientation[] = ["U", ...cardinalOrientations];
         const pieceTargets = this.pieceTargetRefsWithOwner(minion);
         const pips = Array.from({ length: piece.size }, (_, i) => String(i + 1));
         const cardsWorth = (value: number) => hand.filter(uid => {
@@ -5119,7 +5113,7 @@ export class GnosticaGame extends GameBase {
 
         switch (`${suitUid}.${mode}`) {
             case "C.own":
-                return flat(orientations.map(o => [targetCell, o]));
+                return flat(allOrientations.map(o => [targetCell, o]));
             case "C.enemy":
                 return flat((targetT?.pieces ?? [])
                     .map((p, i) => ({ p, i }))
@@ -5282,9 +5276,8 @@ export class GnosticaGame extends GameBase {
 
     private buildRandomOrientMinionTokens(minions: IMinionRef[]): string[] | undefined {
         const pool = shuffle([...minions]) as IMinionRef[];
-        const orientations: Orientation[] = ["U", ...cardinalOrientations];
         for (const minion of pool) {
-            for (const o of shuffle([...orientations]) as Orientation[]) {
+            for (const o of shuffle([...allOrientations]) as Orientation[]) {
                 const check = this.validateOrientMinion(minion, [o]);
                 if (!check.failed) {
                     const ref = this.pieceRefStr(minion.x, minion.y, minion.index, minions);
@@ -5314,10 +5307,9 @@ export class GnosticaGame extends GameBase {
     // different validateX to check against.
     private buildRandomOrientAnyOrHierophantTokens(minions: IMinionRef[], special: "orientAny" | "hierophantReplace"): string[] | undefined {
         const pool = shuffle([...minions]) as IMinionRef[];
-        const orientations: Orientation[] = ["U", ...cardinalOrientations];
         for (const minion of pool) {
             for (const targetRef of shuffle(this.pieceTargetRefs(minion)) as string[]) {
-                for (const o of shuffle([...orientations]) as Orientation[]) {
+                for (const o of shuffle([...allOrientations]) as Orientation[]) {
                     const check = special === "orientAny"
                         ? this.validateOrientAny(minion, [targetRef, o])
                         : this.validateHierophantReplace(minion, [targetRef, o]);
