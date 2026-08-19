@@ -1449,7 +1449,7 @@ export class GnosticaGame extends GameBase {
                     continue;
                 }
                 seenRefs.add(ref);
-                buttons.push({ label: ref, value: `minion_${ref}` });
+                buttons.push({ label: this.textFormat(ref), value: `minion_${ref}` });
             }
             if (declareBtn !== undefined) {
                 buttons.push(declareBtn);
@@ -1795,6 +1795,11 @@ export class GnosticaGame extends GameBase {
     private stripCellFromRef(ref: string): string {
         const idx = ref.indexOf(".");
         return idx === -1 ? ref : ref.slice(idx + 1);
+    }
+
+    private textFormat(ref: string): string {
+        const parts = ref.split(".");
+        return `${parts[1]}-pip pointing ${parts[2] == "U" ? "up" : parts[2]}`;
     }
 
     // Click-to-orient: clicking the cell a piece already occupies means
