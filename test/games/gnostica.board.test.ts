@@ -2,7 +2,7 @@
 import "mocha";
 import { expect } from "chai";
 import { Piece } from "../../src/games/gnostica/Piece";
-import { CellContents } from "../../src/games/gnostica/CellContents";
+import { CellContents } from "../../src/games/gnostica/cell";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { minorCards, majorCards } from "../../src/common/tarot";
 import { UnboundedSquareBoard } from "../../src/common/unbounded-square-board";

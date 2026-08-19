@@ -1,12 +1,12 @@
 import { TarotCard, MinorCard, MajorCard } from "../../common/tarot";
 import { Piece, IPiece } from "./Piece";
 
-export type TerritoryPointValue = 0 | 1 | 2 | 3;
+export type CellPointValue = 0 | 1 | 2 | 3;
 
 // Standalone so powers.ts can evaluate a candidate replacement card (from
 // hand or discard) before it's ever placed on the board, not just a card
 // already sitting in a cell's CellContents.
-export const cardPointValue = (card?: TarotCard): TerritoryPointValue => {
+export const cardPointValue = (card?: TarotCard): CellPointValue => {
     if (card === undefined) {
         return 0;
     }
@@ -74,7 +74,7 @@ export class CellContents implements ICellContents {
         return players.size === 1 && players.has(player);
     }
 
-    public pointValue(): TerritoryPointValue {
+    public pointValue(): CellPointValue {
         return cardPointValue(this.card);
     }
 

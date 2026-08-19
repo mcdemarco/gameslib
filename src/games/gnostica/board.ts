@@ -1,7 +1,7 @@
 import { UnboundedSquareBoard } from "../../common/unbounded-square-board";
 import { DirectionCardinal, orthDirections } from "../../common";
 import { TarotCard } from "../../common/tarot";
-import { CellContents, ICellContents } from "./CellContents";
+import { CellContents, ICellContents } from "./cell";
 import { Piece } from "./Piece";
 
 export type CellClass = "territory" | "wasteland" | "void";
