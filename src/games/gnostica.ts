@@ -290,15 +290,6 @@ interface IMoveState extends IIndividualState {
     cardsDrawn: number[];
     drawPile: string[];
     discardPile: string[];
-    // discardPile exactly as it stood before the most recently completed
-    // real move's own mutations - render "just discarded" highlight
-    // diffs the current pile against this. 
-    // isn't per-player and isn't gated on whose turn it is - it simply
-    // shows whatever the LAST move added, until the NEXT move (by anyone)
-    // updates the baseline again.
-    // I think the AI misunderstood what I wanted to see; need to remove
-    // this whole mechanism and replace with in-turn highlighting of discards
-    discardBaseline: string[];
     stashes: Map<playerid, Stash>;
     eliminated: playerid[];
     lastTurnAnnouncedBy: playerid | undefined;
@@ -381,7 +372,6 @@ export class GnosticaGame extends GameBase {
     public cardsDrawn: number[] = [];
     public drawPile: string[] = [];
     public discardPile: string[] = [];
-    public discardBaseline: string[] = [];
     public stashes!: Map<playerid, Stash>;
     public eliminated: playerid[] = [];
     public lastTurnAnnouncedBy: playerid | undefined;
@@ -403,6 +393,7 @@ export class GnosticaGame extends GameBase {
     public redrawOrder: playerid[] = [];
     public redrawPos = 0;
     private buffers: Direction[] = [];
+    private discarded: string[] = [];
 
     private targetScore(): number {
         if (this.variants.includes("target-8")) {
@@ -473,7 +464,6 @@ export class GnosticaGame extends GameBase {
                 cardsDrawn: hands.map(h => 0),
                 drawPile,
                 discardPile: [],
-                discardBaseline: [],
                 stashes,
                 eliminated: [],
                 lastTurnAnnouncedBy: undefined,
@@ -527,7 +517,6 @@ export class GnosticaGame extends GameBase {
         this.cardsDrawn = [...state.cardsDrawn];
         this.drawPile = [...state.drawPile];
         this.discardPile = [...state.discardPile];
-        this.discardBaseline = [...state.discardBaseline];
         this.stashes = new Map([...state.stashes.entries()].map(([k, v]) => [k, [...v] as Stash]));
         this.eliminated = [...state.eliminated];
         this.lastTurnAnnouncedBy = state.lastTurnAnnouncedBy;
@@ -553,7 +542,6 @@ export class GnosticaGame extends GameBase {
             cardsDrawn: [...this.cardsDrawn],
             drawPile: [...this.drawPile],
             discardPile: [...this.discardPile],
-            discardBaseline: [...this.discardBaseline],
             stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
             eliminated: [...this.eliminated],
             lastTurnAnnouncedBy: this.lastTurnAnnouncedBy,
@@ -698,21 +686,7 @@ export class GnosticaGame extends GameBase {
         }
         this.results = [];
         this.buffers = [];
-
-        // ai trying to emulate emulation??
-        // Freezes the acting player's hand exactly as it stood BEFORE
-        // this turn's own mutations - the comparison point render()'s
-        // "new card" highlight (see newHandCardUids's own docs) diffs
-        // the current hand against. Captured here, not at the end of
-        // the turn, so whatever changes THIS turn makes (a draw, a
-        // trade, etc.) still show as "new" the next time it's this
-        // player's turn - not just changes some OTHER player caused in
-        // between.
-        if (!partial) {
-            // the single shared discard pile - see discardBaseline's own
-            // docs on why this one isn't per-player.
-            this.discardBaseline = [...this.discardPile];
-        }
+        this.discarded = [];
 
         // Parses and executes `m` against `this` - the one place move
         // grammar is interpreted (validateMove mirrors this exact
@@ -3366,6 +3340,7 @@ export class GnosticaGame extends GameBase {
             }
             hand.splice(idx, 1);
             this.discardPile.push(uid);
+            this.discarded.push(uid);
         }
         if (partial) {
             return;
@@ -3552,6 +3527,7 @@ export class GnosticaGame extends GameBase {
         }
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
+        this.discarded.push(uid);
         this.results.push({ type: "deckDraw", what: uid, from: "hand" });
 
         const eligible = this.eligibleMinionsForPlay();
@@ -4650,26 +4626,10 @@ export class GnosticaGame extends GameBase {
         if (player !== this.currplayer || this.liveMove !== undefined) {
             return new Set();
         }
-        const baseline = this.cardsDrawn[player - 1] || 0;
-        if (baseline === 0)
+        const drawn = this.cardsDrawn[player - 1] || 0;
+        if (drawn === 0)
             return new Set();
-        return new Set(this.hands[player - 1].slice(-baseline));
-    }
-
-    // Cards added to the discard pile by the most recently completed move
-    // (see move()'s own docs on discardBaseline) - render() highlights
-    // them the same way newHandCardUids highlights a just-drawn hand
-    // card. Not scoped to a specific viewer the way newHandCardUids is
-    // (the discard pile is always fully public) and clears the instant
-    // ANY player's next move is submitted, not just the acting player's
-    // own next turn - there's only one shared pile, so "whose turn is
-    // it" isn't a meaningful gate here.
-    private newDiscardUids(): Set<string> {
-        if (this.liveMove !== undefined) {
-            return new Set();
-        }
-        const baseline = new Set(this.discardBaseline);
-        return new Set(this.discardPile.filter(uid => !baseline.has(uid)));
+        return new Set(this.hands[player - 1].slice(-drawn));
     }
 
     private scoreFor(player: playerid): number {
@@ -4734,6 +4694,7 @@ export class GnosticaGame extends GameBase {
             this.board.pruneIfEmpty(x, y);
         }
         this.discardPile.push(...this.hands[player - 1]);
+        this.discarded.push(...this.hands[player - 1]);
         this.hands[player - 1] = [];
         this.eliminated.push(player);
         this.results.push({ type: "eliminated", who: player.toString() });
@@ -5724,7 +5685,7 @@ export class GnosticaGame extends GameBase {
         // The discard pile is always face-up/public, unlike hands or the
         // draw pile, so its own contents are read directly.
         const discardArea = this.buildDeckSummaryArea(
-            this.discardPile, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"), this.newDiscardUids()
+            this.discardPile, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"), new Set(this.discarded)
         );
         if (discardArea !== undefined) {
             areas.push(discardArea);
