@@ -427,7 +427,7 @@ body[data-theme='dark'] input[type="radio"] {
      * whole control row compact without touching anything else. */
     .move-controls button {
         padding: 0.3em 0.6em;
-        font-size: 0.85em;
+        font-size: 16px;
     }
     #openSidebarBtn {
         padding: 4px 8px;
@@ -1187,4 +1187,9 @@ body[data-theme='dark'] #gameStatusPanel .stash-movepart {
 body[data-theme='dark'] #gameStatusPanel .stash-item-json pre {
     background-color: rgba(255,255,255,0.05);
     border-color: var(--border-dark);
+}
+
+/* prevents accidental double-tap-to-zoom on iOS Safari */
+button {
+    touch-action: manipulation;
 }
