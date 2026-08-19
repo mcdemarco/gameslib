@@ -5640,11 +5640,16 @@ export class GnosticaGame extends GameBase {
         // (see cmdOrient's own docs on this.buffers), not a click target
         // baked into the grid itself.
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
-        legend.hand_UNKNOWN = [
-            { name: "piece-square", scale: 1 },
-            { text: "?", scale: 0.5, colour: "_context_strokes", orientation: "vertical" },
-        ];
-        
+        legend.hand_UNKNOWN = {
+            name: "piece-square-borderless",
+            colour: {
+                func: "flatten",
+                fg: "_context_fill",
+                bg: "_context_background",
+                opacity: 0.5,
+            },
+        };
+                
         const pieceRows: string[] = [];
         const markers: MarkerOutline[] = [];
         for (let y = minY; y <= maxY; y++) {
