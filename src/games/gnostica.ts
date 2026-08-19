@@ -321,27 +321,18 @@ interface IMoveState extends IIndividualState {
     board: UnboundedSquareBoard<CellContents>;
     // Card uids per player, index 0 = player 1.
     hands: string[][];
-    // Each player's own hand exactly as it stood the last time THEY
-    // started a new turn (frozen the instant they make their first move
-    // of that turn - see move()'s own docs) - the comparison point
-    // render()'s "new card" highlight diffs the current hand against.
-    // Deliberately NOT the same thing as `hands` a move ago: it only
-    // updates at the START of a player's own turn, so it still reflects
-    // whatever they had BEFORE their last turn's own draw/trade/etc.,
-    // making that turn's changes visible as "new" going into their NEXT
-    // one - not just changes caused by other players while they weren't
-    // acting.
-    handBaseline: string[][];
+    // Number of hand cards drawn on the player's last turn.
+    cardsDrawn: number[];
     drawPile: string[];
     discardPile: string[];
     // discardPile exactly as it stood before the most recently completed
-    // real move's own mutations (mirrors handBaseline's own timing - see
-    // move()'s docs) - render()'s discard-pile "just discarded" highlight
-    // diffs the current pile against this. Unlike handBaseline, there's
-    // only one shared pile (always fully public, unlike a hand), so this
+    // real move's own mutations - render "just discarded" highlight
+    // diffs the current pile against this. 
     // isn't per-player and isn't gated on whose turn it is - it simply
     // shows whatever the LAST move added, until the NEXT move (by anyone)
     // updates the baseline again.
+    // I think the AI misunderstood what I wanted to see; need to remove
+    // this whole mechanism and replace with in-turn highlighting of discards
     discardBaseline: string[];
     stashes: Map<playerid, Stash>;
     eliminated: playerid[];
@@ -422,7 +413,7 @@ export class GnosticaGame extends GameBase {
     public currplayer!: playerid;
     public board!: GnosticaBoard;
     public hands: string[][] = [];
-    public handBaseline: string[][] = [];
+    public cardsDrawn: number[] = [];
     public drawPile: string[] = [];
     public discardPile: string[] = [];
     public discardBaseline: string[] = [];
@@ -513,11 +504,8 @@ export class GnosticaGame extends GameBase {
                 currplayer: 1,
                 board: board.store,
                 hands,
-                // Starting hand doubles as each player's own first
-                // baseline - nothing highlights as "new" on anyone's
-                // opening turn (see move()'s own docs on when this
-                // updates from here on).
-                handBaseline: hands.map(h => [...h]),
+                // Do not display the initial hand as a draw.
+                cardsDrawn: hands.map(h => 0),
                 drawPile,
                 discardPile: [],
                 discardBaseline: [],
@@ -571,7 +559,7 @@ export class GnosticaGame extends GameBase {
         // touches the snapshot stored in the stack.
         this.board = new GnosticaBoard(state.board).clone();
         this.hands = state.hands.map(h => [...h]);
-        this.handBaseline = state.handBaseline.map(h => [...h]);
+        this.cardsDrawn = [...state.cardsDrawn];
         this.drawPile = [...state.drawPile];
         this.discardPile = [...state.discardPile];
         this.discardBaseline = [...state.discardBaseline];
@@ -597,7 +585,7 @@ export class GnosticaGame extends GameBase {
             currplayer: this.currplayer,
             board: this.board.clone().store,
             hands: this.hands.map(h => [...h]),
-            handBaseline: this.handBaseline.map(h => [...h]),
+            cardsDrawn: [...this.cardsDrawn],
             drawPile: [...this.drawPile],
             discardPile: [...this.discardPile],
             discardBaseline: [...this.discardBaseline],
@@ -746,6 +734,7 @@ export class GnosticaGame extends GameBase {
         this.results = [];
         this.buffers = [];
 
+        // ai trying to emulate emulation??
         // Freezes the acting player's hand exactly as it stood BEFORE
         // this turn's own mutations - the comparison point render()'s
         // "new card" highlight (see newHandCardUids's own docs) diffs
@@ -753,14 +742,8 @@ export class GnosticaGame extends GameBase {
         // the turn, so whatever changes THIS turn makes (a draw, a
         // trade, etc.) still show as "new" the next time it's this
         // player's turn - not just changes some OTHER player caused in
-        // between. Real commits only: every partial preview call runs
-        // on a disposable, freshly-reconstructed instance (see this
-        // method's own docs) whose mutations never reach saveState(),
-        // so updating handBaseline there would never actually persist -
-        // pointless busywork on every click.
+        // between.
         if (!partial) {
-            this.handBaseline[this.currplayer - 1] = [...this.hands[this.currplayer - 1]];
-            // Same timing/reasoning as handBaseline just above, but for
             // the single shared discard pile - see discardBaseline's own
             // docs on why this one isn't per-player.
             this.discardBaseline = [...this.discardPile];
@@ -3135,6 +3118,7 @@ export class GnosticaGame extends GameBase {
         if (partial) {
             return;
         }
+        this.cardsDrawn[this.currplayer - 1] = args.length;
         this.results.push({ type: "deckDraw", what: args.join(","), from: "pool" });
 
         this.redrawPos += 1;
@@ -3444,6 +3428,7 @@ export class GnosticaGame extends GameBase {
             drawnCount++;
         }
         this.results.push({ type: "deckDraw", count: drawnCount, from: "deck" });
+        this.cardsDrawn[this.currplayer - 1] = drawnCount;
     }
 
     // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar and
@@ -4692,23 +4677,18 @@ export class GnosticaGame extends GameBase {
         return card === undefined ? 100 : allCards().indexOf(card);
     }
 
-    // Cards in `player`'s hand that weren't there as of the start of
-    // their last turn (see move()'s own docs on handBaseline) - render()
-    // uses this to highlight them. Only ever non-empty for the CURRENT
-    // player, and only until they've started building THIS turn's own
-    // move: `liveMove` is transient and never survives serialization,
-    // but that's exactly right here - render() only ever runs either
-    // with no move() call at all (the idle view, before any click, where
-    // liveMove is still unset) or immediately after one ON THAT SAME
-    // instance (liveMove correctly reflecting THAT call's own move
-    // string) - see move()'s own docs on why every partial preview call
-    // reconstructing a fresh instance per click doesn't break this.
+    // Cards that player drew at the end of their last turn,
+    // as tracked by cardsDrawn, for highlighting  by render()
+    // Only ever non-empty for the CURRENT player,
+    // and only until they've started building THIS turn's move.
     private newHandCardUids(player: playerid): Set<string> {
         if (player !== this.currplayer || this.liveMove !== undefined) {
             return new Set();
         }
-        const baseline = new Set(this.handBaseline[player - 1] ?? []);
-        return new Set((this.hands[player - 1] ?? []).filter(uid => !baseline.has(uid)));
+        const baseline = this.cardsDrawn[player - 1] || 0;
+        if (baseline === 0)
+            return new Set();
+        return new Set(this.hands[player - 1].slice(-baseline));
     }
 
     // Cards added to the discard pile by the most recently completed move
