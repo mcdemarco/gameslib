@@ -1,4 +1,4 @@
-import { GameBase, IAPGameState, IClickResult, IIndividualState, IMoveOptions, IRenderOpts, IScores, IValidationResult } from "./_base";
+import { GameBase, IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult } from "./_base";
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
@@ -681,21 +681,7 @@ export class GnosticaGame extends GameBase {
     // for why.
     // ============================================================
 
-    // `partial: true` is the playground/interface's live-preview signal -
-    // "apply this move's effects so I can render what it would look like,
-    // but don't treat it as an actual, final turn" (see Homeworlds' own
-    // move(), which documents the exact same contract). Every hand-card
-    // toggle click re-renders a preview by calling move(..., {partial:
-    // true}) on a disposable reconstructed instance; without honouring
-    // that flag, each of those preview calls was running full end-of-move
-    // processing - advancing the turn and re-drawing for real - which is
-    // exactly what produced the reported "discards immediately replaced,
-    // one at a time" bug. The `partial` object this method mutates is
-    // documented (by that same Homeworlds precedent) as left in a
-    // possibly-inconsistent state afterwards; only ever call it on a
-    // disposable/throwaway instance.
-    public move(m: string, opts: IMoveOptions = {}): GnosticaGame {
-        const { partial = false, trusted = false } = opts;
+    public move(m: string, {trusted = false, partial = false, emulation = false} = {}): GnosticaGame {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
@@ -777,86 +763,82 @@ export class GnosticaGame extends GameBase {
         // real server auto-submits it via moves() the instant it's the
         // only legal option, so a human player should never actually see
         // or click a "pass" prompt themselves.
-        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
-            if (headLower === "bid" && this.phase !== "bidding") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
-            }
-            if ((headLower === "redraw" || headLower === "pass") && this.phase !== "redraw") {
+        if (headLower === "bid") {
+            if (this.phase !== "bidding") {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
             }
-            if (headLower === "bid") {
-                this.cmdBid(parsed.rest, partial);
-            } else if (headLower === "redraw") {
+            this.cmdBid(parsed.rest, partial);
+            
+        } else if (headLower === "redraw" || headLower === "pass") {
+            if (this.phase !== "redraw") {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
+            }
+            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
+            }
+            if (headLower === "redraw") {
                 this.cmdRedraw(parsed.rest, partial);
             } else {
                 this.cmdPass(partial);
             }
-            this.lastmove = m;
-            this.liveMove = partial ? m : undefined;
-            if (partial) {
-                return this;
+        } else {
+            // Every other head is illegal until the bidding variant's opening
+            // procedure has fully resolved into "main".
+            if (this.phase !== "main") {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
             }
-            this.sortHandsIfNotBidding();
-            this.saveState();
-            return this;
-        }
-        // Every other head is illegal until the bidding variant's opening
-        // procedure has fully resolved into "main".
-        if (this.phase !== "main") {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
-        }
-
-        // Place is always a player's ENTIRE turn - one gate here, ahead of
-        // the switch, replaces a separate check inside every other command:
-        // with no board presence, place is the only legal head this turn,
-        // full stop; with board presence, place is illegal instead (caught
-        // by cmdPlace's own ALREADY_ON_BOARD check) and every other command
-        // is free to assume board presence without asking again. Evaluated
-        // fresh every call, so this covers a mid-game wipeout's forced
-        // re-placement identically to the very first turn - no separate
-        // tracked state needed for either case.
-        if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST"));
-        }
-        switch (headLower) {
-            case "place":
-                requireNoSteps();
-                this.cmdPlace(parsed.rest);
-                break;
-            case "orient":
-                requireNoSteps();
-                this.cmdOrient(parsed.rest);
-                break;
-            case "discard":
-                requireNoSteps();
-                this.cmdDiscard(parsed.rest, partial);
-                break;
-            case "use":
-                requireValidStepShapes();
-                this.cmdActivate(parsed.rest, parsed.stepSegments);
-                break;
-            case "play":
-                requireValidStepShapes();
-                this.cmdPlay(parsed.rest, parsed.stepSegments);
-                break;
-        }
-
-        if (parsed.announceLast) {
-            if (this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
+            
+            // Place is always a player's ENTIRE turn - one gate here, ahead of
+            // the switch, replaces a separate check inside every other command:
+            // with no board presence, place is the only legal head this turn,
+            // full stop; with board presence, place is illegal instead (caught
+            // by cmdPlace's own ALREADY_ON_BOARD check) and every other command
+            // is free to assume board presence without asking again. Evaluated
+            // fresh every call, so this covers a mid-game wipeout's forced
+            // re-placement identically to the very first turn - no separate
+            // tracked state needed for either case.
+            if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST"));
             }
-            this.lastTurnAnnouncedBy = this.currplayer;
-            this.results.push({ type: "declare" });
-        }
+            switch (headLower) {
+                case "place":
+                    requireNoSteps();
+                    this.cmdPlace(parsed.rest);
+                    break;
+                case "orient":
+                    requireNoSteps();
+                    this.cmdOrient(parsed.rest);
+                    break;
+                case "discard":
+                    requireNoSteps();
+                    this.cmdDiscard(parsed.rest, partial);
+                    break;
+                case "use":
+                    requireValidStepShapes();
+                    this.cmdActivate(parsed.rest, parsed.stepSegments);
+                    break;
+                case "play":
+                    requireValidStepShapes();
+                    this.cmdPlay(parsed.rest, parsed.stepSegments);
+                    break;
+            }
 
-        if (wasAnnounced) {
-            this.resolveAnnouncedTurn();
-        }
+            if (parsed.announceLast) {
+                if (this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
+                }
+                this.lastTurnAnnouncedBy = this.currplayer;
+                this.results.push({ type: "declare" });
+            }
+            
+            if (wasAnnounced) {
+                this.resolveAnnouncedTurn();
+            }
 
-        this.lastmove = m;
+        }
         // A transient, unpersisted UI hint - NOT the same thing as
         // this.lastmove (the actual recorded last move, part of official
         // game state, serialized every real commit - see moveState()).
@@ -871,11 +853,19 @@ export class GnosticaGame extends GameBase {
         // Magnate's own this.highlights field (also reset/populated fresh
         // per move() call, never persisted).
         this.liveMove = partial ? m : undefined;
-        if (partial) {
+
+ 
+        if (partial || emulation) {
             return this;
         }
-        this.nextPlayer();
-        this.checkEOG();
+
+        this.lastmove = m;
+        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
+            //Need to rewrite these to remove this exception.
+        } else {
+            this.nextPlayer();
+            this.checkEOG();
+        }
         this.sortHandsIfNotBidding();
         this.saveState();
         return this;
