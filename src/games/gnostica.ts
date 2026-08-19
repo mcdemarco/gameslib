@@ -653,30 +653,30 @@ export class GnosticaGame extends GameBase {
         };
 
         // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
-        const headLower = parsed.head.toLowerCase();
-        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
-            if (headLower === "bid" && this.phase !== "bidding") {
-                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+        const head = parsed.head;
+        if (head === "bid" || head === "redraw" || head === "pass") {
+            if (head === "bid" && this.phase !== "bidding") {
+                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
             }
-            if ((headLower === "redraw" || headLower === "pass") && this.phase !== "redraw") {
-                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+            if ((head === "redraw" || head === "pass") && this.phase !== "redraw") {
+                return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
+                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
             }
-            const failure = headLower === "bid" ? this.validateBid(parsed.rest)
-                : headLower === "redraw" ? this.validateRedraw(parsed.rest)
+            const failure = head === "bid" ? this.validateBid(parsed.rest)
+                : head === "redraw" ? this.validateRedraw(parsed.rest)
                 : this.validatePass();
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
         if (this.phase !== "main") {
-            return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head });
+            return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
         }
-        if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
+        if (head !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
         }
         let failure: IValidationResult | undefined;
-        switch (headLower) {
+        switch (head) {
             case "place":
                 failure = requireNoSteps() ?? this.validatePlace(parsed.rest);
                 break;
@@ -799,7 +799,7 @@ export class GnosticaGame extends GameBase {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") }));
             }
         };
-        const headLower = parsed.head.toLowerCase();
+        const head = parsed.head;
 
         // The "bidding" variant's own opening procedure - see cmdBid's/
         // cmdRedraw's/cmdPass's own docs. Structurally unlike every other
@@ -814,23 +814,23 @@ export class GnosticaGame extends GameBase {
         // real server auto-submits it via moves() the instant it's the
         // only legal option, so a human player should never actually see
         // or click a "pass" prompt themselves.
-        if (headLower === "bid") {
+        if (head === "bid") {
             if (this.phase !== "bidding") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
             }
             this.cmdBid(parsed.rest, partial);
             
-        } else if (headLower === "redraw" || headLower === "pass") {
+        } else if (head === "redraw" || head === "pass") {
             if (this.phase !== "redraw") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
             }
-            if (headLower === "redraw") {
+            if (head === "redraw") {
                 this.cmdRedraw(parsed.rest, partial);
             } else {
                 this.cmdPass(partial);
@@ -839,7 +839,7 @@ export class GnosticaGame extends GameBase {
             // Every other head is illegal until the bidding variant's opening
             // procedure has fully resolved into "main".
             if (this.phase !== "main") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: parsed.head }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
             }
             
             // Place is always a player's ENTIRE turn - one gate here, ahead of
@@ -851,10 +851,10 @@ export class GnosticaGame extends GameBase {
             // fresh every call, so this covers a mid-game wipeout's forced
             // re-placement identically to the very first turn - no separate
             // tracked state needed for either case.
-            if (headLower !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
+            if (head !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST"));
             }
-            switch (headLower) {
+            switch (head) {
                 case "place":
                     requireNoSteps();
                     this.cmdPlace(parsed.rest);
@@ -910,7 +910,7 @@ export class GnosticaGame extends GameBase {
         }
 
         this.lastmove = m;
-        if (headLower === "bid" || headLower === "redraw" || headLower === "pass") {
+        if (head === "bid" || head === "redraw" || head === "pass") {
             //Need to rewrite these to remove this exception.
         } else {
             this.nextPlayer();
@@ -993,7 +993,7 @@ export class GnosticaGame extends GameBase {
         const stepSegments = segments.slice(1).map(s => s.split(/\s+/));
         return {
             announceLast,
-            head,
+            head: head.toLowerCase(),
             headRecognized: GnosticaGame.RECOGNIZED_HEADS.includes(head.toLowerCase()),
             rest,
             stepSegments,
@@ -1301,7 +1301,7 @@ export class GnosticaGame extends GameBase {
         if (parsed.announceLast) {
             found.add("declare");
         }
-        const head = parsed.head?.toLowerCase();
+        const head = parsed.head;
         if (head === "discard" && this.isPassEquivalent(parsed.rest)) {
             // "discard draw 0" is Pass's own bare seed (see the Pass
             // button's own click handler) - bold Pass instead of
@@ -2514,7 +2514,7 @@ export class GnosticaGame extends GameBase {
                     // moment one is present).
                     const n = value.slice("drawcount_".length);
                     const parsed = this.parseMove(move);
-                    if (parsed.head?.toLowerCase() !== "discard") {
+                    if (parsed.head !== "discard") {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
                     return this.provisionalResult(["discard", ...parsed.rest, "draw", n].join(" "));
