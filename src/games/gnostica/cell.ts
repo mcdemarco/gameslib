@@ -1,4 +1,4 @@
-import { TarotCard, MinorCard, MajorCard } from "../../common/tarot";
+import { TarotCard, MinorCard, allCards } from "../../common/tarot";
 import { Piece, IPiece } from "./piece";
 
 export type CellPointValue = 0 | 1 | 2 | 3;
@@ -16,8 +16,12 @@ export const cardPointValue = (card?: TarotCard): CellPointValue => {
     return (card as MinorCard).rank.court ? 2 : 1;
 };
 
+// The stored/serialized shape only ever keeps the card's uid, not the full
+// object (see CellContents's own docs on why) - hands/discardPile/drawPile
+// already store plain uid strings the same way, translating to a real card
+// via allCards().find(...) on demand.
 export interface ICellContents {
-    card?: TarotCard;
+    cardUid?: string;
     pieces: IPiece[];
 }
 
@@ -30,13 +34,31 @@ export interface ICellContents {
 // pieces (a wasteland cell someone's minion is standing on) isn't a
 // territory at all by this game's own rules - see GnosticaBoard.classify()'s
 // three-way territory/wasteland/void split.
+//
+// Only `cardUid` is ever actually stored/serialized - a whole board's worth
+// of full TarotCard objects (each with its own nested rank/suit Component
+// sub-objects) repeated across every historical stack entry adds up fast.
+// `card` stays available as a getter/setter for every existing call site's
+// convenience (construct/read/write with a real TarotCard, exactly as
+// before) - it just resolves against allCards() on the fly instead of
+// storing the object itself. Safe because TarotCard instances are treated
+// as immutable value objects throughout this file (uid identifies a card
+// uniquely; nothing ever mutates one of its own sub-properties in place).
 export class CellContents implements ICellContents {
-    public card?: TarotCard;
+    public cardUid?: string;
     public pieces: Piece[];
 
     constructor(card?: TarotCard, pieces: Piece[] = []) {
-        this.card = card;
+        this.cardUid = card?.uid;
         this.pieces = pieces;
+    }
+
+    public get card(): TarotCard | undefined {
+        return this.cardUid === undefined ? undefined : allCards().find(c => c.uid === this.cardUid);
+    }
+
+    public set card(card: TarotCard | undefined) {
+        this.cardUid = card?.uid;
     }
 
     public canAdd(ignoreCapacity = false): boolean {
@@ -79,16 +101,14 @@ export class CellContents implements ICellContents {
     }
 
     public clone(): CellContents {
-        const card = this.card === undefined ? undefined
-            : this.card.major ? (this.card as MajorCard).clone() : (this.card as MinorCard).clone();
-        return new CellContents(card, this.pieces.map(p => p.clone()));
+        const cloned = new CellContents(undefined, this.pieces.map(p => p.clone()));
+        cloned.cardUid = this.cardUid;
+        return cloned;
     }
 
     public static deserialize(t: ICellContents): CellContents {
-        let card: TarotCard | undefined;
-        if (t.card !== undefined) {
-            card = t.card.major ? MajorCard.deserialize(t.card as MajorCard) : MinorCard.deserialize(t.card as MinorCard);
-        }
-        return new CellContents(card, (t.pieces ?? []).map(p => Piece.deserialize(p)));
+        const instance = new CellContents(undefined, (t.pieces ?? []).map(p => Piece.deserialize(p)));
+        instance.cardUid = t.cardUid;
+        return instance;
     }
 }

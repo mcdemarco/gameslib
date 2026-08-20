@@ -13,61 +13,9 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #45 - checkX/getPiece crash for virtual chain minions
 ✔ #46 - pyramid overlap in densePieceGrid @done(26-08-20)
 - #47 - wire chat() to player names
-- #48 - pyramid grid fallback order should depend on the piece's OWN
-  desired position, not one global order. Currently (pieceGridSlots(),
-  gnostica.ts) every piece that loses its preferred slot falls back to
-  whichever slot is next in the single fixed PIECE_GRID_SLOTS order
-  (N,S,E,W,U), regardless of which slot it actually wanted. Needs a
-  per-orientation fallback priority list instead (e.g. N's own fallback
-  order might not match S's) - exact per-position orders still TBD.
-- #49 - require use/play moves to be meaningful, breaking from the literal
-  rules text on purpose: a "use"/"play" that declines EVERY power step
-  (0 steps actually taken) currently validates as a complete, submittable
-  move - the "you can stop here" messaging around this is bad UI, since
-  the player hasn't actually done anything. Spec, fully clarified:
-    - Applies equally to use and play - a fully-declined play still isn't
-      "meaningful" just because the card leaves hand (discarding it via
-      the ALREADY-legal "discard <uid> draw 0" is the correct path for
-      "I don't want this card's power," not play-then-decline).
-    - Does NOT affect declining the TAIL of an already-started major
-      arcana chain (>=1 step actually taken, rest declined) - that
-      remains legal exactly as today (see the existing Lovers/etc. tests).
-    - Fool (uid "00") is fully exempt - not a general "no supported
-      power" carve-out, but because of the RULE that a drawn Fool card
-      *must* be played, and it has no supported power at all (still
-      pending the hidden-info-interaction precedent per Fool/World memory
-      note) - so decline is its only possible outcome and must stay legal.
-    - Wanting to do nothing at all (no card involved) stays via Pass /
-      "discard draw 0", already fixed this session.
+- #48 - pyramid grid fallback order should depend on the piece's own desired position, not one global order (pieceGridSlots() in gnostica.ts); needs a per-orientation fallback priority list; exact orders TBD.
+- #49 - require use/play moves to be meaningful (>=1 power step actually taken), a deliberate break from the literal rules to kill the "you can stop here" messaging on a fully-declined move. Exceptions: declining the TAIL of an already-started major arcana chain stays legal; Fool (uid "00") is fully exempt since a drawn Fool must be played and has no supported power. Giving up a card's power stays via "discard <uid> draw 0", not play-then-decline.
 - #50 - refactor Tarot cards
-- #51 - no test coverage for a genuinely DISCONNECTED board: two or more
-  separate multi-cell territory clusters existing at once (e.g. after a
-  Rod push lands a card far from everything else, or a chain of
-  destructions splits one blob into two). Existing coverage only checks
-  single-cell isolation (a lone wasteland with nothing adjacent) and one
-  Rod-push eviction test that happens to keep a second, distant territory
-  alive as a side condition - nothing verifies render()'s padded window,
-  algebraic notation, or adjacency/move logic across a real gap between
-  two live clusters.
-- #52 - no test coverage for real moves (place/orient/use/play/discard -
-  full move-string parsing, validation, execution, rendering) actually
-  taking place at double-letter coordinates (|x| or |y| > 12, e.g. "aa5").
-  Existing coverage (gnostica.board.test.ts's "round-trips coordinates...
-  across a wide range") only exercises the raw coords2algebraic/
-  algebraic2coords conversion math directly, not the full pipeline a real
-  move goes through. Worth having: only 13 squares from origin, not a far
-  edge case in a normal game.
-- #53 - CellContents.card stores the FULL TarotCard object (nested
-  rank/suit Component sub-objects - uid/seq/name/glyph each), not just a
-  uid string - unlike hands/discardPile/drawPile, which already store
-  plain uid strings and translate to card objects on demand via
-  allCards().find(...) (the pattern used pervasively throughout
-  gnostica.ts already). Since the full move history (this.stack) keeps a
-  complete board snapshot per turn, this redundancy compounds every turn
-  and could matter for state size. Confirmed ~20+ call sites in
-  gnostica.ts, 12 in board.ts, 6 in cell.ts, 3 in powers.ts, plus test
-  files - touches CellContents's own constructor/clone/deserialize/
-  pointValue, ICellContents, createTerritory/growTerritory/pushTerritory,
-  and every read site that currently assumes .card is already a full
-  object. Independent of #50 (Tarot refactor) - card UIDs aren't changing,
-  so this doesn't need to wait on or combine with that work.
+- #51 - no test coverage for a genuinely disconnected board (two+ separate multi-cell territory clusters at once, e.g. after a Rod push lands a card far away); only single-cell isolation is tested today.
+- #52 - no test coverage for real moves (full parse/validate/execute/render) at double-letter coordinates (|x| or |y| > 12); only the raw coordinate math is tested, not the full pipeline. Worth having - only 13 squares from origin.
+✔ #53 - CellContents.card now stores only cardUid (a string), with card as a getter/setter resolving against allCards() - zero call sites outside cell.ts needed to change. @done(26-08-20)
