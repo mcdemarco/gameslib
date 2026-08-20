@@ -40,3 +40,34 @@ Mark items done with ✔ + @done(date) as they're confirmed.
     - Wanting to do nothing at all (no card involved) stays via Pass /
       "discard draw 0", already fixed this session.
 - #50 - refactor Tarot cards
+- #51 - no test coverage for a genuinely DISCONNECTED board: two or more
+  separate multi-cell territory clusters existing at once (e.g. after a
+  Rod push lands a card far from everything else, or a chain of
+  destructions splits one blob into two). Existing coverage only checks
+  single-cell isolation (a lone wasteland with nothing adjacent) and one
+  Rod-push eviction test that happens to keep a second, distant territory
+  alive as a side condition - nothing verifies render()'s padded window,
+  algebraic notation, or adjacency/move logic across a real gap between
+  two live clusters.
+- #52 - no test coverage for real moves (place/orient/use/play/discard -
+  full move-string parsing, validation, execution, rendering) actually
+  taking place at double-letter coordinates (|x| or |y| > 12, e.g. "aa5").
+  Existing coverage (gnostica.board.test.ts's "round-trips coordinates...
+  across a wide range") only exercises the raw coords2algebraic/
+  algebraic2coords conversion math directly, not the full pipeline a real
+  move goes through. Worth having: only 13 squares from origin, not a far
+  edge case in a normal game.
+- #53 - CellContents.card stores the FULL TarotCard object (nested
+  rank/suit Component sub-objects - uid/seq/name/glyph each), not just a
+  uid string - unlike hands/discardPile/drawPile, which already store
+  plain uid strings and translate to card objects on demand via
+  allCards().find(...) (the pattern used pervasively throughout
+  gnostica.ts already). Since the full move history (this.stack) keeps a
+  complete board snapshot per turn, this redundancy compounds every turn
+  and could matter for state size. Confirmed ~20+ call sites in
+  gnostica.ts, 12 in board.ts, 6 in cell.ts, 3 in powers.ts, plus test
+  files - touches CellContents's own constructor/clone/deserialize/
+  pointValue, ICellContents, createTerritory/growTerritory/pushTerritory,
+  and every read site that currently assumes .card is already a full
+  object. Independent of #50 (Tarot refactor) - card UIDs aren't changing,
+  so this doesn't need to wait on or combine with that work.

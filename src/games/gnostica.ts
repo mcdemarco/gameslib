@@ -4714,10 +4714,16 @@ export class GnosticaGame extends GameBase {
     // Turn order / scoring / win-elimination
     // ============================================================
 
+    // Always rotates, even on the move that just ended the game (a direct
+    // win via resolveAnnouncedTurn(), which sets this.gameover BEFORE this
+    // runs) - external consumers (chat/move-history logs) attribute move
+    // N to whichever player currplayer names in stack[N-1], so leaving
+    // currplayer pinned to the winner instead of rotating past them breaks
+    // that attribution for the final move (looks like the previous player
+    // acted twice in a row). Elimination-triggered endgames never hit this
+    // case anyway - checkEOG() sets gameover AFTER this already ran, not
+    // before, so this was only ever actually skipping on a direct win.
     private nextPlayer(): void {
-        if (this.gameover) {
-            return;
-        }
         let next = this.currplayer;
         do {
             next = ((next % this.numplayers) + 1) as playerid;
