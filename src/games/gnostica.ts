@@ -572,6 +572,49 @@ export class GnosticaGame extends GameBase {
     }
 
     public validateMove(m: string): IValidationResult {
+        const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
+
+        if (m.length === 0) {
+            result.valid = true;
+            result.complete = -1;
+            result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS")
+            return result;
+        }
+
+        const isEliminated = this.eliminated.indexOf(this.currplayer) > -1;
+        const isBidWinner = this.mustPassBeforeRedraw(this.currplayer);
+
+        // check for autopass first
+        if (m === "pass") {
+            if (isEliminated) {
+                result.valid = true;
+                result.complete = 1;
+                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                return result;
+            } else if (isBidWinner) {
+                result.valid = true;
+                result.complete = 1;
+                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
+                return result;
+            } else {
+                //There may be other autopass circumstances.
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.gnostica.USE_PASS_BUTTON");
+                return result;
+            }
+        } else {
+            // (m !== "pass")
+            if (isEliminated) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.gnostica.MUST_PASS");
+                return result;
+            } else if (isBidWinner) {
+                result.valid = false;
+                result.message = i18next.t("apgames:validation.gnostica.MUST_PASS_FIRST")
+                return result;
+            }
+        }
+        
         const parsed = this.parseMove(m);
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
@@ -592,7 +635,7 @@ export class GnosticaGame extends GameBase {
             }
             return undefined;
         };
-
+// PASSING HERE
         // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
         const head = parsed.head;
         if (head === "bid" || head === "redraw" || head === "pass") {
@@ -684,145 +727,154 @@ export class GnosticaGame extends GameBase {
                 throw new UserFacingError("VALIDATION_GENERAL", result.message);
             }
         }
+
         this.results = [];
-        this.buffers = [];
-        this.discarded = [];
+        let head;
 
-        // Parses and executes `m` against `this` - the one place move
-        // grammar is interpreted (validateMove mirrors this exact
-        // structure, read-only - see its own docs). Throws
-        // UserFacingError on any illegal move.
-        //
-        // Segment 0 is always the turn's top-level action. For "use"/
-        // "play", 0 or 1 further segments follow - a single suit-power step
-        // (minor arcana always grants exactly one power, and it's always
-        // optional). Major arcana cards (which can chain up to 3 power
-        // steps) aren't supported here yet - see cmdActivate/cmdPlay.
-        const parsed = this.parseMove(m);
-        if (parsed.head === undefined || ! parsed.headRecognized ) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
-        }
-
-        // Remembered before acting: if this player announced their last
-        // turn on a PREVIOUS turn, this is the turn that resolves it - win
-        // or elimination is decided after their action, below.
-        const wasAnnounced = this.lastTurnAnnouncedBy === this.currplayer;
-
-        const requireNoSteps = () => {
-            if (parsed.stepSegments.length > 0) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
-            }
-        };
-        const requireValidStepShapes = () => {
-            if (parsed.malformedStep !== undefined) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") }));
-            }
-        };
-        const head = parsed.head;
-
-        // The "bidding" variant's own opening procedure - see cmdBid's/
-        // cmdRedraw's/cmdPass's own docs. Structurally unlike every other
-        // head below: no power steps, no "(last)" announcement, and their
-        // own bespoke currplayer advancement (next bidder/redrawer, a
-        // phase transition, or a single nextPlayer() hop) instead of the
-        // generic nextPlayer() call every other move falls through to -
-        // so all three are handled entirely here rather than folded into
-        // the switch below. "pass" only ever exists to let the 2-player
-        // variant's own bid winner sit out the loser's first redraw (see
-        // mustPassBeforeRedraw's own docs) - the "autopass" flag means a
-        // real server auto-submits it via moves() the instant it's the
-        // only legal option, so a human player should never actually see
-        // or click a "pass" prompt themselves.
-        if (head === "bid") {
-            if (this.phase !== "bidding") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
-            }
-            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
-            }
-            this.cmdBid(parsed.rest, partial);
-            
-        } else if (head === "redraw" || head === "pass") {
-            if (this.phase !== "redraw") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
-            }
-            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
-            }
-            if (head === "redraw") {
-                this.cmdRedraw(parsed.rest, partial);
-            } else {
-                this.cmdPass(partial);
-            }
+        if (m.toLowerCase() === "pass") {
+            this.results = [{type: "pass"}];
         } else {
-            // Every other head is illegal until the bidding variant's opening
-            // procedure has fully resolved into "main".
-            if (this.phase !== "main") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
-            }
+            this.buffers = [];
+            this.discarded = [];
+
+
             
-            // Place is always a player's ENTIRE turn - one gate here, ahead of
-            // the switch, replaces a separate check inside every other command:
-            // with no board presence, place is the only legal head this turn,
-            // full stop; with board presence, place is illegal instead (caught
-            // by cmdPlace's own ALREADY_ON_BOARD check) and every other command
-            // is free to assume board presence without asking again. Evaluated
-            // fresh every call, so this covers a mid-game wipeout's forced
-            // re-placement identically to the very first turn - no separate
-            // tracked state needed for either case.
-            if (head !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST"));
+            // Parses and executes `m` against `this` - the one place move
+            // grammar is interpreted (validateMove mirrors this exact
+            // structure, read-only - see its own docs). Throws
+            // UserFacingError on any illegal move.
+            //
+            // Segment 0 is always the turn's top-level action. For "use"/
+            // "play", 0 or 1 further segments follow - a single suit-power step
+            // (minor arcana always grants exactly one power, and it's always
+            // optional). Major arcana cards (which can chain up to 3 power
+            // steps) aren't supported here yet - see cmdActivate/cmdPlay.
+            const parsed = this.parseMove(m);
+            if (parsed.head === undefined || ! parsed.headRecognized ) {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
             }
-            switch (head) {
-                case "place":
-                    requireNoSteps();
-                    this.cmdPlace(parsed.rest);
-                    break;
-                case "orient":
-                    requireNoSteps();
-                    this.cmdOrient(parsed.rest);
-                    break;
-                case "discard":
-                    requireNoSteps();
-                    this.cmdDiscard(parsed.rest, partial);
-                    break;
-                case "use":
-                    requireValidStepShapes();
+
+            // Remembered before acting: if this player announced their last
+            // turn on a PREVIOUS turn, this is the turn that resolves it - win
+            // or elimination is decided after their action, below.
+            const wasAnnounced = this.lastTurnAnnouncedBy === this.currplayer;
+
+            const requireNoSteps = () => {
+                if (parsed.stepSegments.length > 0) {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
+                }
+            };
+            const requireValidStepShapes = () => {
+                if (parsed.malformedStep !== undefined) {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") }));
+                }
+            };
+            head = parsed.head;
+
+            // The "bidding" variant's own opening procedure - see cmdBid's/
+            // cmdRedraw's/cmdPass's own docs. Structurally unlike every other
+            // head below: no power steps, no "(last)" announcement, and their
+            // own bespoke currplayer advancement (next bidder/redrawer, a
+            // phase transition, or a single nextPlayer() hop) instead of the
+            // generic nextPlayer() call every other move falls through to -
+            // so all three are handled entirely here rather than folded into
+            // the switch below. "pass" only ever exists to let the 2-player
+            // variant's own bid winner sit out the loser's first redraw (see
+            // mustPassBeforeRedraw's own docs) - the "autopass" flag means a
+            // real server auto-submits it via moves() the instant it's the
+            // only legal option, so a human player should never actually see
+            // or click a "pass" prompt themselves.
+            if (head === "bid") {
+                if (this.phase !== "bidding") {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
+                }
+                if (parsed.stepSegments.length > 0 || parsed.announceLast) {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
+                }
+                this.cmdBid(parsed.rest, partial);
+                
+            } else if (head === "redraw" || head === "pass") {
+                if (this.phase !== "redraw") {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
+                }
+                if (parsed.stepSegments.length > 0 || parsed.announceLast) {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
+                }
+                if (head === "redraw") {
+                    this.cmdRedraw(parsed.rest, partial);
+                } else {
+                    this.cmdPass(partial);
+                }
+            } else {
+                // Every other head is illegal until the bidding variant's opening
+                // procedure has fully resolved into "main".
+                if (this.phase !== "main") {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
+                }
+                
+                // Place is always a player's ENTIRE turn - one gate here, ahead of
+                // the switch, replaces a separate check inside every other command:
+                // with no board presence, place is the only legal head this turn,
+                // full stop; with board presence, place is illegal instead (caught
+                // by cmdPlace's own ALREADY_ON_BOARD check) and every other command
+                // is free to assume board presence without asking again. Evaluated
+                // fresh every call, so this covers a mid-game wipeout's forced
+                // re-placement identically to the very first turn - no separate
+                // tracked state needed for either case.
+                if (head !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST"));
+                }
+                switch (head) {
+                    case "place":
+                        requireNoSteps();
+                        this.cmdPlace(parsed.rest);
+                        break;
+                    case "orient":
+                        requireNoSteps();
+                        this.cmdOrient(parsed.rest);
+                        break;
+                    case "discard":
+                        requireNoSteps();
+                        this.cmdDiscard(parsed.rest, partial);
+                        break;
+                    case "use":
+                        requireValidStepShapes();
                     this.cmdActivate(parsed.rest, parsed.stepSegments);
                     break;
                 case "play":
                     requireValidStepShapes();
-                    this.cmdPlay(parsed.rest, parsed.stepSegments);
-                    break;
-            }
-
-            if (parsed.announceLast) {
-                if (this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
+                        this.cmdPlay(parsed.rest, parsed.stepSegments);
+                        break;
                 }
-                this.lastTurnAnnouncedBy = this.currplayer;
-                this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
+
+                if (parsed.announceLast) {
+                    if (this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
+                        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
+                    }
+                    this.lastTurnAnnouncedBy = this.currplayer;
+                    this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
+                }
+                
+                if (wasAnnounced) {
+                    this.resolveAnnouncedTurn();
+                }
+
             }
-            
-            if (wasAnnounced) {
-                this.resolveAnnouncedTurn();
-            }
+            // A transient, unpersisted UI hint - NOT the same thing as
+            // this.lastmove
+            // liveMove exists purely to answer "is there an in-progress
+            // preview of the CURRENT player's own turn right now" for
+            // getActionButtons()'s benefit: set to `m` for a partial preview
+            // call, explicitly cleared back to undefined the moment a turn is
+            // actually committed - so by the time render() next runs (for
+            // whoever's turn is now current), there is nothing left over from
+            // the previous player's finished action to misread, without
+            // needing to compare against stack history at read time. Mirrors
+            // Magnate's own this.highlights field (also reset/populated fresh
+            // per move() call, never persisted).
+            this.liveMove = partial ? m : undefined;
 
         }
-        // A transient, unpersisted UI hint - NOT the same thing as
-        // this.lastmove
-        // liveMove exists purely to answer "is there an in-progress
-        // preview of the CURRENT player's own turn right now" for
-        // getActionButtons()'s benefit: set to `m` for a partial preview
-        // call, explicitly cleared back to undefined the moment a turn is
-        // actually committed - so by the time render() next runs (for
-        // whoever's turn is now current), there is nothing left over from
-        // the previous player's finished action to misread, without
-        // needing to compare against stack history at read time. Mirrors
-        // Magnate's own this.highlights field (also reset/populated fresh
-        // per move() call, never persisted).
-        this.liveMove = partial ? m : undefined;
-
  
         if (partial || emulation) {
             return this;
@@ -838,16 +890,6 @@ export class GnosticaGame extends GameBase {
         this.saveState();
         return this;
     }
-
-
-    // The end-of-turn "declare" flag is always this exact trailing suffix
-    // on the whole move string - never a comma-separated segment mixed in
-    // with the rest - so it can be found/stripped/reattached with one
-    // shared regex regardless of wherever else in the grammar the rest
-    // of the string is being parsed. See this file's "Move parsing" docs
-    // above for why.
-    private static readonly LAST_FLAG_RE = /\s*\(last\)\s*$/i;
-    private static readonly RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw", "pass"];
 
     // English ordinal suffix (1st, 2nd, 3rd, 4th, ..., 11th-13th stay
     // "th") - used only for the turn-order legend's own labels. Plain
@@ -901,9 +943,12 @@ export class GnosticaGame extends GameBase {
     }
 
     private parseMove(m: string): IParsedMove {
+        const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw", "pass"];
+        const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
+        
         const trimmed = m.trim();
-        const announceLast = GnosticaGame.LAST_FLAG_RE.test(trimmed);
-        const bare = trimmed.replace(GnosticaGame.LAST_FLAG_RE, "").trim();
+        const announceLast = LAST_FLAG_RE.test(trimmed);
+        const bare = trimmed.replace(LAST_FLAG_RE, "").trim();
         const segments = bare.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
         if (segments.length === 0) {
             return { announceLast, head: undefined, headRecognized: true, rest: [], stepSegments: [], malformedStep: undefined };
@@ -913,7 +958,7 @@ export class GnosticaGame extends GameBase {
         return {
             announceLast,
             head: head.toLowerCase(),
-            headRecognized: GnosticaGame.RECOGNIZED_HEADS.includes(head.toLowerCase()),
+            headRecognized: RECOGNIZED_HEADS.includes(head.toLowerCase()),
             rest,
             stepSegments,
             malformedStep: stepSegments.find(tokens => !this.isStepShapeValid(tokens)),
@@ -3167,8 +3212,10 @@ export class GnosticaGame extends GameBase {
         const p = (player ?? this.currplayer) as playerid;
         if (this.mustPassBeforeRedraw(p)) {
             return ["pass"];
-        }
-        return [];
+        } else if (this.eliminated.indexOf(this.currplayer) > -1) {
+            return ["pass"];
+        } else
+            return [];
     }
 
     // "place <cell> [orientation]" - only legal with zero pieces on board;
