@@ -11,8 +11,32 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #38 - 3+ player bid-winner turn order
 ✔ #44 - randomMove() tests and correct pass chat. @done(26-08-20)
 - #45 - checkX/getPiece crash for virtual chain minions
-- #46 - pyramid overlap in densePieceGrid (LIKELY DONE: a passing regression
-  test for exactly this - "never gives two pieces on the same territory
-  identical render coordinates, even past normal capacity" - already exists
-  in test/games/gnostica.test.ts)
+✔ #46 - pyramid overlap in densePieceGrid @done(26-08-20)
 - #47 - wire chat() to player names
+- #48 - pyramid grid fallback order should depend on the piece's OWN
+  desired position, not one global order. Currently (pieceGridSlots(),
+  gnostica.ts) every piece that loses its preferred slot falls back to
+  whichever slot is next in the single fixed PIECE_GRID_SLOTS order
+  (N,S,E,W,U), regardless of which slot it actually wanted. Needs a
+  per-orientation fallback priority list instead (e.g. N's own fallback
+  order might not match S's) - exact per-position orders still TBD.
+- #49 - require use/play moves to be meaningful, breaking from the literal
+  rules text on purpose: a "use"/"play" that declines EVERY power step
+  (0 steps actually taken) currently validates as a complete, submittable
+  move - the "you can stop here" messaging around this is bad UI, since
+  the player hasn't actually done anything. Spec, fully clarified:
+    - Applies equally to use and play - a fully-declined play still isn't
+      "meaningful" just because the card leaves hand (discarding it via
+      the ALREADY-legal "discard <uid> draw 0" is the correct path for
+      "I don't want this card's power," not play-then-decline).
+    - Does NOT affect declining the TAIL of an already-started major
+      arcana chain (>=1 step actually taken, rest declined) - that
+      remains legal exactly as today (see the existing Lovers/etc. tests).
+    - Fool (uid "00") is fully exempt - not a general "no supported
+      power" carve-out, but because of the RULE that a drawn Fool card
+      *must* be played, and it has no supported power at all (still
+      pending the hidden-info-interaction precedent per Fool/World memory
+      note) - so decline is its only possible outcome and must stay legal.
+    - Wanting to do nothing at all (no card involved) stays via Pass /
+      "discard draw 0", already fixed this session.
+- #50 - refactor Tarot cards

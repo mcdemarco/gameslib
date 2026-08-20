@@ -2115,6 +2115,23 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.1.E piece m0.1.E 1`);
     });
 
+    it("use: two eligible minions at the activated cell that are fully identical (same owner/size/facing) resolve directly, no picker offered", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        // Two genuinely interchangeable minions - same owner, size, and
+        // facing. Picking either has the exact same effect, so this isn't
+        // really a choice at all (see allIndistinguishable's own docs).
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 1, "E")];
+        g.move(`use ${aceOfRods().uid}`, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        // Not offered a minion picker at all - resolves straight through to
+        // the mode buttons, as if only one minion had ever been there.
+        expect(values.some(v => v?.startsWith("minion_"))).to.be.false;
+        expect(values).to.include("mode_R_piece");
+    });
+
     it("play: a board-wide pool offers no buttons until a cell is clicked; clicking a cell with just one eligible minion there resolves it directly", () => {
         // A fresh instance per checkpoint, exactly like the real click flow
         // (every click reconstructs a fresh GnosticaGame via GameFactory,

@@ -1177,6 +1177,24 @@ export class GnosticaGame extends GameBase {
     // so outcome (c) there is immediately button-ready with no narrowing
     // click needed - the two heads fall out of the same logic here without
     // special-casing either.
+    // True when every candidate is a genuinely interchangeable minion: the
+    // SAME cell (which territory gets acted on always matters, even for
+    // two intrinsically-identical pieces on different cells) AND the same
+    // owner/size/facing (Piece.id() - see its own docs on this being a
+    // local, non-unique identity by design). Picking any one of them has
+    // the exact same effect, so there's no real choice to offer - see
+    // resolveStepMinion's own use of this.
+    private allIndistinguishable(candidates: IMinionRef[]): boolean {
+        if (candidates.length <= 1) {
+            return true;
+        }
+        if (candidates.some(m => m.x !== candidates[0].x || m.y !== candidates[0].y)) {
+            return false;
+        }
+        const ids = candidates.map(m => (m.piece ?? this.board.get(m.x, m.y)?.pieces[m.index])?.id());
+        return ids.every(id => id !== undefined && id === ids[0]);
+    }
+
     private resolveStepMinion(
         tokens: string[] | undefined, pool: IMinionRef[],
     ): { minion: IMinionRef; ambiguous: boolean; candidates: IMinionRef[] } {
@@ -1192,8 +1210,21 @@ export class GnosticaGame extends GameBase {
             if (this.isMinionCellStillNarrowing(tok, pool)) {
                 const coords = this.tryAlgebraic2coords(tok)!;
                 const narrowed = pool.filter(m => m.x === coords[0] && m.y === coords[1]);
+                // A cell with 2+ eligible minions that all happen to be
+                // identical isn't really ambiguous - no button bar needed,
+                // just pick one at random (see allIndistinguishable's own
+                // docs) exactly as if there'd only ever been one.
+                if (this.allIndistinguishable(narrowed)) {
+                    return { minion: narrowed[Math.floor(Math.random() * narrowed.length)], ambiguous: false, candidates: narrowed };
+                }
                 return { minion: narrowed[0], ambiguous: true, candidates: narrowed };
             }
+        }
+        // Same tolerance as the narrowed branch above, for a pool that's
+        // already single-cell by construction (e.g. "use" - see this
+        // method's own docs) without ever needing a narrowing click.
+        if (this.allIndistinguishable(pool)) {
+            return { minion: pool[Math.floor(Math.random() * pool.length)], ambiguous: false, candidates: pool };
         }
         return { minion: pool[0], ambiguous: true, candidates: pool };
     }
