@@ -55,6 +55,18 @@ const clearBoard = (g: GnosticaGame): void => {
     }
 };
 
+// Hand sorting now happens only in render() (it sorts a local copy of the
+// hand, not this.hands itself - see render()'s own "Hand sorting is now
+// done in the render only" comment), so any test that cares about sort
+// order has to read it back off the rendered hand area, not the raw
+// array. Strips the "_new" highlight suffix (see newHandCardUids's own
+// docs) the same way the real hand_ click handler does.
+const renderedHandUids = (g: GnosticaGame, player: number): string[] => {
+    const rep = g.render() as { areas?: { type: string; ownerMark?: number; pieces?: string[] }[] };
+    const area = rep.areas?.find(a => a.type === "pieces" && a.ownerMark === player);
+    return (area?.pieces ?? []).map(key => key.replace(/^hand_/, "").replace(/_new$/, ""));
+};
+
 describe("Gnostica: setup", () => {
     it("deals 6 cards to each player, tiles a 3x3 grid, and stocks full stashes", () => {
         const g = new GnosticaGame(4);
@@ -119,19 +131,25 @@ describe("Gnostica: setup", () => {
 });
 
 describe("Gnostica: hand sort order", () => {
-    it("a fresh non-bidding game deals hands already in rank order: majors first, then minors grouped by suit and ranked within it", () => {
-        /*
+    // Sort order is deliberately simple - handSortKey just reads position
+    // in allCards(), i.e. [...minorCards, ...majorCards] (see its own
+    // docs): minors first (grouped by suit, ranked within it, since
+    // minorCards itself is built that way), then majors by seq.
+    it("a fresh non-bidding game renders hands already in rank order: minors first (grouped by suit and ranked within it), then majors by seq", () => {
         const g = new GnosticaGame(3);
-        for (const hand of g.hands) {
-            const cards = hand.map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
-            let lastWasMajor = true;
+        for (let p = 1; p <= g.numplayers; p++) {
+            const cards = renderedHandUids(g, p).map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
+            let seenMajor = false;
             let lastSuitSeq = -Infinity;
             let lastRankSeq = -Infinity;
+            let lastMajorSeq = -Infinity;
             for (const c of cards) {
                 if (c.major) {
-                    expect(lastWasMajor, `major ${c.uid} appears after a minor`).to.be.true;
+                    seenMajor = true;
+                    expect(c.seq).to.be.greaterThan(lastMajorSeq);
+                    lastMajorSeq = c.seq;
                 } else {
-                    lastWasMajor = false;
+                    expect(seenMajor, `minor ${c.uid} appears after a major`).to.be.false;
                     const suitSeq = c.suit.seq;
                     const rankSeq = c.rank.seq;
                     if (suitSeq === lastSuitSeq) {
@@ -144,11 +162,10 @@ describe("Gnostica: hand sort order", () => {
                     lastRankSeq = rankSeq;
                 }
             }
-        }*/
+        }
     });
 
-    it("the bidding variant leaves hands in raw draw order through the bidding phase itself, then sorts once it resolves", () => {
-        /*
+    it("the bidding variant leaves the raw hand array in draw order even after a bid resolves; render() sorts it regardless", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         // Force a hand that's already known to be UNSORTED (a minor
         // before a major), so a spurious pass (already-sorted-by-luck)
@@ -168,17 +185,18 @@ describe("Gnostica: hand sort order", () => {
         g.move("bid 1", { trusted: true }); // player 2 - resolves the round (P1's major always wins)
         expect(g.bidWinner).eq(1);
         expect(g.phase).eq("redraw");
-        // Now sorted: the bid major is gone (spent on the bid), so
-        // what's left is minors sorted by suit/rank.
-        const cards = g.hands[0].map(uid => minorCards.find(c => c.uid === uid)!);
+        // The bid major is gone (spent on the bid), so what's left is
+        // minors - render() sorts them by suit/rank regardless of phase
+        // (see renderedHandUids's own docs), even though g.hands[0]
+        // itself is never touched by sorting at all.
+        const cards = renderedHandUids(g, 1).map(uid => minorCards.find(c => c.uid === uid)!);
         for (let i = 1; i < cards.length; i++) {
             const a = cards[i - 1], b = cards[i];
             expect(a.suit.seq < b.suit.seq || (a.suit.seq === b.suit.seq && a.rank.seq < b.rank.seq)).to.be.true;
-        }*/
+        }
     });
 
-    it("stays sorted after an ordinary main-phase hand mutation (discard/draw)", () => {
-        /*
+    it("renders sorted after an ordinary main-phase hand mutation (discard/draw)", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place n0", { trusted: true });
@@ -190,16 +208,19 @@ describe("Gnostica: hand sort order", () => {
         // like this one don't remove the card from drawPile on their own.
         const forcedUids = new Set(g.hands[0]);
         g.drawPile = g.drawPile.filter(uid => !forcedUids.has(uid));
-        g.move("discard 5R", { trusted: true }); // draws back to 6, then re-sorts
-        const cards = g.hands[0].map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
-        let lastWasMajor = true;
+        g.move("discard 5R", { trusted: true }); // draws back to 6
+        const cards = renderedHandUids(g, 1).map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
+        let seenMajor = false;
         let lastSuitSeq = -Infinity;
         let lastRankSeq = -Infinity;
+        let lastMajorSeq = -Infinity;
         for (const c of cards) {
             if (c.major) {
-                expect(lastWasMajor).to.be.true;
+                seenMajor = true;
+                expect(c.seq).to.be.greaterThan(lastMajorSeq);
+                lastMajorSeq = c.seq;
             } else {
-                lastWasMajor = false;
+                expect(seenMajor).to.be.false;
                 if (c.suit.seq === lastSuitSeq) {
                     expect(c.rank.seq).to.be.greaterThan(lastRankSeq);
                 } else {
@@ -209,7 +230,7 @@ describe("Gnostica: hand sort order", () => {
                 lastSuitSeq = c.suit.seq;
                 lastRankSeq = c.rank.seq;
             }
-        }*/
+        }
     });
 });
 
@@ -939,21 +960,22 @@ describe("Gnostica: render", () => {
     // exactly that bug: the old fixed 3-slot nudge table silently reused
     // slot 1's coordinates for every piece beyond the 3rd.
     it("never gives two pieces on the same territory identical render coordinates, even past normal capacity", () => {
-        /* fragile
         const g = new GnosticaGame(2);
         const t = g.board.get(0, 0)!;
         t.pieces = [
             new Piece(1, 1, "U"), new Piece(2, 1, "U"), new Piece(1, 2, "U"),
             new Piece(2, 2, "U"), new Piece(1, 3, "U"),
         ];
-        const rep = g.render() as { legend: Record<string, ({ name?: string; nudge?: { dx: number; dy: number } })[]> };
-        const entry = Object.values(rep.legend).find(
-            glyphs => glyphs.filter(gl => gl.name?.startsWith("pyramid-")).length === t.pieces.length
-        );
+        type CellGlyph = { name?: string; nudge?: { dx: number; dy: number } };
+        const rep = g.render() as { legend: Record<string, CellGlyph | CellGlyph[]> };
+        // Not every legend entry is array-shaped (e.g. hand_UNKNOWN is a
+        // single bare Glyph) - only scan the ones that are.
+        const entry = Object.values(rep.legend)
+            .filter((glyphs): glyphs is CellGlyph[] => Array.isArray(glyphs))
+            .find(glyphs => glyphs.filter(gl => gl.name?.startsWith("pyramid-")).length === t.pieces.length);
         expect(entry, "expected a legend entry with 5 pyramid glyphs").to.not.be.undefined;
         const coords = entry!.filter(gl => gl.name?.startsWith("pyramid-")).map(gl => `${gl.nudge!.dx},${gl.nudge!.dy}`);
         expect(new Set(coords).size, "every piece should have a distinct nudge").eq(coords.length);
-        */
     });
 
     // Void cells are never individually clickable in the grid - a
