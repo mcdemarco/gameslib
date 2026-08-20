@@ -699,11 +699,8 @@ export class GnosticaGame extends GameBase {
         // optional). Major arcana cards (which can chain up to 3 power
         // steps) aren't supported here yet - see cmdActivate/cmdPlay.
         const parsed = this.parseMove(m);
-        if (parsed.head === undefined) {
+        if (parsed.head === undefined || ! parsed.headRecognized ) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
-        }
-        if (!parsed.headRecognized) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.UNRECOGNIZED_MOVE", { move: [parsed.head, ...parsed.rest].join(" ") }));
         }
 
         // Remembered before acting: if this player announced their last
@@ -804,7 +801,7 @@ export class GnosticaGame extends GameBase {
                     throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
                 }
                 this.lastTurnAnnouncedBy = this.currplayer;
-                this.results.push({ type: "declare" });
+                this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
             }
             
             if (wasAnnounced) {
@@ -1291,7 +1288,7 @@ export class GnosticaGame extends GameBase {
             { label: "Pass", value: "pass" },
         ];
         if (this.lastTurnAnnouncedBy === undefined || this.lastTurnAnnouncedBy === this.currplayer) {
-            topLevel.push({ label: "Declare", value: "declare" });
+            topLevel.push({ label: "(Declare)", value: "declare" });
         }
         const highlighted = this.highlightedButtonValues();
         for (const b of topLevel) {
@@ -6179,7 +6176,7 @@ export class GnosticaGame extends GameBase {
                 }
                 break;
             case "declare":
-                node.push(i18next.t("apresults:DECLARE.gnostica", { player }));
+                node.push(i18next.t("apresults:DECLARE.gnostica", { player, count: r.count }));
                 resolved = true;
                 break;
             case "orient":
