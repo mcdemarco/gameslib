@@ -736,8 +736,6 @@ export class GnosticaGame extends GameBase {
         } else {
             this.buffers = [];
             this.discarded = [];
-
-
             
             // Parses and executes `m` against `this` - the one place move
             // grammar is interpreted (validateMove mirrors this exact
@@ -4745,22 +4743,18 @@ export class GnosticaGame extends GameBase {
         this.hands[player - 1] = [];
         this.eliminated.push(player);
         this.results.push({ type: "eliminated", who: player.toString() });
-        // Not explicit in the rules text (which assumes play continues
-        // until someone announces and wins), but if elimination ever
-        // leaves only one player standing, they've necessarily won.
-        const remaining: playerid[] = [];
-        for (let p = 1; p <= this.numplayers; p++) {
-            if (!this.eliminated.includes(p as playerid)) {
-                remaining.push(p as playerid);
-            }
-        }
-        if (remaining.length === 1) {
-            this.gameover = true;
-            this.winner = remaining;
-        }
     }
 
     protected checkEOG(): GnosticaGame {
+        // Not explicit in the rules text (which assumes play continues
+        // until someone announces and wins), but if elimination ever
+        // leaves only one player standing, they've necessarily won.
+        if (this.eliminated.length === this.numplayers - 1) {
+            this.gameover = true;
+            const playarray = [...Array(this.numplayers)].map((_, index) => index + 1) as playerid[];
+            this.winner = playarray.filter(item => ! this.eliminated.includes(item));
+        }
+          
         if (this.gameover) {
             this.results.push({ type: "eog" });
             this.results.push({ type: "winners", players: [...this.winner] });
