@@ -541,6 +541,32 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         expect(g.stashes.get(1)).to.deep.equal([5, 5, 5]);
     });
 
+    it("an eliminated player's own randomMove()/pass is a real, committable move that correctly skips them again", () => {
+        const g = new GnosticaGame(3);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.move("place n0", { trusted: true }); // player 3
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        g.move("discard", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // player 3
+        g.move("discard", { trusted: true }); // player 1's resolving turn - falls short, eliminated
+        expect(g.eliminated).to.deep.equal([1]);
+        expect(g.currplayer).eq(2); // nextPlayer() already correctly skipped player 1
+
+        // Force it to (incorrectly) be player 1's turn again, matching the
+        // scenario randomMove()'s own eliminated check exists for - a
+        // human would never see this via normal play, but the engine
+        // should handle it gracefully regardless.
+        g.currplayer = 1;
+        const rm = g.randomMove();
+        expect(rm).eq("pass");
+        expect(g.validateMove(rm).valid).to.be.true;
+        g.move(rm); // untrusted, exactly like a real client
+        expect(g.currplayer).eq(2); // correctly advanced past the eliminated player again
+        const last = g.results[g.results.length - 1] as { type: string; who?: number; why?: string };
+        expect(last).to.deep.include({ type: "pass", who: 1, why: "eliminated" });
+    });
+
     it("declares the sole remaining player the winner if elimination leaves only one player standing", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true }); // player 1
@@ -717,11 +743,16 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
 
     it("Swords (piece): shrinks a targeted enemy piece, returning it to their stash", () => {
         const g = new GnosticaGame(2);
+        clearBoard(g); // fully deterministic - see clearBoard's own docs
         forceCardAt(g, 0, 0, () => aceOfSwords());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place n0 W", { trusted: true }); // player 2, small piece, on the targeted cell - stash now [4,5,5]
         g.move(`use ${aceOfSwords().uid}, m0.1 piece n0.1 1`, { trusted: true });
-        expect(g.board.get(1, 0)!.pieces.length).eq(0); // small piece, 1 pip = destroyed
+        // n0 has no card of its own (cleared above) - once its only piece
+        // is destroyed, pruneIfEmpty deletes the cell outright rather than
+        // leaving empty CellContents behind (see pruneIfEmpty's own docs),
+        // so board.get(1,0) itself becomes undefined, not just empty.
+        expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // small piece, 1 pip = destroyed
         expect(g.stashes.get(2)![0]).eq(5); // destruction returns it, undoing the placement's draw
     });
 
