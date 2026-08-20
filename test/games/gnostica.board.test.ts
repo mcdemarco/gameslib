@@ -215,7 +215,14 @@ describe("Gnostica: GnosticaBoard rehydration", () => {
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 2, "N")]));
         b.store.set(1, 0, new CellContents(theFool()));
 
-        const raw = JSON.parse(JSON.stringify({ board: b.store }, replacer), reviver) as { board: UnboundedSquareBoard<CellContents> };
+        const json = JSON.stringify({ board: b.store }, replacer);
+        // Only the card's uid is ever actually serialized, not the whole
+        // TarotCard object (see CellContents's own docs on why) - a
+        // regression here would silently bloat every stack entry's state.
+        expect(json).to.include("\"cardUid\":\"AC\"");
+        expect(json).to.not.include("\"rank\"");
+        expect(json).to.not.include("\"suit\"");
+        const raw = JSON.parse(json, reviver) as { board: UnboundedSquareBoard<CellContents> };
         const fixed = GnosticaBoard.rehydrate(raw.board);
         const revived = new GnosticaBoard(fixed);
 
