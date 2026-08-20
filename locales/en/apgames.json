@@ -5798,6 +5798,7 @@
             "LABEL_HAND": "Player {{playerNum}}'s hand {{declared}}",
             "LABEL_WARNING": "This is a declaration round!",
             "MUST_BE_SPOT_CARD": "A newly created territory must be a spot card (ranks A through 10).",
+            "MUST_PASS": "The only move available to you is to pass.",
             "MUST_PASS_FIRST": "You won the bid, so you must pass and let the other player redraw first.",
             "MUST_PLACE_FIRST": "You have no minions on the board, so you are required to use your entire turn to place one 1-pip pyramid onto the board.",
             "MUST_TARGET_ENEMY": "You must select an enemy in the target territory in order to create another enemy there.",
@@ -5845,6 +5846,7 @@
             "TOO_FEW_PIPS_TERRITORY": "Your minion does not have enough pips to attack this territory.",
             "TOO_MANY_TO_DRAW": "You may not draw more than {{maxDraw}} cards.",
             "UNKNOWN_CARD": "That territory card was not found.",
+            "USE_PASS_BUTTON": "Please use the pass button or discard 0 and draw 0 to pass your turn.",
             "VICTIM_STASH_EMPTY": "{{Player}} has no minions of level {{size}}, so you cannot perform this action.",
             "WRONG_PHASE": "\"{{move}}\" is not a legal move right now."
         },
