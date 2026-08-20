@@ -1,0 +1,18 @@
+Gnostica-specific task list.
+Some numbers carry over from an earlier task-tracking approach.
+Mark items done with ✔ + @done(date) as they're confirmed.
+
+✔ #7 - i18n/moveresults work @done(26-08-20)
+- #25 - Fool/World major arcana engine powers
+- #29 - reduce test count
+- #30 - reduce comments
+✔ #31 - board rotation view @done(26-08-20)
+- #32 - verify the stale-preview click bug on a real dev server
+- #38 - 3+ player bid-winner turn order
+✔ #44 - randomMove() tests and correct pass chat. @done(26-08-20)
+- #45 - checkX/getPiece crash for virtual chain minions
+- #46 - pyramid overlap in densePieceGrid (LIKELY DONE: a passing regression
+  test for exactly this - "never gives two pieces on the same territory
+  identical render coordinates, even past normal capacity" - already exists
+  in test/games/gnostica.test.ts)
+- #47 - wire chat() to player names

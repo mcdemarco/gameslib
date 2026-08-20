@@ -417,6 +417,7 @@
         "druid": "{{player}} passed.",
         "frogger": "{{player}} passed {{why}}.",
         "gnostica_bids": "{{player}} was automatically passed for redrawing, having won the bid.",
+        "gnostica_eliminated": "{{player}} has been eliminated and was passed.",
         "linage": "{{player}} passes.",
         "pie": "{{player}} accepted the komi offer and will continue playing second.",
         "pigs": "{{player}} idles.",

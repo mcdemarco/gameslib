@@ -461,6 +461,7 @@ export class GnosticaGame extends GameBase {
                 board: board.store,
                 hands,
                 // Do not display the initial hand as a draw.
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 cardsDrawn: hands.map(h => 0),
                 drawPile,
                 discardPile: [],
@@ -642,7 +643,9 @@ export class GnosticaGame extends GameBase {
             if (head === "bid" && this.phase !== "bidding") {
                 return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
             }
-            if ((head === "redraw" || head === "pass") && this.phase !== "redraw") {
+            // Mirrors move()'s own eliminatedPass exemption - see its docs.
+            const eliminatedPass = head === "pass" && this.eliminated.includes(this.currplayer);
+            if (!eliminatedPass && (head === "redraw" || head === "pass") && this.phase !== "redraw") {
                 return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
@@ -732,7 +735,14 @@ export class GnosticaGame extends GameBase {
         let head;
 
         if (m.toLowerCase() === "pass") {
-            this.results = [{type: "pass"}];
+            // validateMove() (above) is the actual gate on WHO may say
+            // "pass" - eliminated or the 2-player bidding variant's own
+            // bid winner sitting out the loser's first redraw (see
+            // validatePass()'s own docs). `head` deliberately stays
+            // undefined here - see the tail below's own docs on why that
+            // matters for nextPlayer()/checkEOG().
+            const why = this.eliminated.includes(this.currplayer) ? "eliminated" : "bidding";
+            this.results = [{ type: "pass", who: this.currplayer, why }];
         } else {
             this.buffers = [];
             this.discarded = [];
@@ -792,7 +802,13 @@ export class GnosticaGame extends GameBase {
                 this.cmdBid(parsed.rest, partial);
                 
             } else if (head === "redraw" || head === "pass") {
-                if (this.phase !== "redraw") {
+                // An eliminated player's "pass" is phase-independent - they
+                // sit out the rest of the game regardless of what phase
+                // everyone else is in (see validatePass()'s own docs) -
+                // "redraw" itself is never legal for them (they have no
+                // hand to redraw into), so only "pass" gets the exemption.
+                const eliminatedPass = head === "pass" && this.eliminated.includes(this.currplayer);
+                if (!eliminatedPass && this.phase !== "redraw") {
                     throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
                 }
                 if (parsed.stepSegments.length > 0 || parsed.announceLast) {
@@ -879,6 +895,17 @@ export class GnosticaGame extends GameBase {
         }
 
         this.lastmove = m;
+        // `head` is only ever assigned inside the parsed-dispatch branch
+        // above (never for the bare "pass" shortcut, which returns early
+        // in its own branch and leaves `head` undefined) - so a literal
+        // "pass" always falls into the `else` below and gets the same
+        // unconditional nextPlayer()/checkEOG() every other real move
+        // gets, despite matching none of these three string comparisons.
+        // Fragile (see the shortcut's own docs), but currently correct:
+        // "bid"/"redraw" genuinely need their own bespoke turn-advancement
+        // (next bidder/redrawer, a phase transition) instead of this
+        // generic one, and only they ever actually reach here with `head`
+        // set to a matching string.
         if (head === "bid" || head === "redraw" || head === "pass") {
             //Need to rewrite these to remove this exception.
         } else {
@@ -3170,13 +3197,15 @@ export class GnosticaGame extends GameBase {
         return undefined;
     }
 
-    // "pass" - exists purely for the 2-player bidding variant's own bid
-    // winner to sit out the loser's first redraw (see
-    // mustPassBeforeRedraw's own docs). Not a general-purpose pass: it's
-    // illegal anywhere else, including the main phase (a bare "discard"
-    // already fills that role there). A real server auto-submits this via
-    // the "autopass" flag + moves() the instant it's the only legal
-    // option, so a human should never actually need to submit it by hand.
+    // "pass" - legal in exactly two situations: the 2-player bidding
+    // variant's own bid winner sitting out the loser's first redraw (see
+    // mustPassBeforeRedraw's own docs), or an eliminated player sitting out
+    // the rest of the game (phase-independent - see validatePass()'s own
+    // docs). Not a general-purpose pass otherwise: it's illegal anywhere
+    // else, including an ordinary main-phase turn (a bare "discard" already
+    // fills that role there). A real server auto-submits this via the
+    // "autopass" flag + moves() the instant it's the only legal option, so
+    // a human should never actually need to submit it by hand.
     private cmdPass(partial = false): void {
         const failure = this.validatePass();
         if (failure !== undefined) {
@@ -3185,11 +3214,19 @@ export class GnosticaGame extends GameBase {
         if (partial) {
             return;
         }
-        this.results.push({ type: "pass", who: this.currplayer, why: "bidding" });
+        const why = this.eliminated.includes(this.currplayer) ? "eliminated" : "bidding";
+        this.results.push({ type: "pass", who: this.currplayer, why });
         this.nextPlayer();
+        this.checkEOG();
     }
 
     private validatePass(): IValidationResult | undefined {
+        // An eliminated player has nothing left to do but sit out the rest
+        // of the game - "pass" is unconditionally their only legal move,
+        // phase-independent (see move()'s own eliminatedPass exemption).
+        if (this.eliminated.includes(this.currplayer)) {
+            return undefined;
+        }
         if (!this.mustPassBeforeRedraw(this.currplayer)) {
             return this.invalid("apgames:validation.gnostica.NOTHING_TO_PASS");
         }
@@ -4783,6 +4820,13 @@ export class GnosticaGame extends GameBase {
         if (this.gameover) {
             return ""; // matches magnate.ts's own precedent for this case
         }
+        // An eliminated player has nothing left to do - matches moves()'s
+        // own contract (see its docs), and "pass" is now phase-independent
+        // for them (see validatePass()'s own docs). Checked before the
+        // phase dispatch below since it applies regardless of phase.
+        if (this.eliminated.includes(this.currplayer)) {
+            return "pass";
+        }
         if (this.phase === "bidding") {
             const hand = this.hands[this.currplayer - 1];
             return `bid ${1 + Math.floor(Math.random() * hand.length)}`;
@@ -6229,7 +6273,9 @@ export class GnosticaGame extends GameBase {
                 resolved = true;
                 break;
             case "pass":
-                node.push(i18next.t("apresults:PASS.gnostica_bids", { player }));
+                node.push(r.why === "eliminated"
+                    ? i18next.t("apresults:PASS.gnostica_eliminated", { player })
+                    : i18next.t("apresults:PASS.gnostica_bids", { player }));
                 resolved = true;
                 break;
             case "destroy":
