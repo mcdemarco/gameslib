@@ -515,6 +515,45 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         expect(g.winner).to.deep.equal([1]);
     });
 
+    // Regression test for a reported bug: winning via resolveAnnouncedTurn()
+    // sets this.gameover directly (unlike an elimination-triggered endgame,
+    // where checkEOG() sets it only AFTER nextPlayer() already ran) - so
+    // nextPlayer()'s own former "if (this.gameover) return" guard was
+    // skipping the rotation specifically on the winning move itself,
+    // leaving currplayer pinned to the winner instead of advancing past
+    // them. External move-history/chat logs attribute move N to whichever
+    // player stack[N-1].currplayer names, so a currplayer that doesn't
+    // rotate on the final move makes it look like the PREVIOUS player
+    // acted twice in a row instead of the actual winner having the last
+    // turn. Checked for both 2 and 3 players, matching the report.
+    for (const numplayers of [2, 3] as const) {
+        it(`currplayer still rotates past the winner on the winning move itself (${numplayers}-player)`, () => {
+            const g = new GnosticaGame(numplayers);
+            const cells = ["m0", "l0", "n0"].slice(0, numplayers);
+            for (const cell of cells) {
+                g.move(`place ${cell}`, { trusted: true });
+            }
+            for (const [, , t] of g.board.entries()) {
+                if (t.pieces.length > 0) {
+                    continue; // leave every player's own placed piece alone
+                }
+                t.card = theWorld().clone();
+                t.pieces = [new Piece(1, 1, "U")];
+            }
+            g.move("discard (last)", { trusted: true }); // player 1 announces
+            for (let i = 1; i < numplayers; i++) {
+                g.move("discard", { trusted: true }); // every other player
+            }
+            expect(g.currplayer).eq(1);
+            g.move("discard", { trusted: true }); // player 1's resolving turn - wins
+            expect(g.gameover).eq(true);
+            expect(g.winner).to.deep.equal([1]);
+            // The bug: this used to stay 1 (pinned to the winner) instead
+            // of rotating to 2, exactly as every other move does.
+            expect(g.currplayer).eq(2);
+        });
+    }
+
     it("eliminates the announcing player if they fall short of the target score, without ending the game with players left", () => {
         const g = new GnosticaGame(3);
         // Each player's single placed piece scores at most 3 (whatever card
