@@ -16,6 +16,6 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #48 - pyramid grid fallback order should depend on the piece's own desired position, not one global order (pieceGridSlots() in gnostica.ts); needs a per-orientation fallback priority list; exact orders TBD.
 - #49 - require use/play moves to be meaningful (>=1 power step actually taken), a deliberate break from the literal rules to kill the "you can stop here" messaging on a fully-declined move. Exceptions: declining the TAIL of an already-started major arcana chain stays legal; Fool (uid "00") is fully exempt since a drawn Fool must be played and has no supported power. Giving up a card's power stays via "discard <uid> draw 0", not play-then-decline.
 - #50 - refactor Tarot cards
-- #51 - no test coverage for a genuinely disconnected board (two+ separate multi-cell territory clusters at once, e.g. after a Rod push lands a card far away); only single-cell isolation is tested today.
-- #52 - no test coverage for real moves (full parse/validate/execute/render) at double-letter coordinates (|x| or |y| > 12); only the raw coordinate math is tested, not the full pipeline. Worth having - only 13 squares from origin.
-✔ #53 - CellContents.card now stores only cardUid (a string), with card as a getter/setter resolving against allCards() - zero call sites outside cell.ts needed to change. @done(26-08-20)
+✔ #51 - test separate clusters. @done(26-08-20)
+✔ #52 - test double-letter coordinates. @done(26-08-20)
+✔ #53 - CellContents.card to uid. @done(26-08-20)

@@ -207,6 +207,58 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         expect(evicted[0]).to.deep.include({ x: 0, y: 0 });
         expect(b.has(0, 0)).eq(false);
     });
+
+    // Every existing pushTerritory test above lands the card next to
+    // nothing else, so only ever produces one lone new cell. Here it lands
+    // beside an already-existing, unrelated territory, so the result is
+    // TWO genuinely separate multi-cell clusters coexisting on the same
+    // board at once - not just the single-cell isolation covered above.
+    it("keeps two genuinely separate multi-cell clusters classified correctly after a push lands one far away", () => {
+        const b = new GnosticaBoard();
+        // Cluster A (origin): two adjacent territories that survive the push below.
+        b.store.set(-1, 0, new CellContents(twoOfCups()));
+        b.store.set(0, 0, new CellContents(aceOfCups()));
+        // The card about to be pushed away.
+        b.store.set(1, 0, new CellContents(kingOfSwords()));
+        // Cluster B (far away): a pre-existing territory the pushed card
+        // will land beside, forming its own genuinely separate 2-cell
+        // cluster rather than a single isolated landing cell.
+        b.store.set(5, 0, new CellContents(twoOfCups()));
+
+        b.pushTerritory(1, 0, 4, 0); // King of Swords pushed 3 cells east
+
+        // Cluster A survives, unaffected by the push.
+        expect(b.classify(-1, 0)).eq("territory");
+        expect(b.classify(0, 0)).eq("territory");
+
+        // The departure cell had no piece of its own, so nothing is stored
+        // there any more (see CellContents's own docs on what actually
+        // gets stored) - it still classifies as wasteland, still adjacent
+        // to (0,0)'s card.
+        expect(b.has(1, 0)).eq(false);
+        expect(b.classify(1, 0)).eq("wasteland");
+
+        // Genuinely disconnected: (2,0) is adjacent to neither cluster's
+        // cards (it's two cells from cluster A's nearest card and two from
+        // cluster B's) - (1,0) and (3,0), one cell closer on either side,
+        // are each their own cluster's wasteland instead.
+        expect(b.classify(2, 0)).eq("void");
+        expect(b.classify(3, 0)).eq("wasteland");
+
+        // Cluster B: the pushed card landed right beside the pre-existing
+        // territory, forming its own genuine 2-cell cluster.
+        expect(b.classify(4, 0)).eq("territory");
+        expect(b.get(4, 0)!.card?.uid).eq("KS");
+        expect(b.classify(5, 0)).eq("territory");
+
+        // Both clusters coexist in a single scan of the board, not just
+        // whichever one happens to include the first stored entry.
+        const stored = new Set([...b.entries()].map(([x, y]) => `${x},${y}`));
+        for (const key of ["-1,0", "0,0", "4,0", "5,0"]) {
+            expect(stored.has(key), `expected ${key} to be stored`).eq(true);
+        }
+        expect(stored.has("1,0"), "the vacated departure cell should not be stored").eq(false);
+    });
 });
 
 describe("Gnostica: GnosticaBoard rehydration", () => {
