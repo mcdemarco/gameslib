@@ -1,5 +1,5 @@
 import { TarotCard, MinorCard, allCards } from "../../common/tarot";
-import { Piece, IPiece } from "./piece";
+import { Piece } from "./piece";
 
 export type CellPointValue = 0 | 1 | 2 | 3;
 
@@ -16,14 +16,12 @@ export const cardPointValue = (card?: TarotCard): CellPointValue => {
     return (card as MinorCard).rank.court ? 2 : 1;
 };
 
-// The stored/serialized shape only ever keeps the card's uid, not the full
-// object (see CellContents's own docs on why) - hands/discardPile/drawPile
-// already store plain uid strings the same way, translating to a real card
-// via allCards().find(...) on demand.
-export interface ICellContents {
-    cardUid?: string;
-    pieces: IPiece[];
-}
+// The serialized shape: a bare array, no key names at all (repeated per
+// cell, per historical stack entry, so they add up) - element 0 is the
+// card's uid, or "" if there's no card; every element after that is one
+// piece's own compact id() string (see Piece's own docs - always exactly
+// 3 characters, so no delimiter is needed between them either).
+export type ICellContents = string[];
 
 // Whatever's currently at a single board cell - a card and/or pieces, or
 // (as a fresh instance about to be stored) neither yet. A "wasteland"
@@ -35,16 +33,16 @@ export interface ICellContents {
 // territory at all by this game's own rules - see GnosticaBoard.classify()'s
 // three-way territory/wasteland/void split.
 //
-// Only `cardUid` is ever actually stored/serialized - a whole board's worth
-// of full TarotCard objects (each with its own nested rank/suit Component
-// sub-objects) repeated across every historical stack entry adds up fast.
-// `card` stays available as a getter/setter for every existing call site's
-// convenience (construct/read/write with a real TarotCard, exactly as
-// before) - it just resolves against allCards() on the fly instead of
-// storing the object itself. Safe because TarotCard instances are treated
-// as immutable value objects throughout this file (uid identifies a card
-// uniquely; nothing ever mutates one of its own sub-properties in place).
-export class CellContents implements ICellContents {
+// In memory this stays a real object (`cardUid` + a real Piece[] `pieces`,
+// mutated in place via normal array methods everywhere) - only toJSON()'s
+// own output (an ICellContents) is ever actually serialized. `card` stays
+// available as a getter/setter for every existing call site's convenience
+// (construct/read/write with a real TarotCard, exactly as before) - it
+// just resolves against allCards() on the fly instead of storing the
+// object itself. Safe because TarotCard instances are treated as immutable
+// value objects throughout this file (uid identifies a card uniquely;
+// nothing ever mutates one of its own sub-properties in place).
+export class CellContents {
     public cardUid?: string;
     public pieces: Piece[];
 
@@ -106,9 +104,17 @@ export class CellContents implements ICellContents {
         return cloned;
     }
 
-    public static deserialize(t: ICellContents): CellContents {
-        const instance = new CellContents(undefined, (t.pieces ?? []).map(p => Piece.deserialize(p)));
-        instance.cardUid = t.cardUid;
+    // JSON.stringify calls this automatically wherever a CellContents
+    // appears - see this class's own docs on why the wire shape is a bare
+    // array rather than the object this class actually is in memory.
+    public toJSON(): ICellContents {
+        return [this.cardUid ?? "", ...this.pieces.map(p => p.id())];
+    }
+
+    public static deserialize(raw: ICellContents): CellContents {
+        const [cardUid, ...pieceStrs] = raw;
+        const instance = new CellContents(undefined, pieceStrs.map(s => Piece.deserialize(s)));
+        instance.cardUid = cardUid ? cardUid : undefined;
         return instance;
     }
 }

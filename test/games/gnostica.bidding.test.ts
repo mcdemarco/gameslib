@@ -163,7 +163,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.bidWinner).eq(2); // lowest-numbered of the tied {2, 3}, not player 1
     });
 
-    it("computes the redraw order as the reverse of normal turn order, ending at the winner", () => {
+    it("computes turnOrder as tournament rules require - the rank order of the last cards bid - and redrawOrder as its exact reverse", () => {
         const g = new GnosticaGame(4, ["bidding"]);
         g.hands[0] = [minor("KS").uid, "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = [minor("2S").uid, "AR", "2R", "3R", "4R", "5R"];
@@ -174,8 +174,11 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1", { trusted: true });
         g.move("bid 1", { trusted: true });
         expect(g.bidWinner).eq(1); // King is the highest bid
-        expect(g.redrawOrder).to.deep.equal([4, 3, 2, 1]); // winner's right neighbour first, winner last
-        expect(g.currplayer).eq(4);
+        // Rank order of what was actually bid (King > 4S > 3S > 2S), NOT
+        // seating order from the winner (which would be [1,2,3,4]).
+        expect(g.turnOrder).to.deep.equal([1, 4, 3, 2]);
+        expect(g.redrawOrder).to.deep.equal([2, 3, 4, 1]); // exact reverse, winner last
+        expect(g.currplayer).eq(2);
         expect(g.redrawPos).eq(0);
     });
 
@@ -288,7 +291,12 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         g.move("bid 1", { trusted: true }); // P2 - major arcana, wins outright over P1/P3's minors
         g.move("bid 1", { trusted: true }); // P3
         expect(g.bidWinner).eq(2);
-        expect(g.redrawOrder).to.deep.equal([1, 3, 2]); // winner's right neighbour (1) first, winner (2) last
+        // Tournament rules: turnOrder is the rank order of what was bid -
+        // major (player 2) outranks every minor, then King (player 1)
+        // outranks Queen (player 3) among the minors. redrawOrder is the
+        // exact reverse, winner last.
+        expect(g.turnOrder).to.deep.equal([2, 1, 3]);
+        expect(g.redrawOrder).to.deep.equal([3, 1, 2]);
 
         g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
         g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
@@ -297,12 +305,12 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.currplayer).eq(2); // the actual bid winner starts, not player 1
 
         // Walk a full cycle of real turns to confirm rotation is genuinely
-        // anchored to the winner (2 -> 3 -> 1 -> 2), not just the first
+        // anchored to turnOrder (2 -> 1 -> 3 -> 2), not just the first
         // currplayer value after the handoff.
         g.move("place l1", { trusted: true });
-        expect(g.currplayer).eq(3);
-        g.move("place m1", { trusted: true });
         expect(g.currplayer).eq(1);
+        g.move("place m1", { trusted: true });
+        expect(g.currplayer).eq(3);
         g.move("place n1", { trusted: true });
         expect(g.currplayer).eq(2);
     });
