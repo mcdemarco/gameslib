@@ -8,7 +8,7 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #30 - reduce comments
 ✔ #31 - board rotation view @done(26-08-20)
 - #32 - verify the stale-preview click bug on a real dev server
-✔ #38 - tournament rules: turnOrder is now the rank order of the last cards bid (majors outrank minors), persisted and used by nextPlayer(); redrawOrder is its exact reverse; the turn-order UI legend uses it too. Also dropped bidWinner/bidRound/redrawOrder as stored fields in favor of getters derived from phase/biddingPool/turnOrder; redrawPos stays a real field since a partial redraw preview mutates hands before it can be derived from hand length. @done(26-08-20)
+✔ #38 - tournament rules: turnOrder is now the rank order of the last cards bid and is used by nextPlayer() and redrawOrder in reverse, and cleaned up unnecessary stack variables. @done(26-08-20)
 ✔ #44 - randomMove() tests and correct pass chat. @done(26-08-20)
 - #45 - checkX/getPiece crash for virtual chain minions
 ✔ #46 - pyramid overlap in densePieceGrid @done(26-08-20)
