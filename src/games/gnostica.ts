@@ -434,7 +434,15 @@ export class GnosticaGame extends GameBase {
 
     // Transient click-UI hint, not part of persisted game state - see
     // move()'s own docs for exactly what this does and does not track.
-    private liveMove: string | undefined;
+    // Stores the ALREADY-PARSED move, not the raw string: every reader
+    // but one (parsePendingStep, which is a general string-based utility
+    // shared with handleClickCore's own many other ad-hoc move strings)
+    // just wants specific fields off it, so parsing once here instead of
+    // separately in each reader avoids re-parsing the same string up to
+    // four times in a single render() pass. The one reader that needs a
+    // string round-trips it back out via pickleMove() - parsePendingStep
+    // re-parses it internally anyway, so nothing is lost either way.
+    private liveMove: IParsedMove | undefined;
     private buffers: Direction[] = [];
     private discarded: string[] = [];
 
@@ -929,15 +937,18 @@ export class GnosticaGame extends GameBase {
             // this.lastmove
             // liveMove exists purely to answer "is there an in-progress
             // preview of the CURRENT player's own turn right now" for
-            // getActionButtons()'s benefit: set to `m` for a partial preview
-            // call, explicitly cleared back to undefined the moment a turn is
-            // actually committed - so by the time render() next runs (for
-            // whoever's turn is now current), there is nothing left over from
-            // the previous player's finished action to misread, without
-            // needing to compare against stack history at read time. Mirrors
-            // Magnate's own this.highlights field (also reset/populated fresh
-            // per move() call, never persisted).
-            this.liveMove = partial ? m : undefined;
+            // getActionButtons()'s benefit: set to `parsed` (already
+            // computed above - see liveMove's own docs on why it's stored
+            // pre-parsed) for a partial preview call, explicitly cleared
+            // back to undefined the moment a turn is actually committed -
+            // so by the time render() next runs (for whoever's turn is
+            // now current), there is nothing left over from the previous
+            // player's finished action to misread, without needing to
+            // compare against stack history at read time. Mirrors
+            // Magnate's own this.highlights field in lifecycle only (reset/
+            // populated fresh per move() call, never persisted) - not in
+            // what it stores (see liveMove's own docs).
+            this.liveMove = partial ? parsed : undefined;
 
         }
  
@@ -1352,7 +1363,7 @@ export class GnosticaGame extends GameBase {
         // for chat/history, not to signal UI state, so a chat-only change
         // there (e.g. tagging place's own result with `how: "initial"`)
         // has no business breaking this check - and previously did.
-        return this.parseMove(this.liveMove).head?.toLowerCase() === "place";
+        return this.liveMove.head?.toLowerCase() === "place";
     }
 
     // Which button(s) to bold, based on this.liveMove (see move()'s own
@@ -1368,12 +1379,11 @@ export class GnosticaGame extends GameBase {
         if (this.liveMove === undefined) {
             return found;
         }
-        const parsed = this.parseMove(this.liveMove);
-        if (parsed.announceLast) {
+        if (this.liveMove.announceLast) {
             found.add("declare");
         }
-        const head = parsed.head;
-        if (head === "discard" && this.isPassEquivalent(parsed.rest)) {
+        const head = this.liveMove.head;
+        if (head === "discard" && this.isPassEquivalent(this.liveMove.rest)) {
             // "discard draw 0" is Pass's own bare seed (see the Pass
             // button's own click handler) - bold Pass instead of
             // Discard/Draw, regardless of whether the player got there by
@@ -1422,7 +1432,7 @@ export class GnosticaGame extends GameBase {
         // misread that transient state and collapse the bar down to
         // "Place" mid-preview, even though the in-progress move is still
         // perfectly valid and submittable as-is.
-        const midPowerStep = this.liveMove !== undefined && /^(use|play)\b/.test(this.liveMove);
+        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play";
         if ((!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement()) {
             // Only one action is legal here regardless of which case this
             // is - place is a full turn on its own with zero real board
@@ -1462,8 +1472,7 @@ export class GnosticaGame extends GameBase {
         // of the redraw - so the room left is just 6 minus the CURRENT
         // hand length, no separate subtraction of the discard list needed.
         if (this.liveMove !== undefined) {
-            const liveParsed = this.parseMove(this.liveMove);
-            if (liveParsed.head?.toLowerCase() === "discard" && !liveParsed.rest.includes("draw")) {
+            if (this.liveMove.head?.toLowerCase() === "discard" && !this.liveMove.rest.includes("draw")) {
                 const hand = this.hands[this.currplayer - 1] ?? [];
                 const maxDraw = Math.max(0, 6 - hand.length);
                 const countButtons: ButtonBarButton[] = [];
@@ -1474,7 +1483,7 @@ export class GnosticaGame extends GameBase {
             }
         }
 
-        const pendingMinor = this.liveMove !== undefined ? this.parsePendingStep(this.liveMove) : undefined;
+        const pendingMinor = this.liveMove !== undefined ? this.parsePendingStep(this.pickleMove(this.liveMove)) : undefined;
         if (pendingMinor === undefined) {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
