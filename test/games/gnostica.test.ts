@@ -908,6 +908,23 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(dest.pieces.length).eq(2);
         expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "U" }); // B, pushed and reoriented
         expect(dest.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "U" }); // new piece from the Cups step
+
+        // A genuine 2-step chain: one frame (state after step 1 only),
+        // plus the final/live rep.
+        expect(g.frames.length).eq(1);
+        expect(g.frames[0].board.get(2, 0)?.pieces.length).eq(1); // B pushed here, Cups step not yet applied
+        const reps = g.render() as { annotations?: { type: string }[] }[];
+        expect(Array.isArray(reps)).eq(true);
+        expect(reps.length).eq(2);
+
+        // Frame 0's own annotations cover only step 1's effect (the
+        // push) - not step 2's (the new piece), proving the _group/
+        // annotation-flattening fix actually isolates each step, rather
+        // than overlaying every step's own effect onto every frame.
+        expect(reps[0].annotations?.map(a => a.type)).to.deep.equal(["move"]);
+        // The final/live rep covers the whole turn, same as any ordinary
+        // (non-chained) move already does today.
+        expect(reps[1].annotations?.map(a => a.type).sort()).to.deep.equal(["enter", "move"]);
     });
 
     // Regression test for task #45: validateMove() itself never mutates
@@ -932,6 +949,12 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(dest.pieces.length).eq(1);
         expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
         expect(g.board.has(1, 0)).eq(false); // the waypoint at n0 is left empty
+
+        // Frame 0 shows the piece at its intermediate (post-first-move)
+        // position, n0 - not yet at its final position, o0.
+        expect(g.frames.length).eq(1);
+        expect(g.frames[0].board.get(1, 0)?.pieces.length).eq(1);
+        expect(g.frames[0].board.get(2, 0)).eq(undefined);
     });
 
     it("Strength: a single grow step may skip straight from spot to major arcana (skipLadder)", () => {
@@ -986,6 +1009,21 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         );
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("U"); // reoriented twice, back to up
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, orientation: "W" }); // enemy piece reoriented too
+
+        // A genuine 3-step chain: two frames (N-1), plus the final/live rep.
+        expect(g.frames.length).eq(2);
+        expect(g.frames[0].board.get(0, 0)!.pieces[0].orientation).eq("E"); // after step 1 only
+        expect(g.frames[0].board.get(1, 0)!.pieces[0].orientation).eq("U"); // step 2 not yet applied
+        expect(g.frames[1].board.get(0, 0)!.pieces[0].orientation).eq("E"); // still E after step 2
+        expect(g.frames[1].board.get(1, 0)!.pieces[0].orientation).eq("W"); // step 2's own effect
+        const reps = g.render() as unknown[];
+        expect(Array.isArray(reps)).eq(true);
+        expect(reps.length).eq(3);
+
+        // Confirms this.results was genuinely grouped, one _group per
+        // step, not left flat.
+        const groups = g.results.filter(r => r.type === "_group");
+        expect(groups.length).eq(3);
     });
 
     it("Judgement: draws named cards from the discard pile, up to the minion's pip count", () => {
@@ -1022,6 +1060,88 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         forceCardAt(g, 0, 0, () => major(1)); // The Magician - only 1 power
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         expect(() => g.move(`use ${major(1).uid}, m0.1 C own m0 U, m0.1 C own m0 U`)).to.throw();
+    });
+});
+
+// The frame-array API contract itself (see render()'s own docs) - not
+// specific card behaviour, already covered above.
+describe("Gnostica: frame-stepping render() contract", () => {
+    type AreaButtonBarLike = { type: string; buttons?: { value?: string }[] };
+    type RepLike = { areas?: AreaButtonBarLike[] };
+    const barValues = (rep: RepLike): string[] | undefined =>
+        rep.areas?.find(a => a.type === "buttonBar")?.buttons?.map(b => b.value ?? "");
+
+    it("live paging: a genuine 2-step chain, still mid-build (partial), shows step 1's own real choices on frame 0 - not the final rep's", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(6)); // The Lovers
+        forceCardAt(g, 1, 0, () => aceOfDiscs());
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
+        const move = `use ${major(6).uid}, m0.1 piece n0.1 1 U/o0.1 own o0 U`;
+        g.move(move, { partial: true });
+        expect(g.frames.length).eq(1); // still mid-build, but the chain itself is complete
+        const reps = g.render() as RepLike[];
+        expect(Array.isArray(reps)).eq(true);
+        expect(reps.length).eq(2);
+        // Frame 0 (as of just step 1) still has Cups' own mode buttons on
+        // offer - the real choice available at that point in the chain.
+        expect(barValues(reps[0])).to.include("mode_C_own");
+        // The final/live rep (both steps already typed) does not offer
+        // the same thing - proving the two are genuinely distinct, not
+        // both just showing today's (final) button state.
+        expect(barValues(reps[1])).to.not.deep.equal(barValues(reps[0]));
+    });
+
+    it("historical review: the same chain, once fully committed and reloaded, shows no buttons on its own intermediate frame", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(6));
+        forceCardAt(g, 1, 0, () => aceOfDiscs());
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
+        g.move(`use ${major(6).uid}, m0.1 piece n0.1 1 U/o0.1 own o0 U`, { trusted: true });
+        // liveMove is cleared on a real commit - nothing "in progress" left.
+        const reps = g.render() as RepLike[];
+        expect(reps.length).eq(2);
+        expect(barValues(reps[0])).eq(undefined); // no buttonBar area at all on the historical frame
+        expect(barValues(reps[1])).to.not.eq(undefined); // the final/live rep still gets its own normal bar
+    });
+
+    it("0 real steps never produce an array or grouped results", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        g.move(`use ${aceOfCups().uid}`, { trusted: true }); // 0 steps - fully declined
+        expect(Array.isArray(g.render())).eq(false);
+        expect(g.results.some(r => r.type === "_group")).eq(false);
+    });
+
+    it("1 real step never produces an array or grouped results, even on a card that could have taken more", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(6)); // The Lovers - could take up to 2 steps
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        g.move(`use ${major(6).uid}, m0.1 piece m0.1 1 E`, { trusted: true }); // only step 1, step 2 declined
+        expect(Array.isArray(g.render())).eq(false);
+        expect(g.results.some(r => r.type === "_group")).eq(false);
+    });
+
+    it("persistence round-trip: a reloaded game still steps through the same frames a genuine chain produced", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(6));
+        forceCardAt(g, 1, 0, () => aceOfDiscs());
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
+        g.move(`use ${major(6).uid}, m0.1 piece n0.1 1 U/o0.1 own o0 U`, { trusted: true });
+        const before = g.render() as RepLike[];
+
+        const g2 = new GnosticaGame(g.serialize());
+        const after = g2.render() as RepLike[];
+        expect(after.length).eq(before.length);
+        expect(g2.frames.length).eq(g.frames.length);
+        expect(g2.frames[0].board.get(2, 0)?.pieces.length).eq(g.frames[0].board.get(2, 0)?.pieces.length);
     });
 });
 
@@ -2784,7 +2904,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(values).to.not.include("mode_R_piece");
 
         const step2 = g.handleClick(redirected.move, -1, -1, "_btn_mode_C_own");
-        expect(step2.move).eq(`use ${major(6).uid}, m0.1 piece n0.1 1, m0.1 own n0 U`);
+        expect(step2.move).eq(`use ${major(6).uid}, m0.1 piece n0.1 1/m0.1 own n0 U`);
         expect(step2.valid).to.be.true;
 
         g.move(step2.move, { trusted: true });
@@ -2843,7 +2963,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
 
         const modeClick = g.handleClick(withStep1, -1, -1, "_btn_mode_S_piece");
         expect(modeClick.valid).to.be.true;
-        expect(modeClick.move).to.match(new RegExp(`^use ${major(16).uid}, m0\\.1 E, `));
+        expect(modeClick.move).to.match(new RegExp(`^use ${major(16).uid}, m0\\.1 E/`));
     });
 });
 
@@ -3117,7 +3237,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         // handleClickCore's own docs on this priority).
         const [rowM, colM] = rowColFor(g, 0, 0);
         const step2 = g.handleClick(step1.move, rowM, colM);
-        expect(step2.move).eq(`use ${major(12).uid}, m0.1 tile 1, m0.1 m0.1`);
+        expect(step2.move).eq(`use ${major(12).uid}, m0.1 tile 1/m0.1 m0.1`);
         expect(step2.valid).to.be.true;
         g.move(step2.move, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
