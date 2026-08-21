@@ -301,7 +301,9 @@ export const createEnemy = (
 
 // Create a new territory on a targeted wasteland, playing a spot (1-point)
 // card from hand - or, with opts.allowRandomDraw (Wheel of Fortune), drawing
-// the top of the draw pile instead.
+// the top of the draw pile instead, whatever it turns out to be (no point-
+// value restriction on the random draw - unlike the hand-card path, the
+// player never chose it, so there's nothing to restrict against).
 export const checkCreateTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts = {},
@@ -321,9 +323,6 @@ export const checkCreateTerritory = (
         if (ctx.drawPile.length === 0 && ctx.discardPile.length === 0) {
             return { key: "DRAW_PILE_EMPTY" };
         }
-        // A random draw's own point value can't be predicted without
-        // actually drawing - createTerritory below still enforces
-        // it (and undoes the draw if it fails), same as today.
         return undefined;
     }
     if (cardUid === undefined) {
@@ -353,12 +352,7 @@ export const createTerritory = (
     let card: TarotCard;
     if (opts.allowRandomDraw) {
         reshuffle(ctx);
-        const drawnUid = ctx.drawPile.shift() as string;
-        card = cardByUid(drawnUid);
-        if (cardPointValue(card) !== 1) {
-            ctx.drawPile.unshift(drawnUid); // undo the draw before reporting failure
-            throw new GnosticaRulesError("MUST_BE_SPOT_CARD");
-        }
+        card = cardByUid(ctx.drawPile.shift() as string);
     } else {
         card = takeFromPile(ctx.hand, cardUid as string);
     }

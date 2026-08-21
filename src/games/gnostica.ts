@@ -289,15 +289,27 @@ interface IPendingStep {
 // mirrors exactly). `results` is NOT a field here - per-frame
 // annotations are handled via `_group`-wrapping this.results itself
 // (see applyMajorPower/render's own docs), not by duplicating results
-// into each frame. `drawPile` is also excluded - every interaction that
-// touches it is a deck-draw mechanic deferred to real multi-turn support
-// in a later front-end change, not represented within a single turn's
-// chain at all.
+// into each frame. `drawPile` IS included, despite an earlier draft of
+// this excluding it wholesale as a "deck-draw mechanic" needing
+// deferral - that was an overgeneralization: the only thing that
+// genuinely needs deferring is a draw whose OUTCOME the current player
+// needs to see before deciding a LATER step in the SAME chain, pending
+// real multi-turn engine support. Wheel of Fortune (Cups "new" with
+// allowRandomDraw) is a single-step card, so it never even reaches a
+// multi-step chain - no issue there. High Priestess (two `highPriestess`
+// steps) is genuinely split: its SECOND draw is fine (nothing in the
+// same turn depends on it), but its FIRST draw's outcome DOES need to
+// inform what the player discards for the second step - that specific
+// case (a 2-step High Priestess chain) is a known, accepted gap this
+// field doesn't fix, still waiting on that same future engine support.
+// Every other field here is unaffected - board/hands/stashes/discardPile
+// stay accurate regardless.
 export type FrameState = {
     board: UnboundedSquareBoard<CellContents>;
     hands: string[][];
     stashes: Map<playerid, Stash>;
     discardPile: string[];
+    drawPile: string[];
 };
 
 interface IMoveState extends IIndividualState {
@@ -1635,6 +1647,16 @@ export class GnosticaGame extends GameBase {
                 }
                 buttons.push(button);
             }
+            // "new" mode's own required card arg is otherwise only ever
+            // suppliable by clicking a hand card (see supplyStepCardUid's
+            // own docs) - Wheel of Fortune's own step (the only card with
+            // allowRandomDraw set, already reflected in pendingMinor.opts
+            // by computeShortcutOpts - see parsePendingStep's own docs)
+            // has no hand card to click for that, so it gets a dedicated
+            // button instead, exactly parallel to a hand-card click.
+            if (suitUid === "C" && pendingMinor.mode === "new" && pendingMinor.opts.allowRandomDraw === true) {
+                buttons.push({ label: "Random Card", value: "random" });
+            }
         }
         if (declareBtn !== undefined) {
             buttons.push(declareBtn);
@@ -2676,6 +2698,20 @@ export class GnosticaGame extends GameBase {
                         return { move: "play", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY") };
                     case "orient":
                         return { move: "orient", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
+                    case "random":
+                        // Only ever offered for Wheel of Fortune's own
+                        // "new" step (see getActionButtons()'s own docs) -
+                        // supplies the literal "random" token exactly the
+                        // way a hand-card click supplies a specific uid
+                        // (see supplyStepCardUid's own docs).
+                        {
+                            const pending = this.parsePendingStep(move);
+                            if (pending === undefined || pending.suitUid !== "C" || pending.mode !== "new" || pending.opts.allowRandomDraw !== true) {
+                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                            }
+                            const result = this.supplyStepCardUid(pending, "random");
+                            return result ?? { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                        }
                     default:
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                 }
@@ -3953,6 +3989,7 @@ export class GnosticaGame extends GameBase {
                     hands: this.hands.map(h => [...h]),
                     stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
                     discardPile: [...this.discardPile],
+                    drawPile: [...this.drawPile],
                 });
             }
         }
@@ -4265,8 +4302,16 @@ export class GnosticaGame extends GameBase {
             case "new": {
                 const [cellStr, cardArg] = rest;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                if (cardArg === "random") {
-                    createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, { ...opts, allowRandomDraw: true });
+                // "random" is only ever honored when THIS card's own step
+                // genuinely grants it (opts.allowRandomDraw, computed from
+                // its own step.opts by computeShortcutOpts - see
+                // majorArcana.ts's own Wheel of Fortune definition, the
+                // only card with it set) - not just because the literal
+                // token happens to be typed, which would otherwise let any
+                // "Cups: new" step on ANY card draw randomly regardless of
+                // whether it's actually supposed to.
+                if (cardArg === "random" && opts.allowRandomDraw) {
+                    createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts);
                 } else {
                     createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 }
@@ -4328,8 +4373,12 @@ export class GnosticaGame extends GameBase {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
                 }
                 const [tx, ty] = coords;
-                const failure = cardArg === "random"
-                    ? checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, { ...opts, allowRandomDraw: true })
+                // Mirrors applyCups's own "new" case - "random" is only
+                // ever honored when opts.allowRandomDraw is genuinely set
+                // for THIS card's own step, not just because the literal
+                // token was typed.
+                const failure = cardArg === "random" && opts.allowRandomDraw
+                    ? checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts)
                     : checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
@@ -6113,6 +6162,7 @@ export class GnosticaGame extends GameBase {
             hands: frame.hands,
             stashes: frame.stashes,
             discardPile: frame.discardPile,
+            drawPile: frame.drawPile,
             _results: groups[stepIndex] !== undefined ? [groups[stepIndex]] : [],
         }];
         const snapshot = new GnosticaGame(JSON.stringify(raw, replacer));
