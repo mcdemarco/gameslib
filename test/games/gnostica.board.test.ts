@@ -2,7 +2,7 @@
 import "mocha";
 import { expect } from "chai";
 import { Piece } from "../../src/games/gnostica/piece";
-import { CellContents } from "../../src/games/gnostica/cell";
+import { CellContents, ICellContents } from "../../src/games/gnostica/cell";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { minorCards, majorCards } from "../../src/common/tarot";
 import { UnboundedSquareBoard } from "../../src/common/unbounded-square-board";
@@ -216,13 +216,14 @@ describe("Gnostica: GnosticaBoard rehydration", () => {
         b.store.set(1, 0, new CellContents(theFool()));
 
         const json = JSON.stringify({ board: b.store }, replacer);
-        // Only the card's uid is ever actually serialized, not the whole
-        // TarotCard object (see CellContents's own docs on why) - a
-        // regression here would silently bloat every stack entry's state.
-        expect(json).to.include("\"cardUid\":\"AC\"");
+        // A bare ["cardUid", ...pieceIds] array, no key names and no full
+        // card/piece objects (see CellContents's/Piece's own docs on why) -
+        // a regression here would silently bloat every stack entry's state.
+        expect(json).to.include("[\"AC\",\"12N\"]");
         expect(json).to.not.include("\"rank\"");
         expect(json).to.not.include("\"suit\"");
-        const raw = JSON.parse(json, reviver) as { board: UnboundedSquareBoard<CellContents> };
+        expect(json).to.not.include("\"orientation\"");
+        const raw = JSON.parse(json, reviver) as { board: UnboundedSquareBoard<ICellContents> };
         const fixed = GnosticaBoard.rehydrate(raw.board);
         const revived = new GnosticaBoard(fixed);
 

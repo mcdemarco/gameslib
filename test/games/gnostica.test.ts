@@ -478,7 +478,7 @@ describe("Gnostica: turn order legend", () => {
         expect(area!.list!.map(e => e.name)).to.deep.equal(["1st", "2nd", "3rd"]);
     });
 
-    it("reorders to start from the bid winner once the round resolves", () => {
+    it("reorders to the rank order of what was bid once the round resolves (tournament rules)", () => {
         const g = new GnosticaGame(3, ["bidding"]);
         g.hands[0] = [card("KS").uid, "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = [major(21).uid, "AR", "2R", "3R", "4R", "5R"]; // The World - unbeatable
@@ -487,8 +487,10 @@ describe("Gnostica: turn order legend", () => {
         g.move("bid 1", { trusted: true }); // player 2's major wins
         g.move("bid 1", { trusted: true });
         expect(g.bidWinner).eq(2);
+        // Winner (major) first, then King (player 1) over Queen (player 3)
+        // among the minors - NOT seating order from the winner ([2,3,1]).
         const area = keyArea(g)!;
-        expect(area.list!.map(e => e.piece)).to.deep.equal(["turnorder_p2", "turnorder_p3", "turnorder_p1"]);
+        expect(area.list!.map(e => e.piece)).to.deep.equal(["turnorder_p2", "turnorder_p1", "turnorder_p3"]);
     });
 });
 

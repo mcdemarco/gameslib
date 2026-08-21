@@ -316,9 +316,16 @@ interface IMoveState extends IIndividualState {
     // every player draws back up to 6 from during "redraw".
     biddingPool: string[];
     bidWinner: playerid | undefined;
-    // The counterclockwise redraw order (winner's right-hand neighbour
-    // first, winner last) and a cursor into it - computed once the bid
-    // resolves, consumed one player at a time during "redraw".
+    // "Tournament rules": the order of play for the rest of the game is
+    // exactly the rank order of the cards everyone bid (highest first;
+    // majors always outrank minors) - see resolveBidRound's own docs.
+    // Starts as plain ascending player order ([1,2,...,N]) so the
+    // opening bidding round itself (before any rank is known) still
+    // advances player-to-player the ordinary way via nextPlayer().
+    turnOrder: playerid[];
+    // The reverse of turnOrder (worst bidder redraws first, winner last)
+    // and a cursor into it - computed once the bid resolves, consumed one
+    // player at a time during "redraw".
     redrawOrder: playerid[];
     redrawPos: number;
 }
@@ -380,9 +387,6 @@ export class GnosticaGame extends GameBase {
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
-    // Transient click-UI hint, not part of persisted game state - see
-    // move()'s own docs for exactly what this does and does not track.
-    private liveMove: string | undefined;
     // The "bidding" variant's own state - see IMoveState's own docs on
     // each field.
     public phase!: "bidding" | "redraw" | "main";
@@ -390,8 +394,12 @@ export class GnosticaGame extends GameBase {
     public bidPositions: (number | null)[] = [];
     public biddingPool: string[] = [];
     public bidWinner: playerid | undefined;
+    public turnOrder: playerid[] = [];
     public redrawOrder: playerid[] = [];
     public redrawPos = 0;
+    // Transient click-UI hint, not part of persisted game state - see
+    // move()'s own docs for exactly what this does and does not track.
+    private liveMove: string | undefined;
     private buffers: Direction[] = [];
     private discarded: string[] = [];
 
@@ -473,6 +481,7 @@ export class GnosticaGame extends GameBase {
                 bidPositions: new Array(this.numplayers).fill(null),
                 biddingPool: [],
                 bidWinner: undefined,
+                turnOrder: [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid),
                 redrawOrder: [],
                 redrawPos: 0,
                 buffer: undefined
@@ -495,7 +504,7 @@ export class GnosticaGame extends GameBase {
             // wrapper; every stored CellContents still needs its own
             // deserialize() pass to become a real class instance again.
             this.stack.forEach(s => {
-                s.board = GnosticaBoard.rehydrate(s.board as UnboundedSquareBoard<ICellContents>);
+                s.board = GnosticaBoard.rehydrate(s.board as unknown as UnboundedSquareBoard<ICellContents>);
             });
         }
         this.load();
@@ -527,6 +536,7 @@ export class GnosticaGame extends GameBase {
         this.bidPositions = [...state.bidPositions];
         this.biddingPool = [...state.biddingPool];
         this.bidWinner = state.bidWinner;
+        this.turnOrder = [...state.turnOrder];
         this.redrawOrder = [...state.redrawOrder];
         this.redrawPos = state.redrawPos;
         return this;
@@ -552,6 +562,7 @@ export class GnosticaGame extends GameBase {
             bidPositions: [...this.bidPositions],
             biddingPool: [...this.biddingPool],
             bidWinner: this.bidWinner,
+            turnOrder: [...this.turnOrder],
             redrawOrder: [...this.redrawOrder],
             redrawPos: this.redrawPos,
         };
@@ -3068,8 +3079,31 @@ export class GnosticaGame extends GameBase {
         const maxRank = Math.max(...pool.map(rank));
         const winners = pool.filter(r => rank(r) === maxRank).map(r => r.player);
 
+        // "Tournament rules": the order of play for the rest of the game
+        // is exactly the rank order of the cards everyone bid (majors
+        // always outrank minors, same as winner determination above -
+        // there's no rules text covering a mixed round's own ordering
+        // beyond "who wins," so this is the natural, consistent
+        // extension of that same comparison to everyone, not just the
+        // winner). Ties (only possible among minors of different suits,
+        // since every major uid is unique) break toward the lower player
+        // number, matching the same deterministic fallback already used
+        // for a tied WINNING rank just below.
+        const setTurnOrder = (): void => {
+            this.turnOrder = [...revealed]
+                .sort((a, b) => {
+                    const aTier = a.card.major ? 1 : 0;
+                    const bTier = b.card.major ? 1 : 0;
+                    if (aTier !== bTier) return bTier - aTier;
+                    if (rank(a) !== rank(b)) return rank(b) - rank(a);
+                    return a.player - b.player;
+                })
+                .map(r => r.player);
+        };
+
         if (winners.length === 1) {
             this.bidWinner = winners[0];
+            setTurnOrder();
             this.beginRedraw();
             return;
         }
@@ -3087,6 +3121,7 @@ export class GnosticaGame extends GameBase {
         this.bidRound += 1;
         if (this.hands.some(h => h.length === 0)) {
             this.bidWinner = winners[0];
+            setTurnOrder();
             this.beginRedraw();
             return;
         }
@@ -3094,38 +3129,38 @@ export class GnosticaGame extends GameBase {
     }
 
     // "The player to the right of the winner draws... as does each
-    // player in turn counterclockwise around the table" - this engine's
-    // own turn rotation (nextPlayer()) already goes winner -> winner+1 ->
-    // ... , which is what "turns proceeding clockwise" (the very next
-    // sentence in the rules) maps onto, so counterclockwise is simply the
-    // reverse: starting at winner-1 and stepping by -1, ending at the
-    // winner itself last.
+    // player in turn counterclockwise around the table" - under
+    // "tournament rules" there's no physical seating to hang "left"/
+    // "right" off of, so "clockwise" is reinterpreted as turnOrder
+    // itself (the rank order of what everyone bid - see its own docs),
+    // and "counterclockwise" as its exact reverse, ending at the winner.
     private beginRedraw(): void {
-        const winner = this.bidWinner!;
-        const order: playerid[] = [];
-        let p = winner;
-        for (let i = 0; i < this.numplayers; i++) {
-            p = (((p - 2 + this.numplayers) % this.numplayers) + 1) as playerid;
-            order.push(p);
-        }
+        // Exact reverse of turnOrder (see its own docs) - worst bidder
+        // redraws first, the winner (turnOrder[0] by construction) last.
+        const order = [...this.turnOrder].reverse();
         this.redrawOrder = order;
         this.redrawPos = 0;
         this.phase = "redraw";
         if (this.numplayers === 2) {
             // Never assign currplayer to an arbitrary value here (reduces
-            // exposure to any risk around directly reassigning it - see
-            // task #38). currplayer is always player 2 at this exact
-            // point (bidding is fixed player-1-then-player-2 order, and
-            // this only runs once both have bid), so ordinary rotation
-            // takes it to player 1 next - the loser if player 2 won, or
-            // the winner (who isn't allowed to redraw yet) if player 1
-            // won. In the latter case mustPassBeforeRedraw() reports it,
-            // and the "autopass" flag (see gameinfo's own flags, and
-            // moves() below) means a real server auto-submits "pass" for
-            // player 1 the instant it's their only legal option, landing
-            // on player 2 - exactly "the loser draws first," just reached
-            // through the same rotation every other turn already uses
-            // instead of a direct jump.
+            // exposure to any risk around directly reassigning it).
+            // currplayer is always player 2 at this exact point (bidding
+            // is fixed player-1-then-player-2 order, and this only runs
+            // once both have bid) - regardless of who actually won.
+            // turnOrder puts the winner first; stepping forward one
+            // position from player 2 lands on turnOrder's OTHER entry -
+            // the loser, if player 2 themselves won (one step, done) - or
+            // the winner, if player 1 won (since winner-first means
+            // turnOrder's "other" entry from the loser, 2, is the
+            // winner, 1). In that second case the winner isn't allowed to
+            // redraw yet; mustPassBeforeRedraw() reports it, and the
+            // "autopass" flag (see gameinfo's own flags, and moves()
+            // below) means a real server auto-submits "pass" for them the
+            // instant it's their only legal option - cmdPass() calls
+            // nextPlayer() again, stepping forward once more from the
+            // winner to reach the loser, who can now legitimately redraw
+            // first. Either way this converges on the loser, just
+            // sometimes via that extra forced pass in between.
             this.nextPlayer();
         } else {
             this.currplayer = order[0];
@@ -4723,12 +4758,22 @@ export class GnosticaGame extends GameBase {
     // acted twice in a row). Elimination-triggered endgames never hit this
     // case anyway - checkEOG() sets gameover AFTER this already ran, not
     // before, so this was only ever actually skipping on a direct win.
+    //
+    // Steps forward through turnOrder (not raw player-id arithmetic) -
+    // "tournament rules" means play order isn't just 1,2,3...N, it's
+    // whatever resolveBidRound() sets turnOrder to once a bid resolves
+    // (see its own docs). Before any bid has ever resolved, turnOrder is
+    // still its initial [1,2,...,N], so the opening bid-collection round
+    // (cmdBid's own nextPlayer() calls between bidders) advances in plain
+    // ascending order exactly as before - nothing special-cased here for
+    // phase, this one array covers both.
     private nextPlayer(): void {
-        let next = this.currplayer;
+        const pos = this.turnOrder.indexOf(this.currplayer);
+        let next = pos;
         do {
-            next = ((next % this.numplayers) + 1) as playerid;
-        } while (this.eliminated.includes(next) && next !== this.currplayer);
-        this.currplayer = next;
+            next = (next + 1) % this.turnOrder.length;
+        } while (this.eliminated.includes(this.turnOrder[next]) && this.turnOrder[next] !== this.currplayer);
+        this.currplayer = this.turnOrder[next];
     }
 
     // Sort cards by their index in allCards.
@@ -5808,27 +5853,24 @@ export class GnosticaGame extends GameBase {
         }
 
         // Only the bidding variant can ever make turn order diverge from
-        // plain player-number order (its own "winner goes first" rule -
-        // see beginRedraw's own docs) - the default variant always
-        // rotates 1,2,3,...,N, so a legend there would just be
-        // redundant clutter restating the obvious. With only 2 players,
-        // turn order is trivially "you, then them" either way - nothing
-        // worth a legend for regardless of variant. Defaults to plain
-        // ascending order (1..N) whenever bidWinner isn't set yet (still
-        // mid-bid) - exactly the sequence nextPlayer()'s own +1 rotation
-        // already produces in that case.
+        // plain player-number order ("tournament rules" - the rank order
+        // of the cards everyone bid, see resolveBidRound's own docs) -
+        // the default variant always rotates 1,2,3,...,N, so a legend
+        // there would just be redundant clutter restating the obvious.
+        // With only 2 players, turn order is trivially "you, then them"
+        // either way - nothing worth a legend for regardless of variant.
+        // this.turnOrder is already plain ascending order (1..N)
+        // whenever a bid hasn't resolved yet (see its own docs), so no
+        // separate fallback is needed here.
         if (this.numplayers >= 3 && this.variants.includes("bidding")) {
-            const start = this.bidWinner ?? 1;
             const list: AreaKey["list"] = [];
-            let p = start;
-            for (let i = 0; i < this.numplayers; i++) {
+            this.turnOrder.forEach((p, i) => {
                 const key = `turnorder_p${p}`;
                 if (!(key in legend)) {
                     legend[key] = { name: "pyramid-up-small", colour: p };
                 }
                 list.push({ piece: key, name: GnosticaGame.ordinal(i + 1) });
-                p = (p % this.numplayers) + 1;
-            }
+            });
             // "left", not "right" - the action button bar already owns
             // the right side (see actionButtons below), and the two
             // don't stack cleanly on the same side.
