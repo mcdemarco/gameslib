@@ -20,3 +20,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #52 - test double-letter coordinates. @done(26-08-20)
 ✔ #53 - CellContents.card to uid. @done(26-08-20)
 - #54 - "Rods (tile): mode button defaults to pushing the pointed-at territory 1 space" flakes when run as part of the full gnostica*.test.ts suite (passes in isolation and on reruns) - root-cause (likely test-order/shared-state pollution) and fix, or remove it.
+✔ #55 - frame-stepping for multi-step major-arcana moves: render() returns APRenderRep[] (one per step + final) for a genuine 2+-step chain, viewable both live mid-turn (partial preview) and later from history; adopted frogger.ts's _group result-wrapping (required for per-frame annotations, not optional); step separator is now "/" between step segments specifically (pickleMove + the click-driven builders), commas unchanged elsewhere. @done(26-08-21)

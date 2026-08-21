@@ -281,6 +281,25 @@ interface IPendingStep {
 // magicianChoice); a card's `primitive` steps chain through the exact
 // same click machinery a minor arcana card's own single step already
 // uses - see IPendingStep/parsePendingStep. See docs on `move()` below.
+// One snapshot of state per completed step of a 2+-step major-arcana
+// chain (see applyMajorPower's own docs on when/how these get pushed) -
+// deliberately not a full state snapshot, only the fields that can
+// actually mutate mid-chain (mirrors frogger.ts's own FrameState, whose
+// own restraint of omitting anything that can't change mid-move this
+// mirrors exactly). `results` is NOT a field here - per-frame
+// annotations are handled via `_group`-wrapping this.results itself
+// (see applyMajorPower/render's own docs), not by duplicating results
+// into each frame. `drawPile` is also excluded - every interaction that
+// touches it is a deck-draw mechanic deferred to real multi-turn support
+// in a later front-end change, not represented within a single turn's
+// chain at all.
+export type FrameState = {
+    board: UnboundedSquareBoard<CellContents>;
+    hands: string[][];
+    stashes: Map<playerid, Stash>;
+    discardPile: string[];
+};
+
 interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: UnboundedSquareBoard<CellContents>;
@@ -294,6 +313,10 @@ interface IMoveState extends IIndividualState {
     eliminated: playerid[];
     lastTurnAnnouncedBy: playerid | undefined;
     lastmove?: string;
+    // Present only for a move that chained 2+ major-arcana steps - see
+    // FrameState's own docs. Optional so stack entries predating this
+    // feature still deserialize fine.
+    frames?: FrameState[];
     // The "bidding" variant's opening procedure - see cmdBid's own docs.
     // Every other variant/game stays in "main" for its entire lifetime, so
     // none of the fields below are ever touched outside that variant.
@@ -383,6 +406,12 @@ export class GnosticaGame extends GameBase {
     public variants: string[] = [];
     public stack!: Array<IMoveState>;
     public results: Array<APMoveResult> = [];
+    // Populated only for a move that chains 2+ major-arcana steps - see
+    // FrameState's own docs. Left populated even after a partial() call
+    // returns (see move()'s own docs) - that's what lets the acting
+    // player page through their own in-progress chain mid-turn, not just
+    // review a fully-committed one later.
+    public frames: FrameState[] = [];
     // The "bidding" variant's own state - see IMoveState's own docs on
     // each field.
     public phase!: "bidding" | "redraw" | "main";
@@ -544,6 +573,9 @@ export class GnosticaGame extends GameBase {
             // deserialize() pass to become a real class instance again.
             this.stack.forEach(s => {
                 s.board = GnosticaBoard.rehydrate(s.board as unknown as UnboundedSquareBoard<ICellContents>);
+                s.frames?.forEach(f => {
+                    f.board = GnosticaBoard.rehydrate(f.board as unknown as UnboundedSquareBoard<ICellContents>);
+                });
             });
         }
         this.load();
@@ -574,6 +606,7 @@ export class GnosticaGame extends GameBase {
         this.bidPositions = [...state.bidPositions];
         this.biddingPool = [...state.biddingPool];
         this.turnOrder = [...state.turnOrder];
+        this.frames = state.frames ? [...state.frames] : [];
         return this;
     }
 
@@ -596,6 +629,7 @@ export class GnosticaGame extends GameBase {
             bidPositions: [...this.bidPositions],
             biddingPool: [...this.biddingPool],
             turnOrder: [...this.turnOrder],
+            frames: this.frames.length > 0 ? [...this.frames] : [],
         };
     }
 
@@ -791,6 +825,7 @@ export class GnosticaGame extends GameBase {
         }
 
         this.results = [];
+        this.frames = [];
         let head;
 
         if (m.toLowerCase() === "pass") {
@@ -1052,9 +1087,18 @@ export class GnosticaGame extends GameBase {
         };
     }
 
+    // "/" between step segments (mirroring frogger.ts's own sub-move
+    // delimiter) once there's genuinely more than one - the separator
+    // between the head/card-uid and its first step stays "," (that
+    // pairing isn't chaining at all; a single-step "use <uid>, <step>"
+    // is unaffected either way).
     private pickleMove(p: IParsedMove): string {
-        const segments = p.head === undefined ? [] : [[p.head, ...p.rest].join(" "), ...p.stepSegments.map(s => s.join(" "))];
-        const base = segments.join(", ");
+        if (p.head === undefined) {
+            return p.announceLast ? "(last)" : "";
+        }
+        const headPart = [p.head, ...p.rest].join(" ");
+        const stepsPart = p.stepSegments.map(s => s.join(" ")).join("/");
+        const base = stepsPart.length === 0 ? headPart : `${headPart}, ${stepsPart}`;
         return p.announceLast ? (base.length === 0 ? "(last)" : `${base} (last)`) : base;
     }
 
@@ -1996,7 +2040,10 @@ export class GnosticaGame extends GameBase {
     // major-arcana chaining existed.
     private assembleStepMove(pending: IPendingStep, currentTokens: string[]): string {
         const segments = [...pending.priorSteps, currentTokens.join(" ")];
-        return `${pending.head} ${pending.headArg}, ${segments.join(", ")}`;
+        // "/" between step segments themselves (mirrors pickleMove's own
+        // convention - see its own docs); only the very first separator,
+        // between the head/card-uid and the first step, stays ",".
+        return `${pending.head} ${pending.headArg}, ${segments.join("/")}`;
     }
 
     private buildStepModeMove(pending: IPendingStep, mode: string): string {
@@ -2075,7 +2122,7 @@ export class GnosticaGame extends GameBase {
         if (pending.mode === undefined) {
             return pending.priorSteps.length === 0
                 ? `${pending.head} ${pending.headArg}`
-                : `${pending.head} ${pending.headArg}, ${pending.priorSteps.join(", ")}`;
+                : `${pending.head} ${pending.headArg}, ${pending.priorSteps.join("/")}`;
         }
         const ref = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
         return this.assembleStepMove(pending, [ref, ...pending.prefix, pending.mode, ...pending.rest]).trim();
@@ -3872,13 +3919,41 @@ export class GnosticaGame extends GameBase {
         if (stepSegments.length > def.powers.length) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
         }
+        const chained = stepSegments.length > 1;
         let minions = [...eligible];
         for (let i = 0; i < stepSegments.length; i++) {
             const step = def.powers[i];
             const tokens = stepSegments[i];
+            const resultsBefore = this.results.length;
             const outcome = this.applyPowerStep(step, minions, tokens, def, i, stepSegments.length);
             if (outcome?.newMinion !== undefined) {
                 minions = [...minions, outcome.newMinion];
+            }
+            // Wrap this step's own results into one _group entry,
+            // mirroring frogger.ts's own precedent - this is what makes
+            // per-frame annotations possible at all (see render()'s own
+            // docs on pairing frame i with the i-th _group by position),
+            // not an optional extra. `_group` requires a non-empty
+            // results tuple - only the currently-being-typed LAST segment
+            // can legitimately be "still declined" mid-click-build, but
+            // guard anyway rather than ever emit an invalid empty group.
+            if (chained) {
+                const stepResults = this.results.splice(resultsBefore) as APMoveResult[];
+                if (stepResults.length > 0) {
+                    this.results.push({ type: "_group", who: this.currplayer, results: stepResults as [APMoveResult, ...APMoveResult[]] });
+                }
+            }
+            // A frame captures the state right after this step - never
+            // for the last step taken this call, since render()'s own
+            // dispatcher always appends the live/current state as its
+            // own last entry (see its own docs).
+            if (i < stepSegments.length - 1) {
+                this.frames.push({
+                    board: this.board.clone().store,
+                    hands: this.hands.map(h => [...h]),
+                    stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
+                    discardPile: [...this.discardPile],
+                });
             }
         }
     }
@@ -5222,7 +5297,8 @@ export class GnosticaGame extends GameBase {
             const { uid, eligible } = this.weightedPick(onBoard, ({ uid: u }) => cardPointValue(allCards().find(c => c.uid === u)));
             const card = allCards().find(c => c.uid === uid)!;
             const chain = this.buildRandomChain(card, eligible);
-            return [`use ${uid}`, ...chain.map(tokens => tokens.join(" "))].join(", ");
+            const steps = chain.map(tokens => tokens.join(" "));
+            return steps.length === 0 ? `use ${uid}` : `use ${uid}, ${steps.join("/")}`;
         }
         const hand = this.hands[this.currplayer - 1];
         if (hand.length === 0) {
@@ -5243,7 +5319,8 @@ export class GnosticaGame extends GameBase {
         hand.splice(handIdx, 1);
         try {
             const chain = this.buildRandomChain(card, eligible);
-            return [`play ${uid}`, ...chain.map(tokens => tokens.join(" "))].join(", ");
+            const steps = chain.map(tokens => tokens.join(" "));
+            return steps.length === 0 ? `play ${uid}` : `play ${uid}, ${steps.join("/")}`;
         } finally {
             hand.splice(handIdx, 0, uid);
         }
@@ -5733,7 +5810,13 @@ export class GnosticaGame extends GameBase {
     // doesn't shift as the board grows, unlike Knight Line's own
     // notation), so this only needs ONE extra coordinate layer
     // (window-relative row/col), not two.
-    public render(opts?: IRenderOpts): APRenderRep {
+    // The actual, single-state render body - renamed from render() so the
+    // new public render() dispatcher (below) can call it directly on a
+    // throwaway per-frame snapshot without any risk of recursing back
+    // into that dispatcher's own array-building logic. `suppressButtons`
+    // is set only by that dispatcher, for an intermediate frame of a
+    // fully-committed historical chain (see its own docs on why).
+    private renderCurrent(opts?: IRenderOpts, suppressButtons = false): APRenderRep {
         let altDisplay: string | undefined;
         if (opts !== undefined) {
             altDisplay = opts.altDisplay;
@@ -5956,7 +6039,7 @@ export class GnosticaGame extends GameBase {
         // Discard/Pass/Declare) as buttons - see getActionButtons()'s own
         // docs for why a button bar rather than inferring intent from
         // board clicks alone.
-        const actionButtons = this.getActionButtons();
+        const actionButtons = suppressButtons ? undefined : this.getActionButtons();
         if (actionButtons !== undefined) {
             areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
         }
@@ -5988,7 +6071,12 @@ export class GnosticaGame extends GameBase {
         };
 
         const annotations: NonNullable<APRenderRep["annotations"]> = [];
-        for (const r of this.results) {
+        // A 2+-step major-arcana chain wraps each step's own results into
+        // a _group entry (see applyMajorPower's own docs) - flatten one
+        // level so annotations still cover every step's own effect,
+        // rather than silently disappearing for any chained move.
+        const flatResults = this.results.flatMap(r => r.type === "_group" ? r.results : [r]);
+        for (const r of flatResults) {
             if (r.type === "place" && r.where !== undefined) {
                 const [x, y] = GnosticaBoard.algebraic2coords(r.where);
                 annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
@@ -6003,6 +6091,65 @@ export class GnosticaGame extends GameBase {
         }
 
         return rep;
+    }
+
+    // A throwaway GnosticaGame reflecting `frame`'s own board/hands/
+    // stashes/discardPile instead of live state - extends the existing
+    // cloneLive() pattern (built earlier for an unrelated reason) with
+    // field overrides instead of a straight live copy. The clone's own
+    // `frames` stays empty, so callers must call .renderCurrent()
+    // directly on it, not the public .render() - calling the latter
+    // would risk recursing back into array-building logic.
+    private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
+        // this.results holds one _group entry per step of the chain that
+        // produced these frames (see applyMajorPower's own docs) - pull
+        // just this step's own group by position, matching frogger.ts's
+        // identical frame[i]/results[i] pairing.
+        const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
+        const raw = this.state();
+        raw.stack = [{
+            ...this.moveState(),
+            board: frame.board,
+            hands: frame.hands,
+            stashes: frame.stashes,
+            discardPile: frame.discardPile,
+            _results: groups[stepIndex] !== undefined ? [groups[stepIndex]] : [],
+        }];
+        const snapshot = new GnosticaGame(JSON.stringify(raw, replacer));
+        if (this.liveMove !== undefined) {
+            // Still mid-build (the acting player is paging through their
+            // own not-yet-submitted chain) - reconstruct exactly what had
+            // been typed as of this step, so getActionButtons() on the
+            // snapshot offers the real choices available at that point,
+            // not the final/current ones. Legal despite liveMove being
+            // private: TypeScript scopes private access to the class, not
+            // the instance - the same trick validateMajorPower's own
+            // clone-and-replay logic already relies on.
+            snapshot.liveMove = { ...this.liveMove, stepSegments: this.liveMove.stepSegments.slice(0, stepIndex + 1) };
+        }
+        return snapshot;
+    }
+
+    // this.frames is only ever non-empty for a move that chained 2+
+    // major-arcana steps (see applyMajorPower's own docs) - every other
+    // move returns the single rep renderCurrent() always has, unchanged
+    // from before this feature existed.
+    public render(opts?: IRenderOpts): APRenderRep | APRenderRep[] {
+        if (this.frames.length === 0) {
+            return this.renderCurrent(opts);
+        }
+        // No live in-progress move left to reconstruct buttons from means
+        // this is a fully committed move being reviewed later (a reload,
+        // a spectator) - showing the final/next-turn button state on an
+        // intermediate historical frame would misleadingly imply you can
+        // still act from that point, so suppress buttons on those frames
+        // entirely instead. While mid-build, reconstructed per-frame
+        // buttons (renderFrameSnapshot's own liveMove override) are
+        // always used, so suppression never applies there.
+        const historical = this.liveMove === undefined;
+        const reps = this.frames.map((f, i) => this.renderFrameSnapshot(f, i).renderCurrent(opts, historical));
+        reps.push(this.renderCurrent(opts));
+        return reps;
     }
 
     // Every card whose identity is definitively known to whoever is

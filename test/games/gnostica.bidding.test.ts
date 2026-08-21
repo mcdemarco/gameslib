@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
 import "mocha";
 import { expect } from "chai";
-import { AreaButtonBar } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaButtonBar } from "@abstractplay/renderer/build/schemas/schema";
 import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { majorCards, minorCards } from "../../src/common/tarot";
@@ -480,13 +480,13 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
     it("render() offers a single bold 'Bid'/'Redraw' button per phase, and the pool area only appears once populated", () => {
         addResource("en");
         const bidding = new GnosticaGame(2, ["bidding"]);
-        const biddingRep = bidding.render();
+        const biddingRep = bidding.render() as APRenderRep;
         const biddingBar = biddingRep.areas?.find((a): a is AreaButtonBar => a.type === "buttonBar");
         expect(biddingBar?.buttons).to.deep.equal([{ label: "Bid", value: "bid", attributes: [{ name: "font-weight", value: "bold" }] }]);
         expect(biddingRep.areas?.some(a => a.type === "pieces" && "label" in a && a.label === "Revealed bid cards, available to redraw")).to.be.false;
 
         const redraw = setupRedraw();
-        const redrawRep = redraw.render();
+        const redrawRep = redraw.render() as APRenderRep;
         const redrawBar = redrawRep.areas?.find((a): a is AreaButtonBar => a.type === "buttonBar");
         expect(redrawBar?.buttons).to.deep.equal([{ label: "Redraw", value: "redraw", attributes: [{ name: "font-weight", value: "bold" }] }]);
         const poolArea = redrawRep.areas?.find(a => a.type === "pieces" && "label" in a && a.label === "Revealed bid cards, available to redraw");
