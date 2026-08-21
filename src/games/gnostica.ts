@@ -2,7 +2,7 @@ import { GameBase, IAPGameState, IClickResult, IIndividualState, IRenderOpts, IS
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
-import { Direction, reviver, shuffle, UserFacingError } from "../common";
+import { Direction, replacer, reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
@@ -604,6 +604,23 @@ export class GnosticaGame extends GameBase {
 
     public clone(): GnosticaGame {
         return new GnosticaGame(this.serialize());
+    }
+
+    // Unlike clone() (via serialize(), which reads only this.stack - the
+    // last REAL commit), this reflects this.board/this.hands/etc. exactly
+    // as they currently stand live - including a partial preview's own
+    // in-progress board mutation, which never touches this.stack at all
+    // (see move()'s own docs on why). validateMajorPower's own use of
+    // this needs to see exactly what handleClick's live preview already
+    // shows mid-chain, not just the last thing actually submitted - a
+    // stale clone would silently "forget" an earlier step's own already-
+    // rendered effect. A single-entry stack is enough (nothing here ever
+    // reads history), and CellContents/Piece still round-trip correctly
+    // through moveState()'s own real, deep-cloned board/hands.
+    private cloneLive(): GnosticaGame {
+        const raw = this.state();
+        raw.stack = [this.moveState()];
+        return new GnosticaGame(JSON.stringify(raw, replacer));
     }
 
     public validateMove(m: string): IValidationResult {
@@ -3861,16 +3878,39 @@ export class GnosticaGame extends GameBase {
         if (stepSegments.length > def.powers.length) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
         }
+        // A later step naming the exact minion an earlier step in this same
+        // chain just created or moved (see IMinionRef's own docs on
+        // `.piece`) needs that minion to genuinely exist somewhere -
+        // validation itself never mutates `this`, so checkX/getPiece in
+        // powers.ts (see task #45) has nowhere real to read it from.
+        // Mirrors frogger.ts's own validateMove() (clone once, apply each
+        // confirmed-valid step for real on it as the loop goes, so a
+        // later step's own validate call reads genuine board state) - but
+        // frogger's own chains are routinely 3 submoves long, while the
+        // overwhelming majority of Gnostica activations are 0 or 1 step
+        // (every power is optional, and declining it is the common case -
+        // see the "power-still-optional" messaging tests), so the clone
+        // is deferred until a second step actually needs one rather than
+        // paid on every single-step use/play. Uses cloneLive(), not
+        // clone() - a click-driven preview may have already live-mutated
+        // this.board for an earlier step (a partial move() call never
+        // touches this.stack - see cloneLive's own docs), and a
+        // stack-only clone would silently discard that.
+        let clone: GnosticaGame | undefined;
         let minions = [...eligible];
         for (let i = 0; i < stepSegments.length; i++) {
             const step = def.powers[i];
             const tokens = stepSegments[i];
-            const stepResult = this.validatePowerStep(step, minions, tokens, def, i, stepSegments.length);
+            const stepResult = (clone ?? this).validatePowerStep(step, minions, tokens, def, i, stepSegments.length);
             if (stepResult.failed) {
                 return stepResult.result;
             }
             if (stepResult.outcome?.newMinion !== undefined) {
                 minions = [...minions, stepResult.outcome.newMinion];
+            }
+            if (i < stepSegments.length - 1) {
+                clone ??= this.cloneLive();
+                clone.applyPowerStep(step, minions, tokens, def, i, stepSegments.length);
             }
         }
         return undefined;

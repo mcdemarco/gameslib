@@ -910,6 +910,30 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(dest.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "U" }); // new piece from the Cups step
     });
 
+    // Regression test for task #45: validateMove() itself never mutates
+    // the board, so a later step naming the exact minion an earlier step
+    // in this SAME chain just moved/created had nowhere real to read it
+    // from (checkX/getPiece in powers.ts threw NO_TERRITORY_TRACKED) -
+    // the untrusted `move()` path (which calls validateMove() first)
+    // crashed instead of validating or applying. The Lovers test above
+    // only ever exercises this with {trusted: true}, which skips
+    // validateMove() (and therefore this bug) entirely.
+    it("Chariot (move, then move): an untrusted move validates and applies when step 2 acts through step 1's own relocated piece", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(7)); // The Chariot: move, then move
+        forceCardAt(g, 3, 0, () => aceOfDiscs()); // keeps o0 (2,0) a genuine wasteland, not void
+        g.move("place m0 E", { trusted: true }); // player 1, pointing east
+        g.move("place l0", { trusted: true }); // player 2
+        const move = `use ${major(7).uid}, m0.1 piece m0.1 1 E, n0.1 piece n0.1 1 E`;
+        expect(g.validateMove(move).valid).to.be.true;
+        expect(() => g.move(move, { trusted: false })).to.not.throw();
+        const dest = g.board.get(2, 0)!; // o0
+        expect(dest.pieces.length).eq(1);
+        expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
+        expect(g.board.has(1, 0)).eq(false); // the waypoint at n0 is left empty
+    });
+
     it("Strength: a single grow step may skip straight from spot to major arcana (skipLadder)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(8)); // Strength
