@@ -298,7 +298,6 @@ interface IMoveState extends IIndividualState {
     // Every other variant/game stays in "main" for its entire lifetime, so
     // none of the fields below are ever touched outside that variant.
     phase: "bidding" | "redraw" | "main";
-    bidRound: number;
     // One slot per player (index 0 = player 1): the 1-based position in
     // THEIR OWN hand they've committed as this round's bid, or null if
     // they haven't bid yet this round. null, not undefined - state gets
@@ -313,9 +312,11 @@ interface IMoveState extends IIndividualState {
     bidPositions: (number | null)[];
     // Every card actually revealed by a bid, across every round played
     // (tied rounds and the final decisive one alike) - the shared pool
-    // every player draws back up to 6 from during "redraw".
+    // every player draws back up to 6 from during "redraw". bidRound
+    // (how many tied rounds have happened so far, 0-indexed) and
+    // bidWinner/redrawOrder are DERIVED from this plus phase and
+    // turnOrder rather than separately stored - see their own getters.
     biddingPool: string[];
-    bidWinner: playerid | undefined;
     // "Tournament rules": the order of play for the rest of the game is
     // exactly the rank order of the cards everyone bid (highest first;
     // majors always outrank minors) - see resolveBidRound's own docs.
@@ -323,10 +324,14 @@ interface IMoveState extends IIndividualState {
     // opening bidding round itself (before any rank is known) still
     // advances player-to-player the ordinary way via nextPlayer().
     turnOrder: playerid[];
-    // The reverse of turnOrder (worst bidder redraws first, winner last)
-    // and a cursor into it - computed once the bid resolves, consumed one
-    // player at a time during "redraw".
-    redrawOrder: playerid[];
+    // How many players have already redrawn this round. NOT derivable
+    // from hand length the way bidRound/bidWinner/redrawOrder are: a
+    // PARTIAL (preview) redraw deliberately mutates the acting player's
+    // live hand already (see cmdRedraw's own docs - it mirrors
+    // cmdDiscard's precedent of showing the pick accumulating), so a
+    // hand-length-based getter would incorrectly count an in-progress
+    // preview as an already-committed redraw. Only ever incremented on a
+    // REAL (non-partial) commit.
     redrawPos: number;
 }
 
@@ -390,13 +395,39 @@ export class GnosticaGame extends GameBase {
     // The "bidding" variant's own state - see IMoveState's own docs on
     // each field.
     public phase!: "bidding" | "redraw" | "main";
-    public bidRound = 0;
     public bidPositions: (number | null)[] = [];
     public biddingPool: string[] = [];
-    public bidWinner: playerid | undefined;
     public turnOrder: playerid[] = [];
-    public redrawOrder: playerid[] = [];
     public redrawPos = 0;
+
+    // How many tied rounds have happened so far (0-indexed) - biddingPool
+    // grows by exactly `numplayers` cards every time a round resolves,
+    // tied or not, so this is exact for as long as anyone's actually
+    // looking at it (mid-"bidding"). It stops being meaningful the
+    // instant a round resolves WITH a winner (no tie => no increment in
+    // the old field-based version, but the pool still grew) - that's
+    // also exactly the instant phase leaves "bidding", so nothing is
+    // ever actually reading a stale value.
+    public get bidRound(): number {
+        return Math.floor(this.biddingPool.length / this.numplayers);
+    }
+
+    // turnOrder[0] is the bid winner by construction (see its own docs -
+    // it's sorted by rank, and the winner has the highest rank). Only
+    // meaningful once a bid has actually resolved (phase left "bidding")
+    // - before that, turnOrder is still its initial [1,2,...,N], so
+    // turnOrder[0] would misleadingly read as "player 1 already won".
+    public get bidWinner(): playerid | undefined {
+        return this.phase === "bidding" ? undefined : this.turnOrder[0];
+    }
+
+    // Exact reverse of turnOrder (see its own docs) - worst bidder
+    // redraws first, the winner last. Only ever read during "redraw", by
+    // which point turnOrder is already finalized.
+    public get redrawOrder(): playerid[] {
+        return [...this.turnOrder].reverse();
+    }
+
     // Transient click-UI hint, not part of persisted game state - see
     // move()'s own docs for exactly what this does and does not track.
     private liveMove: string | undefined;
@@ -477,12 +508,9 @@ export class GnosticaGame extends GameBase {
                 eliminated: [],
                 lastTurnAnnouncedBy: undefined,
                 phase: this.variants.includes("bidding") ? "bidding" : "main",
-                bidRound: 0,
                 bidPositions: new Array(this.numplayers).fill(null),
                 biddingPool: [],
-                bidWinner: undefined,
                 turnOrder: [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid),
-                redrawOrder: [],
                 redrawPos: 0,
                 buffer: undefined
             };
@@ -532,12 +560,9 @@ export class GnosticaGame extends GameBase {
         this.lastTurnAnnouncedBy = state.lastTurnAnnouncedBy;
         this.lastmove = state.lastmove;
         this.phase = state.phase;
-        this.bidRound = state.bidRound;
         this.bidPositions = [...state.bidPositions];
         this.biddingPool = [...state.biddingPool];
-        this.bidWinner = state.bidWinner;
         this.turnOrder = [...state.turnOrder];
-        this.redrawOrder = [...state.redrawOrder];
         this.redrawPos = state.redrawPos;
         return this;
     }
@@ -558,12 +583,9 @@ export class GnosticaGame extends GameBase {
             lastTurnAnnouncedBy: this.lastTurnAnnouncedBy,
             lastmove: this.lastmove,
             phase: this.phase,
-            bidRound: this.bidRound,
             bidPositions: [...this.bidPositions],
             biddingPool: [...this.biddingPool],
-            bidWinner: this.bidWinner,
             turnOrder: [...this.turnOrder],
-            redrawOrder: [...this.redrawOrder],
             redrawPos: this.redrawPos,
         };
     }
@@ -3102,8 +3124,7 @@ export class GnosticaGame extends GameBase {
         };
 
         if (winners.length === 1) {
-            this.bidWinner = winners[0];
-            setTurnOrder();
+            setTurnOrder(); // turnOrder[0] === winners[0] by construction - see bidWinner's own getter
             this.beginRedraw();
             return;
         }
@@ -3117,10 +3138,12 @@ export class GnosticaGame extends GameBase {
         // `winners` is built by scanning players 1..numplayers in order
         // (see the loop above), so its first entry is simply the
         // lowest-numbered tied player, taken deterministically rather
-        // than broken at random.
-        this.bidRound += 1;
+        // than broken at random - setTurnOrder()'s own player-id tiebreak
+        // agrees, so turnOrder[0] still matches winners[0] here too.
+        // bidRound's own getter already reflects this round's tie -
+        // biddingPool just grew by numplayers above, no separate
+        // increment needed.
         if (this.hands.some(h => h.length === 0)) {
-            this.bidWinner = winners[0];
             setTurnOrder();
             this.beginRedraw();
             return;
@@ -3135,12 +3158,11 @@ export class GnosticaGame extends GameBase {
     // itself (the rank order of what everyone bid - see its own docs),
     // and "counterclockwise" as its exact reverse, ending at the winner.
     private beginRedraw(): void {
-        // Exact reverse of turnOrder (see its own docs) - worst bidder
-        // redraws first, the winner (turnOrder[0] by construction) last.
-        const order = [...this.turnOrder].reverse();
-        this.redrawOrder = order;
-        this.redrawPos = 0;
+        // redrawOrder's own getter already computes this same reversal -
+        // this local is just for the numplayers !== 2 branch below.
+        const order = this.redrawOrder;
         this.phase = "redraw";
+        this.redrawPos = 0;
         if (this.numplayers === 2) {
             // Never assign currplayer to an arbitrary value here (reduces
             // exposure to any risk around directly reassigning it).
@@ -3194,8 +3216,8 @@ export class GnosticaGame extends GameBase {
         }
         this.cardsDrawn[this.currplayer - 1] = args.length;
         this.results.push({ type: "deckDraw", what: args.join(","), from: "pool" });
-
         this.redrawPos += 1;
+
         if (this.redrawPos < this.numplayers) {
             if (this.numplayers === 2) {
                 // Ordinary rotation, not a direct jump (see beginRedraw's
