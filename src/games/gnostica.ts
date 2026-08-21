@@ -324,15 +324,6 @@ interface IMoveState extends IIndividualState {
     // opening bidding round itself (before any rank is known) still
     // advances player-to-player the ordinary way via nextPlayer().
     turnOrder: playerid[];
-    // How many players have already redrawn this round. NOT derivable
-    // from hand length the way bidRound/bidWinner/redrawOrder are: a
-    // PARTIAL (preview) redraw deliberately mutates the acting player's
-    // live hand already (see cmdRedraw's own docs - it mirrors
-    // cmdDiscard's precedent of showing the pick accumulating), so a
-    // hand-length-based getter would incorrectly count an in-progress
-    // preview as an already-committed redraw. Only ever incremented on a
-    // REAL (non-partial) commit.
-    redrawPos: number;
 }
 
 export interface IGnosticaState extends IAPGameState {
@@ -398,7 +389,6 @@ export class GnosticaGame extends GameBase {
     public bidPositions: (number | null)[] = [];
     public biddingPool: string[] = [];
     public turnOrder: playerid[] = [];
-    public redrawPos = 0;
 
     // How many tied rounds have happened so far (0-indexed) - biddingPool
     // grows by exactly `numplayers` cards every time a round resolves,
@@ -426,6 +416,20 @@ export class GnosticaGame extends GameBase {
     // which point turnOrder is already finalized.
     public get redrawOrder(): playerid[] {
         return [...this.turnOrder].reverse();
+    }
+
+    // How many players have already redrawn this round. Deliberately
+    // reads the last REAL commit's hands (the top of this.stack), never
+    // the LIVE this.hands - a partial (preview) redraw mutates this.hands
+    // immediately (see cmdRedraw's own docs on why), but move() only ever
+    // pushes onto this.stack for a REAL commit (see its own tail), so the
+    // stack's top stays exactly what it was until the next one actually
+    // happens - immune to any preview in between. Every hand sits at
+    // exactly 5 cards (post-bid, pre-redraw) or exactly 6 (post-redraw)
+    // during this phase - validateRedraw enforces drawing to EXACTLY 6,
+    // never more or less - so counting full hands is exact.
+    public get redrawPos(): number {
+        return this.stack[this.stack.length - 1].hands.filter(h => h.length === 6).length;
     }
 
     // Transient click-UI hint, not part of persisted game state - see
@@ -511,7 +515,6 @@ export class GnosticaGame extends GameBase {
                 bidPositions: new Array(this.numplayers).fill(null),
                 biddingPool: [],
                 turnOrder: [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid),
-                redrawPos: 0,
                 buffer: undefined
             };
             this.stack = [fresh];
@@ -563,7 +566,6 @@ export class GnosticaGame extends GameBase {
         this.bidPositions = [...state.bidPositions];
         this.biddingPool = [...state.biddingPool];
         this.turnOrder = [...state.turnOrder];
-        this.redrawPos = state.redrawPos;
         return this;
     }
 
@@ -586,7 +588,6 @@ export class GnosticaGame extends GameBase {
             bidPositions: [...this.bidPositions],
             biddingPool: [...this.biddingPool],
             turnOrder: [...this.turnOrder],
-            redrawPos: this.redrawPos,
         };
     }
 
@@ -3162,7 +3163,6 @@ export class GnosticaGame extends GameBase {
         // this local is just for the numplayers !== 2 branch below.
         const order = this.redrawOrder;
         this.phase = "redraw";
-        this.redrawPos = 0;
         if (this.numplayers === 2) {
             // Never assign currplayer to an arbitrary value here (reduces
             // exposure to any risk around directly reassigning it).
@@ -3198,9 +3198,9 @@ export class GnosticaGame extends GameBase {
     // `partial` mirrors cmdDiscard's own split exactly: moving the picked
     // cards from the (fully public) pool into the acting player's hand is
     // safe to do even on a disposable preview instance, so the render can
-    // show the pick accumulating - but advancing redrawPos/currplayer/
-    // phase is the consequential part move()'s live-preview calls must
-    // never trigger for real.
+    // show the pick accumulating - but advancing currplayer/phase is the
+    // consequential part move()'s live-preview calls must never trigger
+    // for real.
     private cmdRedraw(args: string[], partial = false): void {
         const failure = this.validateRedraw(args);
         if (failure !== undefined) {
@@ -3216,9 +3216,13 @@ export class GnosticaGame extends GameBase {
         }
         this.cardsDrawn[this.currplayer - 1] = args.length;
         this.results.push({ type: "deckDraw", what: args.join(","), from: "pool" });
-        this.redrawPos += 1;
 
-        if (this.redrawPos < this.numplayers) {
+        // redrawPos's own getter reads the last REAL commit (this.stack's
+        // top), which doesn't include this move yet - saveState() only
+        // pushes it once move() has fully returned (see move()'s own
+        // tail) - so this player's own just-applied redraw needs +1 here.
+        const donePos = this.redrawPos + 1;
+        if (donePos < this.numplayers) {
             if (this.numplayers === 2) {
                 // Ordinary rotation, not a direct jump (see beginRedraw's
                 // own docs on why that matters) - with exactly two
@@ -3228,7 +3232,7 @@ export class GnosticaGame extends GameBase {
                 // could for 3+ players.
                 this.nextPlayer();
             } else {
-                this.currplayer = this.redrawOrder[this.redrawPos];
+                this.currplayer = this.redrawOrder[donePos];
             }
         } else {
             // Everyone has redrawn - the pool is now exactly empty (see
