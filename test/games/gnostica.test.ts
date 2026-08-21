@@ -1149,6 +1149,40 @@ describe("Gnostica: render", () => {
     });
 });
 
+// GnosticaBoard.coords2algebraic/algebraic2coords' own round-trip math is
+// covered directly in gnostica.board.test.ts - this instead exercises the
+// full pipeline (parseMove/validateMove/move/render) at |x| > 12, where the
+// notation itself switches from one letter to two, using cells built with
+// coords2algebraic rather than hardcoded strings so it stays correct if the
+// notation ever changes.
+describe("Gnostica: double-letter coordinates (full move pipeline)", () => {
+    it("places, activates a suit power, and renders correctly entirely past the single-letter boundary", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        const originCell = GnosticaBoard.coords2algebraic(13, 0); // first double-letter column
+        const neighbourCell = GnosticaBoard.coords2algebraic(14, 0);
+        expect(originCell).eq("aa0"); // sanity check on the notation itself
+        expect(neighbourCell).eq("ab0");
+        forceCardAt(g, 13, 0, aceOfCups);
+        expect(g.board.classify(14, 0)).eq("wasteland");
+
+        expect(g.validateMove(`place ${originCell} E`).valid).to.be.true;
+        g.move(`place ${originCell} E`, { trusted: true }); // player 1, pointing at the neighbour
+        g.move(`place ${neighbourCell}`, { trusted: true }); // player 2
+
+        const useMove = `use ${aceOfCups().uid}, ${originCell}.1 own ${neighbourCell} U`;
+        expect(g.validateMove(useMove).valid).to.be.true;
+        g.move(useMove, { trusted: true });
+        const target = g.board.get(14, 0)!;
+        expect(target.pieces.length).eq(2); // player 2's placed piece, plus player 1's new one
+        expect(target.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "U" });
+
+        const rep = g.render() as { board: { columnLabels: string[] }; pieces: string };
+        expect(rep.board.columnLabels).to.include.members(["aa", "ab"]);
+        expect(rep.pieces).to.be.a("string"); // rendered without throwing
+    });
+});
+
 describe("Gnostica: handleClick", () => {
     // handleClick's row/col are relative to render()'s current window
     // (padded by 1 cell beyond the board's own bounding box) - this mirrors
