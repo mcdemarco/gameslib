@@ -2101,7 +2101,15 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 
     it("Rods (tile): mode button defaults to pushing the pointed-at territory 1 space", () => {
         const g = new GnosticaGame(2);
+        // Fully deterministic (see clearBoard's own docs): the random
+        // initial deal could otherwise occasionally put the Ace of Rods
+        // itself at n0, which forceCardAt's own duplicate-clearing would
+        // then wipe out from there, leaving no territory to push - see
+        // "Rods (tile): pushes the pointed-at territory further away"'s
+        // own identical fix above.
+        clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfRods());
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place l0", { trusted: true }); // player 2
         const seed = g.handleClick("", -1, -1, "_btn_use");
@@ -2146,6 +2154,60 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(cardClick.move).eq(`use ${aceOfDiscs().uid}, m0.1 tile n0 ${royaltyUid}`);
         g.move(cardClick.move, { trusted: true });
         expect(g.board.get(1, 0)!.card?.uid).eq(royaltyUid);
+    });
+
+    it("Cups (new), Wheel of Fortune: a dedicated button supplies the random draw - no hand card needed, no other card offers it", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(10)); // Wheel of Fortune
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place l0", { trusted: true }); // player 2
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_new");
+        expect(modeClick.move).eq(`use ${major(10).uid}, m0.1 new n0`);
+        g.move(modeClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        expect(bar?.buttons?.some(b => b.value === "random")).eq(true);
+
+        const randomClick = g.handleClick(modeClick.move, -1, -1, "_btn_random");
+        expect(randomClick.move).eq(`use ${major(10).uid}, m0.1 new n0 random`);
+        expect(randomClick.valid).to.be.true;
+        // Fully deterministic (see clearBoard's own docs on the same
+        // principle) - and deliberately a non-spot (major arcana) card,
+        // to prove the random draw has no point-value restriction at all
+        // (unlike the ordinary hand-card path for this same mode).
+        const majorUid = major(3).uid; // The Empress, worth 3
+        g.drawPile = [majorUid, ...g.drawPile.filter(uid => uid !== majorUid)];
+        const before = g.drawPile.length;
+        g.move(randomClick.move, { trusted: true });
+        expect(g.board.get(1, 0)!.card?.uid).eq(majorUid);
+        expect(g.drawPile.length).to.be.lessThan(before);
+
+        // A regular Ace of Cups own "new" step never offers this button -
+        // allowRandomDraw is Wheel of Fortune's own opt, not universal to
+        // "new" mode.
+        const g2 = new GnosticaGame(2);
+        clearBoard(g2);
+        forceCardAt(g2, 0, 0, () => aceOfCups());
+        g2.move("place m0 E", { trusted: true });
+        g2.move("place l0", { trusted: true });
+        const seed2 = g2.handleClick("", -1, -1, "_btn_use");
+        const [row2, col2] = rowColFor(g2, 0, 0);
+        const cellClick2 = g2.handleClick(seed2.move, row2, col2);
+        const modeClick2 = g2.handleClick(cellClick2.move, -1, -1, "_btn_mode_C_new");
+        g2.move(modeClick2.move, { partial: true });
+        const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
+        expect(bar2?.buttons?.some(b => b.value === "random")).eq(false);
+
+        // And typing "random" by hand for that same non-Wheel-of-Fortune
+        // card is rejected outright, not silently honored - the gate is
+        // opts.allowRandomDraw (derived from the card's own step
+        // definition), not the literal token.
+        expect(g2.validateMove(`use ${aceOfCups().uid}, m0.1 new n0 random`).valid).to.be.false;
     });
 
     it("Swords (piece): with no facing piece to attack (minion is \"up\"), falls back to the minion itself", () => {

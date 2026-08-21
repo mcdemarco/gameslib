@@ -155,6 +155,22 @@ describe("Gnostica powers: Cups (create)", () => {
         expect(b.get(1, 0)!.card?.uid).eq("3C");
         expect(ctx.discardPile).to.deep.equal([]);
     });
+
+    it("Wheel of Fortune's random-draw mode has no point-value restriction, unlike the ordinary hand-card path", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        const majorUid = card("03").uid; // The Empress, worth 3 - not a spot card
+        const ctx = makeCtx(b, { drawPile: [majorUid] });
+        expect(() => createTerritory(ctx, 0, 0, 0, 1, 0, undefined, { allowRandomDraw: true })).to.not.throw();
+        expect(b.get(1, 0)!.card?.uid).eq(majorUid);
+
+        // The ordinary hand-card path is unaffected by this change - still
+        // restricted to spot cards.
+        const b2 = new GnosticaBoard();
+        b2.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
+        const ctx2 = makeCtx(b2, { hand: [majorUid] });
+        expect(() => createTerritory(ctx2, 0, 0, 0, 1, 0, majorUid)).to.throw();
+    });
 });
 
 describe("Gnostica powers: Rods (move)", () => {
