@@ -3,6 +3,7 @@ import "mocha";
 import { expect } from "chai";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/piece";
+import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
 const major = (seq: number) => majorCards.find(c => c.seq === seq)!;
@@ -231,5 +232,26 @@ describe("Gnostica: randomMove()", () => {
             const move = g.randomMove();
             expect(move.includes("(last)"), `should not declare while ineligible: ${move}`).to.be.false;
         }
+    });
+
+    // A facing only matters for what it points at - on a wasteland cell
+    // with just one real territory neighbour, pointing at any of the
+    // OTHER three cardinal directions wastes the choice on more void.
+    it("weightedRandomOrientation favors U or a direction pointing at real territory over one pointing into more void", () => {
+        const g = new GnosticaGame(2);
+        // Far from the constructor's own random 3x3 deal, so (10,10)'s
+        // only real neighbour is the one forced in deliberately - no
+        // existing CellContents way out here, so unlike forceCardAt this
+        // creates one directly.
+        g.board.store.set(11, 10, new CellContents(minor("AC"))); // east of (10,10)
+        expect(g.board.classify(10, 10)).eq("wasteland");
+        const pick = (g as unknown as { weightedRandomOrientation: (x: number, y: number) => string }).weightedRandomOrientation.bind(g);
+        const counts: Record<string, number> = { N: 0, S: 0, E: 0, W: 0, U: 0 };
+        for (let i = 0; i < 400; i++) {
+            counts[pick(10, 10)]++;
+        }
+        const useful = counts.U + counts.E; // U always useful; E points at the one real territory
+        const useless = counts.N + counts.S + counts.W; // point at more void
+        expect(useful, `useful=${useful} useless=${useless}`).to.be.greaterThan(useless);
     });
 });
