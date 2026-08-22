@@ -26,3 +26,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #57 - added Wheel of Fortune's Random Card click support, plus two related bugs fixed along the way. @done(26-08-21)
 ✔ randomMove: orientation on a wasteland cell now favors useful facings over ones pointing into more void. @done(26-08-22)
 ✔ orient: a no-op reorientation (same facing as current) is now rejected (valid but complete:-1, ORIENT_NO_OP), and randomOrientMove() never generates one. @done(26-08-22)
+✔ minion-picker buttons: textFormat() was parsing orientation back out of the ref string, which omits it when size alone disambiguates - showed "pointing undefined"; now reads the piece's real orientation directly. @done(26-08-22)
