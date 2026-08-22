@@ -2991,20 +2991,34 @@ export class GnosticaGame extends GameBase {
                 // once a piece is already picked).
                 const [prevRef] = args;
                 let dir: Orientation | undefined;
+                let prevLoc: { x: number; y: number; index: number } | undefined;
                 if (prevRef !== undefined) {
-                    const loc = this.resolvePieceRefOrThrow(prevRef);
-                    dir = this.orientationTowardClick(loc.x, loc.y, x, y);
+                    prevLoc = this.resolvePieceRefOrThrow(prevRef);
+                    dir = this.orientationTowardClick(prevLoc.x, prevLoc.y, x, y);
                 }
-                if (prevRef !== undefined && dir !== undefined) {
+                let targetPiece: Piece;
+                let newOrientation: Orientation;
+                if (prevLoc !== undefined && dir !== undefined) {
+                    targetPiece = this.board.get(prevLoc.x, prevLoc.y)!.pieces[prevLoc.index];
                     newmove = `orient ${prevRef} ${dir}`;
+                    newOrientation = dir;
                 } else {
                     const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
                     if (myPieceIdx === -1) {
                         return { move, valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE", ref: cell }) };
                     }
+                    targetPiece = this.board.get(x, y)!.pieces[myPieceIdx];
                     newmove = `orient ${this.pieceRefStr(x, y, myPieceIdx)} U`;
+                    newOrientation = "U";
                 }
-                resultMessageKey = "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
+                // A click that would leave the piece facing exactly where
+                // it already does is a no-op (see validateOrient's own
+                // ORIENT_NO_OP docs) - let that message through unmodified
+                // rather than stomping it with the generic "still
+                // adjustable" one, which would otherwise always win here.
+                resultMessageKey = newOrientation === targetPiece.orientation
+                    ? undefined
+                    : "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
             } else if (head === "use" || head === "play") {
                 // Once a minor-arcana power step's mode is already chosen,
                 // a board click is target/arg cycling for that step first -
@@ -3632,8 +3646,27 @@ export class GnosticaGame extends GameBase {
         if (piece.owner !== this.currplayer) {
             return this.invalid("apgames:validation.gnostica.NOT_YOUR_MINION");
         }
-        if (this.tryParseOrientation(orientationStr) === undefined) {
+        const orientation = this.tryParseOrientation(orientationStr);
+        if (orientation === undefined) {
             return this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr });
+        }
+        // Same "meaningful action" principle as #49: a no-op reorientation
+        // (the piece already faces this way) achieves nothing and should
+        // never be the player's actual final move - but unlike Hierophant/
+        // tradeHands' own self-target rejection, this can't be a hard
+        // invalid() here, since selecting a piece to reorient at all
+        // necessarily seeds ITS OWN current facing as the click flow's
+        // starting point ("clicking the same cell re-affirms up" is
+        // deliberate, existing UX - see the click-to-orient tests - and
+        // both real clicks and the playground's own {partial:true}
+        // preview sync go through this same check, not just a genuine
+        // final submission). Same "still building, not a real answer yet"
+        // shape as #49's POWER_STEP_REQUIRED instead: valid, but
+        // complete:-1, so randomMove()/an actual auto-submit can never
+        // land on this as the FINAL move, while normal click navigation
+        // still works.
+        if (orientation === piece.orientation) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
         return undefined;
     }
@@ -5322,11 +5355,19 @@ export class GnosticaGame extends GameBase {
     // entirely. A piece on its own territory cell is left uniformly
     // random - its facing is already meaningful there regardless of
     // direction, so there's no "wasted" option to steer away from.
-    private weightedRandomOrientation(x: number, y: number): Orientation {
+    // `exclude` lets randomOrientMove() rule out the piece's own CURRENT
+    // facing - reorienting a piece to the direction it's already facing
+    // is a no-op (see validateOrient's own ORIENT_NO_OP docs), so a
+    // legitimate reorientation must always end up genuinely different.
+    // randomPlaceMove() never passes this - a fresh placement has no
+    // "current" facing to avoid, and "U" is a perfectly meaningful choice
+    // there.
+    private weightedRandomOrientation(x: number, y: number, exclude?: Orientation): Orientation {
+        const candidates = exclude === undefined ? allOrientations : allOrientations.filter(o => o !== exclude);
         if (this.board.classify(x, y) !== "wasteland") {
-            return allOrientations[Math.floor(Math.random() * allOrientations.length)];
+            return candidates[Math.floor(Math.random() * candidates.length)];
         }
-        return this.weightedPick(allOrientations, (o) => {
+        return this.weightedPick(candidates, (o) => {
             if (o === "U") {
                 return 2;
             }
@@ -5415,7 +5456,8 @@ export class GnosticaGame extends GameBase {
         }
         const { x, y, index } = ownPieces[Math.floor(Math.random() * ownPieces.length)];
         const ref = this.pieceRefStr(x, y, index);
-        const orientation = this.weightedRandomOrientation(x, y);
+        const current = this.board.get(x, y)!.pieces[index].orientation;
+        const orientation = this.weightedRandomOrientation(x, y, current);
         return `orient ${ref} ${orientation}`;
     }
 
