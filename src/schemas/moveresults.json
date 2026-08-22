@@ -446,6 +446,9 @@
                 },
                 "where": {
                     "type": "string"
+                },
+                "who": {
+                    "type": "number"
                 }
             },
             "required": ["type", "what", "into"],
@@ -548,6 +551,9 @@
                 },
                 "where": {
                     "type": "string"
+                },
+                "who": {
+                    "type": "number"
                 }
             },
             "required": ["type"],
