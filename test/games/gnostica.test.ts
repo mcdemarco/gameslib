@@ -3179,6 +3179,16 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.currplayer).eq(2);
     });
 
+    it("tradeHands: forbids targeting one of the acting player's own pieces - a no-op dressed up as a step", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(11)); // Justice
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")]; // own piece B, also player 1
+        const result = g.validateMove(`use ${major(11).uid}, m0.1 n0.1`);
+        expect(result.valid).to.be.false;
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
+    });
+
     it("orientAny (Devil): target pick auto-seeds a default orientation; a further click near the TARGET adjusts it", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(15)); // The Devil
@@ -3217,6 +3227,16 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(step2.valid).to.be.true;
         g.move(step2.move, { trusted: true });
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
+    });
+
+    it("hierophantReplace: forbids targeting one of the acting player's own pieces - a no-op dressed up as a step", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(5)); // The Hierophant
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")]; // own piece B, also player 1
+        const result = g.validateMove(`use ${major(5).uid}, m0.1 n0.1 U`);
+        expect(result.valid).to.be.false;
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.HIEROPHANT_MUST_TARGET_ENEMY"));
     });
 
     it("magicianChoice: picking a suit letter via button, then that suit's own mode buttons take over unmodified", () => {
@@ -3351,12 +3371,19 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(step1.move).eq(`use ${major(12).uid}, m0.1 tile 1`); // pushes n0's territory east; A never moves
         // m0 is BOTH step 1's own "cycle distance" click target AND
         // tradeHands' own "self" target - starting step 2 wins (see
-        // handleClickCore's own docs on this priority).
+        // handleClickCore's own docs on this priority). Self-targeting
+        // tradeHands is itself forbidden (a no-op dressed up as a real
+        // step - see checkTradeHands's own docs), so this proves routing
+        // picked step 2 without also asserting the resulting move is
+        // legal - it isn't, and correctly so.
         const [rowM, colM] = rowColFor(g, 0, 0);
         const step2 = g.handleClick(step1.move, rowM, colM);
         expect(step2.move).eq(`use ${major(12).uid}, m0.1 tile 1/m0.1 m0.1`);
-        expect(step2.valid).to.be.true;
-        g.move(step2.move, { trusted: true });
+        expect(step2.valid).to.be.false;
+        expect(step2.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
+        // Declining tradeHands (the chain's own tail) stays legal, so
+        // step 1's own push still completes correctly on its own.
+        g.move(step1.move, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
         expect(g.currplayer).eq(2);
@@ -3398,6 +3425,35 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
 
 // #47: chatLog() naming the OTHER player involved in a power, not just the
 // acting player - see gnostica.ts's own otherPlayerName() docs.
+describe("Gnostica: discard/draw chat messages", () => {
+    before(() => {
+        addResource("en");
+    });
+
+    it("omits the discard line entirely when nothing was discarded, rather than 'X discarded .'", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // discards nothing, draws back up to 6
+        const log = g.chatLog(["Alice", "Bob"]);
+        const lastNode = log[log.length - 1];
+        expect(lastNode.some(l => l.includes("discarded"))).eq(false);
+        expect(lastNode.some(l => l.includes("drew"))).eq(true);
+    });
+
+    it("explicitly says '0' when drawing nothing, rather than a bare 'X drew'", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.hands[0] = [card("AC").uid, card("2C").uid, card("3C").uid, card("4C").uid, card("5C").uid, card("6C").uid]; // already at max
+        g.move("discard", { trusted: true }); // discards nothing, hand already full - draws 0
+        const log = g.chatLog(["Alice", "Bob"]);
+        const lastNode = log[log.length - 1];
+        const line = lastNode.find(l => l.includes("drew"));
+        expect(line).eq(i18next.t("apresults:DECKDRAW.gnostica_deck", { player: "Alice", count: 0 }));
+    });
+});
+
 describe("Gnostica: chatLog() other-player naming", () => {
     before(() => {
         addResource("en");
@@ -3423,7 +3479,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.move(`use ${aceOfSwords().uid}, m0.1 piece n0.1 1`, { trusted: true });
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("destroyed"));
-        expect(line).eq(i18next.t("apresults:DESTROY.gnostica_piece_target", { player: "Alice", what: "1", target: "Bob" }));
+        expect(line).eq(i18next.t("apresults:DESTROY.gnostica_piece", { player: "Alice", what: "1", target: "Bob" }));
     });
 
     it("destroy (Swords tile): names the destroyed card's uid, not a raw {{what}} placeholder", () => {
@@ -3438,6 +3494,30 @@ describe("Gnostica: chatLog() other-player naming", () => {
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("destroyed"));
         expect(line).eq(i18next.t("apresults:DESTROY.gnostica_tile", { player: "Alice", what: aceOfDiscs().uid, where: "n0" }));
+    });
+
+    it("move (Rods piece): names whose minion was moved when it isn't the acting player's own", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, distinct from the Rods card itself
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the targeted cell
+        g.move(`use ${aceOfRods().uid}, m0.1 piece n0.1 1 U`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("moved"));
+        expect(line).eq(i18next.t("apresults:MOVE.gnostica_rod_piece", { player: "Alice", what: "1", from: "n0", to: "o0", target: "Bob" }));
+    });
+
+    it("move (Rods piece): no target named for the acting player's own minion", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        g.move("place m0 E", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.move(`use ${aceOfRods().uid}, m0.1 piece m0.1 1 N`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("moved"));
+        expect(line).eq(i18next.t("apresults:MOVE.gnostica_rod_piece_own", { player: "Alice", what: "1", from: "m0", to: "n0" }));
     });
 
     it("place (Cups enemy): names whose stash the copy came from", () => {

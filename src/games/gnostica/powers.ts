@@ -840,6 +840,15 @@ export const checkHierophantReplace = (
     if (target === undefined) {
         return { key: "NO_PIECE_THERE" };
     }
+    // Replacing one of your own pieces with another of your own achieves
+    // nothing a real opponent-facing use of the power would - the
+    // "meaningful step" rule (#49) that already forbids declining a
+    // card's power outright forbids this too, rather than let it stand in
+    // as an equivalent no-op. Skipping this step (leaving the chain's own
+    // tail undeclared) stays legal, same as any other power.
+    if (target.owner === ctx.currplayer) {
+        return { key: "HIEROPHANT_MUST_TARGET_ENEMY" };
+    }
     if (!hasStashAvailable(ctx, ctx.currplayer, target.size)) {
         return { key: "STASH_EMPTY", params: { player: ctx.currplayer, size: target.size } };
     }
@@ -958,8 +967,17 @@ export const checkTradeHands = (
     if (ownErr) return ownErr;
     const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
     if (targetErr) return targetErr;
-    if (ctx.board.get(targetX, targetY)?.pieces[targetIndex] === undefined) {
+    const target = ctx.board.get(targetX, targetY)?.pieces[targetIndex];
+    if (target === undefined) {
         return { key: "NO_PIECE_THERE" };
+    }
+    // Swapping hands with yourself is a no-op wearing the shape of a real
+    // step - the "meaningful step" rule (#49) forbids it the same way it
+    // forbids declining a card's power outright. Skipping this step
+    // (leaving the chain's own tail undeclared) stays legal, same as any
+    // other power.
+    if (target.owner === ctx.currplayer) {
+        return { key: "TRADEHANDS_MUST_TARGET_ENEMY" };
     }
     return undefined;
 };
