@@ -17,7 +17,7 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #48 - pieceGridSlots()'s fallback order is now determined by the bumped piece's own orientation. @done(26-08-22)
 ✔ #49 - use/play moves must take at least one real power step before being treated as complete (chain-tail declines and Fool/World stay exempt); also closed related gaps (self-targeting Hierophant/tradeHands, unlogged piece owners in several chat messages). @done(26-08-21)
 ✔ #49 follow-up - click-driven step messaging no longer shows the raw submit-validation wording while the player is just navigating buttons. @done(26-08-22)
-- #50 - refactor Tarot cards
+✔ #50 - unified MinorCard/MajorCard into one Card class (major arcana get a real, always-populated rank+suit like minors do, via a new empty-uid "Major Arcana" pseudo-suit), mirroring the sibling Decktet module's own single-class design. @done(26-08-22)
 ✔ #51 - test separate clusters. @done(26-08-20)
 ✔ #52 - test double-letter coordinates. @done(26-08-20)
 ✔ #53 - CellContents.card to uid. @done(26-08-20)

@@ -1,19 +1,15 @@
 import { shuffle } from "../shuffle";
-import { TarotCard, MinorCard, MajorCard, minorCards, majorCards } from "./Card";
-
-const cloneCard = (card: TarotCard): TarotCard => card.major ? (card as MajorCard).clone() : (card as MinorCard).clone();
-const findByUid = (uid: string): TarotCard|undefined =>
-    minorCards.find(c => c.uid === uid) ?? majorCards.find(c => c.uid === uid);
+import { Card, TarotCard, minorCards, majorCards } from "./Card";
 
 export class Deck {
     private _cards: TarotCard[];
 
     constructor(cards: TarotCard[]) {
-        this._cards = cards.map(cloneCard);
+        this._cards = cards.map(c => new Card(c));
     }
 
     public get cards(): TarotCard[] {
-        return this._cards.map(cloneCard);
+        return this._cards.map(c => new Card(c));
     }
 
     public get size(): number {
@@ -26,11 +22,11 @@ export class Deck {
     }
 
     public add(uid: string): Deck {
-        const found = findByUid(uid);
+        const found = [...minorCards, ...majorCards].find(c => c.uid === uid);
         if (found === undefined) {
             throw new Error(`Could not find a tarot card with the uid "${uid}"`);
         }
-        this._cards.push(cloneCard(found));
+        this._cards.push(new Card(found));
         this.shuffle();
         return this;
     }

@@ -1,4 +1,4 @@
-import { TarotCard, MinorCard, allCards } from "../../common/tarot";
+import { TarotCard, allCards } from "../../common/tarot";
 import { Piece } from "./piece";
 
 export type CellPointValue = 0 | 1 | 2 | 3;
@@ -13,7 +13,7 @@ export const cardPointValue = (card?: TarotCard): CellPointValue => {
     if (card.major) {
         return 3;
     }
-    return (card as MinorCard).rank.court ? 2 : 1;
+    return card.court ? 2 : 1;
 };
 
 // The serialized shape: a bare array, no key names at all (repeated per

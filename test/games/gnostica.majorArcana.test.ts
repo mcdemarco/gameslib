@@ -25,7 +25,7 @@ describe("Gnostica major arcana", () => {
     });
 
     it("getMajorArcanaDef/getMajorArcanaIcons look up by card", () => {
-        const fool = majorCards.find(c => c.seq === 0)!;
+        const fool = majorCards.find(c => c.rank.seq === 0)!;
         expect(getMajorArcanaIcons(fool)).to.deep.equal(["gnostica-cardQuestion", "gnostica-cardQuestion"]);
         expect(getMajorArcanaDef(fool).powers).to.deep.equal([{ special: "fool" }, { special: "fool" }]);
         expect(MAJOR_ARCANA_ICONS["00"]).to.deep.equal(["gnostica-cardQuestion", "gnostica-cardQuestion"]);

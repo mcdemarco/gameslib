@@ -6,7 +6,7 @@ import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { majorCards, minorCards } from "../../src/common/tarot";
 
-const major = (seq: number) => majorCards.find(c => c.seq === seq)!;
+const major = (seq: number) => majorCards.find(c => c.rank.seq === seq)!;
 const minor = (uid: string) => minorCards.find(c => c.uid === uid)!;
 
 describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {

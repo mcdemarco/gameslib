@@ -1,5 +1,5 @@
 import { DirectionCardinal, shuffle } from "../../common";
-import { TarotCard, MajorCard, allCards } from "../../common/tarot";
+import { TarotCard, allCards } from "../../common/tarot";
 import { GnosticaBoard, IEvicted } from "./board";
 import { CellContents, cardPointValue } from "./cell";
 import { Piece, Pips, Orientation } from "./piece";
@@ -1114,7 +1114,7 @@ export const fool = (ctx: PowerContext): TarotCard => {
 // Not yet reachable via the engine - see this section's own header comment.
 export const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArcanaDef => {
     const present = [...ctx.board.entries()].some(([, , t]) =>
-        t.card !== undefined && t.card.major && (t.card as MajorCard).uid === chosenUid);
+        t.card !== undefined && t.card.major && t.card.uid === chosenUid);
     if (!present) {
         throw new GnosticaRulesError("NO_SUCH_MAJOR_ON_BOARD", { uid: chosenUid });
     }

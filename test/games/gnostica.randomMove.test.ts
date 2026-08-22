@@ -6,7 +6,7 @@ import { Piece } from "../../src/games/gnostica/piece";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
-const major = (seq: number) => majorCards.find(c => c.seq === seq)!;
+const major = (seq: number) => majorCards.find(c => c.rank.seq === seq)!;
 const minor = (uid: string) => minorCards.find(c => c.uid === uid)!;
 
 // Same helper as gnostica.test.ts's own (not exported from there) - forces

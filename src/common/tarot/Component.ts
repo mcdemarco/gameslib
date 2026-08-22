@@ -82,3 +82,48 @@ export const ranks: Component[] = [
     new Component({uid: "Q", seq: 13, name: "Queen", court: true}),
     new Component({uid: "K", seq: 14, name: "King", court: true}),
 ];
+
+// A pseudo-suit standing in for "this card has no real elemental suit" -
+// major arcana cards use this so every Card, major or minor, has a
+// genuine, always-populated `suit`, with no optional fields anywhere.
+// Deliberately NOT part of the `suits` array above: minorCards is built
+// by iterating `suits`, so mixing this in would silently generate 14
+// bogus extra "minor" cards, and would also disrupt allCards()'s own
+// array order, which hand-display sorting depends on directly. The empty
+// uid is what lets Card.uid use one formula (`rank.uid + suit.uid`) for
+// every card - concatenating "" is a no-op, so majors' uid collapses to
+// exactly their rank's own uid.
+export const majorArcanaSuit: Component = new Component({uid: "", seq: 0, name: "Major Arcana"});
+
+// One rank per major arcana card (seq 0-21), analogous to `ranks` above
+// for minors. uid is the exact 2-digit zero-padded scheme major card uids
+// have always used ("00".."21") - load-bearing throughout gnostica.ts's
+// move-string grammar, MAJOR_ARCANA's own lookup keys, and countless test
+// literals, so this must not change. A major's rank uid ("10" for Wheel
+// of Fortune) coincides with a minor rank's own uid ("10" for a Ten) -
+// harmless, since majorArcanaSuit's own empty uid keeps the two cards'
+// full uids distinct ("10" vs "10C").
+export const majorRanks: Component[] = [
+    {seq: 0, name: "The Fool"},
+    {seq: 1, name: "The Magician"},
+    {seq: 2, name: "The High Priestess"},
+    {seq: 3, name: "The Empress"},
+    {seq: 4, name: "The Emperor"},
+    {seq: 5, name: "The Hierophant"},
+    {seq: 6, name: "The Lovers"},
+    {seq: 7, name: "The Chariot"},
+    {seq: 8, name: "Strength"},
+    {seq: 9, name: "The Hermit"},
+    {seq: 10, name: "Wheel of Fortune"},
+    {seq: 11, name: "Justice"},
+    {seq: 12, name: "The Hanged Man"},
+    {seq: 13, name: "Death"},
+    {seq: 14, name: "Temperance"},
+    {seq: 15, name: "The Devil"},
+    {seq: 16, name: "The Tower"},
+    {seq: 17, name: "The Star"},
+    {seq: 18, name: "The Moon"},
+    {seq: 19, name: "The Sun"},
+    {seq: 20, name: "Judgement"},
+    {seq: 21, name: "The World"},
+].map(({seq, name}) => new Component({uid: seq.toString().padStart(2, "0"), seq, name}));
