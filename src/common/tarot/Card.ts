@@ -1,10 +1,6 @@
-import { Component, ranks, suits } from "./Component";
+import { Component, ranks, suits, majorRanks, majorArcanaSuit } from "./Component";
 import { Glyph } from "@abstractplay/renderer/build/schemas/schema";
 
-// Shared shape for every tarot card. Deliberately holds only facts true of a
-// real 78-card tarot deck (identity, major/minor split, suit/rank where
-// applicable). Anything that depends on how a particular game interprets the
-// cards (point values, powers, etc.) does NOT belong here.
 // `compact` requests a smaller-footprint composition (e.g. a board tile
 // that also has to leave room for up to 3 pieces) rather than the default,
 // roomier sizing appropriate for a card shown alone (e.g. in a hand).
@@ -12,44 +8,131 @@ export interface ITarotGlyphOpts {
     compact?: boolean;
 }
 
-export interface ITarotCard {
-    readonly name: string;
-    readonly uid: string;
-    readonly major: boolean;
-    clone(): ITarotCard;
-    toGlyph(opts?: ITarotGlyphOpts): [Glyph, ...Glyph[]];
-}
-
-export type MinorParams = {
+export type CardParams = {
+    name: string;
     rank: Component;
     suit: Component;
+    major: boolean;
 };
 
-export class MinorCard implements ITarotCard {
+// One class for every tarot card, major or minor - `rank`/`suit`/`major`
+// are always populated (majors get majorArcanaSuit/a majorRanks entry
+// rather than leaving suit/rank undefined), so no cast or narrowing is
+// ever needed to read a card's identity, mirroring the sibling Decktet
+// module's own single-class Card.
+export class Card {
+    private readonly _name: string;
     private readonly _rank: Component;
     private readonly _suit: Component;
+    private readonly _major: boolean;
 
-    constructor(params: MinorParams) {
+    constructor(params: CardParams) {
+        this._name = params.name;
         this._rank = params.rank;
         this._suit = params.suit;
+        this._major = params.major;
     }
 
-    public readonly major = false;
-
+    public get name(): string {
+        return this._name;
+    }
     public get rank(): Component {
         return new Component(this._rank);
     }
     public get suit(): Component {
         return new Component(this._suit);
     }
-    public get name(): string {
-        return `${this.rank.name} of ${this.suit.name}`;
+    public get major(): boolean {
+        return this._major;
     }
+    // Minor pip cards, Ace through 10. Derived from the rank's own
+    // `court` flag, not an independently-settable field, so it can never
+    // drift out of sync with it.
+    public get spot(): boolean {
+        return !this._major && !this._rank.court;
+    }
+    // Minor court cards, Page through King.
+    public get court(): boolean {
+        return !this._major && this._rank.court;
+    }
+
+    // One formula for every card - majorArcanaSuit's own uid is "", so
+    // concatenation is a no-op for majors, collapsing this to exactly
+    // `rank.uid` (the existing "00".."21" scheme). No branching needed.
     public get uid(): string {
         return this.rank.uid + this.suit.uid;
     }
 
+    // Traditional additive Roman numeral (no subtractive forms, e.g. 4 is
+    // "IIII" not "IV"), matching Rider-Waite-Smith numbering: the Fool is 0
+    // (Roman numerals have no zero, so it displays as the digit "0").
+    // Only meaningful for major arcana, but well-defined (if unused) for
+    // any card, since every card has a `rank.seq`.
+    public get romanNumeral(): string {
+        const seq = this.rank.seq;
+        if (seq === 0) {
+            return "0";
+        }
+        const table: [number, string][] = [[10, "X"], [5, "V"], [1, "I"]];
+        let remaining = seq;
+        let numeral = "";
+        for (const [value, symbol] of table) {
+            while (remaining >= value) {
+                numeral += symbol;
+                remaining -= value;
+            }
+        }
+        return numeral;
+    }
+    // (Roman numerals have no zero, so it displays as the digit "0").
+    public get romanNumeralPadded(): string {
+        const seq = this.rank.seq;
+        let numeral = "";
+        let paddingLength = 0;
+
+        if (seq === 0) {
+            numeral = "0";
+            paddingLength = 1;
+        } else {
+            const table: [number, string, number][] = [[10, "X", 1], [5, "V", 1], [1, "I", 0.33]];
+            let remaining = seq;
+            for (const [value, symbol, length] of table) {
+                while (remaining >= value) {
+                    numeral += symbol;
+                    remaining -= value;
+                    paddingLength += length;
+                }
+            }
+        }
+
+        while (paddingLength < 6) {
+            numeral += " ";
+            paddingLength += 1;
+        }
+        return numeral;
+    }
+
+    // No bespoke per-card art asset exists yet for major arcana; render a
+    // generic card face with the card's traditional numeral. Game-specific
+    // overlays (e.g. Gnostica's 1-3 power icons) are composed on top by
+    // the consuming game, not here - this module only knows genuine
+    // tarot-deck facts. In `compact` mode the numeral is nudged to the top
+    // edge, leaving the rest of the face free for whatever the caller
+    // layers on top of it. Minor cards show their suit glyph and rank
+    // text instead. Ranks have no dedicated glyph asset; they display as
+    // plain text (their uid: A, 2-10, P, N, Q, K).
     public toGlyph(opts: ITarotGlyphOpts = {}): [Glyph, ...Glyph[]] {
+        if (this.major) {
+            return [
+                { name: "piece-square", scale: 1 },
+                {
+                    text: this.romanNumeral,
+                    scale: opts.compact ? 0.32 : 0.6,
+                    colour: "_context_strokes",
+                    nudge: opts.compact ? { dx: 0, dy: -380 } : undefined,
+                },
+            ];
+        }
         const scale = opts.compact ? 0.32 : 0.5;
         const corner = opts.compact ? 310 : 250;
         const glyph: [Glyph, ...Glyph[]] = [
@@ -62,7 +145,6 @@ export class MinorCard implements ITarotCard {
                 nudge: { dx: -corner, dy: corner },
             });
         }
-        // Ranks have no dedicated glyph asset; render the uid (A, 2-10, P, N, Q, K) as text.
         glyph.push({
             text: this.rank.uid,
             scale,
@@ -72,149 +154,31 @@ export class MinorCard implements ITarotCard {
         return glyph;
     }
 
-    public clone(): MinorCard {
-        return new MinorCard({ rank: this.rank, suit: this.suit });
+    public clone(): Card {
+        return new Card({ name: this.name, rank: this.rank, suit: this.suit, major: this.major });
     }
 
-    public static deserialize(card: MinorCard|string): MinorCard|undefined {
+    public static deserialize(card: Card | string): Card | undefined {
         if (typeof card === "string") {
-            return minorCards.find(c => c.uid === card);
+            return [...minorCards, ...majorCards].find(c => c.uid === card);
         }
-        return new MinorCard({ rank: Component.deserialize(card._rank)!, suit: Component.deserialize(card._suit)! });
+        return new Card({
+            name: card._name,
+            major: card._major,
+            rank: Component.deserialize(card._rank)!,
+            suit: Component.deserialize(card._suit)!,
+        });
     }
 }
 
-export type MajorParams = {
-    seq: number;
-    name: string;
-};
+export type TarotCard = Card;
 
-export class MajorCard implements ITarotCard {
-    private readonly _seq: number;
-    private readonly _name: string;
-
-    constructor(params: MajorParams) {
-        this._seq = params.seq;
-        this._name = params.name;
-    }
-
-    public readonly major = true;
-
-    // Canonical tarot numbering, 0 (the Fool) through 21 (the World).
-    public get seq(): number {
-        return this._seq;
-    }
-    public get name(): string {
-        return this._name;
-    }
-    public get uid(): string {
-        return this.seq.toString().padStart(2, "0");
-    }
-
-    // Traditional additive Roman numeral (no subtractive forms, e.g. 4 is
-    // "IIII" not "IV"), matching Rider-Waite-Smith numbering: the Fool is 0
-    // (Roman numerals have no zero, so it displays as the digit "0").
-    public get romanNumeral(): string {
-        if (this.seq === 0) {
-            return "0";
-        }
-        const table: [number, string][] = [[10, "X"], [5, "V"], [1, "I"]];
-        let remaining = this.seq;
-        let numeral = "";
-        for (const [value, symbol] of table) {
-            while (remaining >= value) {
-                numeral += symbol;
-                remaining -= value;
-            }
-        }
-        return numeral;
-    }
-    // (Roman numerals have no zero, so it displays as the digit "0").
-    public get romanNumeralPadded(): string {
-        let numeral = "";
-        let paddingLength = 0;
-
-        if (this.seq === 0) {
-            numeral = "0";
-            paddingLength = 1;
-        } else {
-            const table: [number, string, number][] = [[10, "X", 1], [5, "V", 1], [1, "I", 0.33]];
-            let remaining = this.seq;
-            for (const [value, symbol, length] of table) {
-                while (remaining >= value) {
-                    numeral += symbol;
-                    remaining -= value;
-                    paddingLength += length;
-                }
-            }
-        }
-        
-        while (paddingLength < 6) {
-            numeral += "\u00A0";
-            paddingLength += 1;
-        }
-        return numeral;
-    }
-
-    // No bespoke per-card art asset exists yet; render a generic card face
-    // with the card's traditional numeral. Game-specific overlays (e.g.
-    // Gnostica's 1-3 power icons) are composed on top by the consuming game,
-    // not here - this module only knows genuine tarot-deck facts. In
-    // `compact` mode the numeral is nudged to the top edge, leaving the rest
-    // of the face free for whatever the caller layers on top of it.
-    public toGlyph(opts: ITarotGlyphOpts = {}): [Glyph, ...Glyph[]] {
-        return [
-            { name: "piece-square", scale: 1 },
-            {
-                text: this.romanNumeral,
-                scale: opts.compact ? 0.32 : 0.6,
-                colour: "_context_strokes",
-                nudge: opts.compact ? { dx: 0, dy: -380 } : undefined,
-            },
-        ];
-    }
-
-    public clone(): MajorCard {
-        return new MajorCard({ seq: this.seq, name: this.name });
-    }
-
-    public static deserialize(card: MajorCard|string): MajorCard|undefined {
-        if (typeof card === "string") {
-            return majorCards.find(c => c.uid === card);
-        }
-        return new MajorCard({ seq: card._seq, name: card._name });
-    }
-}
-
-export type TarotCard = MinorCard | MajorCard;
-
-export const minorCards: MinorCard[] = suits.flatMap(
-    suit => ranks.map(rank => new MinorCard({ rank, suit }))
+export const minorCards: Card[] = suits.flatMap(
+    suit => ranks.map(rank => new Card({ name: `${rank.name} of ${suit.name}`, rank, suit, major: false }))
 );
 
-export const majorCards: MajorCard[] = [
-    { seq: 0, name: "The Fool" },
-    { seq: 1, name: "The Magician" },
-    { seq: 2, name: "The High Priestess" },
-    { seq: 3, name: "The Empress" },
-    { seq: 4, name: "The Emperor" },
-    { seq: 5, name: "The Hierophant" },
-    { seq: 6, name: "The Lovers" },
-    { seq: 7, name: "The Chariot" },
-    { seq: 8, name: "Strength" },
-    { seq: 9, name: "The Hermit" },
-    { seq: 10, name: "Wheel of Fortune" },
-    { seq: 11, name: "Justice" },
-    { seq: 12, name: "The Hanged Man" },
-    { seq: 13, name: "Death" },
-    { seq: 14, name: "Temperance" },
-    { seq: 15, name: "The Devil" },
-    { seq: 16, name: "The Tower" },
-    { seq: 17, name: "The Star" },
-    { seq: 18, name: "The Moon" },
-    { seq: 19, name: "The Sun" },
-    { seq: 20, name: "Judgement" },
-    { seq: 21, name: "The World" },
-].map(params => new MajorCard(params));
+export const majorCards: Card[] = majorRanks.map(
+    rank => new Card({ name: rank.name, rank, suit: majorArcanaSuit, major: true })
+);
 
 export const allCards = (): TarotCard[] => [...minorCards, ...majorCards];

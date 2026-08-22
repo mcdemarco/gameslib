@@ -9,8 +9,8 @@ import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
-const theWorld = () => majorCards.find(c => c.seq === 21)!;
-const major = (seq: number) => majorCards.find(c => c.seq === seq)!;
+const theWorld = () => majorCards.find(c => c.rank.seq === 21)!;
+const major = (seq: number) => majorCards.find(c => c.rank.seq === seq)!;
 const card = (uid: string) => minorCards.find(c => c.uid === uid)!;
 const aceOfCups = () => card("AC");
 const aceOfRods = () => card("AR");
@@ -146,8 +146,8 @@ describe("Gnostica: hand sort order", () => {
             for (const c of cards) {
                 if (c.major) {
                     seenMajor = true;
-                    expect(c.seq).to.be.greaterThan(lastMajorSeq);
-                    lastMajorSeq = c.seq;
+                    expect(c.rank.seq).to.be.greaterThan(lastMajorSeq);
+                    lastMajorSeq = c.rank.seq;
                 } else {
                     expect(seenMajor, `minor ${c.uid} appears after a major`).to.be.false;
                     const suitSeq = c.suit.seq;
@@ -217,8 +217,8 @@ describe("Gnostica: hand sort order", () => {
         for (const c of cards) {
             if (c.major) {
                 seenMajor = true;
-                expect(c.seq).to.be.greaterThan(lastMajorSeq);
-                lastMajorSeq = c.seq;
+                expect(c.rank.seq).to.be.greaterThan(lastMajorSeq);
+                lastMajorSeq = c.rank.seq;
             } else {
                 expect(seenMajor).to.be.false;
                 if (c.suit.seq === lastSuitSeq) {

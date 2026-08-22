@@ -11,7 +11,7 @@ import { replacer, reviver } from "../../src/common";
 const aceOfCups = () => minorCards.find(c => c.uid === "AC")!;
 const twoOfCups = () => minorCards.find(c => c.uid === "2C")!;
 const kingOfSwords = () => minorCards.find(c => c.uid === "KS")!;
-const theFool = () => majorCards.find(c => c.seq === 0)!;
+const theFool = () => majorCards.find(c => c.rank.seq === 0)!;
 
 describe("Gnostica: Piece", () => {
     it("builds a local id from owner+size+orientation", () => {

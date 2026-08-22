@@ -1,4 +1,4 @@
-import { MajorCard } from "../../common/tarot";
+import { Card } from "../../common/tarot";
 
 // The four suit primitives every minor-arcana card (and most major arcana
 // powers) reduce to. Behaviour lives in powers.ts; this file only says which
@@ -41,7 +41,7 @@ export interface MajorArcanaDef {
     seq: number;
     // Which suit-power icon(s) are printed on the card, in power order -
     // Gnostica's interpretation of the card, not a fact about a real tarot
-    // deck, which is why it's not on the shared tarot MajorCard.
+    // deck, which is why it's not on the shared tarot Card.
     icons: string[];
     powers: PowerStep[];
     // Strength/Death/Sun: when both steps end up targeting the same
@@ -176,11 +176,11 @@ export const MAJOR_ARCANA: Record<string, MajorArcanaDef> = {
     },
 };
 
-export const getMajorArcanaDef = (card: MajorCard): MajorArcanaDef => MAJOR_ARCANA[card.uid];
+export const getMajorArcanaDef = (card: Card): MajorArcanaDef => MAJOR_ARCANA[card.uid];
 
 // Kept as a separate accessor (rather than requiring every caller to reach
 // into .icons) since rendering code only ever wants the icon list.
 export const MAJOR_ARCANA_ICONS: Record<string, string[]> = Object.fromEntries(
     Object.entries(MAJOR_ARCANA).map(([uid, def]) => [uid, def.icons])
 );
-export const getMajorArcanaIcons = (card: MajorCard): string[] => MAJOR_ARCANA[card.uid].icons;
+export const getMajorArcanaIcons = (card: Card): string[] => MAJOR_ARCANA[card.uid].icons;

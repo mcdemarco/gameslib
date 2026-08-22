@@ -4,7 +4,7 @@ import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph
 import { APMoveResult } from "../schemas/moveresults";
 import { Direction, replacer, reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
-import { Deck, MinorCard, MajorCard, TarotCard, allCards, ranks, suits } from "../common/tarot";
+import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { CellContents, ICellContents, cardPointValue } from "./gnostica/cell";
 import { Piece, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece";
@@ -1756,7 +1756,7 @@ export class GnosticaGame extends GameBase {
         if (headArg === undefined) {
             return undefined;
         }
-        let card: MinorCard | MajorCard | undefined;
+        let card: Card | undefined;
         let eligible: IMinionRef[];
         if (head === "use") {
             const loc = this.findCardCell(headArg);
@@ -1774,14 +1774,14 @@ export class GnosticaGame extends GameBase {
             return undefined;
         }
         if (!card.major) {
-            const suitUid = (card as MinorCard).suit.uid;
+            const suitUid = card.suit.uid;
             const segment = parsed.stepSegments[0] ?? []; // segment[0] is the minionRef, if typed yet - see resolveStepMinion
             const [, mode, ...rest] = segment;
             const { minion, ambiguous, candidates } = this.resolveStepMinion(segment, eligible);
             return { head, headArg, suitUid, prefix: [], eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, mode, rest };
         }
 
-        const def = getMajorArcanaDef(card as MajorCard);
+        const def = getMajorArcanaDef(card);
         if (def.uid === "00" || def.uid === "21") {
             return undefined; // Fool/World - not resolvable through the engine at all yet
         }
@@ -2894,8 +2894,7 @@ export class GnosticaGame extends GameBase {
                     if (card === undefined || card.major) {
                         return false;
                     }
-                    const minor = card as MinorCard;
-                    return minor.suit.uid === bucketSuit && (minor.rank.court ? "royal" : "spot") === bucketCategory;
+                    return card.suit.uid === bucketSuit && (card.court ? "royal" : "spot") === bucketCategory;
                 };
                 const alreadyFromBucket = selected.filter(matchesBucket);
                 if (alreadyFromBucket.length > 0) {
@@ -3261,13 +3260,12 @@ export class GnosticaGame extends GameBase {
 
         // "The player with the highest number major arcana card wins the
         // bid. If nobody bid with a major arcana card, then the player
-        // with the highest minor arcana card wins" - MajorCard.seq (0-21)
-        // and MinorCard.rank.seq (Component's own ranks array is already
-        // Ace=1..King=14) are exactly these two comparison keys already;
-        // no separate ranking table needed.
+        // with the highest minor arcana card wins" - every card's own
+        // rank.seq (majors 0-21, minors Ace=1..King=14) is exactly this
+        // comparison key already; no separate ranking table needed.
         const majors = revealed.filter(r => r.card.major);
         const pool = majors.length > 0 ? majors : revealed;
-        const rank = (r: { card: TarotCard }): number => r.card.major ? (r.card as MajorCard).seq : (r.card as MinorCard).rank.seq;
+        const rank = (r: { card: TarotCard }): number => r.card.rank.seq;
         const maxRank = Math.max(...pool.map(rank));
         const winners = pool.filter(r => rank(r) === maxRank).map(r => r.player);
 
@@ -3919,9 +3917,9 @@ export class GnosticaGame extends GameBase {
         return this.validateCardPower(card, eligible, stepSegments);
     }
 
-    private applyCardPower(card: MinorCard | MajorCard, eligible: IMinionRef[], stepSegments: string[][]): void {
+    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][]): void {
         if (card.major) {
-            const def = getMajorArcanaDef(card as MajorCard);
+            const def = getMajorArcanaDef(card);
             // Fool and World both delegate to ANOTHER card's full power
             // resolution (a randomly flipped card; any major currently on
             // the board) rather than doing something self-contained - that
@@ -3936,20 +3934,20 @@ export class GnosticaGame extends GameBase {
             }
             this.applyMajorPower(def, eligible, stepSegments);
         } else {
-            this.applyMinorPower((card as MinorCard).suit.uid, eligible, stepSegments);
+            this.applyMinorPower(card.suit.uid, eligible, stepSegments);
         }
     }
 
-    private validateCardPower(card: MinorCard | MajorCard, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
+    private validateCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
         if (card.major) {
-            const def = getMajorArcanaDef(card as MajorCard);
+            const def = getMajorArcanaDef(card);
             if ((def.uid === "00" || def.uid === "21") && stepSegments.length > 0) {
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "FOOL_WORLD_NOT_YET_SUPPORTED" });
             }
             const majorResult = this.validateMajorPower(def, eligible, stepSegments);
             return majorResult;
         }
-        return this.validateMinorPower((card as MinorCard).suit.uid, eligible, stepSegments);
+        return this.validateMinorPower(card.suit.uid, eligible, stepSegments);
     }
 
     // Tolerant of an incomplete step (mode chosen but not enough trailing
@@ -5946,19 +5944,19 @@ export class GnosticaGame extends GameBase {
     // differ from the length assumed while speculatively building it.
     // Always terminates - validateMajorPower(def, eligible, []) is
     // trivially legal (no steps to check).
-    private buildRandomChain(card: MinorCard | MajorCard, eligible: IMinionRef[]): string[][] {
+    private buildRandomChain(card: Card, eligible: IMinionRef[]): string[][] {
         if (!card.major) {
             if (eligible.length === 0 || Math.random() < 0.2) {
                 return []; // decline outright - always legal
             }
-            const suitUid = (card as MinorCard).suit.uid;
+            const suitUid = card.suit.uid;
             const tokens = this.buildRandomStepTokens(suitUid, eligible, {});
             if (tokens === undefined) {
                 return [];
             }
             return this.validateMinorPower(suitUid, eligible, [tokens]) === undefined ? [tokens] : [];
         }
-        const def = getMajorArcanaDef(card as MajorCard);
+        const def = getMajorArcanaDef(card);
         if (def.uid === "00" || def.uid === "21") {
             return []; // Fool/World - not yet engine-supported beyond declining
         }
@@ -6404,8 +6402,7 @@ export class GnosticaGame extends GameBase {
             if (card.major) {
                 majorUids.push(uid);
             } else {
-                const minor = card as MinorCard;
-                const bucket = `${minor.suit.uid}_${minor.rank.court ? "royal" : "spot"}`;
+                const bucket = `${card.suit.uid}_${card.court ? "royal" : "spot"}`;
                 counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
                 if (newUids.has(uid)) {
                     newCounts.set(bucket, (newCounts.get(bucket) ?? 0) + 1);
@@ -6427,7 +6424,7 @@ export class GnosticaGame extends GameBase {
                 // the rank-corner text (a count, not a real rank) are
                 // overridden.
                 const representativeRank = ranks.find(r => r.court === (category === "royal"))!;
-                const representative = new MinorCard({ rank: representativeRank, suit });
+                const representative = new Card({ name: `${representativeRank.name} of ${suit.name}`, rank: representativeRank, suit, major: false });
                 const newCount = newCounts.get(bucket) ?? 0;
                 const oldCount = count - newCount;
                 if (oldCount > 0) {
@@ -6530,8 +6527,8 @@ export class GnosticaGame extends GameBase {
         // shrinks everything in them, versus the normal card layout.
         let rankText = opts.rankText;
         if (rankText === undefined) {
-            rankText = card.major ? (card as MajorCard).romanNumeral : (card as MinorCard).rank.uid;
-            if (!card.major && (card as MinorCard).rank.uid !== "10") {
+            rankText = card.major ? card.romanNumeral : card.rank.uid;
+            if (!card.major && card.rank.uid !== "10") {
                 rankText += "\u00A0";
             }
         }
@@ -6555,8 +6552,8 @@ export class GnosticaGame extends GameBase {
         });
 
         const icons = card.major
-            ? getMajorArcanaIcons(card as MajorCard)
-            : (card as MinorCard).suit.glyph !== undefined ? [(card as MinorCard).suit.glyph!] : [];
+            ? getMajorArcanaIcons(card)
+            : card.suit.glyph !== undefined ? [card.suit.glyph!] : [];
         const circleScale = spaced ? 0.25 : 0.45;
         const iconScale = spaced ? 0.15 : 0.30;
         // `iconShift` compensates for nudging issues, so an
@@ -6575,7 +6572,7 @@ export class GnosticaGame extends GameBase {
         if (card.major) {
             pushCircle(-1, 1, icons[2]);
             pushCircle(1, 1, icons[1]);
-        } else if ((card as MinorCard).rank.court) {
+        } else if (card.court) {
             pushCircle(1, 1, undefined);
         }
 

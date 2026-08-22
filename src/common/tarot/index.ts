@@ -1,6 +1,6 @@
 import { Deck } from "./Deck";
-import { MinorCard, MajorCard, minorCards, majorCards, allCards } from "./Card";
-import { Component, ranks, suits } from "./Component";
+import { Card, minorCards, majorCards, allCards } from "./Card";
+import { Component, ranks, suits, majorRanks, majorArcanaSuit } from "./Component";
 
-export { Deck, MinorCard, MajorCard, Component, minorCards, majorCards, allCards, ranks, suits };
-export type { ITarotCard, TarotCard } from "./Card";
+export { Deck, Card, Component, minorCards, majorCards, allCards, ranks, suits, majorRanks, majorArcanaSuit };
+export type { TarotCard } from "./Card";
