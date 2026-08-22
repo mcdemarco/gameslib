@@ -762,6 +762,64 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
     });
 
+    // Real gameplay counterpart to the bare-board "keeps two genuinely
+    // separate multi-cell clusters classified correctly" unit test in
+    // gnostica.board.test.ts (identical geometry, fromX=1/toX=4) - that
+    // test calls board.pushTerritory() directly, skipping turns, players,
+    // and validateMove() entirely (see its own docs on why a bare board
+    // is the right size for it). This version drives the exact same push
+    // through a real player's "use" move, and also checks the OTHER
+    // player's own, genuinely disconnected cluster stays independently
+    // valid to interact with afterward.
+    it("real gameplay: a Rods push across a genuine void gap validates and applies correctly, and both disconnected clusters stay independently usable", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, -1, 0, () => card("2C")); // l0 - cluster A
+        forceCardAt(g, 0, 0, () => aceOfRods()); // m0 - cluster A, the acting minion's own card
+        forceCardAt(g, 1, 0, () => card("KS")); // n0 - isolated card to be pushed
+        // Cluster B, pre-existing, far away - a DIFFERENT uid than cluster
+        // A's own "2C", since "use <uid>" resolves by scanning the whole
+        // board for a matching uid (see forceCardAt's own docs) - reusing
+        // one would make the final cross-cluster "use" check ambiguous,
+        // and would also make THIS call's own duplicate-clearing wipe out
+        // cluster A's card out from under it.
+        forceCardAt(g, 5, 0, () => card("2D"));
+        g.move("place m0 E", { trusted: true }); // player 1, facing n0
+        g.move("place r0", { trusted: true }); // player 2, onto cluster B's own card
+
+        // A real initial placement always starts at size 1 (see
+        // MUST_PLACE_FIRST's own wording); bumped directly to 3 here so a
+        // real, validated dist-3 push is reachable in one move, matching
+        // the bare-board test's exact push (fromX=1, toX=4) rather than
+        // needing several turns of Discs growth first, which isn't what
+        // this test is about.
+        g.board.get(0, 0)!.pieces[0].size = 3;
+
+        const pushMove = `use ${aceOfRods().uid}, m0.3 tile 3`;
+        expect(g.validateMove(pushMove).valid).to.be.true; // through real validation, not a trusted bypass
+        g.move(pushMove);
+
+        // Cluster A: unaffected.
+        expect(g.board.classify(-1, 0)).eq("territory");
+        expect(g.board.classify(0, 0)).eq("territory");
+        // Departure cell: reverted to wasteland, still adjacent to m0.
+        expect(g.board.has(1, 0)).eq(false);
+        expect(g.board.classify(1, 0)).eq("wasteland");
+        // The gap: genuinely disconnected from either cluster.
+        expect(g.board.classify(2, 0)).eq("void");
+        expect(g.board.classify(3, 0)).eq("wasteland"); // adjacent to the arrived card at q0
+        // Arrival: a brand new 2-cell cluster with cluster B's pre-existing card.
+        expect(g.board.classify(4, 0)).eq("territory");
+        expect(g.board.get(4, 0)!.card?.uid).eq("KS");
+        expect(g.board.classify(5, 0)).eq("territory");
+
+        // Cluster B stays independently valid for its own owner to act
+        // on, entirely unaffected by the unrelated push that happened
+        // three cells away on the other side of a genuine void gap.
+        expect(g.currplayer).eq(2);
+        expect(g.validateMove(`use ${card("2D").uid}`).valid).to.be.true;
+    });
+
     it("Discs (piece): grows the minion by one size", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfDiscs());
@@ -1171,6 +1229,57 @@ describe("Gnostica: frame-stepping render() contract", () => {
         expect(after.length).eq(before.length);
         expect(g2.frames.length).eq(g.frames.length);
         expect(g2.frames[0].board.get(2, 0)?.pieces.length).eq(g.frames[0].board.get(2, 0)?.pieces.length);
+    });
+});
+
+describe("Gnostica: piece grid fallback order (#48)", () => {
+    const gridSlots = (g: GnosticaGame, pieces: Piece[]): { dx: number; dy: number; scale: number }[] =>
+        (g as unknown as { pieceGridSlots: (pieces: Piece[]) => { dx: number; dy: number; scale: number }[] }).pieceGridSlots(pieces);
+
+    it("bumps a piece off its own preferred slot into a perpendicular side, not straight to the opposite one", () => {
+        const g = new GnosticaGame(2);
+        const pieces = [
+            new Piece(1, 1, "N"),
+            new Piece(1, 1, "E"),
+            // N and E both already taken - per #48's fallback order for N
+            // (E, W, U, S) this must land on W next, not jump straight to
+            // S the way the OLD fixed global order (N, S, E, W, U) would
+            // have.
+            new Piece(1, 1, "N"),
+        ];
+        const slots = gridSlots(g, pieces);
+        // Only pieces[0]/pieces[2] (orientation "N") are checked by raw
+        // dx/dy here - N's own rotation transform is the identity (see
+        // CARDINAL_COS_SIN), so its slot choice reads directly off the
+        // returned coordinates with no rotation math needed. pieces[1]
+        // (orientation "E") DOES get rotated before its nudge is
+        // returned (the renderer quirk noted on pieceGridSlots' own
+        // docs - nudge is pre-rotation, not screen space), so its exact
+        // dx/dy isn't asserted here; which slot INDEX it landed on isn't
+        // what this test is about anyway.
+        expect([slots[0].dx, slots[0].dy]).to.deep.equal([0, -380]); // N's own preferred slot
+        expect([slots[2].dx, slots[2].dy]).to.deep.equal([-380, 0]); // W, not S
+    });
+
+    it("exhausts one orientation's own full fallback list in order: preferred, both perpendiculars, centre, opposite side last", () => {
+        const g = new GnosticaGame(2);
+        const pieces = [new Piece(1, 1, "N"), new Piece(1, 1, "N"), new Piece(1, 1, "N"), new Piece(1, 1, "N"), new Piece(1, 1, "N")];
+        const slots = gridSlots(g, pieces).map(s => [s.dx, s.dy]);
+        expect(slots).to.deep.equal([
+            [0, -380], // N - preferred
+            [380, 0],  // E - 1st fallback
+            [-380, 0], // W - 2nd fallback
+            [0, 0],    // U - 3rd fallback
+            [0, 380],  // S - last resort, the opposite side
+        ]);
+    });
+
+    it("a centre-preferring piece bumped off U just takes the first free slot - no particular preference", () => {
+        const g = new GnosticaGame(2);
+        const pieces = [new Piece(1, 1, "U"), new Piece(1, 1, "U")];
+        const slots = gridSlots(g, pieces).map(s => [s.dx, s.dy]);
+        expect(slots[0]).to.deep.equal([0, 0]); // U's own preferred slot
+        expect(slots[1]).to.deep.equal([0, -380]); // first free slot (N), no ordering claim beyond that
     });
 });
 
