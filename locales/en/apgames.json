@@ -5831,6 +5831,7 @@
             "PLACE_OCCUPIED": "Initial placements must be on an empty territory or wasteland space.",
             "PLACE_VOID": "You may not make an initial placement in the void.",
             "PLAY_UID_REQUIRED": "A hand card is required for this action.",
+            "POWER_STEP_REQUIRED": "This card's power must be used, at least in part, before you can submit. Choose a step below, or use \"discard <uid> draw 0\" instead if you'd rather give up its power.",
             "POWER_STILL_OPTIONAL": "All powers are optional, so you may submit your move now or continue.",
             "PUSH_NEEDS_WASTELAND": "You may only push a territory into a wasteland space, not an occupied space or the void.",
             "REDRAW_COUNT_MISMATCH": "You must draw exactly {{needed}} card(s) to bring your hand back up to 6 - you named {{requested}}.",
