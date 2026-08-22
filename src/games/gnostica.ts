@@ -1371,15 +1371,21 @@ export class GnosticaGame extends GameBase {
         return result;
     }
 
-    // #49: which soft-nudge message a click-driven use/play preview should
-    // carry, now that a zero-step activation is no longer treated as
-    // "done" (see validateMinorPower/validateMajorPower). Before any real
-    // step has been taken, nudge toward taking one (POWER_STEP_REQUIRED);
-    // once at least one step is in, the move is already submittable and a
-    // further step is genuinely optional (POWER_STILL_OPTIONAL), same as
-    // before this task. Fool/World stay permanently "still optional" -
-    // they can never take a real step at all (FOOL_WORLD_NOT_YET_SUPPORTED),
-    // so nudging toward one would be a dead end.
+    // #49/follow-up: which INSTRUCTIONAL message a click-driven use/play
+    // preview should carry - this is UI guidance for a player still
+    // actively navigating the button bar, not a validation complaint, so
+    // it deliberately never uses POWER_STEP_REQUIRED (that's reserved for
+    // validateMinorPower/validateMajorPower's own raw validation message,
+    // surfaced only if a move is actually submitted - e.g. hand-typed -
+    // while still incomplete; a real click-driven Submit is disabled in
+    // this state client-side, so a player navigating by clicking never
+    // reaches that message at all). Before any real step has been taken,
+    // just point at the button bar (CHOOSE_STEP); once at least one step
+    // is in, the move is already submittable and a further step is
+    // genuinely optional (POWER_STILL_OPTIONAL), same as before this
+    // task. Fool/World stay permanently "still optional" - they can never
+    // take a real step at all (FOOL_WORLD_NOT_YET_SUPPORTED), so nudging
+    // toward one would be a dead end.
     private powerStepMessageKey(headArg: string, priorStepsCount: number): string {
         if (priorStepsCount > 0) {
             return "apgames:validation.gnostica.POWER_STILL_OPTIONAL";
@@ -1388,7 +1394,7 @@ export class GnosticaGame extends GameBase {
         const exempt = card?.major === true && (headArg === "00" || headArg === "21");
         return exempt
             ? "apgames:validation.gnostica.POWER_STILL_OPTIONAL"
-            : "apgames:validation.gnostica.POWER_STEP_REQUIRED";
+            : "apgames:validation.gnostica.CHOOSE_STEP";
     }
 
     // The six top-level turn choices, as buttons - see the class-level docs
@@ -2508,12 +2514,31 @@ export class GnosticaGame extends GameBase {
     // after already declaring.
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         const parsed = this.parseMove(move);
+        let result: IClickResult;
         if (piece === "_btn_declare") {
-            return this.provisionalResult(this.pickleMove({ ...parsed, announceLast: !parsed.announceLast }));
+            result = this.provisionalResult(this.pickleMove({ ...parsed, announceLast: !parsed.announceLast }));
+        } else {
+            const bareMove = this.pickleMove({ ...parsed, announceLast: false });
+            const core = this.handleClickCore(bareMove, row, col, piece);
+            result = this.reattachLastFlag(core, parsed.announceLast);
         }
-        const bareMove = this.pickleMove({ ...parsed, announceLast: false });
-        const result = this.handleClickCore(bareMove, row, col, piece);
-        return this.reattachLastFlag(result, parsed.announceLast);
+        // The front end (see playground.js's own boardClick()) only
+        // re-renders a live partial preview when `canrender` or
+        // `complete >= 0` is set (see IValidationResult's own docs). A
+        // great many of gnostica's own click-driven results are
+        // legitimately valid but complete:-1 (still building a chain/
+        // mode - see #49) - every one of them DOES represent a genuine,
+        // helpful partial preview (a card just got picked, a step just
+        // got typed, a top-level button just got chosen), so canrender is
+        // set unconditionally here for any valid result, rather than
+        // threading it through every individual return site inside
+        // handleClickCore/handleBiddingClick/provisionalResult - missing
+        // even one would silently leave the button bar/board stale after
+        // that click.
+        if (result.valid) {
+            result.canrender = true;
+        }
+        return result;
     }
 
     // Reattaches "(last)" to a click result computed against the
