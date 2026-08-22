@@ -174,6 +174,7 @@
         "complete": "{{player}} turned a {{what}} into a {{into}} at {{where}}.",
         "courtesan": "King and courtesan swapped positions at {{where}}.",
         "gnostica_hierophant": "{{player}} converted an enemy piece to their own at {{where}}.",
+        "gnostica_hierophant_target": "{{player}} converted {{target}}'s piece to their own at {{where}}.",
         "gnostica_piece": "{{player}} grew a piece to {{into}} at {{where}}.",
         "gnostica_tile": "{{player}} grew a territory into {{into}} at {{where}}.",
         "magnate_deed": "{{player}} completed their deeded card {{what}} in district {{where}}.",
@@ -245,6 +246,7 @@
             "minimal_other": "{{count}} friendly pieces were destroyed."
         },
         "gnostica_piece": "{{player}} destroyed a {{what}}-pip minion.",
+        "gnostica_piece_target": "{{player}} destroyed {{target}}'s {{what}}-pip minion.",
         "gnostica_tile": "{{player}} destroyed {{what}} at {{where}}.",
         "logger": "{{player}} felled a tree at {{where}}.",
         "mattock": "{{player}} mined at {{where}}.",
@@ -477,6 +479,7 @@
         "epam": "{{player}} placed a stone at {{where}}.",
         "gnostica_discard": "{{player}} discarded {{what}}.",
         "gnostica_enemy": "{{player}} added an enemy minion to {{where}}.",
+        "gnostica_enemy_target": "{{player}} added a copy of {{target}}'s minion to {{where}}.",
         "gnostica_initial": "{{player}} placed their first minion at {{where}}.",
         "gnostica_own": "{{player}} added one of their own minions to {{where}}.",
         "gnostica_territory": "{{player}} placed a new territory at {{where}}.",
