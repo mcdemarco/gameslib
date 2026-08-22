@@ -25,3 +25,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #55 - added frame-stepping: render() returns one frame per step for multi-step major-arcana moves. @done(26-08-21)
 ✔ #57 - added Wheel of Fortune's Random Card click support, plus two related bugs fixed along the way. @done(26-08-21)
 ✔ randomMove: orientation on a wasteland cell now favors useful facings over ones pointing into more void. @done(26-08-22)
+✔ orient: a no-op reorientation (same facing as current) is now rejected (valid but complete:-1, ORIENT_NO_OP), and randomOrientMove() never generates one. @done(26-08-22)

@@ -5824,6 +5824,7 @@
             "NO_TERRITORY_THAT_WAY": "There is no territory there to move.",
             "NO_TERRITORY_TRACKED": "There is no territory tracked at that location.",
             "ORIENT_ARGS_REQUIRED": "You must click a neighboring cell to change direction, or the same cell to point up.",
+            "ORIENT_NO_OP": "This minion is already facing that way - reorienting it wouldn't change anything. Choose a different direction, or use another action instead.",
             "PICK_CARD_TO_ACTIVATE": "Click a cell on the board to activate that territory.",
             "PICK_CARD_TO_BID": "Click a card in your hand to bid it face-down.",
             "PICK_CARDS_TO_REDRAW": "Click cards from the pool to draw your hand back up to 6.",

@@ -1585,7 +1585,11 @@ describe("Gnostica: handleClick", () => {
         const result = g.handleClick(seed.move, row, col);
         expect(result.valid).to.be.true;
         expect(result.move).eq("orient m0.1 U");
-        expect(result.complete).eq(0); // same auto-submit guard as place
+        // A freshly-placed piece already defaults to "U", so selecting it
+        // to reorient seeds a genuine no-op - complete:-1, not just the
+        // usual auto-submit guard (0), since this isn't submittable as-is
+        // at all (see validateOrient's own ORIENT_NO_OP docs).
+        expect(result.complete).eq(-1);
     });
 
     it("orient: clicking the piece's own cell again re-affirms \"up\"; clicking a neighbour sets that facing directly", () => {
@@ -2938,13 +2942,40 @@ describe("Gnostica: click-to-orient messaging", () => {
 
     it("orient: clicking a piece to start reorienting it carries the same message", () => {
         const g = new GnosticaGame(2);
-        g.move("place m0", { trusted: true });
+        // Facing E, not the click flow's own default "U" - so selecting
+        // it to reorient seeds a genuine change (U), not a no-op (see
+        // ORIENT_NO_OP's own dedicated test below for that case).
+        g.move("place m0 E", { trusted: true });
         g.move("place l0", { trusted: true });
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("orient", row, col);
         expect(result.valid).to.be.true;
         expect(result.move).eq("orient m0.1 U");
         expect(result.message).eq(directionMsg());
+    });
+
+    it("orient: clicking an already-\"U\" piece to start reorienting it is a no-op, and carries the ORIENT_NO_OP message instead", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // defaults to "U"
+        g.move("place l0", { trusted: true });
+        const [row, col] = rowColFor(g, 0, 0);
+        const result = g.handleClick("orient", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.complete).eq(-1);
+        expect(result.move).eq("orient m0.1 U");
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+    });
+
+    it("orient: a genuine no-op reorientation is rejected at validateMove() too, so it can never be an actual final move", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0 N", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const result = g.validateMove("orient m0.1 N");
+        expect(result.valid).to.be.true; // still building, not a hard error - see the click test above
+        expect(result.complete).eq(-1);
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        // A genuine change to a DIFFERENT facing stays fully valid/complete.
+        expect(g.validateMove("orient m0.1 S").complete).eq(1);
     });
 
     // A wasteland minion facing into the void reads its target from a

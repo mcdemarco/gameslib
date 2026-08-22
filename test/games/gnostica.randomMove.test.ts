@@ -254,4 +254,19 @@ describe("Gnostica: randomMove()", () => {
         const useless = counts.N + counts.S + counts.W; // point at more void
         expect(useful, `useful=${useful} useless=${useless}`).to.be.greaterThan(useless);
     });
+
+    // A no-op reorientation (the same facing as the piece already has) is
+    // never a legitimate move - randomOrientMove() must exclude it from
+    // its own candidates rather than relying on validateMove() to
+    // downgrade it after the fact.
+    it("randomOrientMove() never generates a no-op (the same facing the piece already has)", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const build = (g as unknown as { randomOrientMove: () => string | undefined }).randomOrientMove.bind(g);
+        for (let i = 0; i < 200; i++) {
+            const move = build();
+            expect(move).to.not.eq(undefined);
+            expect(move).to.not.eq("orient m0.1 U");
+        }
+    });
 });
