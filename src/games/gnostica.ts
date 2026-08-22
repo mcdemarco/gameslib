@@ -838,6 +838,7 @@ export class GnosticaGame extends GameBase {
 
         this.results = [];
         this.frames = [];
+        this.cardsDrawn[this.currplayer - 1] = 0;
         let head;
 
         if (m.toLowerCase() === "pass") {
