@@ -6537,6 +6537,20 @@ export class GnosticaGame extends GameBase {
         const CARDINAL_COS_SIN: Record<Exclude<Orientation, "U">, [number, number]> = {
     N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
 };
+        // #48: a piece bumped off its own preferred slot tries the two
+        // perpendicular sides first, then dead centre, and only falls
+        // back to the OPPOSITE side as an absolute last resort - visually
+        // the most misleading placement, since it reads as facing the
+        // wrong way. A centre-preferring piece has no such concern - any
+        // leftover slot is equally fine, so its own list is just a fixed,
+        // deterministic order (not a real preference).
+        const FALLBACK_ORDER: Record<Orientation, number[]> = {
+            N: [2, 3, 4, 1], // E, W, U, S
+            S: [2, 3, 4, 0], // E, W, U, N
+            E: [0, 1, 4, 3], // N, S, U, W
+            W: [0, 1, 4, 2], // N, S, U, E
+            U: [0, 1, 2, 3], // no preference
+        };
 
         const n = pieces.length;
         if (n === 0) {
@@ -6554,10 +6568,11 @@ export class GnosticaGame extends GameBase {
                 chosenIdx[i] = idx;
             }
         });
-        const free = PIECE_GRID_SLOTS.map((_, idx) => idx).filter(idx => !claimed.has(idx));
         for (let i = 0; i < n; i++) {
             if (chosenIdx[i] === undefined) {
-                chosenIdx[i] = free.shift()!;
+                const fallback = FALLBACK_ORDER[pieces[i].orientation].find(idx => !claimed.has(idx))!;
+                claimed.add(fallback);
+                chosenIdx[i] = fallback;
             }
         }
         return chosenIdx.map((idx, i) => {
