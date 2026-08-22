@@ -5311,6 +5311,30 @@ export class GnosticaGame extends GameBase {
     // bare wasteland for placement, a higher-value card for use/play -
     // without ever ruling the weaker options out entirely, the same way
     // a human player occasionally still takes the less obvious option.
+    // A facing only matters for what it points AT (Rods/Swords/Discs all
+    // act on the facing cell - see ROD_NEEDS_FACING and friends), so a
+    // uniformly random orientation on a WASTELAND cell wastes that choice
+    // about as often as not, pointing off into cells with nothing there
+    // to act on. Same "prefer, don't require" bias as weightedPick's own
+    // docs: "U" (no facing at all) and any cardinal direction that
+    // genuinely points at a territory are weighted well above one that
+    // points at more wasteland/void, without ruling the latter out
+    // entirely. A piece on its own territory cell is left uniformly
+    // random - its facing is already meaningful there regardless of
+    // direction, so there's no "wasted" option to steer away from.
+    private weightedRandomOrientation(x: number, y: number): Orientation {
+        if (this.board.classify(x, y) !== "wasteland") {
+            return allOrientations[Math.floor(Math.random() * allOrientations.length)];
+        }
+        return this.weightedPick(allOrientations, (o) => {
+            if (o === "U") {
+                return 2;
+            }
+            const [dx, dy] = this.board.delta(o);
+            return this.board.classify(x + dx, y + dy) === "territory" ? 3 : 1;
+        });
+    }
+
     private weightedPick<T>(items: T[], weight: (item: T) => number): T {
         const weights = items.map(weight);
         const total = weights.reduce((a, b) => a + b, 0);
@@ -5353,7 +5377,7 @@ export class GnosticaGame extends GameBase {
         }
         // Landing on an existing card is weighted 4x over a bare wasteland cell.
         const [x, y] = this.weightedPick(candidates, ([cx, cy]) => this.board.classify(cx, cy) === "territory" ? 4 : 1);
-        const orientation = allOrientations[Math.floor(Math.random() * allOrientations.length)];
+        const orientation = this.weightedRandomOrientation(x, y);
         return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
     }
 
@@ -5391,7 +5415,7 @@ export class GnosticaGame extends GameBase {
         }
         const { x, y, index } = ownPieces[Math.floor(Math.random() * ownPieces.length)];
         const ref = this.pieceRefStr(x, y, index);
-        const orientation = allOrientations[Math.floor(Math.random() * allOrientations.length)];
+        const orientation = this.weightedRandomOrientation(x, y);
         return `orient ${ref} ${orientation}`;
     }
 
