@@ -3542,6 +3542,27 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:CONVERT.gnostica_hierophant_target", { player: "Alice", where: "n0", target: "Bob" }));
     });
 
+    it("orient (Devil orientAny): names whose minion was reoriented when it isn't the acting player's own", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(15)); // The Devil
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "S")]; // enemy B, player 2, facing S
+        g.move(`use ${major(15).uid}, m0.1 n0.1 U`, { trusted: true }); // declines steps 2 & 3
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("oriented"));
+        expect(line).eq(i18next.t("apresults:ORIENT.gnostica_target", { player: "Alice", where: "n0", what: "1", facing: "U", target: "Bob" }));
+    });
+
+    it("orient: no target named for an ordinary turn action (always the acting player's own piece)", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.move("orient m0.1 N", { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("oriented"));
+        expect(line).eq(i18next.t("apresults:ORIENT.gnostica", { player: "Alice", where: "m0", what: "1", facing: "N" }));
+    });
+
     it("falls back to 'Player N' when no names (or too few) are supplied - old-data/pre-#47 compatibility path", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(11)); // Justice

@@ -522,6 +522,9 @@
                 },
                 "facing": {
                     "type": "string"
+                },
+                "who": {
+                    "type": "number"
                 }
             },
             "required": ["type", "facing"],
