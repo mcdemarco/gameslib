@@ -1503,6 +1503,36 @@ describe("Gnostica: handleClick", () => {
         expect(result.complete).eq(0);
     });
 
+    // Regression: playground.js's boardClick() only re-renders the live
+    // preview (updating the button bar) when canrender or complete>=0 is
+    // set - a valid but complete:-1 result (the common case since #49,
+    // e.g. right after picking a card or a top-level button) used to
+    // leave the button bar visibly stale after a real click, even though
+    // the returned message was correct. canrender must be set on every
+    // valid click result regardless of complete, not just the ones that
+    // happen to be complete:0/1.
+    it("sets canrender on a valid complete:-1 result - a top-level button choice - not just complete>=0 ones", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const result = g.handleClick("", -1, -1, "_btn_use");
+        expect(result.valid).to.be.true;
+        expect(result.complete).eq(-1);
+        expect(result.canrender).eq(true);
+    });
+
+    it("sets canrender on a valid complete:-1 result - a freshly-picked card, mode not chosen yet", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const [row, col] = rowColFor(g, 0, 0);
+        const result = g.handleClick("use", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.complete).eq(-1);
+        expect(result.canrender).eq(true);
+    });
+
     it("place: clicking the same cell again re-affirms \"up\"; clicking a neighbour sets that facing directly", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 0, 0);
@@ -2595,8 +2625,11 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         const [row, col] = rowColFor(g, 1, 0); // n0 - only one of the pool's own minions there
         const cellClick = g.handleClick(cardClick.move, row, col);
         expect(cellClick.move).eq(`play ${uid}, n0.1`);
-        // #49: no step taken yet (mode still unchosen) - nudges toward one.
-        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        // Follow-up to #49: no step taken yet (mode still unchosen), but
+        // this is a click-driven preview mid-navigation, not a submit
+        // attempt - points at the button bar rather than surfacing the
+        // raw validation reason (see powerStepMessageKey's own docs).
+        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP"));
         const g2 = setup();
         g2.move(cellClick.move, { partial: true });
         const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
@@ -2971,13 +3004,19 @@ describe("Gnostica: click-to-orient messaging", () => {
 // The bare "activate <cell>"/"play <uid>" state, right after picking the
 // card and before any suit mode or major-arcana power step. Per #49 this
 // is no longer a complete, submittable move - it's still "in progress"
-// (valid:true, complete:-1) and carries POWER_STEP_REQUIRED, nudging
-// toward taking a step, rather than the old POWER_STILL_OPTIONAL/
-// VALID_MOVE wording. Applies equally to a minor or a major arcana card,
-// and to both activate and play - except Fool/World, permanently exempt
-// since neither can ever take a real step (not yet supported), where the
-// old fully-complete/POWER_STILL_OPTIONAL behavior still applies.
-describe("Gnostica: power-step-required messaging", () => {
+// (valid:true, complete:-1). The MESSAGE shown here is a click-driven UI
+// nudge, not a validation complaint - a real Submit is disabled client-
+// side in this state anyway, so there's nothing to warn the player away
+// from; it just points at the button bar (CHOOSE_STEP). The raw
+// POWER_STEP_REQUIRED validation reason still exists (see
+// validateMinorPower/validateMajorPower's own tests, checked directly via
+// validateMove()) - it surfaces only for an actual submit attempt while
+// incomplete (e.g. a hand-typed move), never through this click path.
+// Applies equally to a minor or a major arcana card, and to both activate
+// and play - except Fool/World, permanently exempt since neither can
+// ever take a real step (not yet supported), where the old fully-
+// complete/POWER_STILL_OPTIONAL behavior still applies.
+describe("Gnostica: choose-step click messaging", () => {
     before(() => {
         addResource("en");
     });
@@ -2992,7 +3031,7 @@ describe("Gnostica: power-step-required messaging", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
-    const stepRequiredMsg = () => i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED");
+    const chooseStepMsg = () => i18next.t("apgames:validation.gnostica.CHOOSE_STEP");
     const stillOptionalMsg = () => i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL");
 
     it("activate: a board click onto a card cell carries the message (minor arcana)", () => {
@@ -3005,7 +3044,7 @@ describe("Gnostica: power-step-required messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`use ${aceOfCups().uid}`);
-        expect(result.message).eq(stepRequiredMsg());
+        expect(result.message).eq(chooseStepMsg());
     });
 
     it("activate: carries the message for a major arcana card too", () => {
@@ -3018,7 +3057,7 @@ describe("Gnostica: power-step-required messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`use ${major(10).uid}`);
-        expect(result.message).eq(stepRequiredMsg());
+        expect(result.message).eq(chooseStepMsg());
     });
 
     it("play: a hand-card click carries the message (minor arcana)", () => {
@@ -3030,7 +3069,7 @@ describe("Gnostica: power-step-required messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`play ${uid}`);
-        expect(result.message).eq(stepRequiredMsg());
+        expect(result.message).eq(chooseStepMsg());
     });
 
     it("play: carries the message for a major arcana card too", () => {
@@ -3042,7 +3081,7 @@ describe("Gnostica: power-step-required messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq("play 10");
-        expect(result.message).eq(stepRequiredMsg());
+        expect(result.message).eq(chooseStepMsg());
     });
 
     it("activate: Fool/World stay exempt - still fully complete, still POWER_STILL_OPTIONAL", () => {

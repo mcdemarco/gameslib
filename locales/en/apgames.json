@@ -5784,6 +5784,7 @@
             "CELL_FULL": "There are already 3 or more pieces in the destination cell.",
             "CELL_HAS_ENEMY": "This move is not permitted when there are enemies on the territory.",
             "CHOOSE_ACTION_FIRST": "Click a button to select your main action.",
+            "CHOOSE_STEP": "Choose a step using the buttons next to the game board.",
             "DESTINATION_HAS_ENEMY": "This move is not permitted when there are enemies in the target wasteland.",
             "DESTROYED_NEEDS_NO_CARD": "No replacement card is needed when destroying a territory.",
             "DIRECTION_STILL_ADJUSTABLE": "You may click another cell to change direction, if desired.",
