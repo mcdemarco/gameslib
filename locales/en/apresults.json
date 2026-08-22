@@ -408,6 +408,7 @@
     "ORIENT": {
         "crosshairs": "{{player}} turned a plane at {{where}} to face {{facing}}.",
         "gnostica": "{{player}} oriented a {{what}}-pip minion at {{where}} {{facing}}.",
+        "gnostica_target": "{{player}} oriented {{target}}'s {{what}}-pip minion at {{where}} {{facing}}.",
         "nowhat": "{{player}} turned a piece at {{where}} to face {{facing}}."
     },
     "PASS": {

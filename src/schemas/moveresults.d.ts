@@ -181,6 +181,7 @@ export type APMoveResult =
       what?: string;
       where?: string;
       facing: string;
+      who?: number;
     }
   | {
       type: "detonate";

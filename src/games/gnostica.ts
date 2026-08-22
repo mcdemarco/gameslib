@@ -4751,7 +4751,7 @@ export class GnosticaGame extends GameBase {
         const orientation = this.parseOrientation(orientationStr);
         orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
-        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.stripCellFromRef(targetRef), facing: orientation });
+        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.stripCellFromRef(targetRef), facing: orientation, who: owner });
         return owner === this.currplayer ? { newMinion: target } : {};
     }
 
@@ -6690,9 +6690,21 @@ export class GnosticaGame extends GameBase {
                         case "declare":
                             node.push(i18next.t("apresults:DECLARE.gnostica", { player, count: r.count }));
                             break;
-                        case "orient":
-                            node.push(i18next.t("apresults:ORIENT.gnostica", { player, where: r.where, what: r.what, facing: r.facing }));
+                        case "orient": {
+                            // The Devil's orientAny can reorient ANY
+                            // player's piece, not just the acting minion's
+                            // own (see checkOrientAny/applyOrientAny - no
+                            // "must be your own" restriction); an ordinary
+                            // "orient" turn action never sets `who` at all
+                            // (always self - see cmdOrient), so this falls
+                            // back to the plain wording exactly like
+                            // destroy's tile case does.
+                            const target = this.otherPlayerName(r.who, player, players);
+                            node.push(target === undefined
+                                ? i18next.t("apresults:ORIENT.gnostica", { player, where: r.where, what: r.what, facing: r.facing })
+                                : i18next.t("apresults:ORIENT.gnostica_target", { player, where: r.where, what: r.what, facing: r.facing, target }));
                             break;
+                        }
                         case "use":
                             node.push(i18next.t("apresults:USE.gnostica", { player, what: r.what }));
                             break;
