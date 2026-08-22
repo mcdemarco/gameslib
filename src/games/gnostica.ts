@@ -3644,7 +3644,9 @@ export class GnosticaGame extends GameBase {
             this.discardPile.push(uid);
             this.discarded.push(uid);
         }
-        this.results.push({ type: "place", how: "discard", what: this.discarded.join(",") })
+        if (discardUids.length > 0) {
+            this.results.push({ type: "place", how: "discard", what: this.discarded.join(",") });
+        }
         if (partial) {
             return;
         }
@@ -4460,7 +4462,7 @@ export class GnosticaGame extends GameBase {
                     return {};
                 }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
-                this.results.push({ type: "move", from: origin, to: dest, what: this.stripCellFromRef(targetRef), how: "rod-piece" });
+                this.results.push({ type: "move", from: origin, to: dest, what: this.stripCellFromRef(targetRef), how: "rod-piece", who: movedOwner });
                 if (movedOwner === this.currplayer) {
                     const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                     return { newMinion: { x: destX, y: destY, index: newIndex } };
@@ -4820,7 +4822,7 @@ export class GnosticaGame extends GameBase {
             const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
             const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
             hermitMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY, newOrientation);
-            this.results.push({ type: "move", from: origin, to: destCellStr, what: this.stripCellFromRef(targetRef), how: "hermit-piece" });
+            this.results.push({ type: "move", from: origin, to: destCellStr, what: this.stripCellFromRef(targetRef), how: "hermit-piece", who: owner });
             if (owner === this.currplayer) {
                 const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                 return { newMinion: { x: destX, y: destY, index: newIndex } };
@@ -6700,31 +6702,38 @@ export class GnosticaGame extends GameBase {
                                 : i18next.t("apresults:PASS.gnostica_bids", { player }));
                             break;
                         case "destroy":
-                            // Pieces always have an owner (`who` is always
-                            // set at push time - see the Rods void-death/
-                            // Swords attack sites); territories don't, so
-                            // `who`'s presence, not `what`'s, is what
-                            // distinguishes the two - both now carry a
-                            // `what` (pip count vs. card uid).
                             if (r.who !== undefined) {
+                                //Someone's minion.
                                 const target = this.otherPlayerName(r.who, player, players);
                                 node.push(target === undefined
-                                    ? i18next.t("apresults:DESTROY.gnostica_piece", { player, what: r.what })
-                                    : i18next.t("apresults:DESTROY.gnostica_piece_target", { player, what: r.what, target }));
+                                    ? i18next.t("apresults:DESTROY.gnostica_piece_own", { player, what: r.what })
+                                    : i18next.t("apresults:DESTROY.gnostica_piece", { player, what: r.what, target }));
                             } else {
+                                //A territory.
                                 node.push(i18next.t("apresults:DESTROY.gnostica_tile", { player, where: r.where, what: r.what }));
                             }
                             break;
-                        case "move":
+                        case "move": {
+                            // Rods/Hermit "piece" mode can move ANY
+                            // player's piece, not just the acting minion's
+                            // own (see checkMovePiece/checkHermitMovePiece
+                            // - no owner restriction on the target) - name
+                            // whose it was, same _own/target split as
+                            // "destroy".
+                            const target = this.otherPlayerName(r.who, player, players);
                             switch (r.how) {
                                 case "rod-piece":
-                                    node.push(i18next.t("apresults:MOVE.gnostica_rod_piece", { player, what: r.what, from: r.from, to: r.to }));
+                                    node.push(target === undefined
+                                        ? i18next.t("apresults:MOVE.gnostica_rod_piece_own", { player, what: r.what, from: r.from, to: r.to })
+                                        : i18next.t("apresults:MOVE.gnostica_rod_piece", { player, what: r.what, from: r.from, to: r.to, target }));
                                     break;
                                 case "rod-tile":
                                     node.push(i18next.t("apresults:MOVE.gnostica_rod_tile", { player, from: r.from, to: r.to }));
                                     break;
                                 case "hermit-piece":
-                                    node.push(i18next.t("apresults:MOVE.gnostica_hermit_piece", { player, from: r.from, to: r.to }));
+                                    node.push(target === undefined
+                                        ? i18next.t("apresults:MOVE.gnostica_hermit_piece_own", { player, what: r.what, from: r.from, to: r.to })
+                                        : i18next.t("apresults:MOVE.gnostica_hermit_piece", { player, what: r.what, from: r.from, to: r.to, target }));
                                     break;
                                 case "hermit-tile":
                                     node.push(i18next.t("apresults:MOVE.gnostica_hermit_tile", { player, from: r.from, to: r.to }));
@@ -6735,6 +6744,7 @@ export class GnosticaGame extends GameBase {
                                         : i18next.t("apresults:MOVE.complete_what", { player, what: r.what, from: r.from, to: r.to }));
                             }
                             break;
+                        }
                         case "place":
                             switch (r.how) {
                                 case "cups-own":

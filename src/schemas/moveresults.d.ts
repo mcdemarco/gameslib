@@ -36,6 +36,7 @@ export type APMoveResult =
       what?: string;
       how?: string;
       count?: number;
+      who?: number;
     }
   | {
       type: "capture";
