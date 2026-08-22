@@ -2573,6 +2573,25 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.1.E piece m0.1.E 1`);
     });
 
+    it("use: minion-picker button labels show the piece's real orientation even when the ref itself omits it (disambiguated by size alone)", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        // Different sizes alone are enough to disambiguate these two, so
+        // neither ref needs an orientation suffix (see pieceRefStr's own
+        // docs) - the button LABEL must still read the piece's actual
+        // facing directly, not try to parse it back out of that ref.
+        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "N"), new Piece(1, 1, "E")];
+        g.move(`use ${aceOfRods().uid}`, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("minion_m0.2"); // no orientation in the ref - size alone disambiguates
+        expect(values).to.include("minion_m0.1");
+        const labelFor = (value: string) => bar!.buttons!.find(b => b.value === value)!.label;
+        expect(labelFor("minion_m0.2")).eq("2-pip pointing N");
+        expect(labelFor("minion_m0.1")).eq("1-pip pointing E");
+    });
+
     it("use: two eligible minions at the activated cell that are fully identical (same owner/size/facing) resolve directly, no picker offered", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfRods());

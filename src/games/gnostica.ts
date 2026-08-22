@@ -1612,7 +1612,8 @@ export class GnosticaGame extends GameBase {
                     continue;
                 }
                 seenRefs.add(ref);
-                buttons.push({ label: this.textFormat(ref), value: `minion_${ref}` });
+                const piece = this.board.get(m.x, m.y)!.pieces[m.index];
+                buttons.push({ label: this.textFormat(piece), value: `minion_${ref}` });
             }
             if (declareBtn !== undefined) {
                 buttons.push(declareBtn);
@@ -1975,9 +1976,14 @@ export class GnosticaGame extends GameBase {
         return idx === -1 ? ref : ref.split(".")[1];
     }
 
-    private textFormat(ref: string): string {
-        const parts = ref.split(".");
-        return `${parts[1]}-pip pointing ${parts[2] == "U" ? "up" : parts[2]}`;
+    // Reads size/orientation straight off the piece itself, rather than
+    // trying to parse them back out of a minion ref string - a ref only
+    // carries orientation when it was actually NEEDED to disambiguate
+    // (see pieceRefStr's own docs; two candidates of different sizes
+    // never need it at all), so a piece whose size alone was unique would
+    // otherwise render as "...pointing undefined" here.
+    private textFormat(piece: Piece): string {
+        return `${piece.size}-pip pointing ${piece.orientation === "U" ? "up" : piece.orientation}`;
     }
 
     // Click-to-orient: clicking the cell a piece already occupies means
