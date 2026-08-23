@@ -59,12 +59,19 @@ interface IStepOutcome {
 
 // The non-mutating validator's counterpart to IStepOutcome: either a
 // failure (validation stops here - `result` is the final, i18n-wrapped
-// answer) or a successful step's predicted outcome (validation continues -
-// same chaining information IStepOutcome carries, just computed read-only
-// instead of read off a board that's actually been mutated).
+// answer) or a not-failed outcome, which itself splits into two cases a
+// plain boolean can't otherwise tell apart: `complete` (default true,
+// omitted at every genuine completion site) says the step was actually
+// finished, carrying whatever chaining info IStepOutcome has; `complete:
+// false` is set explicitly at the handful of "still building" precondition
+// checks in validatePowerStep (mode not chosen yet, not enough args yet,
+// etc. - the same tolerance applyPowerStep's own docs describe) so
+// validateMajorPower's own loop can tell "this step is done" apart from
+// "this step was merely never rejected outright" for its own tail
+// (mirrors validateMinorPower's identical distinction, made the same way).
 type StepValidation =
     | { failed: true; result: IValidationResult }
-    | { failed: false; outcome?: IStepOutcome };
+    | { failed: false; complete?: boolean; outcome?: IStepOutcome };
 
 // resolvePieceRef's result: "ok" resolves to exactly one piece;
 // "malformed" is a syntax failure (wrong segment count, bad pips,
@@ -184,6 +191,17 @@ const SPECIAL_MIN_TOKENS: Record<SpecialPower, number> = {
     fool: Infinity,
     worldUseAny: Infinity,
 };
+
+// True iff `pile` (hand or discard-pile uids) holds a card worth exactly
+// `value` points - lets minorModeAvailability tell apart a mode whose
+// completion needs a same-valued card the player doesn't hold, instead of
+// only discovering that once they reach the card-pick step.
+function handHasCardOfValue(pile: string[], value: number): boolean {
+    return pile.some(uid => {
+        const c = allCards().find(cc => cc.uid === uid);
+        return c !== undefined && cardPointValue(c) === value;
+    });
+}
 
 // The engine-side view of an in-progress "use"/"play" click sequence -
 // reconstructed fresh from the move string on every call (same philosophy
@@ -1613,7 +1631,17 @@ export class GnosticaGame extends GameBase {
                 }
                 seenRefs.add(ref);
                 const piece = this.board.get(m.x, m.y)!.pieces[m.index];
-                buttons.push({ label: this.textFormat(piece), value: `minion_${ref}` });
+                const button: ButtonBarButton = { label: this.textFormat(piece), value: `minion_${ref}` };
+                // Rods rejects any upright minion for every mode
+                // (checkCanUseRod, powers.ts) - keep it in the list rather
+                // than omitting it (see tree-pruning docs), but mark it
+                // struck through; the minion_ dispatch below rejects an
+                // actual click on it immediately with the same message.
+                if (pendingMinor.suitUid === "R" && piece.orientation === "U") {
+                    button.attributes = [{ name: "text-decoration", value: "line-through" }];
+                    button.fill = "#999";
+                }
+                buttons.push(button);
             }
             if (declareBtn !== undefined) {
                 buttons.push(declareBtn);
@@ -1667,11 +1695,25 @@ export class GnosticaGame extends GameBase {
             }
         } else {
             const suitUid = pendingMinor.suitUid!;
-            for (const mode of this.legalMinorModes(pendingMinor)) {
+            const feasible = new Set(this.legalMinorModes(pendingMinor));
+            for (const mode of Object.keys(MINOR_MODES[suitUid])) {
                 const config = MINOR_MODES[suitUid][mode];
                 const button: ButtonBarButton = { label: config.label, value: `mode_${suitUid}_${mode}` };
+                const attrs: { name: string; value: string }[] = [];
                 if (pendingMinor.mode === mode) {
-                    button.attributes = [{ name: "font-weight", value: "bold" }];
+                    attrs.push({ name: "font-weight", value: "bold" });
+                }
+                // A mode that can never be completed right now (see
+                // minorModeAvailability's own tree-pruning docs) is still
+                // offered - not omitted - but struck through; the mode_
+                // dispatch below rejects an actual click on it immediately
+                // with the specific reason.
+                if (!feasible.has(mode)) {
+                    attrs.push({ name: "text-decoration", value: "line-through" });
+                    button.fill = "#999";
+                }
+                if (attrs.length > 0) {
+                    button.attributes = attrs as [{ name: string; value: string }, ...{ name: string; value: string }[]];
                 }
                 buttons.push(button);
             }
@@ -2010,38 +2052,94 @@ export class GnosticaGame extends GameBase {
         return undefined;
     }
 
-    // Best-effort filter over which modes are worth offering as buttons
-    // right now, given current board state - not a full legality check
-    // (validateMove still catches anything this misses or over-includes
-    // once the player actually acts). Rods needs its own orientation gate
-    // (a piece pointing "U" cannot use a rod at all, per
-    // requireCanUseRod in powers.ts); the other three suits have no such
-    // restriction.
-    private legalMinorModes(pending: IPendingStep): string[] {
+    // Best-effort feasibility check over which modes are worth offering as
+    // buttons right now, given current board state AND hand contents - not
+    // a full legality check (validateMove still catches anything this
+    // misses or over-includes once the player actually acts). A mode found
+    // infeasible here still gets a button (see getActionButtons' own
+    // tree-pruning docs) - it's shown struck through, and an actual click
+    // is rejected immediately with the specific reason recorded here,
+    // rather than being omitted outright or left to fail only at submit.
+    private minorModeAvailability(pending: IPendingStep): Map<string, { key: string; params?: Record<string, unknown> } | undefined> {
         // Only ever called for a suit-shaped pending - see buildStepModeMove's
         // own docs on why suitUid is guaranteed set here.
         const suitUid = pending.suitUid!;
         const minion = this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const targetT = this.board.get(tx, ty);
-        return Object.keys(MINOR_MODES[suitUid]).filter(mode => {
+        const cell = GnosticaBoard.coords2algebraic(tx, ty);
+        const hand = this.hands[this.currplayer - 1];
+        const result = new Map<string, { key: string; params?: Record<string, unknown> } | undefined>();
+        for (const mode of Object.keys(MINOR_MODES[suitUid])) {
             switch (`${suitUid}.${mode}`) {
                 case "C.own":
-                    return targetT === undefined || targetT.canAdd(pending.opts.ignoreCapacity === true);
+                    result.set(mode, (targetT === undefined || targetT.canAdd(pending.opts.ignoreCapacity === true))
+                        ? undefined : { key: "CELL_FULL" });
+                    break;
                 case "C.enemy":
-                    return (targetT?.pieces ?? []).some(p => p.owner !== this.currplayer);
+                    result.set(mode, (targetT?.pieces ?? []).some(p => p.owner !== this.currplayer)
+                        ? undefined : { key: "NO_ENEMY_THERE", params: { cell } });
+                    break;
                 case "C.new":
-                    return this.board.classify(tx, ty) === "wasteland";
+                    if (this.board.classify(tx, ty) !== "wasteland") {
+                        result.set(mode, { key: "NOT_A_WASTELAND" });
+                    } else if (pending.opts.allowRandomDraw === true || handHasCardOfValue(hand, 1)) {
+                        result.set(mode, undefined);
+                    } else {
+                        result.set(mode, { key: "NO_CARD_FOR_TERRITORY" });
+                    }
+                    break;
                 case "R.piece":
                 case "R.tile":
-                    return minion.orientation !== "U";
-                case "D.tile":
-                case "S.tile":
-                    return (targetT?.pointValue() ?? 0) > 0;
+                    result.set(mode, minion.orientation !== "U" ? undefined : { key: "ROD_NEEDS_FACING" });
+                    break;
+                case "D.tile": {
+                    const current = targetT?.pointValue() ?? 0;
+                    if (current === 0) {
+                        result.set(mode, { key: "NOTHING_TO_GROW" });
+                        break;
+                    }
+                    const pile = pending.opts.replacementSource === "discard" ? this.discardPile : hand;
+                    const maxDelta = pending.opts.skipLadder === true ? 2 : 1;
+                    let ok = false;
+                    for (let d = 1; d <= maxDelta; d++) {
+                        if (handHasCardOfValue(pile, current + d)) {
+                            ok = true;
+                        }
+                    }
+                    result.set(mode, ok ? undefined : { key: "NO_CARD_TO_GROW" });
+                    break;
+                }
+                case "S.tile": {
+                    const current = targetT?.pointValue() ?? 0;
+                    if (current === 0) {
+                        result.set(mode, { key: "NOTHING_TO_ATTACK" });
+                        break;
+                    }
+                    const pile = pending.opts.replacementSource === "discard" ? this.discardPile : hand;
+                    let ok = false;
+                    for (let p = 1; p <= minion.size; p++) {
+                        const resultValue = current - p;
+                        if (resultValue < 0) {
+                            continue;
+                        }
+                        if (resultValue === 0 || handHasCardOfValue(pile, resultValue)) {
+                            ok = true;
+                            break;
+                        }
+                    }
+                    result.set(mode, ok ? undefined : { key: "NO_CARD_TO_ATTACK" });
+                    break;
+                }
                 default:
-                    return true;
+                    result.set(mode, undefined);
             }
-        });
+        }
+        return result;
+    }
+
+    private legalMinorModes(pending: IPendingStep): string[] {
+        return [...this.minorModeAvailability(pending).entries()].filter(([, reason]) => reason === undefined).map(([mode]) => mode);
     }
 
     // Builds the move string for choosing a suit-power mode via button -
@@ -2337,7 +2435,18 @@ export class GnosticaGame extends GameBase {
     // resolvePieceRef's own docs on the "target" pool).
     private pickPieceTargetClick(minion: IMinionRef, x: number, y: number, cell: string, pendingForError: IPendingStep): string | IClickResult | undefined {
         const [faceX, faceY] = this.minorTargetCell(minion);
+        // tradeHands/hierophantReplace must target an enemy (checkTradeHands/
+        // checkHierophantReplace, powers.ts) - orientAny/hermitTeleport have
+        // no such restriction. Reject a self-target (or a facing cell whose
+        // only/first piece is the acting player's own) immediately here,
+        // rather than letting it build a provisional move that's guaranteed
+        // to fail with the same message only once submitted.
+        const requiresEnemy = pendingForError.special === "tradeHands" || pendingForError.special === "hierophantReplace";
+        const enemyKey = pendingForError.special === "tradeHands" ? "TRADEHANDS_MUST_TARGET_ENEMY" : "HIEROPHANT_MUST_TARGET_ENEMY";
         if (x === minion.x && y === minion.y) {
+            if (requiresEnemy) {
+                return { move: this.pendingMoveString(pendingForError), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
+            }
             return this.pieceRefStr(minion.x, minion.y, minion.index);
         }
         if (x !== faceX || y !== faceY) {
@@ -2346,6 +2455,13 @@ export class GnosticaGame extends GameBase {
         const t = this.board.get(faceX, faceY);
         if (t === undefined || t.pieces.length === 0) {
             return { move: this.pendingMoveString(pendingForError), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
+        }
+        if (requiresEnemy) {
+            const enemyIndex = t.pieces.findIndex(p => p.owner !== this.currplayer);
+            if (enemyIndex === -1) {
+                return { move: this.pendingMoveString(pendingForError), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
+            }
+            return this.pieceRefStr(faceX, faceY, enemyIndex);
         }
         return this.pieceRefStr(faceX, faceY, 0);
     }
@@ -2649,6 +2765,10 @@ export class GnosticaGame extends GameBase {
                     if (resolved.kind !== "ok") {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
+                    const clickedPiece = this.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
+                    if (pending.suitUid === "R" && clickedPiece.orientation === "U") {
+                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.ROD_NEEDS_FACING") };
+                    }
                     const minionRef = this.pieceRefStr(resolved.ref.x, resolved.ref.y, resolved.ref.index, pending.minions);
                     return this.provisionalResult(this.assembleStepMove(pending, [minionRef]));
                 }
@@ -2661,6 +2781,10 @@ export class GnosticaGame extends GameBase {
                     const pending = this.parsePendingStep(move);
                     if (pending === undefined || pending.suitUid !== suitUid) {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    const reason = this.minorModeAvailability(pending).get(mode);
+                    if (reason !== undefined) {
+                        return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${reason.key}`, reason.params ?? {}) };
                     }
                     // Cups "own" seeds its new piece's facing as "U" by
                     // default (see buildStepModeMove's own C.own case) -
@@ -4017,8 +4141,16 @@ export class GnosticaGame extends GameBase {
         if (minionRef === undefined) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" });
         }
+        // Same #49 principle as the stepSegments.length===0 case above:
+        // each of the three branches below is ALSO genuinely still
+        // incomplete (a cell chosen but not which minion, a minion but no
+        // mode, a mode but not enough args yet - e.g. Discs "tile" with a
+        // target cell but no replacement card uid) - previously these
+        // returned bare `undefined`, which validateMove()'s own tail
+        // treats as "no objection" and defaults to complete:1/valid, the
+        // exact "looks like a valid move" false-positive this fixes.
         if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
-            return undefined; // cell chosen, which minion there is still undecided - still declined
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
         const result = this.resolvePieceRef(minionRef, eligible);
         if (result.kind !== "ok") {
@@ -4026,14 +4158,14 @@ export class GnosticaGame extends GameBase {
         }
         const minion = result.ref;
         if (mode === undefined) {
-            return undefined; // minion earmarked, mode not chosen yet - still declined
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
         const config = MINOR_MODES[suitUid]?.[mode];
         if (config === undefined) {
             return this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitUid });
         }
         if (rest.length < config.minArgs) {
-            return undefined; // mode chosen, args not yet complete - still declined
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
         const stepResult = this.validateSuitPrimitive(suitUid, minion, mode, rest, {});
         return stepResult.failed ? stepResult.result : undefined;
@@ -4131,6 +4263,17 @@ export class GnosticaGame extends GameBase {
             const stepResult = (clone ?? this).validatePowerStep(step, minions, tokens, def, i, stepSegments.length);
             if (stepResult.failed) {
                 return stepResult.result;
+            }
+            // Same distinction as validateMinorPower's own tail: a step
+            // that was merely never rejected outright isn't necessarily
+            // FINISHED (a target chosen but no replacement card yet, a
+            // mode not yet picked, etc. - see StepValidation's own docs
+            // on why `complete` exists at all). Only meaningful for the
+            // LAST segment given - an earlier one being incomplete would
+            // mean a later one couldn't legitimately exist at all, so
+            // this can't fire mid-chain in practice.
+            if (stepResult.complete === false && i === stepSegments.length - 1) {
+                return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
             }
             if (stepResult.outcome?.newMinion !== undefined) {
                 minions = [...minions, stepResult.outcome.newMinion];
@@ -4253,7 +4396,7 @@ export class GnosticaGame extends GameBase {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }) };
         }
         if (this.isMinionCellStillNarrowing(minionRef, minions)) {
-            return { failed: false }; // cell chosen, which minion there is still undecided - still declined
+            return { failed: false, complete: false }; // cell chosen, which minion there is still undecided - still declined
         }
         const result = this.resolvePieceRef(minionRef, minions);
         if (result.kind !== "ok") {
@@ -4265,14 +4408,14 @@ export class GnosticaGame extends GameBase {
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
             // Mirrors applyPowerStep's own tolerance - see its docs.
             if (mode === undefined) {
-                return { failed: false }; // minion earmarked, mode not chosen yet - still declined
+                return { failed: false, complete: false }; // minion earmarked, mode not chosen yet - still declined
             }
             const config = MINOR_MODES[suitUid]?.[mode];
             if (config === undefined) {
                 return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitUid }) };
             }
             if (modeArgs.length < config.minArgs) {
-                return { failed: false }; // mode chosen, args not yet complete - still declined
+                return { failed: false, complete: false }; // mode chosen, args not yet complete - still declined
             }
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
             return this.validateSuitPrimitive(suitUid, minion, mode, modeArgs, opts);
@@ -4282,7 +4425,7 @@ export class GnosticaGame extends GameBase {
             (step.special === "orientMinion" || step.special === "tradeHands" || step.special === "orientAny" || step.special === "hierophantReplace")
             && rest.length < SPECIAL_MIN_TOKENS[step.special] - 1
         ) {
-            return { failed: false };
+            return { failed: false, complete: false };
         }
         switch (step.special) {
             case "orientMinion":
@@ -4295,13 +4438,13 @@ export class GnosticaGame extends GameBase {
                 // Mirrors applyPowerStep's own tolerance - see its docs.
                 const [hermitMode, ...hermitArgs] = rest;
                 if (hermitMode === undefined) {
-                    return { failed: false }; // mode not chosen yet - still declined
+                    return { failed: false, complete: false }; // mode not chosen yet - still declined
                 }
                 if (hermitMode !== "piece" && hermitMode !== "tile") {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode: hermitMode, suit: "Hermit" }) };
                 }
                 if (hermitArgs.length < 2) {
-                    return { failed: false }; // mode chosen, target/destination not yet complete - still declined
+                    return { failed: false, complete: false }; // mode chosen, target/destination not yet complete - still declined
                 }
                 return this.validateHermitStep(minion, rest);
             }
@@ -5038,20 +5181,20 @@ export class GnosticaGame extends GameBase {
     private validateMagicianChoice(minion: IMinionRef, rest: string[]): StepValidation {
         const [suitLetter, mode, ...args] = rest;
         if (suitLetter === undefined) {
-            return { failed: false }; // minion earmarked, suit not chosen yet - still declined
+            return { failed: false, complete: false }; // minion earmarked, suit not chosen yet - still declined
         }
         if (!["C", "R", "D", "S"].includes(suitLetter)) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_SUIT_LETTER", { suitLetter }) };
         }
         if (mode === undefined) {
-            return { failed: false }; // suit chosen, mode not chosen yet - still declined
+            return { failed: false, complete: false }; // suit chosen, mode not chosen yet - still declined
         }
         const config = MINOR_MODES[suitLetter]?.[mode];
         if (config === undefined) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitLetter }) };
         }
         if (args.length < config.minArgs) {
-            return { failed: false }; // mode chosen, args not yet complete - still declined
+            return { failed: false, complete: false }; // mode chosen, args not yet complete - still declined
         }
         return this.validateSuitPrimitive(suitLetter, minion, mode, args, {});
     }
@@ -5563,10 +5706,12 @@ export class GnosticaGame extends GameBase {
     // minion/board. Best-effort pre-filter only, same as legalMinorModes
     // itself - buildRandomModeArgCandidates + validateSuitPrimitive
     // remain the real gate.
-    private legalModesForMinion(minion: IMinionRef, suitUid: string, ignoreCapacity: boolean): string[] {
+    private legalModesForMinion(minion: IMinionRef, suitUid: string, opts: Record<string, unknown>): string[] {
+        const ignoreCapacity = opts.ignoreCapacity === true;
         const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
         const [tx, ty] = this.minorTargetCell(minion);
         const targetT = this.board.get(tx, ty);
+        const hand = this.hands[this.currplayer - 1];
         return Object.keys(MINOR_MODES[suitUid]).filter(mode => {
             switch (`${suitUid}.${mode}`) {
                 case "C.own":
@@ -5574,13 +5719,44 @@ export class GnosticaGame extends GameBase {
                 case "C.enemy":
                     return (targetT?.pieces ?? []).some(p => p.owner !== this.currplayer);
                 case "C.new":
-                    return this.board.classify(tx, ty) === "wasteland";
+                    if (this.board.classify(tx, ty) !== "wasteland") {
+                        return false;
+                    }
+                    return opts.allowRandomDraw === true || handHasCardOfValue(hand, 1);
                 case "R.piece":
                 case "R.tile":
                     return piece.orientation !== "U";
-                case "D.tile":
-                case "S.tile":
-                    return (targetT?.pointValue() ?? 0) > 0;
+                case "D.tile": {
+                    const current = targetT?.pointValue() ?? 0;
+                    if (current === 0) {
+                        return false;
+                    }
+                    const pile = opts.replacementSource === "discard" ? this.discardPile : hand;
+                    const maxDelta = opts.skipLadder === true ? 2 : 1;
+                    for (let d = 1; d <= maxDelta; d++) {
+                        if (handHasCardOfValue(pile, current + d)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                case "S.tile": {
+                    const current = targetT?.pointValue() ?? 0;
+                    if (current === 0) {
+                        return false;
+                    }
+                    const pile = opts.replacementSource === "discard" ? this.discardPile : hand;
+                    for (let p = 1; p <= piece.size; p++) {
+                        const resultValue = current - p;
+                        if (resultValue < 0) {
+                            continue;
+                        }
+                        if (resultValue === 0 || handHasCardOfValue(pile, resultValue)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
                 default:
                     return true;
             }
@@ -5709,10 +5885,9 @@ export class GnosticaGame extends GameBase {
     private findRandomPrimitiveChoice(
         suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>,
     ): { minion: IMinionRef; mode: string; args: string[] } | undefined {
-        const ignoreCapacity = opts.ignoreCapacity === true;
         const pool = shuffle([...minions]) as IMinionRef[];
         for (const minion of pool) {
-            const modeCandidates = this.legalModesForMinion(minion, suitUid, ignoreCapacity)
+            const modeCandidates = this.legalModesForMinion(minion, suitUid, opts)
                 .map(mode => ({ mode, candidates: this.buildRandomModeArgCandidates(minion, suitUid, mode) }));
             // R.piece's own best candidate weight already tells us whether
             // ANY way of using it here actually lands the acting player's
