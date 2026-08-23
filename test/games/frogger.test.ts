@@ -2,6 +2,7 @@
 
 import "mocha";
 import { expect } from "chai";
+import { addResource } from "../../src";
 import { FroggerGame } from '../../src/games';
 
 describe("Frogger", () => {
@@ -389,6 +390,19 @@ describe("Frogger", () => {
         expect(group).to.not.equal(undefined);
         expect((group as {results: {type: string}[]}).results.some(r => r.type === "move")).to.equal(true);
         expect(g.results.some(r => r.type === "announce")).to.equal(true);
+    });
+
+    it ("Render() does not corrupt the shared results array", () => {
+        // Regression test for an issue with the chatlog.
+        addResource("en");
+        const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["crocodiles","continuous"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-28T02:33:17.187Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PMSL"],["b3","X0"],["c4","PSVK"],["c3","X0"],["d4","NV"],["e4","PVLY"],["e3","X0"],["f4","9VY"],["g4","8MS"],["h4","PMYK"],["h3","X0"],["i4","NL"],["j4","1Y"],["k4","2MK"],["l4","2VL"],["m4","8VL"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["1M","7SK","1L","1K"],["5SV","4MS","3MV","9LK"]],"hands":[[],[]],"market":["6SY","6LK","4VL"],"discards":[],"nummoves":3}]}`);
+        g.move("1M:a3-g3/g3-f3,6LK/6LK:f3-i3/");
+        g.render(); // triggers the aliasing bug, if present
+        const log = g.chatLog(["Alice", "Bob"]);
+        const lastNode = log[log.length - 1];
+        // Match only the refill message itself, not related draw messages.
+        const occurrences = lastNode.filter(line => line.startsWith("The draw pool was")).length;
+        expect(occurrences).to.equal(1);
     });
 
     it ("Implements the original market rules", () => {

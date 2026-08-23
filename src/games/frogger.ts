@@ -2178,7 +2178,8 @@ export class FroggerGame extends GameBase {
                 const group = this.results[i-1];
                 if (group !== undefined && group.type === "_group") {
                     //throw new Error(`The only results that should be present are _group results!`);
-                    results = group.results;
+                    // Changed alias to a copy, fixing weird chatlog issues.
+                    results = [...group.results];
                 } else if (group !== undefined) {
                     results = [group];
                 }
