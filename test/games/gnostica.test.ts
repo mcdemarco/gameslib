@@ -2247,8 +2247,13 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_new");
         expect(modeClick.move).eq(`use ${aceOfCups().uid}, l0.1 new k0`);
-        expect(modeClick.valid).to.be.true; // still-declined-tolerant, not an error - see applyMinorPower's docs
-        expect(modeClick.complete).eq(0);
+        // Cell chosen, card uid not yet supplied - genuinely still
+        // building (complete:-1), not just soft-pedaled to 0 - a bare
+        // hand-typed submission of this exact string must not look
+        // "valid" (the false-positive this fixes; see validateMinorPower's
+        // own docs).
+        expect(modeClick.valid).to.be.true;
+        expect(modeClick.complete).eq(-1);
         const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
         expect(cardClick.move).eq(`use ${aceOfCups().uid}, l0.1 new k0 ${spotUid}`);
         g.move(cardClick.move, { trusted: true });
@@ -2326,11 +2331,45 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_D_tile");
         expect(modeClick.move).eq(`use ${aceOfDiscs().uid}, m0.1 tile n0`);
+        // Target chosen, replacement card not yet supplied - must not read
+        // as a submittable move ("looks like a valid move"): still valid
+        // (still building), but genuinely incomplete.
         expect(modeClick.valid).to.be.true;
+        expect(modeClick.complete).eq(-1);
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
         const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${royaltyUid}`);
         expect(cardClick.move).eq(`use ${aceOfDiscs().uid}, m0.1 tile n0 ${royaltyUid}`);
         g.move(cardClick.move, { trusted: true });
         expect(g.board.get(1, 0)!.card?.uid).eq(royaltyUid);
+    });
+
+    it("Discs (tile): mode button is struck through and rejects a click when the hand has no card that could grow this territory", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfDiscs());
+        forceCardAt(g, 1, 0, () => card("2C")); // n0, a known worth-1 spot card
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place l0", { trusted: true }); // player 2
+        // All spot cards (worth 1) - growing a worth-1 territory needs a
+        // worth-2 (court) card, which none of these are.
+        g.hands[0] = [card("AC").uid, card("2R").uid, card("3D").uid, card("4S").uid];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        g.move(cellClick.move, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const tileBtn = bar!.buttons!.find(b => b.value === "mode_D_tile");
+        expect(tileBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
+        const rejected = g.handleClick(cellClick.move, -1, -1, "_btn_mode_D_tile");
+        expect(rejected.valid).to.be.false;
+        expect(rejected.message).eq(i18next.t("apgames:validation.gnostica.NO_CARD_TO_GROW"));
+        g.hands[0].push("KS"); // King of Swords, worth 2 - now completable
+        const rep2 = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
+        const tileBtn2 = bar2!.buttons!.find(b => b.value === "mode_D_tile");
+        expect(tileBtn2!.attributes).to.be.undefined;
+        const accepted = g.handleClick(cellClick.move, -1, -1, "_btn_mode_D_tile");
+        expect(accepted.move).eq(`use ${aceOfDiscs().uid}, m0.1 tile n0`);
     });
 
     it("Cups (new), Wheel of Fortune: a dedicated button supplies the random draw - no hand card needed, no other card offers it", () => {
@@ -2483,18 +2522,30 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(values[values.length - 1]).eq("declare");
     });
 
-    it("offers only currently-sensible suit modes as buttons", () => {
+    it("offers every suit mode as a button, struck through when not currently sensible, and rejects a click on one immediately", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0", { trusted: true }); // "U" - targets itself, a territory with no enemy on it
         g.move("place l0", { trusted: true });
         g.move(`use ${aceOfCups().uid}`, { partial: true }); // sync engine state, same as the playground's own preview flow
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("mode_C_own");
-        expect(values).to.not.include("mode_C_enemy"); // no enemy piece at the target (self) cell
-        expect(values).to.not.include("mode_C_new"); // "U" targets self, a territory, not a wasteland
+        expect(values).to.include("mode_C_enemy"); // still offered, not omitted - see tree-pruning docs
+        expect(values).to.include("mode_C_new");
+        const ownBtn = bar!.buttons!.find(b => b.value === "mode_C_own");
+        expect(ownBtn!.attributes).to.be.undefined; // feasible - not struck through
+        const enemyBtn = bar!.buttons!.find(b => b.value === "mode_C_enemy");
+        expect(enemyBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" }); // no enemy piece at the target (self) cell
+        const newBtn = bar!.buttons!.find(b => b.value === "mode_C_new");
+        expect(newBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" }); // "U" targets self, a territory, not a wasteland
+        const enemyClick = g.handleClick(`use ${aceOfCups().uid}`, -1, -1, "_btn_mode_C_enemy");
+        expect(enemyClick.valid).to.be.false;
+        expect(enemyClick.message).eq(i18next.t("apgames:validation.gnostica.NO_ENEMY_THERE", { cell: "m0" }));
+        const newClick = g.handleClick(`use ${aceOfCups().uid}`, -1, -1, "_btn_mode_C_new");
+        expect(newClick.valid).to.be.false;
+        expect(newClick.message).eq(i18next.t("apgames:validation.gnostica.NOT_A_WASTELAND"));
     });
 
     it("bolds the currently-chosen mode button", () => {
@@ -2555,12 +2606,23 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         // buttons show up afterward.
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 1, "E")];
         g.move(`use ${aceOfRods().uid}`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("minion_m0.1.U");
         expect(values).to.include("minion_m0.1.E");
         expect(values).to.not.include("mode_R_piece"); // not offered until a minion is actually chosen
+        // The upright minion is still offered (not pruned outright), but
+        // struck through - it can never satisfy checkCanUseRod - and an
+        // actual click on it is rejected immediately instead of building a
+        // doomed provisional move.
+        const uprightButton = bar!.buttons!.find(b => b.value === "minion_m0.1.U");
+        expect(uprightButton!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
+        const rejectedClick = g.handleClick(`use ${aceOfRods().uid}`, -1, -1, "_btn_minion_m0.1.U");
+        expect(rejectedClick.valid).to.be.false;
+        expect(rejectedClick.message).eq(i18next.t("apgames:validation.gnostica.ROD_NEEDS_FACING"));
+        const facingButton = bar!.buttons!.find(b => b.value === "minion_m0.1.E");
+        expect(facingButton!.attributes).to.be.undefined;
         const picked = g.handleClick(`use ${aceOfRods().uid}`, -1, -1, "_btn_minion_m0.1.E");
         expect(picked.move).eq(`use ${aceOfRods().uid}, m0.1.E`);
         g.move(picked.move, { partial: true });
@@ -3169,6 +3231,27 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         return bar!.buttons!.map(b => b.value);
     };
 
+    it("Empress (orientMinion, then create): a chain whose LAST step is started but not yet complete is not treated as a valid, submittable move", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(3)); // The Empress
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        // Step 1 (orientMinion) reorients U -> E, so step 2's own target
+        // (the minion's new facing) is n0. Step 2 (Cups "new") has that
+        // target cell but no replacement card uid yet - the same shape of
+        // bug reported for a minor arcana card's own single step, just
+        // reached through a major arcana chain's LAST step instead (see
+        // validatePowerStep/validateMajorPower's own docs).
+        const incomplete = g.validateMove(`use ${major(3).uid}, m0.1 E/m0.1 new n0`);
+        expect(incomplete.valid).to.be.true;
+        expect(incomplete.complete).eq(-1);
+        expect(incomplete.message).eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        // Supplying the card uid completes it normally.
+        g.hands[0].push("2S");
+        const complete = g.validateMove(`use ${major(3).uid}, m0.1 E/m0.1 new n0 2S`);
+        expect(complete.complete).eq(1);
+    });
+
     it("Lovers (move, then create): step 2's Cups buttons appear only once step 1 is complete; a board click still redirects step 1's default target; the chained click sequence resolves correctly", () => {
         // Fully deterministic (see clearBoard's own docs): the random
         // initial deal could otherwise occasionally put The Lovers
@@ -3387,6 +3470,20 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
     });
 
+    it("tradeHands: clicking the acting minion's own cell during target-pick surfaces MUST_TARGET_ENEMY immediately, instead of building a doomed self-target move", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(11)); // Justice
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, player 2
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const selfClick = g.handleClick(cellClick.move, row, col); // m0 itself, not n0
+        expect(selfClick.valid).to.be.false;
+        expect(selfClick.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
+        expect(selfClick.move).eq(cellClick.move); // the move string never advances into the doomed state
+    });
+
     it("orientAny (Devil): target pick auto-seeds a default orientation; a further click near the TARGET adjusts it", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(15)); // The Devil
@@ -3571,12 +3668,14 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         // tradeHands' own "self" target - starting step 2 wins (see
         // handleClickCore's own docs on this priority). Self-targeting
         // tradeHands is itself forbidden (a no-op dressed up as a real
-        // step - see checkTradeHands's own docs), so this proves routing
-        // picked step 2 without also asserting the resulting move is
-        // legal - it isn't, and correctly so.
+        // step - see checkTradeHands's own docs), so pickPieceTargetClick
+        // now rejects it immediately (see its own tree-pruning docs) rather
+        // than building the doomed step-2 move and letting it fail later -
+        // this proves routing picked step 2 without ever advancing the
+        // move string into that invalid state.
         const [rowM, colM] = rowColFor(g, 0, 0);
         const step2 = g.handleClick(step1.move, rowM, colM);
-        expect(step2.move).eq(`use ${major(12).uid}, m0.1 tile 1/m0.1 m0.1`);
+        expect(step2.move).eq(step1.move);
         expect(step2.valid).to.be.false;
         expect(step2.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
         // Declining tradeHands (the chain's own tail) stays legal, so
