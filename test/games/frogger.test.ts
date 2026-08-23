@@ -377,6 +377,20 @@ describe("Frogger", () => {
 
     });
 
+    it ("Regression test of a submove with refill", () => {
+        // Regression test for a chatlogging issue.
+        const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["courts","#market","refills"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-29T03:38:17.329Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","7VY"],["c4","PVLY"],["d4","PMSL"],["e4","2MK"],["f4","3LY"],["g4","PMYK"],["h4","5ML"],["i4","8YK"],["j4","NY"],["k4","PSVK"],["l4","1L"],["m4","6MV"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["TSLK","NM","9LK","TMLY"],["9MS","7SK","1K","2VL"]],"hands":[[],[]],"market":["NS","3SK","TMVK","5YK","TSVY","NV"],"discards":[],"nummoves":3}]}`);
+        g.move("NM:a3-d3/9LK:a3-c2/TSLK:a3-d2/");
+        g.move("9MS:a2-k3/7SK:a2-n2/1K:k3-n2/");
+        g.move("d3-c3,5YK/c2-b2,TMVK/d2-c2,TSVY/");
+        g.move("2VL:a2-d1/d1-c1,3SK/c1-b3,NS/");
+        g.move("5YK:b2-e2/e2-d2,NV!/");
+        const group = g.results.find(r => r.type === "_group");
+        expect(group).to.not.equal(undefined);
+        expect((group as {results: {type: string}[]}).results.some(r => r.type === "move")).to.equal(true);
+        expect(g.results.some(r => r.type === "announce")).to.equal(true);
+    });
+
     it ("Implements the original market rules", () => {
         const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["courtpawns"],"gameover":false,"winner":[],"stack":[{"_version":"20251229","_results":[],"_timestamp":"2025-12-31T23:44:13.590Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","3SK"],["c4","7VY"],["d4","TSVY"],["e4","5YK"],["f4","2SY"],["g4","8MS"],["h4","3LY"],["i4","TSLK"],["j4","1Y"],["k4","TMLY"],["l4","1S"],["m4","TMVK"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["1L","1K","6LK","6SY"],["NY","1V","NS","NM"]],"hands":[[],[]],"market":["9LK","NK","9VY","8YK","2MK","6MV"],"discards":[],"nummoves":3}]}`);
         

@@ -1779,6 +1779,15 @@ export class FroggerGame extends GameBase {
                     this.moveFrog(subIFM.from,subIFM.to);
                 }
 
+                // Group results before a possible refill break to prevent data loss on exit.
+                this.results.push({type: "_group", who: this.currplayer, results: results as [APMoveResult, ...APMoveResult[]]});
+                // store current board, market, and discards in frames
+                this.frames.push({
+                    board: new Map(this.board),
+                    market: [...this.market],
+                    discards: frameDiscards
+                })
+
                 if (refill) {
                     remaining = 2 - s;
                     break;
@@ -1789,15 +1798,6 @@ export class FroggerGame extends GameBase {
                     //but we need an array to highlight legal market cards.
                     this._highlight = [subIFM.card];
                 }
-
-                // group the results for each step together
-                this.results.push({type: "_group", who: this.currplayer, results: results as [APMoveResult, ...APMoveResult[]]});
-                // store current board, market, and discards in frames
-                this.frames.push({
-                    board: new Map(this.board),
-                    market: [...this.market],
-                    discards: frameDiscards
-                })
             }
 
             //We may leave the last frame in case of crocodile action, so just check the results length for now.
