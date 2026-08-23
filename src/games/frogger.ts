@@ -894,18 +894,20 @@ export class FroggerGame extends GameBase {
     }
 
     private refillMarket(): number {
-        //Fills the market regardless of current size.
+        //Tops the market up to marketsize.
         //Shuffles the discards when necessary.
-        //Refill variant behavior is mostly handled by the caller,
+        //Refill variant behavior is mostly handled by the caller.
+        //Returns how many cards were actually drawn this call.
 
         //May be called when the market is already full (in the continuous variant).
         if (this.market.length === this.marketsize)
             return 0;
 
         //First, try to draw what we need from the deck.
-        let toDraw = Math.min(this.marketsize, this.deck.size);
+        const needed = this.marketsize - this.market.length;
+        let toDraw = Math.min(needed, this.deck.size);
 
-        this.market = [...this.deck.draw(toDraw).map(c => c.uid)];
+        this.market.push(...this.deck.draw(toDraw).map(c => c.uid));
 
         if (this.market.length === this.marketsize) {
             return toDraw;

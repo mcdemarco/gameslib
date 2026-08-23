@@ -274,6 +274,16 @@ describe("Frogger", () => {
 
     });
 
+    it ("continuous market top up regression test", () => {
+        // Only top up the market in the continuous variant.
+        const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["crocodiles","continuous"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-28T02:33:17.187Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","PMSL"],["b3","X0"],["c4","PSVK"],["c3","X0"],["d4","NV"],["e4","PVLY"],["e3","X0"],["f4","9VY"],["g4","8MS"],["h4","PMYK"],["h3","X0"],["i4","NL"],["j4","1Y"],["k4","2MK"],["l4","2VL"],["m4","8VL"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["1M","7SK","1L","1K"],["5SV","4MS","3MV","9LK"]],"hands":[[],[]],"market":["6SY","6LK","4VL"],"discards":[],"nummoves":3}]}`);
+        g.move("1M:a3-g3/g3-f3,6LK/6LK:f3-i3/"); // pops only 6LK; 6SY and 4VL are never touched
+        expect(g.market).to.include("6SY");
+        expect(g.market).to.include("4VL");
+        expect(g.market).to.not.include("6LK"); // popped, replaced by exactly one new card
+        expect(g.market.length).to.equal(3);
+    });
+
     it ("Implements basic suit movement rules", () => {
         const g = new FroggerGame(`{"game":"frogger","numplayers":2,"variants":["courts","#market"],"gameover":false,"winner":[],"stack":[{"_version":"20251220","_results":[],"_timestamp":"2025-12-29T03:38:17.329Z","currplayer":1,"board":{"dataType":"Map","value":[["b4","7VY"],["c4","PVLY"],["d4","PMSL"],["e4","2MK"],["f4","3LY"],["g4","PMYK"],["h4","5ML"],["i4","8YK"],["j4","NY"],["k4","PSVK"],["l4","1L"],["m4","6MV"],["a3","X1-6"],["a2","X2-6"]]},"closedhands":[["TSLK","NM","9LK","TMLY"],["9MS","7SK","1K","2VL"]],"hands":[[],[]],"market":["NS","3SK","TMVK","5YK","TSVY","NV"],"discards":[],"nummoves":3}]}`);
 
