@@ -1,4 +1,6 @@
-import { GameBase, IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult } from "./_base";
+import { IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult } from "./_base";
+import { GameBaseSequenced } from "./_turn-sequenced";
+import type { IGamePly } from "./_turn-model";
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
@@ -25,7 +27,7 @@ import {
     checkHermitMovePiece, checkHermitMoveTerritory, checkTradeHands,
     checkJudgementDraw, checkHighPriestess,
 } from "./gnostica/powers";
-import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
+import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import i18next from "i18next";
 
 export type playerid = 1|2|3|4|5|6;
@@ -330,6 +332,15 @@ export type FrameState = {
     drawPile: string[];
 };
 
+// A same-seat obligation left over from a High Priestess activation that
+// paused mid-chain - see applyMajorPower's own docs on when this gets set.
+interface IPendingMajorPower {
+    cardUid: string;        // re-derives def via MAJOR_ARCANA lookup
+    source: "use" | "play"; // which head resumes it
+    nextStepIndex: number;  // def.powers[nextStepIndex] is what the follow-up move must supply
+    minions: IMinionRef[];  // accreted minions list as of the pause point
+}
+
 interface IMoveState extends IIndividualState {
     currplayer: playerid;
     board: UnboundedSquareBoard<CellContents>;
@@ -347,6 +358,12 @@ interface IMoveState extends IIndividualState {
     // FrameState's own docs. Optional so stack entries predating this
     // feature still deserialize fine.
     frames?: FrameState[];
+    // Set when a High Priestess activation paused after a supplied step,
+    // awaiting a follow-up move() submission on the same seat before the
+    // turn can advance - see move()'s tail and applyMajorPower's own docs.
+    // Optional so stack entries predating this feature still deserialize
+    // fine.
+    pendingPower?: IPendingMajorPower;
     // The "bidding" variant's opening procedure - see cmdBid's own docs.
     // Every other variant/game stays in "main" for its entire lifetime, so
     // none of the fields below are ever touched outside that variant.
@@ -384,7 +401,7 @@ export interface IGnosticaState extends IAPGameState {
     stack: Array<IMoveState>;
 }
 
-export class GnosticaGame extends GameBase {
+export class GnosticaGame extends GameBaseSequenced {
     public static readonly gameinfo: APGamesInformation = {
         name: "Gnostica",
         uid: "gnostica",
@@ -442,6 +459,9 @@ export class GnosticaGame extends GameBase {
     // player page through their own in-progress chain mid-turn, not just
     // review a fully-committed one later.
     public frames: FrameState[] = [];
+    // Set when a High Priestess activation is mid-pause - see
+    // IPendingMajorPower's own docs.
+    public pendingPower: IPendingMajorPower | undefined;
     // The "bidding" variant's own state - see IMoveState's own docs on
     // each field.
     public phase!: "bidding" | "redraw" | "main";
@@ -637,6 +657,7 @@ export class GnosticaGame extends GameBase {
         this.biddingPool = [...state.biddingPool];
         this.turnOrder = [...state.turnOrder];
         this.frames = state.frames ? [...state.frames] : [];
+        this.pendingPower = state.pendingPower;
         return this;
     }
 
@@ -660,6 +681,7 @@ export class GnosticaGame extends GameBase {
             biddingPool: [...this.biddingPool],
             turnOrder: [...this.turnOrder],
             frames: this.frames.length > 0 ? [...this.frames] : [],
+            pendingPower: this.pendingPower,
         };
     }
 
@@ -706,16 +728,10 @@ export class GnosticaGame extends GameBase {
         }
 
         const isEliminated = this.eliminated.indexOf(this.currplayer) > -1;
-        const isBidWinner = this.mustPassBeforeRedraw(this.currplayer);
 
         // check for autopass first
         if (m === "pass") {
             if (isEliminated) {
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
-            } else if (isBidWinner) {
                 result.valid = true;
                 result.complete = 1;
                 result.message = i18next.t("apgames:validation._general.VALID_MOVE");
@@ -731,10 +747,6 @@ export class GnosticaGame extends GameBase {
             if (isEliminated) {
                 result.valid = false;
                 result.message = i18next.t("apgames:validation.gnostica.MUST_PASS");
-                return result;
-            } else if (isBidWinner) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.gnostica.MUST_PASS_FIRST")
                 return result;
             }
         }
@@ -762,6 +774,19 @@ export class GnosticaGame extends GameBase {
 // PASSING HERE
         // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
         const head = parsed.head;
+
+        // A paused High Priestess activation obligates this seat to resume
+        // it (with the same head it started with) before anything else is
+        // legal - short-circuits ahead of every other gate below, since
+        // phase/hasPiecesOnBoard checks don't apply to a resume submission.
+        if (this.pendingPower !== undefined) {
+            if (head !== this.pendingPower.source) {
+                return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
+            }
+            const failure = requireValidStepShapes() ?? this.validateResumePendingPower(parsed.rest, parsed.stepSegments);
+            return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        }
+
         if (head === "bid" || head === "redraw" || head === "pass") {
             if (head === "bid" && this.phase !== "bidding") {
                 return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
@@ -911,12 +936,12 @@ export class GnosticaGame extends GameBase {
             // phase transition, or a single nextPlayer() hop) instead of the
             // generic nextPlayer() call every other move falls through to -
             // so all three are handled entirely here rather than folded into
-            // the switch below. "pass" only ever exists to let the 2-player
-            // variant's own bid winner sit out the loser's first redraw (see
-            // mustPassBeforeRedraw's own docs) - the "autopass" flag means a
-            // real server auto-submits it via moves() the instant it's the
-            // only legal option, so a human player should never actually see
-            // or click a "pass" prompt themselves.
+            // the switch below. "pass" only ever exists to let an eliminated
+            // player sit out the rest of the game (see validatePass()'s own
+            // docs) - the "autopass" flag means a real server auto-submits
+            // it via moves() the instant it's the only legal option, so a
+            // human player should never actually see or click a "pass"
+            // prompt themselves.
             if (head === "bid") {
                 if (this.phase !== "bidding") {
                     throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
@@ -1036,6 +1061,11 @@ export class GnosticaGame extends GameBase {
         // set to a matching string.
         if (head === "bid" || head === "redraw" || head === "pass") {
             //Need to rewrite these to remove this exception.
+        } else if (this.pendingPower !== undefined) {
+            // Same seat still owes a follow-up High Priestess submission -
+            // stay put. checkEOG() doesn't need to run here either: it
+            // reads only eliminated/gameover/winner, none of which this
+            // step could have changed.
         } else {
             this.nextPlayer();
             this.checkEOG();
@@ -1088,6 +1118,12 @@ export class GnosticaGame extends GameBase {
     private isStepShapeValid(tokens: string[]): boolean {
         if (tokens.length === 0 || tokens.length > GnosticaGame.MAX_STEP_TOKENS) {
             return false;
+        }
+        // resumePendingPower's own sentinel (skip the remaining High
+        // Priestess step entirely) - neither a piece ref nor a card uid,
+        // so it needs its own shape allowance.
+        if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+            return true;
         }
         if (!tokens.every(t => GnosticaGame.STEP_TOKEN_RE.test(t))) {
             return false;
@@ -1521,6 +1557,21 @@ export class GnosticaGame extends GameBase {
         }
         if (this.phase === "redraw") {
             return [{ label: "Redraw", value: "redraw", attributes: [{ name: "font-weight", value: "bold" }] }];
+        }
+        // A paused High Priestess activation obligates this seat before
+        // anything else is legal - offer only its own two options, same
+        // "only one thing possible right now" pattern as bidding/redraw
+        // above. Once "Continue" is clicked, the existing hand-card-click
+        // toggle (handleClickCore's own pendingForCard?.special ===
+        // "highPriestess" branch) builds the discard list unmodified,
+        // since it only ever parses the in-progress move string, not any
+        // pendingPower-aware state.
+        if (this.pendingPower !== undefined && this.liveMove === undefined) {
+            const cardName = allCards().find(c => c.uid === this.pendingPower!.cardUid)?.name ?? this.pendingPower.cardUid;
+            return [
+                { label: `Continue ${cardName}`, value: "resume_power", attributes: [{ name: "font-weight", value: "bold" }] },
+                { label: "Decline", value: "decline_power" },
+            ];
         }
         // A live preview of "use"/"play" can only ever have STARTED
         // with the acting player already having board presence - both
@@ -2874,6 +2925,24 @@ export class GnosticaGame extends GameBase {
                         return { move: "play", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY") };
                     case "orient":
                         return { move: "orient", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
+                    case "resume_power": {
+                        // Seeds the resume submission's head + already-known
+                        // card uid directly (unlike "use"/"play" above,
+                        // there's no ambiguity to resolve via a board click -
+                        // pendingPower already names the exact card) - the
+                        // existing hand-card-click toggle then builds the
+                        // discard list from here unmodified.
+                        if (this.pendingPower === undefined) {
+                            return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                        }
+                        const seeded = `${this.pendingPower.source} ${this.pendingPower.cardUid}`;
+                        return { move: seeded, valid: true, complete: -1, message: i18next.t(this.powerStepMessageKey(this.pendingPower.cardUid, 0)) };
+                    }
+                    case "decline_power":
+                        if (this.pendingPower === undefined) {
+                            return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                        }
+                        return this.provisionalResult(`${this.pendingPower.source} ${this.pendingPower.cardUid}, decline`);
                     case "random":
                         // Only ever offered for Wheel of Fortune's own
                         // "new" step (see getActionButtons()'s own docs) -
@@ -3456,34 +3525,14 @@ export class GnosticaGame extends GameBase {
     // itself (the rank order of what everyone bid - see its own docs),
     // and "counterclockwise" as its exact reverse, ending at the winner.
     private beginRedraw(): void {
-        // redrawOrder's own getter already computes this same reversal -
-        // this local is just for the numplayers !== 2 branch below.
-        const order = this.redrawOrder;
+        // redrawOrder's own getter already computes turnOrder's reversal -
+        // turnOrder[0] is the bid winner by construction, so redrawOrder[0]
+        // is always the worst bidder, for every player count. Jump there
+        // directly instead of routing through nextPlayer() - no forced
+        // "pass" is needed for the 2-player case now that we don't rely on
+        // ordinary rotation to (sometimes) land on the winner first.
         this.phase = "redraw";
-        if (this.numplayers === 2) {
-            // Never assign currplayer to an arbitrary value here (reduces
-            // exposure to any risk around directly reassigning it).
-            // currplayer is always player 2 at this exact point (bidding
-            // is fixed player-1-then-player-2 order, and this only runs
-            // once both have bid) - regardless of who actually won.
-            // turnOrder puts the winner first; stepping forward one
-            // position from player 2 lands on turnOrder's OTHER entry -
-            // the loser, if player 2 themselves won (one step, done) - or
-            // the winner, if player 1 won (since winner-first means
-            // turnOrder's "other" entry from the loser, 2, is the
-            // winner, 1). In that second case the winner isn't allowed to
-            // redraw yet; mustPassBeforeRedraw() reports it, and the
-            // "autopass" flag (see gameinfo's own flags, and moves()
-            // below) means a real server auto-submits "pass" for them the
-            // instant it's their only legal option - cmdPass() calls
-            // nextPlayer() again, stepping forward once more from the
-            // winner to reach the loser, who can now legitimately redraw
-            // first. Either way this converges on the loser, just
-            // sometimes via that extra forced pass in between.
-            this.nextPlayer();
-        } else {
-            this.currplayer = order[0];
-        }
+        this.currplayer = this.redrawOrder[0];
     }
 
     // "redraw <uid...>" - the acting player's free choice of cards from
@@ -3549,25 +3598,7 @@ export class GnosticaGame extends GameBase {
         }
     }
 
-    // True exactly when the 2-player bidding variant's own "loser draws
-    // first" rule blocks `player` from redrawing right now: they won the
-    // bid, and the loser hasn't taken their own (first) redraw yet. Only
-    // meaningful for exactly 2 players - the 3+ player redraw order is
-    // still steered directly via redrawOrder/redrawPos (see beginRedraw's
-    // own docs), so currplayer is always already correct there and this
-    // always reports false. Shared by validateRedraw (reject a redraw
-    // attempt from the blocked winner), validatePass/cmdPass (the only
-    // situation where passing is legal), moves() (the "autopass" flag's
-    // own signal - see its docs), and randomMove().
-    private mustPassBeforeRedraw(player: playerid): boolean {
-        return this.phase === "redraw" && this.numplayers === 2
-            && this.redrawPos === 0 && player === this.bidWinner;
-    }
-
     private validateRedraw(args: string[]): IValidationResult | undefined {
-        if (this.mustPassBeforeRedraw(this.currplayer)) {
-            return this.invalid("apgames:validation.gnostica.MUST_PASS_FIRST");
-        }
         const hand = this.hands[this.currplayer - 1];
         const needed = 6 - hand.length;
         if (args.length !== needed) {
@@ -3586,15 +3617,14 @@ export class GnosticaGame extends GameBase {
         return undefined;
     }
 
-    // "pass" - legal in exactly two situations: the 2-player bidding
-    // variant's own bid winner sitting out the loser's first redraw (see
-    // mustPassBeforeRedraw's own docs), or an eliminated player sitting out
-    // the rest of the game (phase-independent - see validatePass()'s own
-    // docs). Not a general-purpose pass otherwise: it's illegal anywhere
-    // else, including an ordinary main-phase turn (a bare "discard" already
-    // fills that role there). A real server auto-submits this via the
-    // "autopass" flag + moves() the instant it's the only legal option, so
-    // a human should never actually need to submit it by hand.
+    // "pass" - legal in exactly one situation: an eliminated player sitting
+    // out the rest of the game (phase-independent - see validatePass()'s
+    // own docs). Not a general-purpose pass otherwise: it's illegal
+    // anywhere else, including an ordinary main-phase turn (a bare
+    // "discard" already fills that role there). A real server auto-submits
+    // this via the "autopass" flag + moves() the instant it's the only
+    // legal option, so a human should never actually need to submit it by
+    // hand.
     private cmdPass(partial = false): void {
         const failure = this.validatePass();
         if (failure !== undefined) {
@@ -3603,8 +3633,7 @@ export class GnosticaGame extends GameBase {
         if (partial) {
             return;
         }
-        const why = this.eliminated.includes(this.currplayer) ? "eliminated" : "bidding";
-        this.results.push({ type: "pass", who: this.currplayer, why });
+        this.results.push({ type: "pass", who: this.currplayer, why: "eliminated" });
         this.nextPlayer();
         this.checkEOG();
     }
@@ -3616,27 +3645,22 @@ export class GnosticaGame extends GameBase {
         if (this.eliminated.includes(this.currplayer)) {
             return undefined;
         }
-        if (!this.mustPassBeforeRedraw(this.currplayer)) {
-            return this.invalid("apgames:validation.gnostica.NOTHING_TO_PASS");
-        }
-        return undefined;
+        return this.invalid("apgames:validation.gnostica.NOTHING_TO_PASS");
     }
 
     // The "autopass" flag's own signal (see gameinfo's own flags): a real
     // server calls this after every move resolves and, if it returns
-    // exactly ["pass"], auto-submits "pass" on that player's behalf
-    // rather than waiting for real input - see mustPassBeforeRedraw's own
-    // docs for the one situation that actually triggers here. This is
-    // deliberately NOT a general move enumerator (that's what the
-    // "no-moves"/"custom-randomization" flags + randomMove() are for) -
-    // every other situation returns [] ("not enumerating, but nothing is
-    // forced"), matching this library's own established convention (see
-    // e.g. knightline.ts's identical use of "autopass" + moves()).
+    // exactly ["pass"], auto-submits "pass" on that player's behalf rather
+    // than waiting for real input - see validatePass()'s own docs for the
+    // one situation that actually triggers here. This is deliberately NOT
+    // a general move enumerator (that's what the "no-moves"/
+    // "custom-randomization" flags + randomMove() are for) - every other
+    // situation returns [] ("not enumerating, but nothing is forced"),
+    // matching this library's own established convention (see e.g.
+    // knightline.ts's identical use of "autopass" + moves()).
     public moves(player?: playerid): string[] {
         const p = (player ?? this.currplayer) as playerid;
-        if (this.mustPassBeforeRedraw(p)) {
-            return ["pass"];
-        } else if (this.eliminated.indexOf(this.currplayer) > -1) {
+        if (this.eliminated.indexOf(p) > -1) {
             return ["pass"];
         } else
             return [];
@@ -3959,6 +3983,10 @@ export class GnosticaGame extends GameBase {
     }
 
     private cmdActivate(args: string[], stepSegments: string[][]): void {
+        if (this.pendingPower !== undefined) {
+            this.resumePendingPower(args, stepSegments, "use");
+            return;
+        }
         const [cardUid] = args;
         if (cardUid === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ACTIVATE_UID_REQUIRED"));
@@ -3977,7 +4005,7 @@ export class GnosticaGame extends GameBase {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid }));
         }
         this.results.push({ type: "use", what: t.card!.uid });
-        this.applyCardPower(t.card!, eligible, stepSegments);
+        this.applyCardPower(t.card!, eligible, stepSegments, "use");
     }
 
     private validateActivate(args: string[], stepSegments: string[][]): IValidationResult | undefined {
@@ -4004,6 +4032,10 @@ export class GnosticaGame extends GameBase {
     // "Play a card from your hand to the discard pile. All your pieces on
     // the board are minions [...]"
     private cmdPlay(args: string[], stepSegments: string[][]): void {
+        if (this.pendingPower !== undefined) {
+            this.resumePendingPower(args, stepSegments, "play");
+            return;
+        }
         const [uid] = args;
         if (uid === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PLAY_UID_REQUIRED"));
@@ -4023,7 +4055,7 @@ export class GnosticaGame extends GameBase {
         this.results.push({ type: "deckDraw", what: uid, from: "hand" });
 
         const eligible = this.eligibleMinionsForPlay();
-        this.applyCardPower(card, eligible, stepSegments);
+        this.applyCardPower(card, eligible, stepSegments, "play");
     }
 
     // Doesn't need to simulate cmdPlay's own hand mutation (removing the
@@ -4047,7 +4079,7 @@ export class GnosticaGame extends GameBase {
         return this.validateCardPower(card, eligible, stepSegments);
     }
 
-    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][]): void {
+    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play"): void {
         if (card.major) {
             const def = getMajorArcanaDef(card);
             // Fool and World both delegate to ANOTHER card's full power
@@ -4062,7 +4094,7 @@ export class GnosticaGame extends GameBase {
             if ((def.uid === "00" || def.uid === "21") && stepSegments.length > 0) {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "FOOL_WORLD_NOT_YET_SUPPORTED" }));
             }
-            this.applyMajorPower(def, eligible, stepSegments);
+            this.applyMajorPower(def, eligible, stepSegments, source);
         } else {
             this.applyMinorPower(card.suit.uid, eligible, stepSegments);
         }
@@ -4179,7 +4211,7 @@ export class GnosticaGame extends GameBase {
     // computeShortcutOpts()'s own docs for why that derivation is safe to
     // apply unconditionally rather than requiring genuine same-target
     // detection between steps.
-    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][]): void {
+    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play"): void {
         if (stepSegments.length > def.powers.length) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
         }
@@ -4220,7 +4252,69 @@ export class GnosticaGame extends GameBase {
                     drawPile: [...this.drawPile],
                 });
             }
+            // A High Priestess step that isn't the chain's last possible
+            // step pauses here instead of falling through to the implicit-
+            // decline behavior every other major arcana still uses - its
+            // second discard choice should be informed by what this step's
+            // (hidden, random) redraw actually produced, which the player
+            // can only see once this step has genuinely committed.
+            const isLastSupplied = i === stepSegments.length - 1;
+            const hasMoreSteps = i + 1 < def.powers.length;
+            if (isLastSupplied && hasMoreSteps && "special" in step && step.special === "highPriestess") {
+                this.pendingPower = { cardUid: def.uid, source, nextStepIndex: i + 1, minions };
+                return;
+            }
         }
+    }
+
+    // Resumes a paused High Priestess activation - does NOT re-enter
+    // applyMajorPower from i = 0, and (for a "play"-sourced obligation)
+    // does NOT repeat cmdPlay's own hand/discard-pile mutation, which
+    // already happened before the pause. Reuses applyPowerStep unmodified
+    // for the actual step mutation; only this dispatch/bookkeeping and the
+    // "decline" sentinel are new.
+    private resumePendingPower(args: string[], stepSegments: string[][], source: "use" | "play"): void {
+        const pending = this.pendingPower!;
+        if (pending.source !== source || args[0] !== pending.cardUid) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        }
+        if (stepSegments.length !== 1) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PENDING_POWER_ONE_STEP"));
+        }
+        const tokens = stepSegments[0];
+        this.pendingPower = undefined;
+        if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+            return; // skip the remaining step entirely - turn ends normally, same as declining any other optional power
+        }
+        const def = MAJOR_ARCANA[pending.cardUid];
+        const step = def.powers[pending.nextStepIndex];
+        this.applyPowerStep(step, pending.minions, tokens, def, pending.nextStepIndex, def.powers.length);
+    }
+
+    // Mirrors resumePendingPower's own dispatch, read-only - the `source`
+    // match itself is checked by validateMove()'s own early gate, not here.
+    private validateResumePendingPower(args: string[], stepSegments: string[][]): IValidationResult | undefined {
+        const pending = this.pendingPower!;
+        if (args[0] !== pending.cardUid) {
+            return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
+        }
+        if (stepSegments.length !== 1) {
+            return this.invalid("apgames:validation.gnostica.PENDING_POWER_ONE_STEP");
+        }
+        const tokens = stepSegments[0];
+        if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+            return undefined;
+        }
+        const def = MAJOR_ARCANA[pending.cardUid];
+        const step = def.powers[pending.nextStepIndex];
+        const stepResult = this.validatePowerStep(step, pending.minions, tokens, def, pending.nextStepIndex, def.powers.length);
+        if (stepResult.failed) {
+            return stepResult.result;
+        }
+        if (stepResult.complete === false) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+        }
+        return undefined;
     }
 
     private validateMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
@@ -5230,6 +5324,17 @@ export class GnosticaGame extends GameBase {
         this.currplayer = this.turnOrder[next];
     }
 
+    // Stay open while a High Priestess obligation is pending, even if
+    // currplayer has cycled back to the round opener - otherwise the
+    // inherited (elimination-safe) close check would false-positive-close
+    // the round after the seat's first ply, before the obligation resolves.
+    protected shouldCloseRound(roundPlies: IGamePly[], stackIndex: number): boolean {
+        if (this.stack[stackIndex].pendingPower !== undefined) {
+            return false;
+        }
+        return super.shouldCloseRound(roundPlies, stackIndex);
+    }
+
     // Sort cards by their index in allCards.
     private static handSortKey(uid: string): number {
         const card = allCards().find(c => c.uid === uid);
@@ -5368,9 +5473,6 @@ export class GnosticaGame extends GameBase {
             return `bid ${1 + Math.floor(Math.random() * hand.length)}`;
         }
         if (this.phase === "redraw") {
-            if (this.mustPassBeforeRedraw(this.currplayer)) {
-                return "pass";
-            }
             const needed = 6 - this.hands[this.currplayer - 1].length;
             const picks = (shuffle(this.biddingPool) as string[]).slice(0, needed);
             return `redraw ${picks.join(" ")}`.trim();
@@ -6929,10 +7031,15 @@ export class GnosticaGame extends GameBase {
     //Switched to chatLog because there are a lot of player names to report.
     public chatLog(players: string[]): string[][] {
         const result: string[][] = [];
-        for (const state of this.stack) {
+        // Index 0 has no associated ply, so it's skipped.
+        for (let i = 1; i < this.stack.length; i++) {
+            const state = this.stack[i];
             if (state._results !== undefined && state._results.length > 0) {
                 const node: string[] = [(state._timestamp && new Date(state._timestamp).toISOString()) || "unknown"];
-                let otherPlayer = state.currplayer as number - 1;
+                // Resolved via plyActor(), not `state.currplayer - 1`, to fix
+                // skip-turn (elimination) and sequenced (bidding reorder,
+                // High Priestess) cases.
+                let otherPlayer = this.plyActor(i);
                 if (otherPlayer < 1) {
                     otherPlayer = this.numplayers;
                 }
@@ -7081,9 +7188,12 @@ export class GnosticaGame extends GameBase {
                                 node.push(i18next.t("apresults:CONVERT.gnostica_tile", { player, what: r.what, into: r.into, where: r.where }));
                             }
                             break;
-                        case "eliminated":
-                            node.push(i18next.t("apresults:ELIMINATED", { player }));
+                        case "eliminated": {
+                            const who = parseInt(r.who, 10);
+                            const ename = who <= players.length ? players[who - 1] : `Player ${who}`;
+                            node.push(i18next.t("apresults:ELIMINATED", { player: ename }));
                             break;
+                        }
                         case "eog":
                             node.push(i18next.t("apresults:EOG.default"));
                             break;

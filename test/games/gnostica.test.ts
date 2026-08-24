@@ -494,6 +494,71 @@ describe("Gnostica: turn order legend", () => {
     });
 });
 
+describe("Gnostica: bidding-variant player reordering and pass removal", () => {
+    it("2-player: beginRedraw() lands directly on the loser with no forced pass, whichever player wins the bid", () => {
+        const winner1 = new GnosticaGame(2, ["bidding"]);
+        winner1.hands[0] = [major(21).uid, "AC", "2C", "3C", "4C", "5C"]; // The World - unbeatable
+        winner1.hands[1] = [card("KS").uid, "AR", "2R", "3R", "4R", "5R"];
+        winner1.move("bid 1", { trusted: true }); // player 1's major
+        winner1.move("bid 1", { trusted: true }); // player 2's minor - resolves
+        expect(winner1.bidWinner).eq(1);
+        expect(winner1.phase).eq("redraw");
+        expect(winner1.currplayer).eq(2); // loser redraws first, no forced pass in between
+        expect(winner1.getPlies().some(p => p.results.some(r => r.type === "pass"))).eq(false);
+
+        const winner2 = new GnosticaGame(2, ["bidding"]);
+        winner2.hands[0] = [card("KS").uid, "AC", "2C", "3C", "4C", "5C"];
+        winner2.hands[1] = [major(21).uid, "AR", "2R", "3R", "4R", "5R"]; // The World - unbeatable
+        winner2.move("bid 1", { trusted: true });
+        winner2.move("bid 1", { trusted: true }); // player 2's major - resolves
+        expect(winner2.bidWinner).eq(2);
+        expect(winner2.phase).eq("redraw");
+        expect(winner2.currplayer).eq(1); // loser (player 1) redraws first
+        expect(winner2.getPlies().some(p => p.results.some(r => r.type === "pass"))).eq(false);
+    });
+
+    it("moves()/validateMove()/randomMove() no longer offer or accept \"pass\" for a non-eliminated player during bidding/redraw", () => {
+        const g = new GnosticaGame(2, ["bidding"]);
+        g.hands[0] = [major(21).uid, "AC", "2C", "3C", "4C", "5C"];
+        g.hands[1] = [card("KS").uid, "AR", "2R", "3R", "4R", "5R"];
+        g.move("bid 1", { trusted: true });
+        g.move("bid 1", { trusted: true });
+        expect(g.phase).eq("redraw");
+        expect(g.moves()).to.deep.equal([]);
+        expect(g.validateMove("pass").valid).to.be.false;
+        expect(g.randomMove()).to.not.eq("pass");
+    });
+
+    for (const numplayers of [2, 3] as const) {
+        it(`turnOrder reorder (${numplayers}p): getPlies()/getRounds()/chatLog() stay correct across the bid resolution boundary`, () => {
+            addResource("en");
+            const g = new GnosticaGame(numplayers, ["bidding"]);
+            g.hands[0] = [card("KS").uid, "AC", "2C", "3C", "4C", "5C"];
+            g.hands[1] = [major(21).uid, "AR", "2R", "3R", "4R", "5R"]; // The World - unbeatable
+            if (numplayers === 3) {
+                g.hands[2] = [card("QS").uid, "AD", "2D", "3D", "4D", "5D"];
+            }
+            for (let i = 0; i < numplayers; i++) {
+                g.move("bid 1", { trusted: true });
+            }
+            expect(g.bidWinner).eq(2);
+            for (let i = 0; i < numplayers; i++) {
+                const needed = 6 - g.hands[g.currplayer - 1].length;
+                const picks = g.biddingPool.slice(0, needed);
+                g.move(`redraw ${picks.join(" ")}`, { trusted: true });
+            }
+            expect(g.phase).eq("main");
+            expect(g.currplayer).eq(2); // winner goes first
+            g.move("place m0", { trusted: true }); // winner's first main-phase turn (no board presence yet)
+            const plies = g.getPlies();
+            expect(plies[plies.length - 1].actor).eq(2);
+            const names = numplayers === 2 ? ["Alice", "Bob"] : ["Alice", "Bob", "Carol"];
+            const log = g.chatLog(names);
+            expect(log[log.length - 1].some(l => l.includes("Bob"))).eq(true);
+        });
+    }
+});
+
 describe("Gnostica: announce last turn / win / elimination", () => {
     it("wins if the announcing player has reached the target score on their following turn", () => {
         const g = new GnosticaGame(2);
@@ -662,6 +727,53 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         expect(g.eliminated).to.deep.equal([1]);
         expect(g.gameover).eq(true); // only player 2 remains
         expect(g.winner).to.deep.equal([2]);
+    });
+
+    it("getPlies()/chatLog() stay correct across the elimination boundary (plyActor(), not a stale currplayer-1 guess)", () => {
+        addResource("en");
+        const g = new GnosticaGame(3);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.move("place n0", { trusted: true }); // player 3
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        g.move("discard", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // player 3
+        g.move("discard", { trusted: true }); // player 1's resolving turn - falls short, eliminated
+        expect(g.eliminated).to.deep.equal([1]);
+        g.move("discard", { trusted: true }); // player 2's ordinary post-elimination turn
+        const plies = g.getPlies();
+        // Actor 1 never appears again once eliminated - nextPlayer()'s own
+        // skip loop already guarantees this at the currplayer level, this
+        // confirms getPlies()'s own plyActor()-based reconstruction agrees.
+        const actorsAfterElimination = plies.slice(plies.findIndex(p => p.results.some(r => r.type === "eliminated")) + 1).map(p => p.actor);
+        expect(actorsAfterElimination).to.not.include(1);
+        expect(plies[plies.length - 1].actor).eq(2);
+        const log = g.chatLog(["Alice", "Bob", "Carol"]);
+        // The eliminated ply's own line still names the actual actor (Alice,
+        // who WAS still currplayer for that ply) even though currplayer
+        // itself has since moved on - the old `state.currplayer - 1` guess
+        // would have misattributed this once elimination started skipping
+        // seats.
+        const eliminatedLine = log.find(node => node.some(l => l.includes("eliminated")));
+        expect(eliminatedLine?.some(l => l.includes("Alice"))).eq(true);
+        // The final, post-elimination line correctly names Bob, not a
+        // stale/incorrect guess.
+        const lastLine = log[log.length - 1];
+        expect(lastLine.some(l => l.includes("Bob"))).eq(true);
+    });
+
+    it("chatLog()'s \"eliminated\" line uses the result's own r.who, not the generically-computed actor", () => {
+        addResource("en");
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place n0", { trusted: true }); // player 2
+        g.move("discard (last)", { trusted: true }); // player 1 announces
+        g.move("discard", { trusted: true }); // player 2
+        g.move("discard", { trusted: true }); // player 1's resolving turn - falls short, eliminated
+        expect(g.eliminated).to.deep.equal([1]);
+        const log = g.chatLog(["Alice", "Bob"]);
+        const eliminatedLine = log.find(node => node.some(l => l.includes("eliminated")));
+        expect(eliminatedLine?.some(l => l.includes("Alice"))).eq(true);
     });
 });
 
@@ -997,6 +1109,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
     });
 
     it("#47: chatLog() logs a line for EACH step of a chained move, not just one - proving _group unwrapping actually works", () => {
+        addResource("en");
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => major(6)); // The Lovers
@@ -3642,10 +3755,14 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(click2.move).eq(`use ${major(2).uid}, 2C 5C`);
         const click3 = g.handleClick(click2.move, -1, -1, "hand_2C"); // toggle back off
         expect(click3.move).eq(`use ${major(2).uid}, 5C`);
-        g.move(click3.move, { trusted: true }); // declines the second highPriestess step too
+        g.move(click3.move, { trusted: true }); // step 1 commits and pauses, awaiting step 2
         expect(g.hands[0]).to.not.include("5C");
         expect(g.hands[0].length).eq(6); // redrawn from 2 (3 - 1 discarded) back to 6
         expect(g.discardPile).to.include("5C");
+        expect(g.currplayer).eq(1); // same seat still owes step 2
+        expect(g.pendingPower).to.not.be.undefined;
+        g.move(`use ${major(2).uid}, decline`, { trusted: true }); // declines the second highPriestess step
+        expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
     });
 
@@ -3869,5 +3986,88 @@ describe("Gnostica: chatLog() other-player naming", () => {
         const log = g.chatLog([]);
         const line = log.flat().find(l => l.includes("traded hands"));
         expect(line).eq(i18next.t("apresults:ANNOUNCE.gnostica", { player: "Player 1", target: "Player 2" }));
+    });
+});
+
+describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
+    // Mirrors the identical helper in "handleClick - major arcana special
+    // powers (Phase B)" - removes a uid from wherever the random initial
+    // deal put it, so force-assigning g.hands[0] below can't create a
+    // duplicate that gets redrawn straight back (see that helper's own docs).
+    const pluckCard = (g: GnosticaGame, uid: string): void => {
+        for (const hand of g.hands) {
+            const idx = hand.indexOf(uid);
+            if (idx !== -1) hand.splice(idx, 1);
+        }
+        let idx = g.drawPile.indexOf(uid);
+        if (idx !== -1) g.drawPile.splice(idx, 1);
+        idx = g.discardPile.indexOf(uid);
+        if (idx !== -1) g.discardPile.splice(idx, 1);
+    };
+
+    const setupHP = (numplayers = 2): GnosticaGame => {
+        const g = new GnosticaGame(numplayers);
+        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        for (const uid of ["2C", "5C", "AR"]) {
+            pluckCard(g, uid);
+        }
+        return g;
+    };
+
+    it("getPlies()/getRounds(): two same-seat plies, no synthetic pass, sharing one round until the cycle genuinely wraps", () => {
+        const g = setupHP();
+        g.hands[0] = ["2C", "5C", "AR"];
+        g.move(`use ${major(2).uid}, 5C`, { trusted: true }); // step 1: discard 5C, redraw to 6, pauses
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(g.currplayer).eq(1); // same seat still owes step 2
+        g.move(`use ${major(2).uid}, decline`, { trusted: true }); // step 2: decline
+        expect(g.pendingPower).to.be.undefined;
+        expect(g.currplayer).eq(2); // now advances normally
+
+        const plies = g.getPlies();
+        const [step1, step2] = plies.slice(-2);
+        expect([step1.actor, step2.actor]).to.deep.equal([1, 1]);
+        // Both plies stay in the same round - proves shouldCloseRound's
+        // pendingPower guard prevented a false-positive close after step 1,
+        // even though currplayer (still 1) already equalled the round's
+        // own opener at that point.
+        expect(step1.round).eq(step2.round);
+        expect(plies.some(p => p.results.some(r => r.type === "pass"))).eq(false);
+
+        // Sparse export: one row per ply, both landing in player 1's column.
+        const [row1, row2] = g.getRounds().slice(-2);
+        expect(row1[0]).to.not.be.null;
+        expect(row1[1]).to.be.null;
+        expect(row2[0]).to.not.be.null;
+        expect(row2[1]).to.be.null;
+    });
+
+    it("full scenario: step 1 pauses (currplayer unchanged, pendingPower set), step 2 resumes and clears it, hand redraws to 6", () => {
+        const g = setupHP();
+        g.hands[0] = ["2C", "5C", "AR"];
+        g.move(`use ${major(2).uid}, 5C`, { trusted: true });
+        expect(g.currplayer).eq(1);
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(g.hands[0]).to.not.include("5C");
+        expect(g.hands[0].length).eq(6);
+        g.move(`use ${major(2).uid}, AR`, { trusted: true }); // step 2: discard AR instead of declining
+        expect(g.pendingPower).to.be.undefined;
+        expect(g.currplayer).eq(2);
+        expect(g.hands[0]).to.not.include("AR");
+        expect(g.hands[0].length).eq(6); // redrawn back up again
+    });
+
+    it("resume-mismatch guards reject a wrong card uid, the wrong action (use vs play), and more than one step segment", () => {
+        const g = setupHP();
+        g.hands[0] = ["2C", "5C", "AR"];
+        g.move(`use ${major(2).uid}, 5C`, { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(() => g.move("use 07, decline", { trusted: true })).to.throw(); // wrong cardUid
+        expect(() => g.move(`play ${major(2).uid}, decline`, { trusted: true })).to.throw(); // wrong source (resumed via "use")
+        expect(() => g.move(`use ${major(2).uid}, AR, 2C`, { trusted: true })).to.throw(); // more than one step segment
+        // None of the rejected attempts cleared the obligation.
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(g.currplayer).eq(1);
     });
 });
