@@ -706,6 +706,12 @@
         "camelot_castle_move_none": "{{player}} has no more castle moves.",
         "gnostica": "{{player}} used territory {{what}}."
     },
+    "REVEALFLIP": {
+        "gnostica": ""
+    },
+    "BORROWPOWER": {
+        "gnostica": ""
+    },
     "SCRIBE": {
         "no_formation": "no formations",
         "glyphs": {

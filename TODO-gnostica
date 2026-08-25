@@ -4,7 +4,7 @@ Some items were marked off at transfer here, not at completion.
 Mark items done with ✔ + @done(date) as they're confirmed.
 
 ✔ #7 - i18n/moveresults work @done(26-08-20)
-- #25 - Implement Fool/World/High Priestess major arcana powers using new GameBase
+✔ #25 - Implement Fool/World/High Priestess major arcana powers using new GameBase: Fool and World now fully supported (resolution stack, click flows, chatLog, tests), completing High Priestess's earlier support. @done(26-08-25)
 - #29 - reduce test count
 - #30 - reduce comments
 ✔ #31 - board rotation view @done(26-08-20)

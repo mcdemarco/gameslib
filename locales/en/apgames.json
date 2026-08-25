@@ -5857,6 +5857,7 @@
             "UNKNOWN_CARD": "That territory card was not found.",
             "USE_PASS_BUTTON": "Please use the pass button or discard 0 and draw 0 to pass your turn.",
             "VICTIM_STASH_EMPTY": "{{Player}} has no minions of level {{size}}, so you cannot perform this action.",
+            "WORLD_SELF_REFERENCE": "",
             "WRONG_PHASE": "\"{{move}}\" is not a legal move right now."
         },
         "guerrilla": {

@@ -1033,26 +1033,28 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         expect(() => g.move(`use ${aceOfCups().uid}`)).to.throw();
     });
 
-    it("refuses to USE the Fool or World's power - not yet supported", () => {
+    it("refuses to USE World's power against a malformed target", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
+        // "C" isn't any major arcana card's own uid - checkWorldChoosePower
+        // rejects it as NO_SUCH_MAJOR_ON_BOARD.
         expect(() => g.move(`use ${theWorld().uid}, m0.1 C own m0 U`)).to.throw();
     });
 
-    // Fool/World are exempt from #49's "at least one real step" rule - they
-    // can never take a real step at all (not yet supported), so requiring
-    // one would make either card unusable. Declining entirely stays fully
-    // legal for both, including through the ordinary untrusted path.
-    it("still allows activating/playing the Fool or World if the power is declined", () => {
+    // World is subject to #49 like every other major now (see the Fool/
+    // World test suite below for full coverage) - declining its power
+    // entirely still needs a trusted caller to bypass #49, exactly like
+    // every other major arcana card.
+    it("declining World's power outright is legal for a trusted caller, but not yet submittable untrusted (#49)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
         const validated = g.validateMove(`use ${theWorld().uid}`);
         expect(validated.valid).to.be.true;
-        expect(validated.complete).eq(1);
+        expect(validated.complete).eq(-1);
         expect(() => g.move(`use ${theWorld().uid}`, { trusted: true })).to.not.throw();
     });
 });
@@ -3257,7 +3259,6 @@ describe("Gnostica: choose-step click messaging", () => {
         return [y - minY, x - minX];
     };
     const chooseStepMsg = () => i18next.t("apgames:validation.gnostica.CHOOSE_STEP");
-    const stillOptionalMsg = () => i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL");
 
     it("activate: a board click onto a card cell carries the message (minor arcana)", () => {
         const g = new GnosticaGame(2);
@@ -3309,7 +3310,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.message).eq(chooseStepMsg());
     });
 
-    it("activate: Fool/World stay exempt - still fully complete, still POWER_STILL_OPTIONAL", () => {
+    it("activate: World carries the same CHOOSE_STEP message as any other major now", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         g.move("place m0", { trusted: true });
@@ -3317,9 +3318,9 @@ describe("Gnostica: choose-step click messaging", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("use", row, col);
         expect(result.valid).to.be.true;
-        expect(result.complete).eq(0); // provisionalResult's own auto-submit guard, same as place/orient
+        expect(result.complete).eq(-1);
         expect(result.move).eq(`use ${theWorld().uid}`);
-        expect(result.message).eq(stillOptionalMsg());
+        expect(result.message).eq(chooseStepMsg());
     });
 });
 
@@ -4069,5 +4070,368 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         // None of the rejected attempts cleared the obligation.
         expect(g.pendingPower).to.not.be.undefined;
         expect(g.currplayer).eq(1);
+    });
+});
+
+describe("Gnostica: Fool and World", () => {
+    const pluckCard = (g: GnosticaGame, uid: string): void => {
+        for (const hand of g.hands) {
+            const idx = hand.indexOf(uid);
+            if (idx !== -1) hand.splice(idx, 1);
+        }
+        let idx = g.drawPile.indexOf(uid);
+        if (idx !== -1) g.drawPile.splice(idx, 1);
+        idx = g.discardPile.indexOf(uid);
+        if (idx !== -1) g.discardPile.splice(idx, 1);
+    };
+
+    const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        return [y - minY, x - minX];
+    };
+
+    const buttonValues = (g: GnosticaGame): (string | undefined)[] => {
+        // World's own step is itself a chained segment (unlike a direct
+        // card's often-single-segment preview), so even a 2-segment
+        // preview here already has a frame boundary - render() returns
+        // an array of per-frame reps in that case; the LIVE button bar is
+        // always on the last one.
+        const raw = g.render();
+        const rep = (Array.isArray(raw) ? raw[raw.length - 1] : raw) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        return bar!.buttons!.map(b => b.value);
+    };
+
+    const setupFool = (): GnosticaGame => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(0)); // The Fool
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        return g;
+    };
+
+    // m0: The World, minion A facing n0. n0: own piece B (to be pushed).
+    // p0: The Lovers, World's own target - kept away from m0/n0/o0 so the
+    // push destination (o0) never collides with it.
+    const setupWorldLovers = (): GnosticaGame => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => theWorld());
+        forceCardAt(g, 1, 0, () => aceOfDiscs());
+        forceCardAt(g, 3, 0, () => major(6));
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
+        return g;
+    };
+
+    it("World -> Lovers fully resolves both of Lovers' own steps in one call, no pause (hand-typed)", () => {
+        const g = setupWorldLovers();
+        g.move(`use ${theWorld().uid}, m0.1 ${major(6).uid}, m0.1 piece n0.1 1 U, o0.1 own o0 U`, { trusted: true });
+        expect(g.pendingPower).to.be.undefined; // World's push is informationally free - no pause at all
+        expect(g.currplayer).eq(2);
+        const dest = g.board.get(2, 0)!; // o0
+        expect(dest.pieces.length).eq(2); // B, pushed here, plus Lovers' own new piece
+        expect(g.board.get(1, 0)!.pieces.length).eq(0); // B left n0
+        // Three chained segments (World's own push, then Lovers' own two
+        // steps) means every one of them gets its own _group wrapper.
+        expect(g.results.filter(r => r.type === "_group")).to.have.length(3);
+        const flat = g.results.flatMap(r => r.type === "_group" ? r.results : [r]);
+        expect(flat.some(r => (r as unknown as { type: string }).type === "borrowPower")).eq(true);
+    });
+
+    it("World -> Lovers via clicks: the pushed frame's own steps become click-driven too", () => {
+        const setup = setupWorldLovers;
+        const g = setup();
+
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [rowM, colM] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, rowM, colM);
+        expect(cellClick.move).eq(`use ${theWorld().uid}`);
+
+        // No mode button for worldUseAny (pure click-driven) - a click on
+        // Lovers' own cell supplies the target directly.
+        const [rowP, colP] = rowColFor(g, 3, 0);
+        const targetClick = g.handleClick(cellClick.move, rowP, colP);
+        expect(targetClick.move).eq(`use ${theWorld().uid}, m0.1 ${major(6).uid}`);
+        expect(targetClick.valid).to.be.true;
+
+        // Lovers' own step 1 (Rods) buttons are now on offer, proving
+        // parsePendingStep's stack-awareness resolved the PUSHED frame's
+        // own def, not World's own (already-exhausted) one.
+        const preview1 = setup();
+        preview1.move(targetClick.move, { partial: true });
+        expect(buttonValues(preview1)).to.include("mode_R_piece");
+
+        const modeClick = g.handleClick(targetClick.move, -1, -1, "_btn_mode_R_piece");
+        expect(modeClick.move).eq(`use ${theWorld().uid}, m0.1 ${major(6).uid}/m0.1 piece m0.1 1`);
+
+        const [rowN, colN] = rowColFor(g, 1, 0);
+        const redirected = g.handleClick(modeClick.move, rowN, colN);
+        expect(redirected.move).eq(`use ${theWorld().uid}, m0.1 ${major(6).uid}/m0.1 piece n0.1 1`);
+        expect(redirected.valid).to.be.true;
+
+        const preview2 = setup();
+        preview2.move(redirected.move, { partial: true });
+        expect(buttonValues(preview2)).to.include("mode_C_own");
+
+        const step2 = g.handleClick(redirected.move, -1, -1, "_btn_mode_C_own");
+        expect(step2.valid).to.be.true;
+
+        g.move(step2.move, { trusted: true });
+        expect(g.pendingPower).to.be.undefined;
+        expect(g.currplayer).eq(2);
+        expect(g.board.get(2, 0)!.pieces.length).eq(1); // B, pushed to o0
+        expect(g.board.get(1, 0)!.pieces.length).eq(1); // Lovers' own new piece, at n0 (now vacant)
+    });
+
+    it("World rejects a self-reference and an off-board target; declining its own power outright needs a trusted caller (#49, same as any other major)", () => {
+        const selfRef = new GnosticaGame(2);
+        forceCardAt(selfRef, 0, 0, () => theWorld());
+        selfRef.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        expect(() => selfRef.move(`use ${theWorld().uid}, m0.1 ${theWorld().uid}`, { trusted: true })).to.throw();
+
+        const offBoard = new GnosticaGame(2);
+        forceCardAt(offBoard, 0, 0, () => theWorld());
+        offBoard.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        // The random initial deal could otherwise occasionally have
+        // already placed Lovers somewhere on the board too.
+        for (const [x, y, t] of offBoard.board.entries()) {
+            if ((x !== 0 || y !== 0) && t.card?.uid === major(6).uid) {
+                t.card = undefined;
+            }
+        }
+        expect(() => offBoard.move(`use ${theWorld().uid}, m0.1 ${major(6).uid}`, { trusted: true })).to.throw(); // Lovers isn't on the board
+
+        const decline = new GnosticaGame(2);
+        forceCardAt(decline, 0, 0, () => theWorld());
+        decline.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const validated = decline.validateMove(`use ${theWorld().uid}`);
+        expect(validated.valid).to.be.true;
+        expect(validated.complete).eq(-1); // #49 applies to the root the same as every other major now
+        expect(() => decline.move(`use ${theWorld().uid}`, { trusted: true })).to.not.throw();
+    });
+
+    it("Fool flips a forced major -> pauses; resume supplies the revealed card's own steps; two same-seat plies", () => {
+        const g = setupFool();
+        pluckCard(g, "06");
+        g.drawPile.unshift("06"); // force the flip to reveal The Lovers
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - own piece B
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, facing n0
+
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.currplayer).eq(1);
+        expect(g.pendingPower).to.not.be.undefined;
+        // Fool's own frame stays (it still owes its own 2nd flip - only
+        // 1 of its own 2 steps is done), with the revealed card pushed on top.
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "06"]);
+        expect(g.discardPile).to.include("06"); // flipped straight to discard, per fool()'s own docs
+
+        // Resume: Lovers' own two steps, both in the same submission -
+        // nothing about what a reveal grants stays hidden once the flip
+        // itself has already happened.
+        g.move(`use ${major(0).uid}, m0.1 piece n0.1 1 U, o0.1 own o0 U`, { trusted: true });
+        expect(g.pendingPower).to.be.undefined;
+        expect(g.currplayer).eq(2);
+        expect(g.board.get(2, 0)!.pieces.length).eq(2);
+
+        const plies = g.getPlies();
+        const [step1, step2] = plies.slice(-2);
+        expect([step1.actor, step2.actor]).to.deep.equal([1, 1]);
+    });
+
+    it("Fool flips a forced minor -> pauses; resume supplies the synthesized primitive step", () => {
+        const g = setupFool();
+        pluckCard(g, "AC");
+        g.drawPile.unshift("AC"); // Ace of Cups - synthesized into a one-step "create" frame
+
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AC"]);
+        g.move(`use ${major(0).uid}, m0.1 own m0 U`, { trusted: true });
+        expect(g.pendingPower).to.be.undefined;
+        expect(g.currplayer).eq(2);
+        expect(g.board.get(0, 0)!.pieces.length).eq(2); // Fool's own minion, plus the new Cups piece
+    });
+
+    it("Fool's second flip also pauses too, unconditionally - not only when a sibling step remains", () => {
+        const g = setupFool();
+        pluckCard(g, "AC");
+        pluckCard(g, "AD");
+        g.drawPile.unshift("AC");
+
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}, decline`, { trusted: true }); // decline AC's own step
+        expect(g.pendingPower).to.not.be.undefined; // Fool's own second flip is still owed
+        expect(g.pendingPower!.stack).to.deep.equal([{ cardUid: "00", nextStepIndex: 1, minions: [{ x: 0, y: 0, index: 0 }] }]);
+
+        g.drawPile.unshift("AD");
+        g.move(`use ${major(0).uid}, fool`, { trusted: true }); // second flip
+        expect(g.pendingPower).to.not.be.undefined; // pauses again, unconditionally
+        // Fool's own frame is now fully exhausted (both flips done), but
+        // the forced pause fires immediately on push - before any cascade
+        // could pop it - so it's still sitting there, buried, exactly
+        // like World's own spent frame does in the nested tests below.
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AD"]);
+        expect(g.pendingPower!.stack[0].nextStepIndex).eq(2);
+    });
+
+    it("Fool -> Fool: playing the Fool discards it first, so an empty draw pile can flip it right back", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups()); // any real card, distinct from the Fool
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        pluckCard(g, "00"); // avoid a duplicate wherever the random deal put it
+        for (const [, , t] of g.board.entries()) {
+            if (t.card?.uid === "00") t.card = undefined;
+        }
+        g.hands[0].push("00");
+        // Empty the draw pile entirely and leave only "00" in the discard
+        // pile - reshuffle() (inside fool()) will pull it right back in.
+        g.drawPile.length = 0;
+        g.discardPile.length = 0;
+        g.discardPile.push("00");
+
+        g.move("play 00, fool", { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(g.pendingPower!.stack.length).eq(2);
+        expect(g.pendingPower!.stack[0].cardUid).eq("00"); // the OUTER Fool, still owed its own 2nd flip
+        expect(g.pendingPower!.stack[1].cardUid).eq("00"); // the INNER (self-revealed) Fool, owed both of its own flips
+        expect(g.pendingPower!.stack[1].nextStepIndex).eq(0);
+    });
+
+    it("World targets Fool: a nested pause, and declining the reveal re-pauses on Fool's own remaining flip (not a cleared obligation)", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => theWorld());
+        forceCardAt(g, 1, 0, () => major(0)); // The Fool, World's own target
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        pluckCard(g, "AC");
+        g.drawPile.unshift("AC");
+
+        g.move(`use ${theWorld().uid}, m0.1 00, fool`, { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined;
+        // World's own spent frame is buried but not yet popped - the
+        // forced pause fires before any cascade could reach it (same
+        // "buried, not yet cleaned up" situation as Fool's own frame
+        // above).
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["21", "00", "AC"]);
+        expect(g.currplayer).eq(1);
+
+        g.move(`use ${theWorld().uid}, decline`, { trusted: true }); // decline the reveal (AC's own step)
+        expect(g.pendingPower).to.not.be.undefined; // re-pauses on Fool's own remaining flip, NOT cleared
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["21", "00"]);
+        expect(g.pendingPower!.stack[1].nextStepIndex).eq(1);
+        expect(g.currplayer).eq(1);
+    });
+
+    it("resume-mismatch guards are keyed on rootCardUid, not the current top frame's own cardUid", () => {
+        const g = setupWorldLovers();
+        g.move(`use ${theWorld().uid}, m0.1 ${major(6).uid}`, { trusted: true }); // World's own step only - pauses on Lovers, no forcePause though
+        // World's own push never forces a pause, so this single-segment
+        // submission actually completes the WHOLE activation (Lovers' own
+        // steps get implicitly declined) rather than leaving anything
+        // pending - confirms this before the real point of the test below.
+        expect(g.pendingPower).to.be.undefined;
+
+        // Rebuild with a card that DOES force a pause once targeted, so a
+        // genuine nested pendingPower (rootCardUid "21", top cardUid "00")
+        // exists to probe.
+        const g2 = new GnosticaGame(2);
+        forceCardAt(g2, 0, 0, () => theWorld());
+        forceCardAt(g2, 1, 0, () => major(0)); // The Fool
+        g2.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        pluckCard(g2, "AC");
+        g2.drawPile.unshift("AC");
+        g2.move(`use ${theWorld().uid}, m0.1 00, fool`, { trusted: true });
+        expect(g2.pendingPower!.rootCardUid).eq("21");
+        expect(g2.pendingPower!.stack[g2.pendingPower!.stack.length - 1].cardUid).eq("AC");
+        // A resume keyed on the TOP frame's own cardUid ("AC") rather than
+        // rootCardUid ("21") must be rejected.
+        expect(() => g2.move("use AC, decline", { trusted: true })).to.throw();
+        expect(g2.pendingPower).to.not.be.undefined;
+        expect(() => g2.move(`use ${theWorld().uid}, decline`, { trusted: true })).to.not.throw();
+    });
+
+    it("Fool's own 'Flip' button submits the sentinel token, at the root", () => {
+        const g = setupFool();
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        expect(cellClick.move).eq(`use ${major(0).uid}`);
+
+        const preview = setupFool();
+        preview.move(cellClick.move, { partial: true });
+        expect(buttonValues(preview)).to.include("power_fool");
+
+        const flipClick = g.handleClick(cellClick.move, -1, -1, "_btn_power_fool");
+        expect(flipClick.move).eq(`use ${major(0).uid}, fool`);
+        expect(flipClick.valid).to.be.true;
+    });
+
+    it("World's target-cell click and Fool's 'Flip' button compose: World -> Fool driven entirely by clicks", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => theWorld());
+        forceCardAt(g, 1, 0, () => major(0)); // The Fool
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [rowM, colM] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, rowM, colM);
+
+        const [rowN, colN] = rowColFor(g, 1, 0);
+        const targetClick = g.handleClick(cellClick.move, rowN, colN);
+        expect(targetClick.move).eq(`use ${theWorld().uid}, m0.1 00`);
+
+        const preview = new GnosticaGame(2);
+        forceCardAt(preview, 0, 0, () => theWorld());
+        forceCardAt(preview, 1, 0, () => major(0));
+        preview.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        preview.move(targetClick.move, { partial: true });
+        expect(buttonValues(preview)).to.include("power_fool");
+
+        const flipClick = g.handleClick(targetClick.move, -1, -1, "_btn_power_fool");
+        expect(flipClick.move).eq(`use ${theWorld().uid}, m0.1 00/fool`);
+        expect(flipClick.valid).to.be.true;
+    });
+
+    it("chatLog() renders revealFlip/borrowPower lines - structurally (placeholder text, not real content)", () => {
+        addResource("en");
+        const foolGame = setupFool();
+        pluckCard(foolGame, "AC");
+        foolGame.drawPile.unshift("AC");
+        foolGame.move(`use ${major(0).uid}, fool`, { trusted: true });
+        const foolRows = foolGame.chatLog(["Alice", "Bob"]);
+        // node[0] is the timestamp; a silently-dropped "revealFlip" (the
+        // exact failure mode without the stub-recognizing branch) would
+        // leave this row with only the "use" line, one entry short.
+        expect(foolRows[foolRows.length - 1]).to.include("");
+
+        const worldGame = setupWorldLovers();
+        worldGame.move(`use ${theWorld().uid}, m0.1 ${major(6).uid}, m0.1 piece n0.1 1 U, o0.1 own o0 U`, { trusted: true });
+        const worldRows = worldGame.chatLog(["Alice", "Bob"]);
+        expect(worldRows[worldRows.length - 1]).to.include("");
+    });
+
+    it("randomMove() sanity check: a paused activation always yields something validateMove() accepts", () => {
+        const g = setupFool();
+        pluckCard(g, "AC");
+        g.drawPile.unshift("AC");
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined;
+        const move = g.randomMove();
+        expect(move).eq(`use ${major(0).uid}, decline`);
+        expect(g.validateMove(move).valid).to.be.true;
+        expect(() => g.move(move, { trusted: true })).to.not.throw();
+    });
+
+    it("regression: Judgement can draw itself back from the discard pile", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        pluckCard(g, "20"); // Judgement - avoid a duplicate elsewhere
+        g.hands[0] = g.hands[0].slice(0, 5); // room for 1 more once "20" itself is played away
+        g.hands[0].push("20");
+        g.discardPile.push("21"); // padding, so "20" isn't the only discard entry
+        g.move("play 20, m0.1 20", { trusted: true });
+        expect(g.hands[0]).to.include("20");
+        expect(g.discardPile).to.not.include("20");
+        expect(g.currplayer).eq(2);
     });
 });

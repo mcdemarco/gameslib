@@ -764,13 +764,13 @@ export const attackTerritory = (
 //   Man's rod half, Tower, Star, Moon, Sun, Death) is already fully covered
 //   by the primitives above plus their opts flags.
 //
-// Fool ({special:"fool"}) and World ({special:"worldUseAny"}) are not
-// reachable through the engine yet (gnostica.ts's applyCardPower rejects any
-// power step on either card - see FOOL_WORLD_NOT_YET_SUPPORTED), so
-// fool/worldChoosePower below are left as plain throwing
-// functions rather than split into checkX/mutating pairs - there's no
-// validator-side caller that would use a checkX for them yet. Splitting
-// them is future work, alongside actually wiring them up.
+// Fool ({special:"fool"}) and World ({special:"worldUseAny"}) both hand
+// off to a DIFFERENT card's own power array rather than doing something
+// self-contained - the flipped card, for Fool; the player-chosen on-board
+// card, for World. fool()/worldChoosePower() below resolve/validate only
+// their OWN half (flipping; naming a legal target); actually dispatching
+// the resulting card's own power steps is gnostica.ts's job (see
+// resolveFrameDef/walkFrameStack there).
 // ============================================================
 
 // Orient one of the acting player's own minions. Unlike the suit
@@ -1087,16 +1087,21 @@ export const highPriestess = (ctx: PowerContext, discardUids: string[]): void =>
     }
 };
 
+export const checkFool = (ctx: PowerContext): PowerFailure | undefined =>
+    (ctx.drawPile.length === 0 && ctx.discardPile.length === 0) ? { key: "DRAW_PILE_EMPTY" } : undefined;
+
 // Fool: flip the top card of the draw pile and "play" it - i.e. it goes
 // straight to the discard pile, same as any other played card, and is
 // returned here so the caller can resolve whichever power it grants (the
 // card grants two flips - see MAJOR_ARCANA["00"] - by calling this twice).
 // Actually dispatching the flipped card's own power is the caller's job,
-// same scope boundary as Magician/World below - only the engine has the
-// full per-card power dispatcher. Not yet reachable via the engine - see
-// this section's own header comment on why this isn't split into a
-// checkX/mutating pair yet.
+// same scope boundary as World below - only the engine has the full
+// per-card power dispatcher.
 export const fool = (ctx: PowerContext): TarotCard => {
+    const failure = checkFool(ctx);
+    if (failure) {
+        throw new GnosticaRulesError(failure.key, failure.params);
+    }
     reshuffle(ctx);
     const uid = ctx.drawPile.shift();
     if (uid === undefined) {
@@ -1107,20 +1112,30 @@ export const fool = (ctx: PowerContext): TarotCard => {
     return flipped;
 };
 
-// World: validates that `chosenUid` names a major arcana card currently
-// present somewhere on the board, and returns its MajorArcanaDef so the
-// caller can resolve that card's power(s) exactly as if it had been
-// activated directly - the actual multi-step dispatch is the engine's job.
-// Not yet reachable via the engine - see this section's own header comment.
-export const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArcanaDef => {
+export const checkWorldChoosePower = (ctx: PowerContext, chosenUid: string): PowerFailure | undefined => {
+    if (chosenUid === "21") {
+        return { key: "WORLD_SELF_REFERENCE" };
+    }
     const present = [...ctx.board.entries()].some(([, , t]) =>
         t.card !== undefined && t.card.major && t.card.uid === chosenUid);
     if (!present) {
-        throw new GnosticaRulesError("NO_SUCH_MAJOR_ON_BOARD", { uid: chosenUid });
+        return { key: "NO_SUCH_MAJOR_ON_BOARD", params: { uid: chosenUid } };
     }
-    const def = MAJOR_ARCANA[chosenUid];
-    if (def === undefined) {
-        throw new GnosticaRulesError("UNKNOWN_CARD", { uid: chosenUid });
+    if (MAJOR_ARCANA[chosenUid] === undefined) {
+        return { key: "UNKNOWN_CARD", params: { uid: chosenUid } };
     }
-    return def;
+    return undefined;
+};
+
+// World: validates that `chosenUid` names a major arcana card currently
+// present somewhere on the board (and isn't World itself), and returns its
+// MajorArcanaDef so the caller can resolve that card's power(s) exactly as
+// if it had been activated directly - the actual multi-step dispatch is
+// the engine's job.
+export const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArcanaDef => {
+    const failure = checkWorldChoosePower(ctx, chosenUid);
+    if (failure) {
+        throw new GnosticaRulesError(failure.key, failure.params);
+    }
+    return MAJOR_ARCANA[chosenUid];
 };
