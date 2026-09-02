@@ -3400,7 +3400,7 @@ describe("Gnostica: choose-step click messaging", () => {
         // "02" (The High Priestess) - the active card - not "00" (The Fool
         // - the root).
         expect(continueBtn.label).eq("Use Card 02");
-        expect(declineBtn.label).eq("Decline Card 02");
+        expect(declineBtn.label).eq("Decline 02");
     });
 
     // Regression: the real client calls validateMove("") right after every
@@ -4462,10 +4462,11 @@ describe("Gnostica: Fool and World", () => {
         expect(() => decline.move(`use ${theWorld().uid}`, { trusted: true })).to.not.throw();
     });
 
-    it("Fool flips a forced major -> pauses; resume supplies the revealed card's own steps; two same-seat plies", () => {
+    it("Fool flips a forced major -> pauses; resuming Lovers' own two steps also auto-continues Fool's own second (mandatory) flip", () => {
         const g = setupFool();
         pluckCard(g, "06");
         g.drawPile.unshift("06"); // force the flip to reveal The Lovers
+        pluckCard(g, "AS");
         forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - own piece B
         g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, facing n0
@@ -4480,50 +4481,78 @@ describe("Gnostica: Fool and World", () => {
 
         // Resume: Lovers' own two steps, both in the same submission -
         // nothing about what a reveal grants stays hidden once the flip
-        // itself has already happened.
+        // itself has already happened. Fool's own draws are never
+        // optional (see walkFrameStack's own docs), so the moment
+        // Lovers' own frame is fully exhausted, Fool's second flip fires
+        // automatically, IN THIS SAME submission - revealing a new card
+        // and pausing on ITS OWN choice, rather than a separate "should
+        // Fool draw again" prompt.
+        g.drawPile.unshift("AS"); // force what that automatic second flip reveals
         g.move(`use ${major(0).uid}, m0.1 piece n0.1 1 U, o0.1 own o0 U`, { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AS"]);
+        expect(g.pendingPower!.stack[0].nextStepIndex).eq(2); // Fool's own frame is now fully spent
+        expect(g.currplayer).eq(1); // still paused - the turn hasn't passed yet
+        expect(g.board.get(2, 0)!.pieces.length).eq(2); // Lovers' own steps DID take effect
+
+        // Declining the second reveal's own power now fully resolves the
+        // whole activation in one more submission (Fool's frame is
+        // already spent, so nothing is left to auto-continue).
+        g.move(`use ${major(0).uid}, decline`, { trusted: true });
         expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
-        expect(g.board.get(2, 0)!.pieces.length).eq(2);
 
         const plies = g.getPlies();
-        const [step1, step2] = plies.slice(-2);
-        expect([step1.actor, step2.actor]).to.deep.equal([1, 1]);
+        const [step1, step2, step3] = plies.slice(-3);
+        expect([step1.actor, step2.actor, step3.actor]).to.deep.equal([1, 1, 1]);
     });
 
-    it("Fool flips a forced minor -> pauses; resume supplies the synthesized primitive step", () => {
+    it("Fool flips a forced minor -> pauses; resuming its synthesized primitive step also auto-continues Fool's own second flip", () => {
         const g = setupFool();
         pluckCard(g, "AC");
         g.drawPile.unshift("AC"); // Ace of Cups - synthesized into a one-step "create" frame
+        pluckCard(g, "AS");
 
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AC"]);
+        g.drawPile.unshift("AS"); // force what Fool's own automatic second flip reveals
         g.move(`use ${major(0).uid}, m0.1 own m0 U`, { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined; // Fool's own second flip auto-fired, in the same submission
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AS"]);
+        expect(g.currplayer).eq(1);
+        expect(g.board.get(0, 0)!.pieces.length).eq(2); // Fool's own minion, plus the new Cups piece
+
+        g.move(`use ${major(0).uid}, decline`, { trusted: true });
         expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
-        expect(g.board.get(0, 0)!.pieces.length).eq(2); // Fool's own minion, plus the new Cups piece
     });
 
-    it("Fool's second flip also pauses too, unconditionally - not only when a sibling step remains", () => {
+    // Regression: Fool's own draws are never optional (walkFrameStack's
+    // own docs) - declining what the first flip revealed auto-continues
+    // straight into the second flip, IN THE SAME SUBMISSION, rather than
+    // needing a separate "Continue"/resume round just to ask whether
+    // Fool should draw again.
+    it("declining what the first flip revealed auto-continues into a mandatory second flip, in one submission", () => {
         const g = setupFool();
         pluckCard(g, "AC");
         pluckCard(g, "AD");
         g.drawPile.unshift("AC");
 
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        g.move(`use ${major(0).uid}, decline`, { trusted: true }); // decline AC's own step
-        expect(g.pendingPower).to.not.be.undefined; // Fool's own second flip is still owed
-        expect(g.pendingPower!.stack).to.deep.equal([{ cardUid: "00", nextStepIndex: 1, minions: [{ x: 0, y: 0, index: 0 }] }]);
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AC"]);
 
         g.drawPile.unshift("AD");
-        g.move(`use ${major(0).uid}, fool`, { trusted: true }); // second flip
-        expect(g.pendingPower).to.not.be.undefined; // pauses again, unconditionally
+        g.move(`use ${major(0).uid}, decline`, { trusted: true }); // decline AC's own step
+        expect(g.pendingPower).to.not.be.undefined;
         // Fool's own frame is now fully exhausted (both flips done), but
-        // the forced pause fires immediately on push - before any cascade
-        // could pop it - so it's still sitting there, buried, exactly
-        // like World's own spent frame does in the nested tests below.
+        // the forced pause on the SECOND flip's own reveal fires before
+        // any cascade could pop it - so it's still sitting there, buried,
+        // exactly like World's own spent frame does in the nested tests
+        // below.
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AD"]);
         expect(g.pendingPower!.stack[0].nextStepIndex).eq(2);
+        expect(g.discardPile).to.include.members(["AC", "AD"]); // both flips actually happened
+        expect(g.currplayer).eq(1); // still paused on AD's own choice
     });
 
     it("Fool -> Fool: playing the Fool discards it first, so an empty draw pile can flip it right back", () => {
@@ -4549,13 +4578,14 @@ describe("Gnostica: Fool and World", () => {
         expect(g.pendingPower!.stack[1].nextStepIndex).eq(0);
     });
 
-    it("World targets Fool: a nested pause, and declining the reveal re-pauses on Fool's own remaining flip (not a cleared obligation)", () => {
+    it("World targets Fool: a nested pause, and declining the reveal auto-continues into Fool's own mandatory second flip", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         forceCardAt(g, 1, 0, () => major(0)); // The Fool, World's own target
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         pluckCard(g, "AC");
         g.drawPile.unshift("AC");
+        pluckCard(g, "AS");
 
         g.move(`use ${theWorld().uid}, m0.1 00, fool`, { trusted: true });
         expect(g.pendingPower).to.not.be.undefined;
@@ -4566,10 +4596,15 @@ describe("Gnostica: Fool and World", () => {
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["21", "00", "AC"]);
         expect(g.currplayer).eq(1);
 
+        // Declining AC's own power exposes Fool's own remaining flip -
+        // never optional (see walkFrameStack's own docs) - so it fires
+        // automatically, in this SAME submission, revealing a new card
+        // and pausing on IT instead.
+        g.drawPile.unshift("AS");
         g.move(`use ${theWorld().uid}, decline`, { trusted: true }); // decline the reveal (AC's own step)
-        expect(g.pendingPower).to.not.be.undefined; // re-pauses on Fool's own remaining flip, NOT cleared
-        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["21", "00"]);
-        expect(g.pendingPower!.stack[1].nextStepIndex).eq(1);
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["21", "00", "AS"]);
+        expect(g.pendingPower!.stack[1].nextStepIndex).eq(2); // Fool's own frame is now fully spent
         expect(g.currplayer).eq(1);
     });
 
@@ -4631,25 +4666,42 @@ describe("Gnostica: Fool and World", () => {
         expect(real.pendingPower).to.not.be.undefined;
     });
 
-    it("Fool's second flip, once Continued into, is also no-button and auto-complete", () => {
+    // Regression: since Fool's own second flip is never a separate,
+    // optional choice any more (it fires automatically the moment
+    // declining a reveal exposes it - see walkFrameStack's own docs),
+    // there's no longer a "Continue"/resume round for it at all. Clicking
+    // "Decline" on a revealed card's own power already produces a
+    // complete, submit-ready move whose real commit performs BOTH the
+    // decline and the automatic second flip - the button bar has nothing
+    // Fool-specific to offer at any point in this preview.
+    it("declining a revealed card's power in the click preview is already complete, and the decline choice persists (bolded)", () => {
         const g = setupFool();
         pluckCard(g, "AC");
         g.drawPile.unshift("AC");
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        g.move(`use ${major(0).uid}, decline`, { trusted: true }); // decline AC's own step
         expect(g.pendingPower).to.not.be.undefined;
 
-        const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
-        expect(resumed.move).eq(`use ${major(0).uid}`);
-        expect(resumed.valid).to.be.true;
-        expect(resumed.complete).to.eq(0);
-        expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP2_READY"));
+        const declined = g.handleClick("", -1, -1, "_btn_decline_power");
+        expect(declined.move).eq(`use ${major(0).uid}, decline`);
+        expect(declined.valid).to.be.true;
+        expect(declined.complete).to.eq(0);
+        expect(declined.message).to.eq(i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW"));
 
         const preview = setupFool();
+        pluckCard(preview, "AC");
+        preview.drawPile.unshift("AC");
         preview.move(`use ${major(0).uid}, fool`, { trusted: true });
-        preview.move(`use ${major(0).uid}, decline`, { trusted: true });
-        preview.move(resumed.move, { partial: true });
+        preview.move(declined.move, { partial: true });
+        // No button for Fool's own (automatic) flip - just the decline of
+        // AC (the card that WAS actually drawn), persisting bolded, same
+        // as "Use Territory"/"Play Card" persists once chosen.
         expect(buttonValues(preview)).to.not.include("power_fool");
+        expect(buttonValues(preview)).to.deep.equal(["use", "decline_power", "declare"]);
+        const rep = preview.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas!.find(a => a.type === "buttonBar")!;
+        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
+        expect(declineBtn.label).eq("Decline AC");
+        expect(declineBtn.attributes).to.deep.equal([{ name: "font-weight", value: "bold" }]);
     });
 
     // Regression: a real flip's own message (validateMove("") right after
@@ -4673,7 +4725,15 @@ describe("Gnostica: Fool and World", () => {
         expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
     });
 
-    it("World's target-cell click and Fool's 'Flip' button compose: World -> Fool driven entirely by clicks", () => {
+    // Regression: declining a revealed card's own power exposes Fool's own
+    // remaining flip underneath (see walkFrameStack's own
+    // "lastWasExplicitDecline" docs) - the click PREVIEW of that decline
+    // used to fall back to the generic top-level bar and a bare "Looks
+    // like a valid move" message, because getActionButtons()'s own
+    // pendingPower-reseeded read of parsePendingStep always started
+    // priorSteps at [] (see reachedViaDecline's own docs), indistinguishable
+    // from a genuinely fresh/mandatory activation.
+    it("World's target-cell click on Fool already produces a complete, submit-ready move - no button needed", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         forceCardAt(g, 1, 0, () => major(0)); // The Fool
@@ -4686,17 +4746,28 @@ describe("Gnostica: Fool and World", () => {
         const [rowN, colN] = rowColFor(g, 1, 0);
         const targetClick = g.handleClick(cellClick.move, rowN, colN);
         expect(targetClick.move).eq(`use ${theWorld().uid}, m0.1 00`);
+        expect(targetClick.valid).to.be.true;
+        expect(targetClick.complete).to.eq(0); // already complete via World's own free push + Fool's auto-flip
 
         const preview = new GnosticaGame(2);
         forceCardAt(preview, 0, 0, () => theWorld());
         forceCardAt(preview, 1, 0, () => major(0));
         preview.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         preview.move(targetClick.move, { partial: true });
-        expect(buttonValues(preview)).to.include("power_fool");
+        // No button needed - Fool's own flip auto-resolves on a real
+        // commit regardless of any click; nothing about it is offered as
+        // an optional continuation.
+        expect(buttonValues(preview)).to.not.include("power_fool");
+        expect(preview.discardPile.length).eq(0); // nothing revealed during this partial preview
 
-        const flipClick = g.handleClick(targetClick.move, -1, -1, "_btn_power_fool");
-        expect(flipClick.move).eq(`use ${theWorld().uid}, m0.1 00/fool`);
-        expect(flipClick.valid).to.be.true;
+        const real = new GnosticaGame(2);
+        forceCardAt(real, 0, 0, () => theWorld());
+        forceCardAt(real, 1, 0, () => major(0));
+        real.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        real.move(targetClick.move); // real, non-partial commit
+        expect(real.pendingPower).to.not.be.undefined; // Fool's own flip actually fired, pausing on what it revealed
+        expect(real.pendingPower!.stack.map(f => f.cardUid)[0]).eq("21");
+        expect(real.pendingPower!.stack.map(f => f.cardUid)[1]).eq("00");
     });
 
     it("chatLog() renders revealFlip/borrowPower lines, naming the actual card, not a bare uid", () => {

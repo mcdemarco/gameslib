@@ -1523,13 +1523,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"
                 : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1" };
         }
-        // Fool: no button, no choice - selecting/resuming into it already
-        // produces a complete move (see synthesizeFoolStep), so the
-        // message's whole job is telling the player what Submit will do.
+        // Fool: no button, no choice - engaging it at all (root, or as a
+        // revealed/targeted card elsewhere) already produces a complete
+        // move, since BOTH of its own flips fire automatically once
+        // started (see walkFrameStack's own docs) - the message's whole
+        // job is telling the player what Submit will do. Only ever
+        // reached at its own first step (nextStepIndex 0) - the second
+        // never pauses separately to ask again.
         if (headArg === "00") {
-            return { key: priorStepsCount > 0
-                ? "apgames:validation.gnostica.FOOL_FLIP2_READY"
-                : "apgames:validation.gnostica.FOOL_FLIP1_READY" };
+            return { key: "apgames:validation.gnostica.FOOL_FLIP1_READY" };
         }
         // Every other card: name it explicitly. A fresh top-level
         // activation is one the player just clicked themselves (so this
@@ -1680,7 +1682,12 @@ export class GnosticaGame extends GameBaseSequenced {
             // recommended over the other.
             return [
                 { label: `Use Card ${activeUid}`, value: "resume_power" },
-                { label: `Decline Card ${activeUid}`, value: "decline_power" },
+                // "Decline" alone (no "Card") - unlike "Use", which could
+                // in principle mean using the card's minion presence or
+                // other actions elsewhere in the game, a decline is only
+                // ever offered for a card's own power, so naming it is
+                // enough without the extra word.
+                { label: `Decline ${activeUid}`, value: "decline_power" },
             ];
         }
         // A live preview of "use"/"play" can only ever have STARTED
@@ -1782,6 +1789,41 @@ export class GnosticaGame extends GameBaseSequenced {
         const selected = topLevel.find(b => b.value === pendingMinor.head);
         const declareBtn = topLevel.find(b => b.value === "declare");
 
+        // Fool's own step is never itself clickable - flipping is
+        // automatic on a real commit, whether this is the mandatory root
+        // activation, a resume already opted into via Continue, or
+        // exposed by declining what an earlier flip revealed (see
+        // walkFrameStack's own docs). The one case that still needs its
+        // OWN button here is that last one: the decline the player just
+        // made is a genuine, already-final choice about a REAL drawn
+        // card, and should keep showing (bolded) exactly like the
+        // top-level "Use"/"Play" choice persists, rather than collapsing
+        // to the plain top-level bar as if nothing had been decided. The
+        // declined card's own uid isn't recoverable from
+        // this.pendingPower.stack any more (the preceding partial apply
+        // already popped it for real), but Fool always sends what it
+        // flips straight to the discard pile and nothing else touches it
+        // between the flip and this decline, so the pile's own last
+        // entry is it.
+        if (pendingMinor.special === "fool") {
+            const lastTypedSegment = this.liveMove?.stepSegments[this.liveMove.stepSegments.length - 1];
+            const reachedViaDecline = lastTypedSegment !== undefined
+                && lastTypedSegment.length === 1 && lastTypedSegment[0].toLowerCase() === "decline";
+            const declinedUid = reachedViaDecline ? this.discardPile[this.discardPile.length - 1] : undefined;
+            if (declinedUid !== undefined) {
+                const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
+                buttons.push({
+                    label: `Decline ${declinedUid}`, value: "decline_power",
+                    attributes: [{ name: "font-weight", value: "bold" }],
+                });
+                if (declareBtn !== undefined) {
+                    buttons.push(declareBtn);
+                }
+                return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+            }
+            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+        }
+
         // Every remaining candidate minion for THIS step already sits on
         // the same cell - either "use"'s own pool, always single-cell by
         // construction, or "play"'s board-wide pool once a board click has
@@ -1841,38 +1883,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        // Fool has no minionRef and no real choice when this frame's flip
-        // is guaranteed to happen anyway: a fresh root activation (#49
-        // makes the root's own first step mandatory) or a resume already
-        // opted into via Continue - both cases are recognizable here as
-        // pendingMinor.priorSteps.length === 0, since parsePendingStep
-        // only ever WALKS segments (populating priorSteps) when replaying
-        // an in-progress, not-yet-committed move string; a seeded resume
-        // or a totally fresh selection never walks anything. In either of
-        // those, synthesizeFoolStep already makes the move complete on
-        // its own, so no button is needed - the status message
-        // (FOOL_FLIP1_READY/FOOL_FLIP2_READY, via powerStepMessageKey)
-        // already says what submitting will do, and nothing about what
-        // gets revealed is computed or shown before that real Submit.
-        if (pendingMinor.special === "fool" && pendingMinor.priorSteps.length === 0) {
-            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
-        }
-        // Reached via a push that's still mid-build within the SAME
-        // not-yet-submitted move (e.g. World's own step just pushed into
-        // Fool) - unlike the mandatory cases above, a pushed frame stays
-        // fully optional (#49), so the player needs an explicit way to
-        // opt into the flip as part of this move, rather than it
-        // happening automatically and taking away the choice to leave it
-        // undeclared. No bold - nothing here is "already selected" (see
-        // decline_power's own docs on that distinction).
-        if (pendingMinor.special === "fool") {
-            const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-            buttons.push({ label: "Draw and Use", value: "power_fool" });
-            if (declareBtn !== undefined) {
-                buttons.push(declareBtn);
-            }
-            return buttons as [ButtonBarButton, ...ButtonBarButton[]];
-        }
         // High Priestess: the discard list itself is still built via hand-
         // card clicks (below), but the actual draw count is the player's
         // own choice, exactly like the ordinary end-of-turn discard/draw
@@ -2087,8 +2097,32 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             const stepIndex = top.nextStepIndex;
             const step = frameDef.powers[stepIndex];
+            if ("special" in step && step.special === "fool") {
+                // Fool's own step always auto-resolves the instant it's
+                // next in line on a real commit (see walkFrameStack's own
+                // docs) - there's nothing here for a click to build, and
+                // what a flip reveals is unknowable until that real
+                // commit happens, so this UI-only preview has nothing
+                // further to say once it's reached, regardless of
+                // whatever segment (if any) the player typed next.
+                return undefined;
+            }
             const tokens = parsed.stepSegments[segIdx];
             const isLastSegment = segIdx === parsed.stepSegments.length - 1;
+            if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+                // Mirrors validateFrameStack's own decline branch - missing
+                // here used to mean a declined pushed frame (e.g. Fool's
+                // reveal) left this UI-only walk unable to make sense of
+                // the segment at all, silently falling all the way back to
+                // the generic top-level bar instead of showing whatever
+                // frame the decline exposes underneath (which may itself
+                // need its own Continue/Decline-style choice, or - if it's
+                // already exhausted - nothing further at all).
+                priorSteps.push(tokens.join(" "));
+                stack.pop();
+                GnosticaGame.popExhaustedFrames(this, stack);
+                continue;
+            }
             if ("primitive" in step) {
                 const suitUidForStep = this.primitiveToSuit(step.primitive);
                 const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
@@ -3233,23 +3267,24 @@ export class GnosticaGame extends GameBaseSequenced {
                         const activeMsg = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex);
                         return this.provisionalResult(seeded, activeMsg.key, activeMsg.params);
                     }
-                    case "decline_power":
+                    case "decline_power": {
                         if (this.pendingPower === undefined) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        return this.provisionalResult(`${this.pendingPower.source} ${this.pendingPower.rootCardUid}, decline`);
-                    case "power_fool": {
-                        // Only reachable for a push mid-build that's still
-                        // optional (see getActionButtons()'s own docs) -
-                        // the mandatory root/resume cases never show this
-                        // button at all, since they're already complete
-                        // via synthesizeFoolStep. parsePendingStep already
-                        // resolves the right (pushed) frame for `move`.
-                        const pending = this.parsePendingStep(move);
-                        if (pending === undefined || pending.special !== "fool") {
-                            return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                        }
-                        return this.provisionalResult(this.assembleStepMove(pending, ["fool"]));
+                        const declined = `${this.pendingPower.source} ${this.pendingPower.rootCardUid}, decline`;
+                        // Declining pops the CURRENT top frame. What's left
+                        // underneath is never itself a genuine further
+                        // choice any more - Fool's own remaining flip (the
+                        // only thing that used to sit there) auto-resolves
+                        // on this same real commit instead of pausing (see
+                        // walkFrameStack's own docs) - so name that
+                        // outcome plainly rather than a card that isn't
+                        // known yet.
+                        const remaining = this.pendingPower.stack.slice(0, -1);
+                        return this.provisionalResult(
+                            declined,
+                            this.topStepIsFool(remaining) ? "apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW" : undefined,
+                        );
                     }
                     case "random":
                         // Only ever offered for Wheel of Fortune's own
@@ -4588,52 +4623,89 @@ export class GnosticaGame extends GameBaseSequenced {
     //   frame had left of its own power is implicitly declined (popped) -
     //   exactly like a plain single-frame chain already works today. If
     //   that pop empties the stack, the whole activation is done and the
-    //   turn advances normally. If it exposes an OUTER frame that still
-    //   has its own unconsumed steps (only possible for Fool, whose own
-    //   frame never fully exhausts after just one flip), that frame gets
-    //   its own fresh pause - it was never addressed by anything the
-    //   caller supplied this call, so it isn't declined by omission the
-    //   way the frame actually being typed against is.
+    //   turn advances normally. If it exposes an outer frame, that frame's
+    //   own next step is either Fool's (see below - auto-resolves right
+    //   here, in the SAME call, never reaching this exit at all) or
+    //   something else that genuinely needs input the caller didn't
+    //   supply, which stays pending exactly like any other pushed frame's
+    //   own untaken step.
+    //
+    // Fool's own step is unconditionally auto-taken the moment it's next
+    // in line - flipping is the ONLY possible action for it (unlike every
+    // other special, even High Priestess, which genuinely lets the player
+    // choose), so there is nothing to decide and nothing to decline: it
+    // never counts against the given segment cursor, never needs a
+    // "fool" token typed for it (one is still accepted and simply
+    // consumed, for hand-typed/legacy moves), and - since every flip
+    // force-pauses to reveal what came up - it always returns from
+    // inside this loop, never falling through to the "implicitly
+    // declined" exit below. This is what makes declining a revealed
+    // card's own power (a real, genuine choice) and Fool drawing its
+    // next card (never a choice) compose into ONE submission: the
+    // decline consumes its own given segment and pops that frame, then
+    // the loop immediately re-checks the newly-exposed top - if that's
+    // Fool's own remaining flip, it fires right then, in the same call.
     private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], source: "use" | "play", rootCardUid: string, partial: boolean): void {
         const chained = stepSegments.length > 1;
-        for (let i = 0; i < stepSegments.length; i++) {
+        let i = 0;
+        let stepsProcessed = 0;
+        for (;;) {
             const top = stack[stack.length - 1];
             if (top === undefined) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
-            }
-            const tokens = stepSegments[i];
-            if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                stack.pop();
-                // Popping can expose an ALREADY-exhausted frame directly
-                // beneath (a parent whose own single step already ran, but
-                // whose push left it buried under the very frame just
-                // declined - e.g. World's own 1-step frame, still sitting
-                // under whatever it pushed) - cascade the same as every
-                // other pop site, rather than leaving it stranded.
-                GnosticaGame.popExhaustedFrames(this, stack);
-                continue; // no result to group/snapshot for a pure decline
+                if (i < stepSegments.length) {
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
+                }
+                break;
             }
             const frameDef = this.resolveFrameDef(top.cardUid);
             const step = frameDef.powers[top.nextStepIndex];
-            const resultsBefore = this.results.length;
-            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial);
-            if (outcome?.newMinion !== undefined) {
-                top.minions = [...top.minions, outcome.newMinion];
-            }
-            top.nextStepIndex++;
-            // Wrap this step's own results into one _group entry,
-            // mirroring frogger.ts's own precedent - unchanged from
-            // before this method existed, just keyed off the flat
-            // segment cursor `i` rather than a single fixed def's own
-            // step index (per-step frame grouping never cared which card
-            // a step belonged to).
-            if (chained) {
-                const stepResults = this.results.splice(resultsBefore) as APMoveResult[];
-                if (stepResults.length > 0) {
-                    this.results.push({ type: "_group", who: this.currplayer, results: stepResults as [APMoveResult, ...APMoveResult[]] });
+            const isFoolStep = "special" in step && step.special === "fool";
+            let tokens: string[];
+            if (isFoolStep) {
+                const next = stepSegments[i];
+                if (next !== undefined && next.length === 1 && next[0].toLowerCase() === "fool") {
+                    i++; // an explicit "fool" token, if given, is just consumed - not required
+                }
+                if (partial) {
+                    // Nothing genuinely happens under a partial preview
+                    // (see applyPowerStep's own fool-branch docs) - not
+                    // even nextStepIndex should advance, or popExhaustedFrames
+                    // right below would wrongly treat Fool's OWN frame as
+                    // spent and pop it, clearing pendingPower entirely as
+                    // if the whole activation had resolved (it hasn't -
+                    // a real commit would push a newly revealed card's
+                    // own frame on top instead, keeping this one buried).
+                    // Leaving the stack untouched and pausing on it as-is
+                    // is the least misleading approximation available
+                    // without actually knowing what a real flip reveals.
+                    this.pendingPower = { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
+                    return;
+                }
+                tokens = ["fool"];
+            } else {
+                if (i >= stepSegments.length) {
+                    break;
+                }
+                tokens = stepSegments[i];
+                i++;
+                if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+                    stack.pop();
+                    // Popping can expose an ALREADY-exhausted frame directly
+                    // beneath (a parent whose own single step already ran, but
+                    // whose push left it buried under the very frame just
+                    // declined - e.g. World's own 1-step frame, still sitting
+                    // under whatever it pushed) - cascade the same as every
+                    // other pop site, rather than leaving it stranded.
+                    GnosticaGame.popExhaustedFrames(this, stack);
+                    continue; // no result to group/snapshot for a pure decline
                 }
             }
-            if (i < stepSegments.length - 1) {
+            // Snapshot BEFORE every step except the first processed one
+            // this call - equivalent to the old "after every step except
+            // the last" (there's no way to know in advance whether an
+            // auto-resolved Fool step will follow a given one), and lets
+            // undo/redo still stop at any intermediate point.
+            if (stepsProcessed > 0) {
                 this.frames.push({
                     board: this.board.clone().store,
                     hands: this.hands.map(h => [...h]),
@@ -4641,6 +4713,21 @@ export class GnosticaGame extends GameBaseSequenced {
                     discardPile: [...this.discardPile],
                     drawPile: [...this.drawPile],
                 });
+            }
+            stepsProcessed++;
+            const resultsBefore = this.results.length;
+            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial);
+            if (outcome?.newMinion !== undefined) {
+                top.minions = [...top.minions, outcome.newMinion];
+            }
+            top.nextStepIndex++;
+            // Wrap this step's own results into one _group entry,
+            // mirroring frogger.ts's own precedent.
+            if (chained) {
+                const stepResults = this.results.splice(resultsBefore) as APMoveResult[];
+                if (stepResults.length > 0) {
+                    this.results.push({ type: "_group", who: this.currplayer, results: stepResults as [APMoveResult, ...APMoveResult[]] });
+                }
             }
             if (outcome?.pushFrame !== undefined) {
                 stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions });
@@ -4651,51 +4738,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 return;
             }
         }
-        // Segments exhausted, no forced pause: decline whatever's left of
-        // the CURRENT (innermost) frame, then re-check whether that
-        // exposes an outer frame with its own genuine remaining steps.
-        // Skipped when the LAST segment actually submitted was ITSELF an
-        // explicit "decline" - that already fully expressed the player's
-        // intent for the frame it popped; auto-declining the DIFFERENT
-        // frame it exposed underneath as well, just because no further
-        // segment happened to follow, would silently discard an
-        // obligation the player never actually addressed (e.g. World
-        // targeting Fool: declining Fool's own reveal must re-pause on
-        // Fool's own remaining flip, not clear the whole activation).
-        const lastSegment = stepSegments[stepSegments.length - 1];
-        const lastWasExplicitDecline = lastSegment !== undefined && lastSegment.length === 1 && lastSegment[0].toLowerCase() === "decline";
-        if (!lastWasExplicitDecline && stack.length > 0) {
+        // Segments exhausted (or stack empty) with no forced pause: implicitly
+        // decline whatever's left of the CURRENT (top) frame. Fool's own step
+        // never reaches here - see this method's own docs.
+        if (stack.length > 0) {
             stack.pop();
             GnosticaGame.popExhaustedFrames(this, stack);
         }
         this.pendingPower = stack.length > 0 ? { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] } : undefined;
-    }
-
-    // Fool's own step has no real choice at all - flipping is the ONLY
-    // possible action, unlike every other special (even High Priestess
-    // genuinely lets the player pick which cards to discard). So rather
-    // than making the player explicitly type/click a "fool" token,
-    // selecting the card (or continuing into a frame whose own next step
-    // IS a fool flip - the second flip, or a nested Fool reached via a
-    // reveal) already builds a complete, submittable move: an empty
-    // segment list is synthesized as ["fool"] whenever the CURRENT top
-    // frame's own next step is special:"fool". A hand-typed "...,  fool"
-    // still works unmodified, since this only fires when stepSegments is
-    // genuinely empty.
-    private synthesizeFoolStep(stack: readonly IPowerFrame[], stepSegments: string[][]): string[][] {
-        if (stepSegments.length > 0) {
-            return stepSegments;
-        }
-        const top = stack[stack.length - 1];
-        if (top === undefined) {
-            return stepSegments;
-        }
-        const frameDef = this.resolveFrameDef(top.cardUid);
-        const step = frameDef.powers[top.nextStepIndex];
-        if (step !== undefined && "special" in step && step.special === "fool") {
-            return [["fool"]];
-        }
-        return stepSegments;
     }
 
     // Walks a major arcana card's power-step list from a fresh use/play
@@ -4707,8 +4757,24 @@ export class GnosticaGame extends GameBaseSequenced {
     // detection between steps.
     private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
-        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
         this.walkFrameStack(stack, stepSegments, source, def.uid, partial);
+    }
+
+    // True when `stack`'s own top frame's NEXT step is special:"fool" -
+    // used only to decide whether a bare, 0-segment seed (the client's
+    // own "just show me what's here" preview, before any real step is
+    // typed) should be left completely alone (every OTHER special/
+    // primitive genuinely needs real input before there's anything to
+    // apply) or should be allowed straight into walkFrameStack/
+    // validateFrameStack, which auto-resolve Fool's own step unconditionally
+    // regardless of segment count - see walkFrameStack's own docs.
+    private topStepIsFool(stack: readonly IPowerFrame[]): boolean {
+        const top = stack[stack.length - 1];
+        if (top === undefined) {
+            return false;
+        }
+        const step = this.resolveFrameDef(top.cardUid).powers[top.nextStepIndex];
+        return step !== undefined && "special" in step && step.special === "fool";
     }
 
     // Resumes a paused activation - does NOT re-enter applyMajorPower from
@@ -4719,72 +4785,101 @@ export class GnosticaGame extends GameBaseSequenced {
     // should let the player supply all of ITS steps in one go if they're
     // already known (nothing about a revealed card's own power is hidden
     // once the reveal has happened) - walkFrameStack handles this
-    // uniformly, re-pausing again if anything (including an outer Fool
-    // frame with its own flip still owed) remains once segments run out.
+    // uniformly, re-pausing again if anything genuinely optional and
+    // still needing real input remains once segments run out.
     private resumePendingPower(args: string[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
         const pending = this.pendingPower!;
         if (pending.source !== source || args[0] !== pending.rootCardUid) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
         }
         const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
-        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
-        if (stepSegments.length === 0) {
+        if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             // A bare "<source> <rootCardUid>" seed - the client always
             // sends this to populate a partial preview before any step is
             // typed (see boardClick()'s own convention). Nothing to
-            // process yet; pendingPower stays exactly as it was.
+            // process yet; pendingPower stays exactly as it was. Fool's
+            // own step is exempt from this - it auto-resolves regardless
+            // of segment count (see walkFrameStack's own docs), so a bare
+            // seed against it should go ahead and take the flip.
             return;
         }
         this.walkFrameStack(stack, stepSegments, source, pending.rootCardUid, partial);
     }
 
-    // Read-only counterpart to walkFrameStack, mirroring validateMajorPower's
-    // own lazy-clone replay: only clones (via cloneLive(), since a
-    // click-driven preview may have already live-mutated this.board -
-    // see validateMajorPower's own docs) once a SECOND segment actually
-    // needs to see genuine post-earlier-step state.
+    // Read-only counterpart to walkFrameStack, mirroring its own inline
+    // Fool auto-resolution (see walkFrameStack's own docs) - Fool's own
+    // step is checked regardless of the given-segment cursor `i`, and
+    // (since checkFool never knows what would be revealed) validation
+    // always stops the instant it validates a forced-pause step, exactly
+    // once, the same way a real apply always returns right there:
+    // anything "after" it in the stack is fundamentally unknowable until
+    // an actual commit happens - unlike walkFrameStack, this loop has no
+    // outer segment-count bound to lean on for that, since Fool consumes
+    // none, so the stop has to be explicit here.
     private validateFrameStack(stack: IPowerFrame[], stepSegments: string[][]): IValidationResult | undefined {
         let clone: GnosticaGame | undefined;
-        for (let i = 0; i < stepSegments.length; i++) {
+        let i = 0;
+        for (;;) {
             const top = stack[stack.length - 1];
             if (top === undefined) {
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
-            }
-            const tokens = stepSegments[i];
-            const isLast = i === stepSegments.length - 1;
-            if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                stack.pop();
-                // Mirrors walkFrameStack's own decline branch - popping can
-                // expose an already-exhausted buried frame (e.g. World's
-                // own spent 1-step frame), which a later segment (if any)
-                // must not be validated against.
-                GnosticaGame.popExhaustedFrames(this, stack);
-                if (!isLast) {
-                    clone ??= this.cloneLive();
+                if (i < stepSegments.length) {
+                    return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
                 }
-                continue;
+                return undefined;
             }
             const frameDef = this.resolveFrameDef(top.cardUid);
             const stepIndex = top.nextStepIndex;
             const step = frameDef.powers[stepIndex];
+            const isFoolStep = "special" in step && step.special === "fool";
+            let tokens: string[];
+            if (isFoolStep) {
+                const next = stepSegments[i];
+                if (next !== undefined && next.length === 1 && next[0].toLowerCase() === "fool") {
+                    i++; // an explicit "fool" token, if given, is just consumed - not required
+                }
+                tokens = ["fool"];
+            } else {
+                if (i >= stepSegments.length) {
+                    return undefined; // nothing more given - this frame's own remaining step stays optional
+                }
+                tokens = stepSegments[i];
+                i++;
+                if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+                    stack.pop();
+                    // Mirrors walkFrameStack's own decline branch - popping can
+                    // expose an already-exhausted buried frame (e.g. World's
+                    // own spent 1-step frame), which a later segment (if any)
+                    // must not be validated against.
+                    GnosticaGame.popExhaustedFrames(this, stack);
+                    if (i < stepSegments.length) {
+                        clone ??= this.cloneLive();
+                    }
+                    continue;
+                }
+            }
             const stepResult = (clone ?? this).validatePowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length);
             if (stepResult.failed) {
                 return stepResult.result;
             }
             if (stepResult.complete === false) {
-                if (isLast) {
+                if (i >= stepSegments.length) {
                     return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
                 }
                 // An earlier segment being incomplete means a later one
                 // couldn't legitimately exist - defensive, shouldn't fire.
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: tokens.join(" ") });
             }
-            // A forced-pause step can never legally be followed by more
-            // segments - the player couldn't have known what to put
-            // there (Fool's flip is hidden; the caller found out what was
-            // revealed only by actually taking the step).
-            if (stepResult.outcome?.forcePause === true && !isLast) {
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "STEPS_AFTER_FORCED_PAUSE" });
+            if (stepResult.outcome?.forcePause === true) {
+                // A forced-pause step can never legally be followed by more
+                // segments - the player couldn't have known what to put
+                // there (Fool's flip is hidden; the caller found out what
+                // was revealed only by actually taking the step) - and
+                // nothing can be validated past it regardless, so stop here
+                // either way.
+                if (i < stepSegments.length) {
+                    return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "STEPS_AFTER_FORCED_PAUSE" });
+                }
+                return undefined;
             }
             if (stepResult.outcome?.newMinion !== undefined) {
                 top.minions = [...top.minions, stepResult.outcome.newMinion];
@@ -4794,12 +4889,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions });
             }
             GnosticaGame.popExhaustedFrames(this, stack);
-            if (!isLast) {
+            if (i < stepSegments.length || stack.length > 0) {
                 clone ??= this.cloneLive();
                 clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true);
             }
         }
-        return undefined;
     }
 
     private validateMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
@@ -4810,13 +4904,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // target, Fool's reveal) stays fully optional, including zero
         // steps: the committing action (naming a target, flipping) already
         // happened, so forcing further action on top of it would
-        // contradict "all powers are optional" for what it revealed. See
-        // walkFrameStack's own docs for how running out of segments
-        // declines only the current (possibly pushed) frame, never a
-        // fresh requirement layered on top of it.
+        // contradict "all powers are optional" for what it revealed. Fool's
+        // own root step is exempt from the "need a real segment" check
+        // below - see topStepIsFool's own docs.
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
-        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
-        if (stepSegments.length === 0) {
+        if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
         return this.validateFrameStack(stack, stepSegments);
@@ -4830,11 +4922,11 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
         }
         const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
-        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
-        if (stepSegments.length === 0) {
+        if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
-            // everywhere else for an in-progress chain.
+            // everywhere else for an in-progress chain. Fool's own step is
+            // exempt - see topStepIsFool's own docs.
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
         return this.validateFrameStack(stack, stepSegments);

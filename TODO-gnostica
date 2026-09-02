@@ -27,8 +27,12 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #58 - randomMove: orientation on a wasteland cell now favors useful facings over ones pointing into more void. @done(26-08-22)
 ✔ #59 - orient: a no-op reorientation (same facing as current) is now rejected and randomOrientMove() won't generate one. @done(26-08-22)
 ✔ #60 - minion-picker buttons now read the piece's real orientation directly. @done(26-08-22)
-✔ #61 - validateMinorPower: 3 "still declined" branches now return valid:true/complete:-1/POWER_STEP_REQUIRED like the existing 0-step case. @done(26-08-22)
+✔ #61 - validateMinorPower: 3 "still declined" branches now behave like the existing 0-step case. @done(26-08-22)
 ✔ #62 - major arcana had the same "looks valid" gap as #61's minor-arcana fix; StepValidation now carries an explicit `complete` flag so validateMajorPower can tell a chain's last step is still being built. @done(26-08-22)
 ✔ #63 - tree-pruning: doomed choices (upright minion for Rods, a mode the hand can't complete, self-targeting tradeHands/hierophantReplace) are now struck through/rejected immediately with a specific reason. @done(26-08-22)
 - #64 - better discard/draw messaging: both the basic action and the High Priestess version
 - #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances
+- #66 - test fool messaging on reload in production
+- #67 - "Use Territory"/"Play Card" buttons could show the active card's slug too, not just which action started the move
+- #68 - The corner case of no bid resolution (all players lose, if possible)
+- #69 - Edit messages.
