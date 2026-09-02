@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
 import "mocha";
 import { expect } from "chai";
+import i18next from "i18next";
 import { APRenderRep, AreaButtonBar } from "@abstractplay/renderer/build/schemas/schema";
 import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
@@ -180,6 +181,32 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.redrawOrder).to.deep.equal([2, 3, 4, 1]); // exact reverse, winner last
         expect(g.currplayer).eq(2);
         expect(g.redrawPos).eq(0);
+    });
+
+    // Both the turn order and the redraw order are known the instant
+    // bidding resolves (redrawOrder is always turnOrder's own exact
+    // reverse - see beginRedraw's own docs), so both get reported
+    // together in one chat line rather than split across bid-resolution
+    // and redraw-completion.
+    it("reports the finalized turn order and redraw order in the chat log once bidding resolves", () => {
+        addResource("en");
+        const g = new GnosticaGame(4, ["bidding"]);
+        g.hands[0] = [minor("KS").uid, "AC", "2C", "3C", "4C", "5C"];
+        g.hands[1] = [minor("2S").uid, "AR", "2R", "3R", "4R", "5R"];
+        g.hands[2] = [minor("3S").uid, "AD", "2D", "3D", "4D", "5D"];
+        g.hands[3] = [minor("4S").uid, minor("5S").uid, minor("6S").uid, minor("7S").uid, minor("8S").uid, minor("9S").uid];
+        g.move("bid 1", { trusted: true });
+        g.move("bid 1", { trusted: true });
+        g.move("bid 1", { trusted: true });
+        g.move("bid 1", { trusted: true }); // the last bid resolves the round
+
+        const players = ["Alice", "Bob", "Carol", "Dave"];
+        const rows = g.chatLog(players);
+        const line = rows[rows.length - 1].find(l => l.includes("Turn order"));
+        expect(line).eq(i18next.t("apresults:TURNORDER.gnostica", {
+            turnOrder: "Alice, Dave, Carol, Bob", // matches g.turnOrder = [1,4,3,2]
+            redrawOrder: "Bob, Carol, Dave, Alice", // exact reverse
+        }));
     });
 
     it("survives a real serialize/deserialize round-trip mid-bid (JSON turns unfilled array slots into null, not undefined)", () => {

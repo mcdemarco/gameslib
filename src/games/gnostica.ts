@@ -3781,6 +3781,10 @@ export class GnosticaGame extends GameBaseSequenced {
     // itself (the rank order of what everyone bid - see its own docs),
     // and "counterclockwise" as its exact reverse, ending at the winner.
     private beginRedraw(): void {
+        // Announce the now-finalized order once, regardless of which of
+        // resolveBidRound()'s two call sites got us here (a clean single
+        // winner, or the "someone's hand ran dry mid-tie" fallback).
+        this.pushTurnOrderResult();
         // redrawOrder's own getter already computes turnOrder's reversal -
         // turnOrder[0] is the bid winner by construction, so redrawOrder[0]
         // is always the worst bidder, for every player count. Jump there
@@ -5678,6 +5682,15 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push(r as unknown as APMoveResult);
     }
 
+    // Stand-in for a real schema entry to be added later - see
+    // moveresults.json. Reports the finalized turn order once bidding
+    // concludes - redraw order is always turnOrder's own exact reverse
+    // (see redrawOrder's own getter), so it's derived in chatLog() from
+    // this same array rather than stored a second time.
+    private pushTurnOrderResult(): void {
+        this.results.push({ type: "turnOrder", order: [...this.turnOrder] } as unknown as APMoveResult);
+    }
+
     // Magician: <minionRef> <suitLetter: C|R|D|S> <mode> <args...> - the
     // player picks which of the four suit primitives to use; everything
     // after the suit letter matches that suit's normal mode+args grammar.
@@ -7500,14 +7513,22 @@ export class GnosticaGame extends GameBaseSequenced {
                 // gnostica has no separate chat() dispatcher to do it in).
                 const flatResults = state._results.flatMap(r => r.type === "_group" ? r.results : [r]);
                 for (const r of flatResults) {
-                    // revealFlip/borrowPower are stubs (see pushStubResult's
-                    // own docs) - not part of the real APMoveResult union
-                    // yet, so they can't be ordinary switch cases below
-                    // without a cast.
+                    // revealFlip/borrowPower/turnOrder are stubs (see
+                    // pushStubResult's/pushTurnOrderResult's own docs) -
+                    // not part of the real APMoveResult union yet, so they
+                    // can't be ordinary switch cases below without a cast.
                     const stubType = (r as unknown as { type: string }).type;
                     if (stubType === "revealFlip" || stubType === "borrowPower") {
                         const stub = r as unknown as { type: "revealFlip" | "borrowPower"; what: string };
                         node.push(i18next.t(`apresults:${stubType === "revealFlip" ? "REVEALFLIP" : "BORROWPOWER"}.gnostica`, { player, what: stub.what }));
+                        continue;
+                    }
+                    if (stubType === "turnOrder") {
+                        const stub = r as unknown as { type: "turnOrder"; order: number[] };
+                        const nameFor = (p: number): string => p <= players.length ? players[p - 1] : `Player ${p}`;
+                        const turnOrderNames = stub.order.map(nameFor).join(", ");
+                        const redrawOrderNames = [...stub.order].reverse().map(nameFor).join(", ");
+                        node.push(i18next.t("apresults:TURNORDER.gnostica", { turnOrder: turnOrderNames, redrawOrder: redrawOrderNames }));
                         continue;
                     }
                     switch (r.type) {

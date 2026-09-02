@@ -712,6 +712,9 @@
     "BORROWPOWER": {
         "gnostica": ""
     },
+    "TURNORDER": {
+        "gnostica": "Bidding is resolved. Turn order for the rest of the game: {{turnOrder}}. Redraw order: {{redrawOrder}}."
+    },
     "SCRIBE": {
         "no_formation": "no formations",
         "glyphs": {
