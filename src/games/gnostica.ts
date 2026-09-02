@@ -771,9 +771,19 @@ export class GnosticaGame extends GameBaseSequenced {
             // is wrong here whenever that fresh render is actually the
             // forced Continue/Decline screen (getActionButtons()'s own
             // pendingPower gate), not the ordinary 6-button bar.
-            result.message = this.pendingPower !== undefined
-                ? i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE")
-                : i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
+            if (this.pendingPower !== undefined) {
+                // Names the ACTIVE (top-of-stack) card, not always
+                // rootCardUid - this is the only chance the status line
+                // itself (as opposed to the chat log) gets to tell the
+                // player which card's power they're being asked about,
+                // which matters most exactly when it's NOT the card they
+                // themselves used/played (Fool's reveal, World's target).
+                const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
+                const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
+                result.message = i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName });
+            } else {
+                result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
+            }
             return result;
         }
 
@@ -1476,14 +1486,14 @@ export class GnosticaGame extends GameBaseSequenced {
     // wrong here - only the player's own explicit "Submit Move" should end
     // the click sequence, or the very first click auto-submits "U" before
     // there's ever a chance to cycle to a real facing.
-    private provisionalResult(newmove: string, messageKey?: string): IClickResult {
+    private provisionalResult(newmove: string, messageKey?: string, messageParams?: Record<string, unknown>): IClickResult {
         const result = this.validateMove(newmove) as IClickResult;
         result.move = newmove;
         if (result.valid && result.complete === 1) {
             result.complete = 0;
         }
         if (messageKey !== undefined && result.valid) {
-            result.message = i18next.t(messageKey);
+            result.message = i18next.t(messageKey, messageParams);
         }
         return result;
     }
@@ -1507,15 +1517,35 @@ export class GnosticaGame extends GameBaseSequenced {
     // ordinary discard/draw action doesn't (a SECOND round follows the
     // first) - so it gets the same wording as the ordinary discard action
     // itself, plus a clause about that.
-    private powerStepMessageKey(headArg: string, priorStepsCount: number): string {
+    private powerStepMessageKey(headArg: string, priorStepsCount: number): { key: string; params?: Record<string, unknown> } {
         if (headArg === "02") {
-            return priorStepsCount > 0
+            return { key: priorStepsCount > 0
                 ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"
-                : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1";
+                : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1" };
         }
-        return priorStepsCount > 0
-            ? "apgames:validation.gnostica.POWER_STILL_OPTIONAL"
-            : "apgames:validation.gnostica.CHOOSE_STEP";
+        // Fool: no button, no choice - selecting/resuming into it already
+        // produces a complete move (see synthesizeFoolStep), so the
+        // message's whole job is telling the player what Submit will do.
+        if (headArg === "00") {
+            return { key: priorStepsCount > 0
+                ? "apgames:validation.gnostica.FOOL_FLIP2_READY"
+                : "apgames:validation.gnostica.FOOL_FLIP1_READY" };
+        }
+        // Every other card: name it explicitly. A fresh top-level
+        // activation is one the player just clicked themselves (so this
+        // is a confirming reminder), but a card reached via a push
+        // (Fool's reveal, World's target) was never clicked by the
+        // player at all - naming it here is the ONLY way the status line
+        // itself (as opposed to the chat log, which the player may not
+        // be looking at) tells them which card's power they're now
+        // choosing steps for.
+        const cardName = allCards().find(c => c.uid === headArg)?.name ?? headArg;
+        return {
+            key: priorStepsCount > 0
+                ? "apgames:validation.gnostica.POWER_STILL_OPTIONAL"
+                : "apgames:validation.gnostica.CHOOSE_STEP",
+            params: { card: cardName },
+        };
     }
 
     // The six top-level turn choices, as buttons - see the class-level docs
@@ -1634,15 +1664,23 @@ export class GnosticaGame extends GameBaseSequenced {
         // since it only ever parses the in-progress move string, not any
         // pendingPower-aware state.
         if (this.pendingPower !== undefined && this.liveMove === undefined) {
-            const cardName = allCards().find(c => c.uid === this.pendingPower!.rootCardUid)?.name ?? this.pendingPower.rootCardUid;
+            // Named after the ACTIVE (top-of-stack) card's own uid, not
+            // rootCardUid - rootCardUid never changes even once a pushed
+            // frame's own card becomes the active one (Fool revealing the
+            // High Priestess, say), so naming the button after it would
+            // name the wrong card. The uid (not the full name) keeps the
+            // label short; the status message (PENDING_POWER_CHOICE)
+            // already spells out the full name for anyone who needs it.
+            const activeUid = this.pendingPower.stack[this.pendingPower.stack.length - 1].cardUid;
+            //
             // Neither option is bold here - bold marks a button matching
             // what this.liveMove ALREADY says (see highlightedButtonValues'
             // own docs), and at this point nothing has been chosen yet;
-            // Continue and Decline are both genuinely open choices, not
-            // one recommended over the other.
+            // Use and Decline are both genuinely open choices, not one
+            // recommended over the other.
             return [
-                { label: `Continue ${cardName}`, value: "resume_power" },
-                { label: "Decline", value: "decline_power" },
+                { label: `Use Card ${activeUid}`, value: "resume_power" },
+                { label: `Decline Card ${activeUid}`, value: "decline_power" },
             ];
         }
         // A live preview of "use"/"play" can only ever have STARTED
@@ -1803,18 +1841,33 @@ export class GnosticaGame extends GameBaseSequenced {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        // Fool has no minionRef and no click target at all (like
-        // highPriestess) - unlike highPriestess, though, its own step
-        // needs an explicit ACTION to submit (there's no discard-list
-        // click to build up), so it gets a dedicated bold button, exactly
-        // parallel to decline_power's own "produce a complete, submittable
-        // token via provisionalResult" pattern. Covers every depth this
-        // step can be reached at (a fresh root activation, a resume's own
-        // second flip, or nested via World) for free, since all three
-        // reduce to "the currently-active step is special: 'fool'".
+        // Fool has no minionRef and no real choice when this frame's flip
+        // is guaranteed to happen anyway: a fresh root activation (#49
+        // makes the root's own first step mandatory) or a resume already
+        // opted into via Continue - both cases are recognizable here as
+        // pendingMinor.priorSteps.length === 0, since parsePendingStep
+        // only ever WALKS segments (populating priorSteps) when replaying
+        // an in-progress, not-yet-committed move string; a seeded resume
+        // or a totally fresh selection never walks anything. In either of
+        // those, synthesizeFoolStep already makes the move complete on
+        // its own, so no button is needed - the status message
+        // (FOOL_FLIP1_READY/FOOL_FLIP2_READY, via powerStepMessageKey)
+        // already says what submitting will do, and nothing about what
+        // gets revealed is computed or shown before that real Submit.
+        if (pendingMinor.special === "fool" && pendingMinor.priorSteps.length === 0) {
+            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+        }
+        // Reached via a push that's still mid-build within the SAME
+        // not-yet-submitted move (e.g. World's own step just pushed into
+        // Fool) - unlike the mandatory cases above, a pushed frame stays
+        // fully optional (#49), so the player needs an explicit way to
+        // opt into the flip as part of this move, rather than it
+        // happening automatically and taking away the choice to leave it
+        // undeclared. No bold - nothing here is "already selected" (see
+        // decline_power's own docs on that distinction).
         if (pendingMinor.special === "fool") {
             const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-            buttons.push({ label: "Flip", value: "power_fool", attributes: [{ name: "font-weight", value: "bold" }] });
+            buttons.push({ label: "Draw and Use", value: "power_fool" });
             if (declareBtn !== undefined) {
                 buttons.push(declareBtn);
             }
@@ -3168,9 +3221,17 @@ export class GnosticaGame extends GameBaseSequenced {
                         // active right now (the top of the stack - e.g. a
                         // card Fool revealed, not necessarily rootCardUid
                         // itself), at its own real step index - not always
-                        // step 0, unlike a fresh activation.
+                        // step 0, unlike a fresh activation. Routed through
+                        // provisionalResult (rather than a hardcoded
+                        // complete:-1) because a resumed Fool flip is
+                        // ALREADY complete via synthesizeFoolStep - the
+                        // player needs Submit enabled, not a false "still
+                        // building" state; every other card's genuinely
+                        // incomplete resume (e.g. High Priestess round 2)
+                        // still reports complete:-1 on its own, unaffected.
                         const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
-                        return { move: seeded, valid: true, complete: -1, message: i18next.t(this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex)) };
+                        const activeMsg = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex);
+                        return this.provisionalResult(seeded, activeMsg.key, activeMsg.params);
                     }
                     case "decline_power":
                         if (this.pendingPower === undefined) {
@@ -3178,10 +3239,12 @@ export class GnosticaGame extends GameBaseSequenced {
                         }
                         return this.provisionalResult(`${this.pendingPower.source} ${this.pendingPower.rootCardUid}, decline`);
                     case "power_fool": {
-                        // Covers a fresh root activation, a resume's own
-                        // second flip, and a nested Fool reached via World
-                        // alike - parsePendingStep already resolves the
-                        // right frame for `move` regardless of depth.
+                        // Only reachable for a push mid-build that's still
+                        // optional (see getActionButtons()'s own docs) -
+                        // the mandatory root/resume cases never show this
+                        // button at all, since they're already complete
+                        // via synthesizeFoolStep. parsePendingStep already
+                        // resolves the right (pushed) frame for `move`.
                         const pending = this.parsePendingStep(move);
                         if (pending === undefined || pending.special !== "fool") {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
@@ -3281,9 +3344,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     const freshPending = this.parsePendingStep(`play ${uid}`);
                     const needsCellClick = freshPending?.minionAmbiguous === true
                         && new Set(freshPending.minionCandidates.map(m => `${m.x},${m.y}`)).size > 1;
+                    const playMsg = this.powerStepMessageKey(uid, 0);
                     return this.provisionalResult(
                         `play ${uid}`,
-                        needsCellClick ? "apgames:validation.gnostica.PICK_MINION_CELL" : this.powerStepMessageKey(uid, 0),
+                        needsCellClick ? "apgames:validation.gnostica.PICK_MINION_CELL" : playMsg.key,
+                        needsCellClick ? undefined : playMsg.params,
                     );
                 }
                 // Any already-chosen "draw <n>" tail is deliberately
@@ -3413,6 +3478,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // hand-card click branch below, not here). See
             // provisionalResult's own messageKey param.
             let resultMessageKey: string | undefined;
+            let resultMessageParams: Record<string, unknown> | undefined;
 
             if (head === "place") {
                 // Click-to-orient (see orientationTowardClick's own docs):
@@ -3529,9 +3595,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     if (atCell.length === 1) {
                         const ref = this.pieceRefStr(atCell[0].x, atCell[0].y, atCell[0].index, candidate.minions);
+                        const narrowMsg = this.powerStepMessageKey(candidate.headArg, candidate.priorSteps.length);
                         return this.provisionalResult(
                             this.assembleStepMove(candidate, [ref]),
-                            this.powerStepMessageKey(candidate.headArg, candidate.priorSteps.length),
+                            narrowMsg.key,
+                            narrowMsg.params,
                         );
                     }
                     return this.provisionalResult(
@@ -3583,7 +3651,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell }) };
                 }
                 newmove = `use ${t.card.uid}`;
-                resultMessageKey = this.powerStepMessageKey(t.card.uid, 0);
+                {
+                    const useMsg = this.powerStepMessageKey(t.card.uid, 0);
+                    resultMessageKey = useMsg.key;
+                    resultMessageParams = useMsg.params;
+                }
             } else if (!this.hasPiecesOnBoard(this.currplayer)) {
                 // Fresh click, nothing placed yet - place is the only legal
                 // start, and needs no button.
@@ -3597,7 +3669,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
             }
 
-            return this.provisionalResult(newmove, resultMessageKey);
+            return this.provisionalResult(newmove, resultMessageKey, resultMessageParams);
         } catch {
             return {
                 move,
@@ -4599,6 +4671,33 @@ export class GnosticaGame extends GameBaseSequenced {
         this.pendingPower = stack.length > 0 ? { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] } : undefined;
     }
 
+    // Fool's own step has no real choice at all - flipping is the ONLY
+    // possible action, unlike every other special (even High Priestess
+    // genuinely lets the player pick which cards to discard). So rather
+    // than making the player explicitly type/click a "fool" token,
+    // selecting the card (or continuing into a frame whose own next step
+    // IS a fool flip - the second flip, or a nested Fool reached via a
+    // reveal) already builds a complete, submittable move: an empty
+    // segment list is synthesized as ["fool"] whenever the CURRENT top
+    // frame's own next step is special:"fool". A hand-typed "...,  fool"
+    // still works unmodified, since this only fires when stepSegments is
+    // genuinely empty.
+    private synthesizeFoolStep(stack: readonly IPowerFrame[], stepSegments: string[][]): string[][] {
+        if (stepSegments.length > 0) {
+            return stepSegments;
+        }
+        const top = stack[stack.length - 1];
+        if (top === undefined) {
+            return stepSegments;
+        }
+        const frameDef = this.resolveFrameDef(top.cardUid);
+        const step = frameDef.powers[top.nextStepIndex];
+        if (step !== undefined && "special" in step && step.special === "fool") {
+            return [["fool"]];
+        }
+        return stepSegments;
+    }
+
     // Walks a major arcana card's power-step list from a fresh use/play
     // activation. Tracks the growing minion set ("any of your pieces
     // directly affected by a minion become minions for that turn") and
@@ -4608,6 +4707,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // detection between steps.
     private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
+        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
         this.walkFrameStack(stack, stepSegments, source, def.uid, partial);
     }
 
@@ -4626,6 +4726,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pending.source !== source || args[0] !== pending.rootCardUid) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
         }
+        const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
+        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
         if (stepSegments.length === 0) {
             // A bare "<source> <rootCardUid>" seed - the client always
             // sends this to populate a partial preview before any step is
@@ -4633,7 +4735,6 @@ export class GnosticaGame extends GameBaseSequenced {
             // process yet; pendingPower stays exactly as it was.
             return;
         }
-        const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
         this.walkFrameStack(stack, stepSegments, source, pending.rootCardUid, partial);
     }
 
@@ -4713,10 +4814,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // walkFrameStack's own docs for how running out of segments
         // declines only the current (possibly pushed) frame, never a
         // fresh requirement layered on top of it.
+        const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
+        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
         if (stepSegments.length === 0) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
-        const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
         return this.validateFrameStack(stack, stepSegments);
     }
 
@@ -4727,13 +4829,14 @@ export class GnosticaGame extends GameBaseSequenced {
         if (args[0] !== pending.rootCardUid) {
             return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
         }
+        const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
+        stepSegments = this.synthesizeFoolStep(stack, stepSegments);
         if (stepSegments.length === 0) {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
             // everywhere else for an in-progress chain.
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
-        const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
         return this.validateFrameStack(stack, stepSegments);
     }
 
@@ -4757,6 +4860,18 @@ export class GnosticaGame extends GameBaseSequenced {
         if ("special" in step && step.special === "fool") {
             if (tokens.length !== 1 || tokens[0].toLowerCase() !== "fool") {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: tokens.join(" ") }));
+            }
+            // Unlike High Priestess's redraw (a real quantity that's merely
+            // cosmetic to preview early), which card gets flipped is hidden
+            // information - a partial preview must never actually flip,
+            // since move(partial:true) genuinely mutates this instance
+            // (see playground.js's fresh-per-click convention) and anything
+            // it reveals would leak to the client before a real Submit.
+            // So a partial call only reports that a pause is coming, with
+            // no pushFrame and nothing pushed to results; the real flip
+            // happens exactly once, on the actual non-partial commit.
+            if (partial) {
+                return { forcePause: true };
             }
             const revealed = fool(this.buildPowerContext());
             this.pushStubResult({ type: "revealFlip", what: revealed.uid });
@@ -7520,7 +7635,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     const stubType = (r as unknown as { type: string }).type;
                     if (stubType === "revealFlip" || stubType === "borrowPower") {
                         const stub = r as unknown as { type: "revealFlip" | "borrowPower"; what: string };
-                        node.push(i18next.t(`apresults:${stubType === "revealFlip" ? "REVEALFLIP" : "BORROWPOWER"}.gnostica`, { player, what: stub.what }));
+                        // `what` is a bare card uid - resolve to its real
+                        // name for the chat log (this is the only place a
+                        // human actually learns what a Fool draw/World
+                        // borrow revealed - see pushStubResult's own docs).
+                        const cardName = allCards().find(c => c.uid === stub.what)?.name ?? stub.what;
+                        node.push(i18next.t(`apresults:${stubType === "revealFlip" ? "REVEALFLIP" : "BORROWPOWER"}.gnostica`, { player, what: cardName }));
                         continue;
                     }
                     if (stubType === "turnOrder") {

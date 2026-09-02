@@ -4,7 +4,7 @@ Some items were marked off at transfer here, not at completion.
 Mark items done with ✔ + @done(date) as they're confirmed.
 
 ✔ #7 - i18n/moveresults work @done(26-08-20)
-✔ #25 - Implement Fool/World/High Priestess major arcana powers using new GameBase: Fool and World now fully supported (resolution stack, click flows, chatLog, tests), completing High Priestess's earlier support. @done(26-08-25)
+✔ #25 - Implement Fool/World/High Priestess major arcana powers using new GameBase. @done(26-08-25)
 - #29 - reduce test count
 - #30 - reduce comments
 ✔ #31 - board rotation view @done(26-08-20)
@@ -15,9 +15,9 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #46 - pyramid overlap in densePieceGrid fixed. @done(26-08-20)
 ✔ #47 - gnostica.ts now has a single chatLog() to resolve player names. @done(26-08-21)
 ✔ #48 - pieceGridSlots()'s fallback order is now determined by the bumped piece's own orientation. @done(26-08-22)
-✔ #49 - use/play moves must take at least one real power step before being treated as complete (chain-tail declines and Fool/World stay exempt); also closed related gaps (self-targeting Hierophant/tradeHands, unlogged piece owners in several chat messages). @done(26-08-21)
-✔ #49 follow-up - click-driven step messaging no longer shows the raw submit-validation wording while the player is just navigating buttons. @done(26-08-22)
-✔ #50 - unified MinorCard/MajorCard into one Card class (major arcana get a real, always-populated rank+suit like minors do, via a new empty-uid "Major Arcana" pseudo-suit), mirroring the sibling Decktet module's own single-class design. @done(26-08-22)
+✔ #49 - use/play moves require at least one real power step to be complete (chain-tail declines and Fool/World stay exempt); also closed related gaps. @done(26-08-21)
+✔ #49 - follow-up - click-driven step messaging fixed. @done(26-08-22)
+✔ #50 - unified MinorCard/MajorCard into one Card class as with Decktet cards. @done(26-08-22)
 ✔ #51 - test separate clusters. @done(26-08-20)
 ✔ #52 - test double-letter coordinates. @done(26-08-20)
 ✔ #53 - CellContents.card to uid. @done(26-08-20)
@@ -25,9 +25,10 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #55 - added frame-stepping: render() returns one frame per step for multi-step major-arcana moves. @done(26-08-21)
 ✔ #57 - added Wheel of Fortune's Random Card click support, plus two related bugs fixed along the way. @done(26-08-21)
 ✔ #58 - randomMove: orientation on a wasteland cell now favors useful facings over ones pointing into more void. @done(26-08-22)
-✔ #59 - orient: a no-op reorientation (same facing as current) is now rejected (valid but complete:-1, ORIENT_NO_OP), and randomOrientMove() never generates one. @done(26-08-22)
-✔ #60 - minion-picker buttons: textFormat() was parsing orientation back out of the ref string, which omits it when size alone disambiguates - showed "pointing undefined"; now reads the piece's real orientation directly. @done(26-08-22)
-✔ #61 - validateMinorPower: 3 "still declined" branches (cell chosen/minion undecided, minion earmarked/mode undecided, mode chosen/args incomplete) returned bare `undefined`, which validateMove()'s tail defaulted to complete:1/valid - a false "looks valid" for an obviously-incomplete step (e.g. Discs "tile" with a target but no replacement card). Now return valid:true/complete:-1/POWER_STEP_REQUIRED like the existing 0-step case. @done(26-08-22)
+✔ #59 - orient: a no-op reorientation (same facing as current) is now rejected and randomOrientMove() won't generate one. @done(26-08-22)
+✔ #60 - minion-picker buttons now read the piece's real orientation directly. @done(26-08-22)
+✔ #61 - validateMinorPower: 3 "still declined" branches now return valid:true/complete:-1/POWER_STEP_REQUIRED like the existing 0-step case. @done(26-08-22)
 ✔ #62 - major arcana had the same "looks valid" gap as #61's minor-arcana fix; StepValidation now carries an explicit `complete` flag so validateMajorPower can tell a chain's last step is still being built. @done(26-08-22)
-✔ #63 - tree-pruning: doomed choices (upright minion for Rods, a mode the hand can't complete, self-targeting tradeHands/hierophantReplace) are now struck through/rejected immediately with a specific reason, instead of building a provisional move that only fails at submit. @done(26-08-22)
-- #64 - better discard/draw messaging: both the ordinary end-of-turn discard action and High Priestess's own toggle clicks show the generic "Looks like a valid move" while building the discard list (before a count is chosen) - could use more specific, step-aware wording throughout, not just at the final count-picker click.
+✔ #63 - tree-pruning: doomed choices (upright minion for Rods, a mode the hand can't complete, self-targeting tradeHands/hierophantReplace) are now struck through/rejected immediately with a specific reason. @done(26-08-22)
+- #64 - better discard/draw messaging: both the basic action and the High Priestess version
+- #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances

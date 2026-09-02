@@ -2829,7 +2829,7 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         // this is a click-driven preview mid-navigation, not a submit
         // attempt - points at the button bar rather than surfacing the
         // raw validation reason (see powerStepMessageKey's own docs).
-        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP"));
+        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: card(uid).name }));
         const g2 = setup();
         g2.move(cellClick.move, { partial: true });
         const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
@@ -3258,7 +3258,7 @@ describe("Gnostica: choose-step click messaging", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
-    const chooseStepMsg = () => i18next.t("apgames:validation.gnostica.CHOOSE_STEP");
+    const chooseStepMsg = (cardName: string) => i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: cardName });
 
     it("activate: a board click onto a card cell carries the message (minor arcana)", () => {
         const g = new GnosticaGame(2);
@@ -3270,7 +3270,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`use ${aceOfCups().uid}`);
-        expect(result.message).eq(chooseStepMsg());
+        expect(result.message).eq(chooseStepMsg(aceOfCups().name));
     });
 
     it("activate: carries the message for a major arcana card too", () => {
@@ -3283,7 +3283,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`use ${major(10).uid}`);
-        expect(result.message).eq(chooseStepMsg());
+        expect(result.message).eq(chooseStepMsg(major(10).name));
     });
 
     it("play: a hand-card click carries the message (minor arcana)", () => {
@@ -3295,7 +3295,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`play ${uid}`);
-        expect(result.message).eq(chooseStepMsg());
+        expect(result.message).eq(chooseStepMsg(minorCards.find(c => c.uid === uid)!.name));
     });
 
     it("play: carries the message for a major arcana card too", () => {
@@ -3307,7 +3307,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq("play 10");
-        expect(result.message).eq(chooseStepMsg());
+        expect(result.message).eq(chooseStepMsg(major(10).name));
     });
 
     it("activate: World carries the same CHOOSE_STEP message as any other major now", () => {
@@ -3320,7 +3320,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`use ${theWorld().uid}`);
-        expect(result.message).eq(chooseStepMsg());
+        expect(result.message).eq(chooseStepMsg(theWorld().name));
     });
 
     // High Priestess isn't button-driven at all (CHOOSE_STEP would be
@@ -3330,7 +3330,7 @@ describe("Gnostica: choose-step click messaging", () => {
     it("activate: High Priestess carries discard-style wording instead of CHOOSE_STEP, distinguishing round 1 from round 2", () => {
         const round1Msg = i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1");
         const round2Msg = i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2");
-        expect(round1Msg).to.not.eq(chooseStepMsg());
+        expect(round1Msg).to.not.eq(chooseStepMsg(major(2).name));
         expect(round2Msg).to.not.eq(round1Msg);
 
         const g = new GnosticaGame(2);
@@ -3369,6 +3369,40 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(declineBtn.attributes).to.be.undefined;
     });
 
+    // Regression: the button used to be labeled "Continue {{rootCardUid's
+    // name}}" - always the ORIGINALLY used/played card, never the actual
+    // active one. Once Fool reveals a DIFFERENT card (here, the High
+    // Priestess), that label would misleadingly say "Continue The Fool"
+    // while what Continue actually resolves is the High Priestess's own
+    // power. The buttons are now generic; the status message (asserted
+    // elsewhere) is what actually names the active card.
+    it("Continue/Decline buttons are named after the ACTIVE card's uid, not the root card's", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(0)); // The Fool
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        // Force the flip to reveal The High Priestess - pluck it from
+        // wherever the random deal put it first.
+        for (const hand of g.hands) {
+            const idx = hand.indexOf("02");
+            if (idx !== -1) hand.splice(idx, 1);
+        }
+        const drawIdx = g.drawPile.indexOf("02");
+        if (drawIdx !== -1) g.drawPile.splice(drawIdx, 1);
+        g.drawPile.unshift("02");
+
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "02"]);
+
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
+        const bar = rep.areas!.find(a => a.type === "buttonBar")!;
+        const continueBtn = bar.buttons!.find(b => b.value === "resume_power")!;
+        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
+        // "02" (The High Priestess) - the active card - not "00" (The Fool
+        // - the root).
+        expect(continueBtn.label).eq("Use Card 02");
+        expect(declineBtn.label).eq("Decline Card 02");
+    });
+
     // Regression: the real client calls validateMove("") right after every
     // real commit, purely to populate the status line for the render that
     // follows (see playground.js's own moveBtn handler) - this used to
@@ -3385,7 +3419,7 @@ describe("Gnostica: choose-step click messaging", () => {
 
         g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true }); // pauses, awaiting round 2
         expect(g.pendingPower).to.not.be.undefined;
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE"));
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(2).name }));
 
         g.move(`use ${major(2).uid}, decline`, { trusted: true }); // clears the obligation
         expect(g.pendingPower).to.be.undefined;
@@ -4567,20 +4601,76 @@ describe("Gnostica: Fool and World", () => {
         expect(() => g2.move(`use ${theWorld().uid}, decline`, { trusted: true })).to.not.throw();
     });
 
-    it("Fool's own 'Flip' button submits the sentinel token, at the root", () => {
+    it("Fool's own root activation needs no button - selecting it already produces a complete, submittable move", () => {
         const g = setupFool();
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         expect(cellClick.move).eq(`use ${major(0).uid}`);
+        expect(cellClick.valid).to.be.true;
+        expect(cellClick.complete).to.eq(0); // already complete, just not yet submitted
+        expect(cellClick.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP1_READY"));
 
+        // No button offered - the root's flip is mandatory (#49), so
+        // there's nothing left to click.
         const preview = setupFool();
         preview.move(cellClick.move, { partial: true });
-        expect(buttonValues(preview)).to.include("power_fool");
+        expect(buttonValues(preview)).to.not.include("power_fool");
+        // Nor does the partial preview itself reveal anything - the real
+        // flip (and anything it would push onto the stack) only happens
+        // on a genuine, non-partial commit. The preview instance does
+        // still record that A pause happened (bookkeeping only, never
+        // persisted - see the fresh-per-click architecture), but nothing
+        // about WHAT was revealed.
+        expect(preview.discardPile.length).eq(0);
+        expect(preview.pendingPower?.stack).to.have.length(1);
 
-        const flipClick = g.handleClick(cellClick.move, -1, -1, "_btn_power_fool");
-        expect(flipClick.move).eq(`use ${major(0).uid}, fool`);
-        expect(flipClick.valid).to.be.true;
+        // The real commit is what actually flips and pauses.
+        const real = setupFool();
+        real.move(cellClick.move);
+        expect(real.pendingPower).to.not.be.undefined;
+    });
+
+    it("Fool's second flip, once Continued into, is also no-button and auto-complete", () => {
+        const g = setupFool();
+        pluckCard(g, "AC");
+        g.drawPile.unshift("AC");
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}, decline`, { trusted: true }); // decline AC's own step
+        expect(g.pendingPower).to.not.be.undefined;
+
+        const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
+        expect(resumed.move).eq(`use ${major(0).uid}`);
+        expect(resumed.valid).to.be.true;
+        expect(resumed.complete).to.eq(0);
+        expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP2_READY"));
+
+        const preview = setupFool();
+        preview.move(`use ${major(0).uid}, fool`, { trusted: true });
+        preview.move(`use ${major(0).uid}, decline`, { trusted: true });
+        preview.move(resumed.move, { partial: true });
+        expect(buttonValues(preview)).to.not.include("power_fool");
+    });
+
+    // Regression: a real flip's own message (validateMove("") right after
+    // commit, the Continue/Decline screen) and the message shown once
+    // Continue is clicked both used to be generic, never naming what was
+    // actually revealed - the player could only learn that from the chat
+    // log, easy to miss. Both must name the revealed card explicitly.
+    it("Fool's real flip and its Continue click both name the revealed card in the message, not just the chat log", () => {
+        const g = setupFool();
+        pluckCard(g, "AC");
+        g.drawPile.unshift("AC");
+        g.move(`use ${major(0).uid}`); // real, non-partial commit - actually flips
+        expect(g.pendingPower).to.not.be.undefined;
+        const acName = minorCards.find(c => c.uid === "AC")!.name;
+        expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: acName }));
+
+        const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
+        expect(resumed.move).eq(`use ${major(0).uid}`);
+        // A minor card's own synthesized primitive step is a fresh (step
+        // 0) choice - CHOOSE_STEP is the right message key, now naming AC.
+        expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
     });
 
     it("World's target-cell click and Fool's 'Flip' button compose: World -> Fool driven entirely by clicks", () => {
@@ -4609,22 +4699,20 @@ describe("Gnostica: Fool and World", () => {
         expect(flipClick.valid).to.be.true;
     });
 
-    it("chatLog() renders revealFlip/borrowPower lines - structurally (placeholder text, not real content)", () => {
+    it("chatLog() renders revealFlip/borrowPower lines, naming the actual card, not a bare uid", () => {
         addResource("en");
         const foolGame = setupFool();
         pluckCard(foolGame, "AC");
         foolGame.drawPile.unshift("AC");
         foolGame.move(`use ${major(0).uid}, fool`, { trusted: true });
         const foolRows = foolGame.chatLog(["Alice", "Bob"]);
-        // node[0] is the timestamp; a silently-dropped "revealFlip" (the
-        // exact failure mode without the stub-recognizing branch) would
-        // leave this row with only the "use" line, one entry short.
-        expect(foolRows[foolRows.length - 1]).to.include("");
+        const acName = minorCards.find(c => c.uid === "AC")!.name;
+        expect(foolRows[foolRows.length - 1].some(line => line.includes(acName))).to.be.true;
 
         const worldGame = setupWorldLovers();
         worldGame.move(`use ${theWorld().uid}, m0.1 ${major(6).uid}, m0.1 piece n0.1 1 U, o0.1 own o0 U`, { trusted: true });
         const worldRows = worldGame.chatLog(["Alice", "Bob"]);
-        expect(worldRows[worldRows.length - 1]).to.include("");
+        expect(worldRows[worldRows.length - 1].some(line => line.includes(major(6).name))).to.be.true;
     });
 
     it("randomMove() sanity check: a paused activation always yields something validateMove() accepts", () => {

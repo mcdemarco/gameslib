@@ -707,10 +707,10 @@
         "gnostica": "{{player}} used territory {{what}}."
     },
     "REVEALFLIP": {
-        "gnostica": ""
+        "gnostica": "{{player}} drew {{what}}."
     },
     "BORROWPOWER": {
-        "gnostica": ""
+        "gnostica": "{{player}} borrowed the power of {{what}}."
     },
     "TURNORDER": {
         "gnostica": "Bidding is resolved. Turn order for the rest of the game: {{turnOrder}}. Redraw order: {{redrawOrder}}."
