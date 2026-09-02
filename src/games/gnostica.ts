@@ -764,7 +764,16 @@ export class GnosticaGame extends GameBaseSequenced {
         if (m.length === 0) {
             result.valid = true;
             result.complete = -1;
-            result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS")
+            // The real client calls validateMove("") right after every
+            // real commit, purely to populate the status line for the
+            // FRESH render that follows (see playground.js's own moveBtn
+            // handler) - INITIAL_INSTRUCTIONS ("click a top-level button")
+            // is wrong here whenever that fresh render is actually the
+            // forced Continue/Decline screen (getActionButtons()'s own
+            // pendingPower gate), not the ordinary 6-button bar.
+            result.message = this.pendingPower !== undefined
+                ? i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE")
+                : i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
             return result;
         }
 
@@ -1044,11 +1053,11 @@ export class GnosticaGame extends GameBaseSequenced {
                         break;
                     case "use":
                         requireValidStepShapes();
-                    this.cmdActivate(parsed.rest, parsed.stepSegments);
+                    this.cmdActivate(parsed.rest, parsed.stepSegments, partial);
                     break;
                 case "play":
                     requireValidStepShapes();
-                        this.cmdPlay(parsed.rest, parsed.stepSegments);
+                        this.cmdPlay(parsed.rest, parsed.stepSegments, partial);
                         break;
                 }
 
@@ -1169,6 +1178,14 @@ export class GnosticaGame extends GameBaseSequenced {
         // Fool's own sentinel - a bare "fool" token, neither a piece ref
         // nor a card uid, needs its own shape allowance too.
         if (tokens.length === 1 && tokens[0].toLowerCase() === "fool") {
+            return true;
+        }
+        // High Priestess with zero discards but an explicit draw count
+        // ("draw <n>" as the WHOLE step) - "draw" is neither a piece ref
+        // nor a card uid, so it needs the same allowance. A discard list
+        // followed by "draw <n>" doesn't need this, since tokens[0] there
+        // is a genuine card uid already.
+        if (tokens[0]?.toLowerCase() === "draw") {
             return true;
         }
         if (!tokens.every(t => GnosticaGame.STEP_TOKEN_RE.test(t))) {
@@ -1483,7 +1500,19 @@ export class GnosticaGame extends GameBaseSequenced {
     // just point at the button bar (CHOOSE_STEP); once at least one step
     // is in, the move is already submittable and a further step is
     // genuinely optional (POWER_STILL_OPTIONAL).
-    private powerStepMessageKey(_headArg: string, priorStepsCount: number): string {
+    //
+    // High Priestess is a special case - it isn't button-driven at all
+    // (CHOOSE_STEP would be actively wrong, since there IS no button for
+    // it), and it has its own real "how does this work" question the
+    // ordinary discard/draw action doesn't (a SECOND round follows the
+    // first) - so it gets the same wording as the ordinary discard action
+    // itself, plus a clause about that.
+    private powerStepMessageKey(headArg: string, priorStepsCount: number): string {
+        if (headArg === "02") {
+            return priorStepsCount > 0
+                ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"
+                : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1";
+        }
         return priorStepsCount > 0
             ? "apgames:validation.gnostica.POWER_STILL_OPTIONAL"
             : "apgames:validation.gnostica.CHOOSE_STEP";
@@ -1606,8 +1635,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // pendingPower-aware state.
         if (this.pendingPower !== undefined && this.liveMove === undefined) {
             const cardName = allCards().find(c => c.uid === this.pendingPower!.rootCardUid)?.name ?? this.pendingPower.rootCardUid;
+            // Neither option is bold here - bold marks a button matching
+            // what this.liveMove ALREADY says (see highlightedButtonValues'
+            // own docs), and at this point nothing has been chosen yet;
+            // Continue and Decline are both genuinely open choices, not
+            // one recommended over the other.
             return [
-                { label: `Continue ${cardName}`, value: "resume_power", attributes: [{ name: "font-weight", value: "bold" }] },
+                { label: `Continue ${cardName}`, value: "resume_power" },
                 { label: "Decline", value: "decline_power" },
             ];
         }
@@ -1786,14 +1820,33 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return buttons as [ButtonBarButton, ...ButtonBarButton[]];
         }
+        // High Priestess: the discard list itself is still built via hand-
+        // card clicks (below), but the actual draw count is the player's
+        // own choice, exactly like the ordinary end-of-turn discard/draw
+        // action's own count-picker (see its own docs just above) - same
+        // shape, offered the same way, as soon as this step is live and no
+        // count has been chosen for THIS round yet. pendingMinor.rest
+        // already reflects every discard named so far (see
+        // buildSpecialPending's own highPriestess handling), so the room
+        // left is 6 minus the CURRENT (already-discarded) hand length,
+        // identical to the ordinary action's own calculation.
+        if (pendingMinor.special === "highPriestess" && !pendingMinor.rest.includes("draw")) {
+            const hand = this.hands[this.currplayer - 1] ?? [];
+            const maxDraw = Math.max(0, 6 - hand.length);
+            const countButtons: ButtonBarButton[] = [];
+            for (let n = maxDraw; n >= 0; n--) {
+                countButtons.push({ label: `Draw ${n}`, value: `hpdraw_${n}` });
+            }
+            return countButtons as [ButtonBarButton, ...ButtonBarButton[]];
+        }
         // orientMinion/tradeHands/orientAny/hierophantReplace/
-        // judgementDraw/highPriestess/worldUseAny are pure click-driven
-        // (board or AreaPieces clicks, no mode to pick via button) - leave
-        // the bar exactly as "orient"/"place" already do (uncollapsed),
-        // rather than collapsing to an empty button set. hermitTeleport
-        // (mode not chosen yet) and magicianChoice (suit not chosen yet)
-        // are the two special powers that DO need their own button set,
-        // handled below instead of falling into the suit-mode loop. Once
+        // judgementDraw/worldUseAny are pure click-driven (board or
+        // AreaPieces clicks, no mode to pick via button) - leave the bar
+        // exactly as "orient"/"place" already do (uncollapsed), rather
+        // than collapsing to an empty button set. hermitTeleport (mode not
+        // chosen yet) and magicianChoice (suit not chosen yet) are the two
+        // special powers that DO need their own button set, handled below
+        // instead of falling into the suit-mode loop. Once
         // magicianChoice's suit IS chosen, buildSpecialPending has already
         // redirected `pendingMinor` into an ordinary suit-shaped pending
         // (special undefined, suitUid set), so it falls straight through
@@ -2036,7 +2089,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // function's own "best-effort, never a source of truth" docs.
             clone ??= this.cloneLive();
             try {
-                const outcome = clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length);
+                const outcome = clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true);
                 top.nextStepIndex++;
                 if (outcome?.pushFrame !== undefined) {
                     stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, eligible: [...outcome.pushFrame.minions], minions: [...outcome.pushFrame.minions] });
@@ -3044,6 +3097,37 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     return this.provisionalResult(["discard", ...parsed.rest, "draw", n].join(" "));
                 }
+                if (value.startsWith("hpdraw_")) {
+                    // High Priestess's own count-picker buttons - mirrors
+                    // drawcount_ above, but appends onto the CURRENT power
+                    // step's own tokens (pending.rest, already carrying
+                    // every discard named so far) rather than the top-level
+                    // move's args.
+                    const n = value.slice("hpdraw_".length);
+                    const pending = this.parsePendingStep(move);
+                    if (pending === undefined || pending.special !== "highPriestess") {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    // Picking a count always completes this step (highPriestess's
+                    // own SPECIAL_MIN_TOKENS is Infinity, but the count itself
+                    // is the one thing every submission needs) - unlike the
+                    // generic "Looks like a valid move" fallback, tell the
+                    // player what submitting actually does: forces a pause
+                    // for a SECOND round (see applyPowerStep's own docs) if
+                    // this is the first, or ends the whole activation if
+                    // it's the second - same stepIndex-from-pendingPower
+                    // derivation as the resume_power case above, so this
+                    // stays correct even for a High Priestess reached via a
+                    // push (Fool's reveal, World's borrow), not just a
+                    // direct "use"/"play".
+                    const stepIndex = this.pendingPower !== undefined
+                        ? this.pendingPower.stack[this.pendingPower.stack.length - 1].nextStepIndex
+                        : 0;
+                    const messageKey = stepIndex > 0
+                        ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"
+                        : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1_READY";
+                    return this.provisionalResult(this.assembleStepMove(pending, [...pending.rest, "draw", n]), messageKey);
+                }
                 switch (value) {
                     case "pass":
                         // A genuine pass - explicitly zero discards AND
@@ -3080,7 +3164,13 @@ export class GnosticaGame extends GameBaseSequenced {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
                         const seeded = `${this.pendingPower.source} ${this.pendingPower.rootCardUid}`;
-                        return { move: seeded, valid: true, complete: -1, message: i18next.t(this.powerStepMessageKey(this.pendingPower.rootCardUid, 0)) };
+                        // The message is about whichever frame is actually
+                        // active right now (the top of the stack - e.g. a
+                        // card Fool revealed, not necessarily rootCardUid
+                        // itself), at its own real step index - not always
+                        // step 0, unlike a fresh activation.
+                        const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
+                        return { move: seeded, valid: true, complete: -1, message: i18next.t(this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex)) };
                     }
                     case "decline_power":
                         if (this.pendingPower === undefined) {
@@ -3161,7 +3251,18 @@ export class GnosticaGame extends GameBaseSequenced {
                     // `head === "play"` case below, since resolving High
                     // Priestess via "play" would otherwise misread this
                     // click as "play this card" instead.
-                    let discards = [...pendingForCard.rest];
+                    //
+                    // Any already-chosen "draw <n>" tail is dropped before
+                    // toggling, exactly like "discard"'s own handling below -
+                    // the valid count range shifts with the discard list
+                    // itself, so changing which cards are discarded
+                    // re-solicits the count fresh. Without this, a card
+                    // toggled AFTER a count was already chosen would be
+                    // appended past the "draw" token and silently ignored
+                    // (never actually discarded) rather than added to the
+                    // list.
+                    const drawIdx = pendingForCard.rest.indexOf("draw");
+                    let discards = drawIdx === -1 ? [...pendingForCard.rest] : pendingForCard.rest.slice(0, drawIdx);
                     if (discards.includes(uid)) {
                         discards = discards.filter(u => u !== uid);
                     } else {
@@ -4137,9 +4238,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return eligible;
     }
 
-    private cmdActivate(args: string[], stepSegments: string[][]): void {
+    private cmdActivate(args: string[], stepSegments: string[][], partial: boolean): void {
         if (this.pendingPower !== undefined) {
-            this.resumePendingPower(args, stepSegments, "use");
+            this.resumePendingPower(args, stepSegments, "use", partial);
             return;
         }
         const [cardUid] = args;
@@ -4160,7 +4261,7 @@ export class GnosticaGame extends GameBaseSequenced {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid }));
         }
         this.results.push({ type: "use", what: t.card!.uid });
-        this.applyCardPower(t.card!, eligible, stepSegments, "use");
+        this.applyCardPower(t.card!, eligible, stepSegments, "use", partial);
     }
 
     private validateActivate(args: string[], stepSegments: string[][]): IValidationResult | undefined {
@@ -4186,9 +4287,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // "Play a card from your hand to the discard pile. All your pieces on
     // the board are minions [...]"
-    private cmdPlay(args: string[], stepSegments: string[][]): void {
+    private cmdPlay(args: string[], stepSegments: string[][], partial: boolean): void {
         if (this.pendingPower !== undefined) {
-            this.resumePendingPower(args, stepSegments, "play");
+            this.resumePendingPower(args, stepSegments, "play", partial);
             return;
         }
         const [uid] = args;
@@ -4210,7 +4311,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({ type: "deckDraw", what: uid, from: "hand" });
 
         const eligible = this.eligibleMinionsForPlay();
-        this.applyCardPower(card, eligible, stepSegments, "play");
+        this.applyCardPower(card, eligible, stepSegments, "play", partial);
     }
 
     // Doesn't need to simulate cmdPlay's own hand mutation (removing the
@@ -4223,7 +4324,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.PLAY_UID_REQUIRED");
         }
         const hand = this.hands[this.currplayer - 1];
-        if (!hand.includes(uid)) {
+        const handIdx = hand.indexOf(uid);
+        if (handIdx === -1) {
             return this.invalid("apgames:validation.gnostica.NOT_IN_HAND", { uid });
         }
         const card = allCards().find(c => c.uid === uid);
@@ -4231,13 +4333,27 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.UNKNOWN_CARD", { uid });
         }
         const eligible = this.eligibleMinionsForPlay();
-        return this.validateCardPower(card, eligible, stepSegments);
+        // cmdPlay removes the card from hand BEFORE resolving its power
+        // (see its own docs) - a power that reads hand SIZE (High
+        // Priestess's own draw-count bound, or Judgement's pip-count cap)
+        // needs to see that same, already-reduced hand here too, or its
+        // own bounds would be off by one relative to what actually
+        // happens on commit (the eligible pool above is unaffected -
+        // eligibleMinionsForPlay only reads board state, never hand
+        // contents). Mirrors that removal for the DURATION of this
+        // validation call only, always restored via finally.
+        hand.splice(handIdx, 1);
+        try {
+            return this.validateCardPower(card, eligible, stepSegments);
+        } finally {
+            hand.splice(handIdx, 0, uid);
+        }
     }
 
-    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play"): void {
+    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
         if (card.major) {
             const def = getMajorArcanaDef(card);
-            this.applyMajorPower(def, eligible, stepSegments, source);
+            this.applyMajorPower(def, eligible, stepSegments, source, partial);
         } else {
             this.applyMinorPower(card.suit.uid, eligible, stepSegments);
         }
@@ -4402,7 +4518,7 @@ export class GnosticaGame extends GameBaseSequenced {
     //   its own fresh pause - it was never addressed by anything the
     //   caller supplied this call, so it isn't declined by omission the
     //   way the frame actually being typed against is.
-    private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], source: "use" | "play", rootCardUid: string): void {
+    private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], source: "use" | "play", rootCardUid: string, partial: boolean): void {
         const chained = stepSegments.length > 1;
         for (let i = 0; i < stepSegments.length; i++) {
             const top = stack[stack.length - 1];
@@ -4424,7 +4540,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const frameDef = this.resolveFrameDef(top.cardUid);
             const step = frameDef.powers[top.nextStepIndex];
             const resultsBefore = this.results.length;
-            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length);
+            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial);
             if (outcome?.newMinion !== undefined) {
                 top.minions = [...top.minions, outcome.newMinion];
             }
@@ -4486,9 +4602,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // computeShortcutOpts()'s own docs for why that derivation is safe to
     // apply unconditionally rather than requiring genuine same-target
     // detection between steps.
-    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play"): void {
+    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
-        this.walkFrameStack(stack, stepSegments, source, def.uid);
+        this.walkFrameStack(stack, stepSegments, source, def.uid, partial);
     }
 
     // Resumes a paused activation - does NOT re-enter applyMajorPower from
@@ -4501,7 +4617,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // once the reveal has happened) - walkFrameStack handles this
     // uniformly, re-pausing again if anything (including an outer Fool
     // frame with its own flip still owed) remains once segments run out.
-    private resumePendingPower(args: string[], stepSegments: string[][], source: "use" | "play"): void {
+    private resumePendingPower(args: string[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
         const pending = this.pendingPower!;
         if (pending.source !== source || args[0] !== pending.rootCardUid) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
@@ -4514,7 +4630,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return;
         }
         const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
-        this.walkFrameStack(stack, stepSegments, source, pending.rootCardUid);
+        this.walkFrameStack(stack, stepSegments, source, pending.rootCardUid, partial);
     }
 
     // Read-only counterpart to walkFrameStack, mirroring validateMajorPower's
@@ -4575,7 +4691,7 @@ export class GnosticaGame extends GameBaseSequenced {
             GnosticaGame.popExhaustedFrames(this, stack);
             if (!isLast) {
                 clone ??= this.cloneLive();
-                clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length);
+                clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true);
             }
         }
         return undefined;
@@ -4622,10 +4738,10 @@ export class GnosticaGame extends GameBaseSequenced {
     // see each apply*() method below. High Priestess is the one special
     // with no minion reference at all (it's pure hand/pile manipulation).
     private applyPowerStep(
-        step: PowerStep, minions: IMinionRef[], tokens: string[], def: MajorArcanaDef, stepIndex: number, totalSteps: number,
+        step: PowerStep, minions: IMinionRef[], tokens: string[], def: MajorArcanaDef, stepIndex: number, totalSteps: number, partial: boolean,
     ): IStepOutcome | undefined {
         if ("special" in step && step.special === "highPriestess") {
-            this.applyHighPriestess(tokens);
+            this.applyHighPriestess(tokens, partial);
             // Pause only if a LATER sibling step of THIS SAME card depends
             // on this one's outcome - High Priestess's own first-of-two
             // discard round. Unlike Fool's flip (see the "fool" case
@@ -5522,14 +5638,29 @@ export class GnosticaGame extends GameBaseSequenced {
         return failure ? this.failureResult(failure) : undefined;
     }
 
-    // High Priestess: <discardUid...> - no minion reference at all.
-    private applyHighPriestess(tokens: string[]): void {
-        highPriestess(this.buildPowerContext(), tokens);
-        this.results.push({ type: "deckDraw", count: tokens.length, from: "deck" });
+    // High Priestess: <discardUid...> [draw <n>] - no minion reference at
+    // all, and now mirrors the ordinary end-of-turn discard/draw action's
+    // own grammar exactly (see cmdDiscard's own docs) - the draw count is
+    // the player's own choice, not forced to the max. The draw itself is
+    // genuinely random (once a reshuffle is needed) and is deferred until
+    // a real (non-partial) commit, same as cmdDiscard's own convention.
+    // No result is logged for a partial call - nothing happened yet worth
+    // logging.
+    private applyHighPriestess(tokens: string[], partial: boolean): void {
+        const drawIdx = tokens.indexOf("draw");
+        const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
+        const drawCountStr = drawIdx === -1 ? undefined : tokens[drawIdx + 1];
+        const drawn = highPriestess(this.buildPowerContext(), discardUids, drawCountStr, partial);
+        if (!partial) {
+            this.results.push({ type: "deckDraw", count: drawn, from: "deck" });
+        }
     }
 
     private validateHighPriestess(tokens: string[]): IValidationResult | undefined {
-        const failure = checkHighPriestess(this.buildPowerContext(), tokens);
+        const drawIdx = tokens.indexOf("draw");
+        const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
+        const drawCountStr = drawIdx === -1 ? undefined : tokens[drawIdx + 1];
+        const failure = checkHighPriestess(this.buildPowerContext(), discardUids, drawCountStr);
         return failure ? this.failureResult(failure) : undefined;
     }
 

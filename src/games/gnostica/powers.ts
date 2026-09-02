@@ -1047,14 +1047,16 @@ export const judgementDraw = (
     }
 };
 
-// High Priestess: one "discard any, then draw back up to 6" round (the card
+// High Priestess: one "discard any or none, then draw" round (the card
 // grants two of these in a row - see MAJOR_ARCANA["02"] - by simply calling
 // this twice). No minion/targeting is involved; this is pure hand/pile
-// manipulation. Reshuffles the discard pile into the draw pile if it runs
-// dry mid-draw, same as the ordinary end-of-turn "discard and draw" action -
-// draws only stop early if both piles end up genuinely empty. Every named
-// uid is checked up front for the same reason as Judgement above.
-export const checkHighPriestess = (ctx: PowerContext, discardUids: string[]): PowerFailure | undefined => {
+// manipulation. The rules never mandate refilling all the way to 6 - the
+// draw count is the player's own choice, exactly like the ordinary
+// end-of-turn "discard and draw" action's own "draw <n>" grammar (see
+// cmdDiscard/validateDiscard, gnostica.ts): omitting a count defaults to
+// the max, same as that action's own default. Every named discard uid is
+// checked up front for the same reason as Judgement above.
+export const checkHighPriestess = (ctx: PowerContext, discardUids: string[], drawCountStr?: string): PowerFailure | undefined => {
     const seen = new Set<string>();
     for (const uid of discardUids) {
         if (seen.has(uid)) {
@@ -1065,11 +1067,26 @@ export const checkHighPriestess = (ctx: PowerContext, discardUids: string[]): Po
             return { key: "NOT_IN_HAND", params: { uid } };
         }
     }
+    if (drawCountStr !== undefined) {
+        const maxDraw = Math.max(0, 6 - (ctx.hand.length - discardUids.length));
+        const count = Number(drawCountStr);
+        if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
+            return { key: "BAD_DRAW_COUNT", params: { requested: drawCountStr, max: maxDraw } };
+        }
+    }
     return undefined;
 };
 
-export const highPriestess = (ctx: PowerContext, discardUids: string[]): void => {
-    const failure = checkHighPriestess(ctx, discardUids);
+// `partial` mirrors cmdDiscard's own convention: the discard half happens
+// eagerly either way (so a click-driven preview correctly shows the named
+// cards leaving hand), but the draw half - genuinely random once a
+// reshuffle is needed, and otherwise just premature - is skipped during a
+// partial preview and only actually happens on a real commit. Returns the
+// number of cards actually drawn, so the caller can log the real count
+// rather than the discard count or the requested one (a reshuffle-starved
+// deck can still fall short of what was asked for).
+export const highPriestess = (ctx: PowerContext, discardUids: string[], drawCountStr: string | undefined, partial: boolean): number => {
+    const failure = checkHighPriestess(ctx, discardUids, drawCountStr);
     if (failure) {
         throw new GnosticaRulesError(failure.key, failure.params);
     }
@@ -1078,13 +1095,21 @@ export const highPriestess = (ctx: PowerContext, discardUids: string[]): void =>
         ctx.hand.splice(idx, 1);
         ctx.discardPile.push(uid);
     }
-    while (ctx.hand.length < 6) {
+    if (partial) {
+        return 0;
+    }
+    const maxDraw = Math.max(0, 6 - ctx.hand.length);
+    const count = drawCountStr === undefined ? maxDraw : Number(drawCountStr);
+    let drawn = 0;
+    while (drawn < count) {
         reshuffle(ctx);
         if (ctx.drawPile.length === 0) {
             break; // nothing left anywhere
         }
         ctx.hand.push(ctx.drawPile.shift() as string);
+        drawn++;
     }
+    return drawn;
 };
 
 export const checkFool = (ctx: PowerContext): PowerFailure | undefined =>

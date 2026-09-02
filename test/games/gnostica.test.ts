@@ -3322,6 +3322,75 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.move).eq(`use ${theWorld().uid}`);
         expect(result.message).eq(chooseStepMsg());
     });
+
+    // High Priestess isn't button-driven at all (CHOOSE_STEP would be
+    // actively wrong - there's no button for it), so it gets the same
+    // wording as the ordinary discard/draw action instead, plus a clause
+    // about its own two-round structure.
+    it("activate: High Priestess carries discard-style wording instead of CHOOSE_STEP, distinguishing round 1 from round 2", () => {
+        const round1Msg = i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1");
+        const round2Msg = i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2");
+        expect(round1Msg).to.not.eq(chooseStepMsg());
+        expect(round2Msg).to.not.eq(round1Msg);
+
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const discardUid = g.hands[0][0];
+        const [row, col] = rowColFor(g, 0, 0);
+        const fresh = g.handleClick("use", row, col);
+        expect(fresh.move).eq(`use ${major(2).uid}`);
+        expect(fresh.message).eq(round1Msg);
+
+        g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true }); // step 1: a real discard, pauses on step 2
+        expect(g.pendingPower).to.not.be.undefined;
+        const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
+        expect(resumed.move).eq(`use ${major(2).uid}`);
+        expect(resumed.message).eq(round2Msg);
+    });
+
+    // Regression: bold marks a button matching what this.liveMove ALREADY
+    // says (see highlightedButtonValues' own docs) - Continue and Decline
+    // are both genuinely open choices at this point, neither "selected",
+    // so neither should be bold.
+    it("Continue/Decline: neither button is bold - nothing has been chosen yet", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2));
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const discardUid = g.hands[0][0];
+        g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined;
+
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: unknown[] }[] }[] };
+        const bar = rep.areas!.find(a => a.type === "buttonBar")!;
+        const continueBtn = bar.buttons!.find(b => b.value === "resume_power")!;
+        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
+        expect(continueBtn.attributes).to.be.undefined;
+        expect(declineBtn.attributes).to.be.undefined;
+    });
+
+    // Regression: the real client calls validateMove("") right after every
+    // real commit, purely to populate the status line for the render that
+    // follows (see playground.js's own moveBtn handler) - this used to
+    // always say INITIAL_INSTRUCTIONS ("click a top-level button"), which
+    // is wrong the moment that render is actually the forced Continue/
+    // Decline screen, not the ordinary button bar.
+    it("validateMove(\"\") reports the pending-power choice, not the generic top-level-button instructions, once a card's power is paused", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const discardUid = g.hands[0][0];
+
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+
+        g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true }); // pauses, awaiting round 2
+        expect(g.pendingPower).to.not.be.undefined;
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE"));
+
+        g.move(`use ${major(2).uid}, decline`, { trusted: true }); // clears the obligation
+        expect(g.pendingPower).to.be.undefined;
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+    });
 });
 
 describe("Gnostica: handleClick - major arcana chained power steps", () => {
@@ -3738,7 +3807,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.currplayer).eq(2);
     });
 
-    it("highPriestess: hand-card clicks toggle a discard list (no minionRef at all), then redraw to 6 on commit", () => {
+    it("highPriestess: hand-card clicks toggle a discard list (no minionRef at all), defaulting to a redraw up to 6 on commit", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -3765,6 +3834,142 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         g.move(`use ${major(2).uid}, decline`, { trusted: true }); // declines the second highPriestess step
         expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
+    });
+
+    // The rules never mandate refilling all the way to 6 - the draw count
+    // is the player's own choice, exactly like the ordinary end-of-turn
+    // discard/draw action's own "Draw N" buttons.
+    it("highPriestess: the Draw N button set lets the player choose fewer than the max", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        for (const uid of ["2C", "5C", "AR"]) {
+            pluckCard(g, uid);
+        }
+        g.hands[0] = ["2C", "5C", "AR"];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const discardClick = g.handleClick(cellClick.move, -1, -1, "hand_5C");
+        expect(discardClick.move).eq(`use ${major(2).uid}, 5C`);
+        // maxDraw is 6 - 2 (hand after discarding 5C) = 4; choose 1 instead.
+        const drawClick = g.handleClick(discardClick.move, -1, -1, "_btn_hpdraw_1");
+        expect(drawClick.move).eq(`use ${major(2).uid}, 5C draw 1`);
+        expect(drawClick.valid).to.be.true;
+        // A count picked completes the move - tell the player to submit,
+        // not the generic "Looks like a valid move" (there's a second
+        // round still coming, this being round 1).
+        expect(drawClick.message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1_READY"));
+
+        g.move(drawClick.move, { trusted: true });
+        expect(g.hands[0]).to.not.include("5C");
+        expect(g.hands[0].length).eq(3); // 2 remaining + exactly 1 drawn, not up to 6
+        expect(g.pendingPower).to.not.be.undefined; // step 1 of 2 - still owes the second flip
+
+        // Round 2: the SAME count-picker click now reports it's the LAST round.
+        const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
+        const round2Draw = g.handleClick(resumed.move, -1, -1, "_btn_hpdraw_0");
+        expect(round2Draw.message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
+    });
+
+    // Regression: clicking a "Draw N" button early, then going back to
+    // discard ANOTHER card, used to append the new uid AFTER the "draw n"
+    // tail (e.g. "5C draw 1 AR") - drawIdx-based parsing then silently
+    // dropped everything past "draw", so the new card was never actually
+    // discarded at all, despite the move looking "valid".
+    it("highPriestess: discarding another card after already choosing a draw count drops the stale count and adds the card", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2));
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        for (const uid of ["2C", "5C", "AR"]) {
+            pluckCard(g, uid);
+        }
+        g.hands[0] = ["2C", "5C", "AR"];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const discard1 = g.handleClick(cellClick.move, -1, -1, "hand_5C");
+        const drawClick = g.handleClick(discard1.move, -1, -1, "_btn_hpdraw_1"); // chosen too early
+        expect(drawClick.move).eq(`use ${major(2).uid}, 5C draw 1`);
+
+        const discard2 = g.handleClick(drawClick.move, -1, -1, "hand_AR");
+        expect(discard2.move).eq(`use ${major(2).uid}, 5C AR`); // stale "draw 1" dropped, AR added
+        expect(discard2.valid).to.be.true;
+
+        g.move(discard2.move, { trusted: true }); // 0 remaining in a 3-card hand, defaults to max draw
+        expect(g.hands[0]).to.not.include("5C");
+        expect(g.hands[0]).to.not.include("AR");
+        expect(g.hands[0].length).eq(6); // defaulted to max (1 remaining + 5 drawn), not stuck at a stale count
+    });
+
+    // Regression: playing High Priestess (as opposed to using it already on
+    // the board) removes the card from hand BEFORE its own power resolves
+    // (cmdPlay's own docs) - validation never accounted for that extra
+    // card leaving, so its own max-draw bound was off by one relative to
+    // what actually happens on commit (a 6-card hand, played + 2 discards,
+    // is genuinely down to 3 - the true max draw is 3, not 2).
+    it("highPriestess (played from hand): the draw-count max accounts for the played card itself leaving the hand", () => {
+        const g = new GnosticaGame(2);
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")]; // some piece on the board, for eligibleMinionsForPlay
+        for (const uid of ["02", "2C", "5C"]) {
+            pluckCard(g, uid);
+        }
+        g.hands[0] = ["02", "2C", "5C", "AR", "AS", "AD"];
+        const seed = g.handleClick("", -1, -1, "_btn_play");
+        const play02 = g.handleClick(seed.move, -1, -1, "hand_02");
+        expect(play02.move).eq("play 02");
+        const discard1 = g.handleClick(play02.move, -1, -1, "hand_2C");
+        const discard2 = g.handleClick(discard1.move, -1, -1, "hand_5C");
+        expect(discard2.move).eq("play 02, 2C 5C");
+
+        // Hand is genuinely down to 3 (6 - the played card - 2 discards),
+        // so drawing 3 is legal; drawing 4 is not.
+        const draw3 = g.handleClick(discard2.move, -1, -1, "_btn_hpdraw_3");
+        expect(draw3.move).eq("play 02, 2C 5C draw 3");
+        expect(draw3.valid).to.be.true;
+
+        g.move(draw3.move, { trusted: true });
+        expect(g.hands[0].length).eq(6); // 3 remaining + exactly 3 drawn
+        expect(g.hands[0]).to.not.include("02");
+        expect(g.hands[0]).to.not.include("2C");
+        expect(g.hands[0]).to.not.include("5C");
+    });
+
+    // Regression: the real client's boardClick() calls game.move(result.move,
+    // {partial: true}) after EVERY click, to render a live preview - this
+    // used to trigger the actual (random) redraw immediately, before the
+    // player had finished building their discard list or ever clicked
+    // Submit. Mirrors cmdDiscard's own "discard eagerly, defer the draw"
+    // convention for the ordinary end-of-turn action.
+    it("highPriestess: a partial preview discards eagerly but does not redraw until the real, non-partial commit", () => {
+        // A fresh instance per call, exactly like the real client's own
+        // boardClick() convention (a fresh GameFactory reload from the
+        // last CONFIRMED state before every partial preview, and again
+        // for the real submit) - a single instance can't reuse the same
+        // "5C" token for both, since the partial call already discards it
+        // for real.
+        const setup = (): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+            for (const uid of ["2C", "5C", "AR"]) {
+                pluckCard(g, uid);
+            }
+            g.hands[0] = ["2C", "5C", "AR"];
+            return g;
+        };
+        const preview = setup();
+        preview.move(`use ${major(2).uid}, 5C`, { partial: true }); // exactly what a live client preview does
+        expect(preview.hands[0]).to.not.include("5C"); // discarded for real...
+        expect(preview.hands[0].length).eq(2); // ...but NOT yet redrawn back to 6
+        expect(preview.pendingPower).to.not.be.undefined; // forcePause still fires regardless of partial
+        expect(preview.currplayer).eq(1);
+
+        const g = setup();
+        g.move(`use ${major(2).uid}, 5C`, { trusted: true }); // the real, final submit
+        expect(g.hands[0]).to.not.include("5C");
+        expect(g.hands[0].length).eq(6); // now genuinely redrawn
+        expect(g.pendingPower).to.not.be.undefined; // step 1 of 2 - still owes the second flip
     });
 
     it("Hanged Man (move, then tradeHands): a click on a cell already 'claimed' by step 1 still starts step 2, not step 1's own refinement", () => {
@@ -3804,14 +4009,13 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.currplayer).eq(2);
     });
 
-    it("orientMinion/tradeHands/orientAny/hierophantReplace/judgementDraw/highPriestess leave the button bar uncollapsed (no mode buttons of their own)", () => {
+    it("orientMinion/tradeHands/orientAny/hierophantReplace/judgementDraw leave the button bar uncollapsed (no mode buttons of their own)", () => {
         const setups: [number, () => void][] = [
             [3, () => undefined],  // Empress: orientMinion
             [11, () => undefined], // Justice: tradeHands
             [15, () => undefined], // Devil: orientAny
             [5, () => undefined],  // Hierophant: hierophantReplace
             [20, () => undefined], // Judgement: judgementDraw
-            [2, () => undefined],  // High Priestess: highPriestess
         ];
         for (const [seq] of setups) {
             const g = new GnosticaGame(2);
@@ -3821,6 +4025,20 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
             const values = buttonValues(g);
             expect(values, `seq ${seq}`).to.deep.equal(["use", "play", "orient", "discard", "pass", "declare"]);
         }
+    });
+
+    // High Priestess is the one exception - unlike the others above, its
+    // own draw count IS a real player choice (see the ordinary discard/draw
+    // action's own ROOT_ARGS analogue), so it gets the same count-picker
+    // button set that action already has, offered as soon as the step is
+    // live and no count has been chosen yet.
+    it("highPriestess shows its own Draw N count-picker, same shape as the ordinary discard/draw action's own", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2));
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        g.hands[0] = g.hands[0].slice(0, 4); // room to draw, so maxDraw > 0
+        g.move(`use ${major(2).uid}`, { partial: true });
+        expect(buttonValues(g)).to.deep.equal(["hpdraw_2", "hpdraw_1", "hpdraw_0"]); // maxDraw = 6 - 4
     });
 
     it("hermitTeleport shows its own piece/tile buttons; magicianChoice shows its own suit buttons", () => {
