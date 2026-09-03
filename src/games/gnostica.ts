@@ -28,6 +28,7 @@ import {
     checkJudgementDraw, checkHighPriestess, checkFool, checkWorldChoosePower,
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
+import { MINOR_MODES, HERMIT_MODES, primitiveStepShape, SPECIAL_STEP_SHAPES } from "./gnostica/stepShapes";
 import i18next from "i18next";
 
 export type playerid = 1|2|3|4|5|6;
@@ -55,6 +56,16 @@ interface IMinionRef {
 // affected by a minion become minions for that turn" (Lovers example in the
 // rules text) - so a step that moved/grew/created/replaced one of the
 // acting player's OWN pieces reports its new location here.
+//
+// applyPowerStep's own return type is IStepOutcome | undefined, and
+// `undefined` there means ONLY "this step's own token grammar isn't
+// complete enough to act on yet" (per stepShapes.ts's own shape check,
+// consulted before any apply* method below ever runs) - never "done,
+// nothing to report." judgementDraw (the one step with genuinely nothing
+// to chain) returns `{}` rather than `undefined` for exactly this reason,
+// so walkFrameStack can tell the two apart with a plain `=== undefined`
+// check on applyPowerStep's own return value, without needing to ask
+// validatePowerStep anything.
 interface IStepOutcome {
     newMinion?: IMinionRef;
     // Hand off to a DIFFERENT card's own power array - World's chosen
@@ -122,99 +133,17 @@ interface IParsedMove {
     malformedStep: string[] | undefined;
 }
 
-// Click support for minor arcana's single suit-power step (major arcana's
-// own chained steps reuse this same table - see parsePendingStep()).
-// One entry per suit+mode: the button label, whether the mode's target is a
-// whole cell (assertValidCellTarget) or a specific piece within one
-// (assertValidPieceTarget, which additionally always allows self regardless
-// of facing), and the minimum number of tokens after "<minionRef> <mode>"
-// needed before applyMinorPower() will actually attempt the primitive
-// rather than treating the step as still-in-progress (see its own docs).
-// Trailing optional args (a reorientation after acting on your own piece)
-// are deliberately not counted here, and not click-driven this pass either
-// - every mode is fully usable without one, just not adjustable by click.
-interface MinorModeConfig {
-    label: string;
-    shape: "cell" | "piece" | "none";
-    minArgs: number;
-}
-const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
-    C: {
-        own: { label: "Create Minion", shape: "cell", minArgs: 2 },
-        enemy: { label: "Create Enemy", shape: "cell", minArgs: 2 },
-        new: { label: "Create Territory", shape: "cell", minArgs: 2 },
-    },
-    R: {
-        piece: { label: "Move Piece", shape: "piece", minArgs: 2 },
-        tile: { label: "Push Territory", shape: "none", minArgs: 1 },
-    },
-    D: {
-        piece: { label: "Grow Piece", shape: "piece", minArgs: 1 },
-        tile: { label: "Grow Territory", shape: "cell", minArgs: 2 },
-    },
-    S: {
-        piece: { label: "Attack Piece", shape: "piece", minArgs: 2 },
-        tile: { label: "Attack Territory", shape: "cell", minArgs: 2 },
-    },
-};
-
-// Hermit isn't suit-shaped (no create/move/grow/attack primitive behind
-// it), so it gets its own tiny two-entry mode table rather than a slot in
-// MINOR_MODES - button label only; shape/minArgs aren't needed here since
-// hermitTeleport's own click handler manages its stages directly rather
-// than going through legalMinorModes/buildStepModeMove.
-const HERMIT_MODES: Record<string, { label: string }> = {
-    piece: { label: "Move Piece" },
-    tile: { label: "Push Territory" },
-};
-
 // The four suits magicianChoice lets the player pick between, in button
 // order - reuses MINOR_MODES[suitUid] once chosen (see IPendingStep's own
-// `prefix` field).
+// `prefix` field). MINOR_MODES/HERMIT_MODES/SPECIAL_MIN_TOKENS themselves
+// (and the shared completeness logic built on them) live in
+// ./gnostica/stepShapes - see that file's own docs.
 const ALL_SUITS: { uid: string; label: string }[] = [
     { uid: "C", label: "Cups" },
     { uid: "R", label: "Rods" },
     { uid: "D", label: "Discs" },
     { uid: "S", label: "Swords" },
 ];
-
-// Minimum token count (including the leading minionRef, except
-// highPriestess which has none) for a `special` step's segment to be
-// considered "complete enough to walk past" - checked for BOTH an
-// earlier, already-typed step in a chain, AND a card's own ONLY step on
-// every non-preferCurrent call (getActionButtons, the mode_/magician_/
-// hermit_ button dispatches) - it's not exclusively a "multi-step chain"
-// concern. orientMinion/tradeHands/orientAny have a real, fixed token
-// count once complete, so they get one; hierophantReplace does too even
-// though (being always its card's only step) it's never actually walked
-// past in practice - listed anyway for correctness rather than relying on
-// that coincidence. magicianChoice, hermitTeleport, judgementDraw, and
-// highPriestess all have variable-length grammars with no fixed
-// "complete" token count reachable from here, AND are also always their
-// card's only step - Infinity means "never complete enough to walk past,"
-// which is exactly right for a step that's never anything BUT current.
-const SPECIAL_MIN_TOKENS: Record<SpecialPower, number> = {
-    orientMinion: 2,      // minionRef + orientation
-    tradeHands: 2,        // minionRef + targetRef
-    orientAny: 3,         // minionRef + targetRef + orientation
-    hierophantReplace: 3, // minionRef + targetRef + orientation
-    magicianChoice: Infinity,
-    hermitTeleport: Infinity,
-    judgementDraw: Infinity,
-    highPriestess: Infinity,
-    // Fool's flip always forces a pause (see applyPowerStep's own docs),
-    // so a completed "fool" segment can never legally be followed by
-    // another segment in the same move string - same "never anything but
-    // current" reasoning as highPriestess/magicianChoice/etc. above.
-    fool: Infinity,
-    // <minionRef> <cardUid> - unlike every other special above, this DOES
-    // need a finite value: World's own push is informationally free (no
-    // forced pause), so a fully-typed "<minionRef> <cardUid>" segment can
-    // legitimately be followed by the pushed frame's own first step in the
-    // same move string, and parsePendingStep's walk needs to recognize
-    // that segment as complete in order to advance past it.
-    worldUseAny: 2,
-};
 
 // True iff `pile` (hand or discard-pile uids) holds a card worth exactly
 // `value` points - lets minorModeAvailability tell apart a mode whose
@@ -2217,8 +2146,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 const suitUidForStep = this.primitiveToSuit(step.primitive);
                 const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
                 const [, mode, ...rest] = tokens;
-                const config = mode !== undefined ? MINOR_MODES[suitUidForStep]?.[mode] : undefined;
-                if (config === undefined || rest.length < config.minArgs || (isLastSegment && callOpts.preferCurrent)) {
+                // Same shared shape check apply/validate use (see
+                // stepShapes.ts's own docs) - asked directly,
+                // independently; this function never calls into apply or
+                // validate for it. "malformed" is folded in with
+                // "incomplete" here (both mean "still building" for this
+                // best-effort UI preview - a hand-typed bad mode name is
+                // caught properly at Submit, not mid-click).
+                const shape = primitiveStepShape(suitUidForStep, tokens.slice(1));
+                if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
                     // Still building this one - not complete enough to
                     // advance past, OR the caller explicitly wants the
                     // last-typed segment treated as "current" even once it
@@ -2233,8 +2169,13 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { head, headArg, suitUid: suitUidForStep, prefix: [], eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode, rest };
                 }
             } else {
-                const minTokens = SPECIAL_MIN_TOKENS[step.special];
-                if (tokens.length < minTokens || (isLastSegment && callOpts.preferCurrent)) {
+                // highPriestess/fool have no minionRef to strip at all
+                // (fool never reaches here - see the early-return above);
+                // every other special does, matching apply/validate's own
+                // convention for SPECIAL_STEP_SHAPES.
+                const noMinionRef = step.special === "highPriestess" || step.special === "fool";
+                const shape = SPECIAL_STEP_SHAPES[step.special](noMinionRef ? tokens : tokens.slice(1));
+                if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
                     // Same "still building, or the caller wants it treated
                     // as current regardless" rule as the primitive branch
                     // above - see this function's own docs and
@@ -3301,8 +3242,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
                     // Picking a count always completes this step (highPriestess's
-                    // own SPECIAL_MIN_TOKENS is Infinity, but the count itself
-                    // is the one thing every submission needs) - unlike the
+                    // own shape check in stepShapes.ts is unconditional -
+                    // any token count is "complete enough" - but the count
+                    // itself is the one thing every submission needs) -
+                    // unlike the
                     // generic "Looks like a valid move" fallback, tell the
                     // player what submitting actually does: forces a pause
                     // for a SECOND round (see applyPowerStep's own docs) if
@@ -4602,7 +4545,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (stepSegments.length > 1) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "MINOR_ONE_STEP_ONLY" }));
         }
-        const [minionRef, mode, ...rest] = stepSegments[0];
+        const [minionRef, ...rest] = stepSegments[0];
         if (minionRef === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }));
         }
@@ -4610,17 +4553,18 @@ export class GnosticaGame extends GameBaseSequenced {
             return; // cell chosen, which minion there is still undecided - still declined
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, eligible, "NOT_AN_ELIGIBLE_MINION");
-        if (mode === undefined) {
-            return; // minion earmarked, mode not chosen yet - still declined
+        // Same shared shape check applyPowerStep uses for a major card's
+        // own primitive step (see stepShapes.ts's own docs) - a minor
+        // card's power is that same grammar, just never chained.
+        const shape = primitiveStepShape(suitUid, rest);
+        if (shape.status === "incomplete") {
+            return; // still declined so far
         }
-        const config = MINOR_MODES[suitUid]?.[mode];
-        if (config === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitUid }));
+        if (shape.status === "malformed") {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${shape.key}`, shape.params));
         }
-        if (rest.length < config.minArgs) {
-            return; // mode chosen, args not yet complete - still declined
-        }
-        this.applySuitPrimitive(suitUid, minion, mode, rest, {});
+        const [mode, ...args] = rest;
+        this.applySuitPrimitive(suitUid, minion, mode, args, {});
     }
 
     // Mirrors applyMinorPower's own tolerance exactly (declining, and an
@@ -4641,18 +4585,16 @@ export class GnosticaGame extends GameBaseSequenced {
         if (stepSegments.length > 1) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "MINOR_ONE_STEP_ONLY" });
         }
-        const [minionRef, mode, ...rest] = stepSegments[0];
+        const [minionRef, ...rest] = stepSegments[0];
         if (minionRef === undefined) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" });
         }
-        // Same #49 principle as the stepSegments.length===0 case above:
-        // each of the three branches below is ALSO genuinely still
-        // incomplete (a cell chosen but not which minion, a minion but no
-        // mode, a mode but not enough args yet - e.g. Discs "tile" with a
-        // target cell but no replacement card uid) - previously these
-        // returned bare `undefined`, which validateMove()'s own tail
-        // treats as "no objection" and defaults to complete:1/valid, the
-        // exact "looks like a valid move" false-positive this fixes.
+        // Same #49 principle as the stepSegments.length===0 case above: a
+        // cell chosen but not which minion is ALSO genuinely still
+        // incomplete - previously this returned bare `undefined`, which
+        // validateMove()'s own tail treats as "no objection" and defaults
+        // to complete:1/valid, the exact "looks like a valid move"
+        // false-positive this fixes.
         if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
@@ -4661,17 +4603,17 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalidPieceRef(result.kind, minionRef, "NOT_AN_ELIGIBLE_MINION");
         }
         const minion = result.ref;
-        if (mode === undefined) {
+        // Same shared shape check applyMinorPower/applyPowerStep use (see
+        // stepShapes.ts's own docs).
+        const shape = primitiveStepShape(suitUid, rest);
+        if (shape.status === "incomplete") {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
-        const config = MINOR_MODES[suitUid]?.[mode];
-        if (config === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitUid });
+        if (shape.status === "malformed") {
+            return this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params);
         }
-        if (rest.length < config.minArgs) {
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
-        }
-        const stepResult = this.validateSuitPrimitive(suitUid, minion, mode, rest, {});
+        const [mode, ...args] = rest;
+        const stepResult = this.validateSuitPrimitive(suitUid, minion, mode, args, {});
         return stepResult.failed ? stepResult.result : undefined;
     }
 
@@ -4806,36 +4748,18 @@ export class GnosticaGame extends GameBaseSequenced {
                     continue; // no result to group/snapshot for a pure decline
                 }
             }
-            // A still-being-typed segment (minion earmarked but no mode
-            // yet, mode chosen but args incomplete, magicianChoice's suit
-            // without a mode yet, etc.) must pause here WITHOUT advancing
-            // nextStepIndex - applyPowerStep's own "declined so far"
-            // tolerance returns undefined for both this case AND a step
-            // that's genuinely done but has no outcome fields to report
-            // (judgementDraw, say), so that return value alone can't tell
-            // the two apart. validatePowerStep's `complete` flag can
-            // (mirrors validateFrameStack's own identical check) - checked
-            // read-only here, on the CURRENT real state, before applying
-            // anything for this segment.
-            const preCheck = this.validatePowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length);
-            if (preCheck.failed) {
-                throw new UserFacingError("VALIDATION_GENERAL", preCheck.result.message);
-            }
-            if (preCheck.complete === false) {
-                this.pendingPower = { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
-                // `i` was already advanced past THIS segment above (the
-                // cursor's own bookkeeping, needed regardless of outcome),
-                // but the segment itself never actually got applied - so
-                // it's excluded here, unlike every other pendingPower
-                // assignment in this function.
-                this.pendingPowerConsumedSegments = i - 1;
-                return;
-            }
             // Snapshot BEFORE every step except the first processed one
             // this call - equivalent to the old "after every step except
             // the last" (there's no way to know in advance whether an
             // auto-resolved Fool step will follow a given one), and lets
-            // undo/redo still stop at any intermediate point.
+            // undo/redo still stop at any intermediate point. Taken before
+            // knowing whether this step will actually complete, since
+            // applyPowerStep is a guaranteed no-op when it returns
+            // undefined (its own shape check, in stepShapes.ts, runs
+            // before any mutation for every branch that can return
+            // undefined at all - see IStepOutcome's own docs) - discarded
+            // below if that turns out to be the case, rather than leaving
+            // a spurious undo point behind.
             if (stepsProcessed > 0) {
                 this.frames.push({
                     board: this.board.clone().store,
@@ -4845,10 +4769,30 @@ export class GnosticaGame extends GameBaseSequenced {
                     drawPile: [...this.drawPile],
                 });
             }
-            stepsProcessed++;
             const resultsBefore = this.results.length;
             const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial);
-            if (outcome?.newMinion !== undefined) {
+            if (outcome === undefined) {
+                // A still-being-typed segment (minion earmarked but no
+                // mode yet, mode chosen but args incomplete, magicianChoice's
+                // suit without a mode yet, etc.) - pause here WITHOUT
+                // advancing nextStepIndex. `undefined` here means only
+                // this now, never "done, nothing to report" - see
+                // IStepOutcome's own docs - so no separate call into
+                // validatePowerStep is needed to tell the two apart.
+                if (stepsProcessed > 0) {
+                    this.frames.pop();
+                }
+                this.pendingPower = { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
+                // `i` was already advanced past THIS segment above (the
+                // cursor's own bookkeeping, needed regardless of outcome),
+                // but the segment itself never actually got applied - so
+                // it's excluded here, unlike every other pendingPower
+                // assignment in this function.
+                this.pendingPowerConsumedSegments = i - 1;
+                return;
+            }
+            stepsProcessed++;
+            if (outcome.newMinion !== undefined) {
                 top.minions = [...top.minions, outcome.newMinion];
             }
             top.nextStepIndex++;
@@ -4860,11 +4804,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     this.results.push({ type: "_group", who: this.currplayer, results: stepResults as [APMoveResult, ...APMoveResult[]] });
                 }
             }
-            if (outcome?.pushFrame !== undefined) {
+            if (outcome.pushFrame !== undefined) {
                 stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions });
             }
             GnosticaGame.popExhaustedFrames(this, stack);
-            if (outcome?.forcePause === true) {
+            if (outcome.forcePause === true) {
                 this.pendingPower = stack.length > 0 ? { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] } : undefined;
                 this.pendingPowerConsumedSegments = i;
                 return;
@@ -5148,42 +5092,32 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
         if ("primitive" in step) {
-            const [mode, ...modeArgs] = rest;
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-            // Same "declined so far" tolerance applyMinorPower's own single
-            // step already has - a major card's primitive step is no
-            // different from a minor card's own, and Phase A's click flow
-            // relies on it identically (a mode-button click for Cups
-            // "new"/Discs or Swords "tile" deliberately produces fewer
-            // tokens than minArgs, waiting on a hand-card uid supply).
-            if (mode === undefined) {
-                return undefined; // minion earmarked, mode not chosen yet - still declined
+            // "Still building" vs "malformed" vs "ready to act on" is
+            // answered once, uniformly, by stepShapes.ts's own shared
+            // check (see its docs) - validate and the UI preview walker
+            // ask the SAME function, independently, for the SAME
+            // question; none of the three calls each other for it.
+            const shape = primitiveStepShape(suitUid, rest);
+            if (shape.status === "incomplete") {
+                return undefined; // still declined so far
             }
-            const config = MINOR_MODES[suitUid]?.[mode];
-            if (config === undefined) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitUid }));
+            if (shape.status === "malformed") {
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${shape.key}`, shape.params));
             }
-            if (modeArgs.length < config.minArgs) {
-                return undefined; // mode chosen, args not yet complete - still declined
-            }
+            const [mode, ...modeArgs] = rest;
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
             return this.applySuitPrimitive(suitUid, minion, mode, modeArgs, opts);
         }
-        // orientMinion/tradeHands/orientAny/hierophantReplace all have a
-        // fixed arg count once complete (SPECIAL_MIN_TOKENS, minus the
-        // leading minionRef already stripped above) - same "declined so
-        // far" tolerance as everything else in this function, for a
-        // hand-typed partial segment (my own click flows never expose an
-        // incomplete state for these four, since each click either
-        // produces a fully-complete segment or is rejected outright - see
-        // handleOrientMinionClick/handleTradeHandsClick/
-        // handleOrientAnyOrHierophantClick's own docs).
-        if (
-            (step.special === "orientMinion" || step.special === "tradeHands" || step.special === "orientAny" || step.special === "hierophantReplace")
-            && rest.length < SPECIAL_MIN_TOKENS[step.special] - 1
-        ) {
-            return undefined;
+        const shape = SPECIAL_STEP_SHAPES[step.special](rest);
+        if (shape.status === "incomplete") {
+            return undefined; // still declined so far
         }
+        if (shape.status === "malformed") {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${shape.key}`, shape.params));
+        }
+        // Every apply* method below can now assume complete, well-formed
+        // input - the shape check above already ruled out anything else.
         switch (step.special) {
             case "orientMinion":
                 return this.applyOrientMinion(minion, rest);
@@ -5191,35 +5125,20 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.applyOrientAny(minion, rest);
             case "hierophantReplace":
                 return this.applyHierophantReplace(minion, rest);
-            case "hermitTeleport": {
-                // Same "declined so far" tolerance a primitive step's own
-                // mode+args get (see applyPowerStep's own docs) -
-                // hermitTeleport's mode/target/destination are built up
-                // via clicks the exact same incremental way.
-                const [hermitMode, ...hermitArgs] = rest;
-                if (hermitMode === undefined) {
-                    return undefined; // mode not chosen yet - still declined
-                }
-                if (hermitMode !== "piece" && hermitMode !== "tile") {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode: hermitMode, suit: "Hermit" }));
-                }
-                if (hermitArgs.length < 2) {
-                    return undefined; // mode chosen, target/destination not yet complete - still declined
-                }
+            case "hermitTeleport":
                 return this.applyHermitStep(minion, rest);
-            }
             case "tradeHands":
                 return this.applyTradeHands(minion, rest);
             case "judgementDraw":
                 this.applyJudgementDraw(minion, rest);
-                return undefined;
+                // A real (if empty) outcome, not undefined - undefined is
+                // reserved exclusively for "still incomplete" now (see
+                // IStepOutcome's own docs and walkFrameStack's).
+                return {};
             case "magicianChoice":
                 return this.applyMagicianChoice(minion, rest);
             case "worldUseAny": {
                 const [chosenUid] = rest;
-                if (chosenUid === undefined) {
-                    return undefined; // minion earmarked, target not chosen yet - still declined
-                }
                 const chosenDef = worldChoosePower(this.buildPowerContext(), chosenUid);
                 this.pushStubResult({ type: "borrowPower", what: chosenUid });
                 return { pushFrame: { cardUid: chosenDef.uid, minions: [minion] } };
@@ -5268,29 +5187,31 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const minion = result.ref;
         if ("primitive" in step) {
-            const [mode, ...modeArgs] = rest;
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-            // Mirrors applyPowerStep's own tolerance - see its docs.
-            if (mode === undefined) {
-                return { failed: false, complete: false }; // minion earmarked, mode not chosen yet - still declined
+            // Same shared shape check applyPowerStep uses (see
+            // stepShapes.ts's own docs) - asked directly, independently;
+            // this function never calls into applyPowerStep for it.
+            const shape = primitiveStepShape(suitUid, rest);
+            if (shape.status === "incomplete") {
+                return { failed: false, complete: false };
             }
-            const config = MINOR_MODES[suitUid]?.[mode];
-            if (config === undefined) {
-                return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitUid }) };
+            if (shape.status === "malformed") {
+                return { failed: true, result: this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params) };
             }
-            if (modeArgs.length < config.minArgs) {
-                return { failed: false, complete: false }; // mode chosen, args not yet complete - still declined
-            }
+            const [mode, ...modeArgs] = rest;
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
             return this.validateSuitPrimitive(suitUid, minion, mode, modeArgs, opts);
         }
-        // Mirrors applyPowerStep's own tolerance - see its docs.
-        if (
-            (step.special === "orientMinion" || step.special === "tradeHands" || step.special === "orientAny" || step.special === "hierophantReplace")
-            && rest.length < SPECIAL_MIN_TOKENS[step.special] - 1
-        ) {
+        const shape = SPECIAL_STEP_SHAPES[step.special](rest);
+        if (shape.status === "incomplete") {
             return { failed: false, complete: false };
         }
+        if (shape.status === "malformed") {
+            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params) };
+        }
+        // Every validate* method below can now assume complete,
+        // well-formed input - the shape check above already ruled out
+        // anything else.
         switch (step.special) {
             case "orientMinion":
                 return this.validateOrientMinion(minion, rest);
@@ -5298,20 +5219,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.validateOrientAny(minion, rest);
             case "hierophantReplace":
                 return this.validateHierophantReplace(minion, rest);
-            case "hermitTeleport": {
-                // Mirrors applyPowerStep's own tolerance - see its docs.
-                const [hermitMode, ...hermitArgs] = rest;
-                if (hermitMode === undefined) {
-                    return { failed: false, complete: false }; // mode not chosen yet - still declined
-                }
-                if (hermitMode !== "piece" && hermitMode !== "tile") {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode: hermitMode, suit: "Hermit" }) };
-                }
-                if (hermitArgs.length < 2) {
-                    return { failed: false, complete: false }; // mode chosen, target/destination not yet complete - still declined
-                }
+            case "hermitTeleport":
                 return this.validateHermitStep(minion, rest);
-            }
             case "tradeHands":
                 return this.validateTradeHands(minion, rest);
             case "judgementDraw": {
@@ -5322,9 +5231,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.validateMagicianChoice(minion, rest);
             case "worldUseAny": {
                 const [chosenUid] = rest;
-                if (chosenUid === undefined) {
-                    return { failed: false, complete: false }; // minion earmarked, target not chosen yet - still declined
-                }
                 const failure = this.validateWorldChoosePower(chosenUid);
                 if (failure) {
                     return { failed: true, result: failure };
@@ -6067,48 +5973,20 @@ export class GnosticaGame extends GameBaseSequenced {
     // Magician: <minionRef> <suitLetter: C|R|D|S> <mode> <args...> - the
     // player picks which of the four suit primitives to use; everything
     // after the suit letter matches that suit's normal mode+args grammar.
-    private applyMagicianChoice(minion: IMinionRef, rest: string[]): IStepOutcome | undefined {
+    // Called only once applyPowerStep's own SPECIAL_STEP_SHAPES.magicianChoice
+    // check has already confirmed `rest` is complete and well-formed (see
+    // stepShapes.ts's own docs) - no completeness/legality checking here.
+    private applyMagicianChoice(minion: IMinionRef, rest: string[]): IStepOutcome {
         const [suitLetter, mode, ...args] = rest;
-        if (suitLetter === undefined) {
-            return undefined; // minion earmarked, suit not chosen yet - still declined
-        }
-        if (!["C", "R", "D", "S"].includes(suitLetter)) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_SUIT_LETTER", { suitLetter }));
-        }
-        // Same "declined so far" tolerance a primitive step's own mode
-        // gets (see applyPowerStep's docs) - magicianChoice's suit choice
-        // is really just an extra token in front of that same grammar.
-        if (mode === undefined) {
-            return undefined; // suit chosen, mode not chosen yet - still declined
-        }
-        const config = MINOR_MODES[suitLetter]?.[mode];
-        if (config === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitLetter }));
-        }
-        if (args.length < config.minArgs) {
-            return undefined; // mode chosen, args not yet complete - still declined
-        }
         return this.applySuitPrimitive(suitLetter, minion, mode, args, {});
     }
 
+    // Called only once validatePowerStep's own SPECIAL_STEP_SHAPES.magicianChoice
+    // check has already confirmed `rest` is complete and well-formed (see
+    // stepShapes.ts's own docs) - no completeness checking here, just the
+    // real legality check on the now-known suit/mode/args.
     private validateMagicianChoice(minion: IMinionRef, rest: string[]): StepValidation {
         const [suitLetter, mode, ...args] = rest;
-        if (suitLetter === undefined) {
-            return { failed: false, complete: false }; // minion earmarked, suit not chosen yet - still declined
-        }
-        if (!["C", "R", "D", "S"].includes(suitLetter)) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_SUIT_LETTER", { suitLetter }) };
-        }
-        if (mode === undefined) {
-            return { failed: false, complete: false }; // suit chosen, mode not chosen yet - still declined
-        }
-        const config = MINOR_MODES[suitLetter]?.[mode];
-        if (config === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: suitLetter }) };
-        }
-        if (args.length < config.minArgs) {
-            return { failed: false, complete: false }; // mode chosen, args not yet complete - still declined
-        }
         return this.validateSuitPrimitive(suitLetter, minion, mode, args, {});
     }
 
