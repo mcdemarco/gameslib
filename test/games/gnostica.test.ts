@@ -3353,7 +3353,14 @@ describe("Gnostica: choose-step click messaging", () => {
     // says (see highlightedButtonValues' own docs) - Continue and Decline
     // are both genuinely open choices at this point, neither "selected",
     // so neither should be bold.
-    it("Continue/Decline: neither button is bold - nothing has been chosen yet", () => {
+    // Regression: a genuine pendingPower obligation used to always show a
+    // one-time "Use Card X/Decline X" screen before anything else, even
+    // when X's own step (like High Priestess's round 2) has real buttons
+    // of its own to offer immediately - forcing an extra click just to
+    // reach them. Now X's own buttons (here, the Draw N count picker)
+    // show directly, with "Decline X" persisting alongside them so the
+    // player is never stuck without a way out.
+    it("a pending obligation's own buttons show directly, with an unbold persisting Decline button - nothing has been chosen yet", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2));
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -3361,22 +3368,21 @@ describe("Gnostica: choose-step click messaging", () => {
         g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true });
         expect(g.pendingPower).to.not.be.undefined;
 
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: unknown[] }[] }[] };
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: unknown[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
-        const continueBtn = bar.buttons!.find(b => b.value === "resume_power")!;
+        expect(bar.buttons!.find(b => b.value === "resume_power")).to.be.undefined;
+        expect(bar.buttons!.some(b => b.value?.startsWith("hpdraw_"))).to.be.true;
         const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
-        expect(continueBtn.attributes).to.be.undefined;
+        expect(declineBtn.label).eq("Decline 02");
         expect(declineBtn.attributes).to.be.undefined;
     });
 
-    // Regression: the button used to be labeled "Continue {{rootCardUid's
-    // name}}" - always the ORIGINALLY used/played card, never the actual
-    // active one. Once Fool reveals a DIFFERENT card (here, the High
-    // Priestess), that label would misleadingly say "Continue The Fool"
-    // while what Continue actually resolves is the High Priestess's own
-    // power. The buttons are now generic; the status message (asserted
-    // elsewhere) is what actually names the active card.
-    it("Continue/Decline buttons are named after the ACTIVE card's uid, not the root card's", () => {
+    // Regression: the persisting Decline button used to be labeled after
+    // rootCardUid - always the ORIGINALLY used/played card, never the
+    // actual active one. Once Fool reveals a DIFFERENT card (here, the
+    // High Priestess), that label would misleadingly say "Decline 00"
+    // while what it actually declines is the High Priestess's own power.
+    it("the persisting Decline button is named after the ACTIVE card's uid, not the root card's", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(0)); // The Fool
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -3395,11 +3401,11 @@ describe("Gnostica: choose-step click messaging", () => {
 
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
-        const continueBtn = bar.buttons!.find(b => b.value === "resume_power")!;
-        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
+        expect(bar.buttons!.find(b => b.value === "resume_power")).to.be.undefined;
+        expect(bar.buttons!.some(b => b.value?.startsWith("hpdraw_"))).to.be.true;
         // "02" (The High Priestess) - the active card - not "00" (The Fool
         // - the root).
-        expect(continueBtn.label).eq("Use Card 02");
+        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
         expect(declineBtn.label).eq("Decline 02");
     });
 
@@ -4361,6 +4367,36 @@ describe("Gnostica: Fool and World", () => {
         return g;
     };
 
+    // Regression: a revealed card's own real buttons now show immediately
+    // (no separate "Use Card X" click first - see getActionButtons()'s
+    // own docs), and a persisting "Decline X" is always folded in
+    // alongside them. Before this fix, committing to "Use Card X" for a
+    // Rods card whose every eligible minion is upright (Rods rejects
+    // upright minions for every mode) left the player with nothing but
+    // struck-through buttons and no way back out.
+    it("a revealed Rods card with only upright minions leaves every mode struck through, but the persisting Decline button is still there", () => {
+        const g = setupFool();
+        pluckCard(g, "2R");
+        g.drawPile.unshift("2R"); // force the flip to reveal 2 of Rods
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "2R"]);
+
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas!.find(a => a.type === "buttonBar")!;
+        // Rods' own mode buttons show directly - no "Use Card 2R" click
+        // needed first - and every one is struck through, since Fool's
+        // own minion (the only eligible one) is upright.
+        const modeButtons = bar.buttons!.filter(b => b.value?.startsWith("mode_R_"));
+        expect(modeButtons.length).to.be.greaterThan(0);
+        for (const b of modeButtons) {
+            expect(b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through")).to.be.true;
+        }
+        // A way out, still available.
+        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
+        expect(declineBtn.label).eq("Decline 2R");
+        expect(declineBtn.attributes).to.be.undefined;
+    });
+
     // m0: The World, minion A facing n0. n0: own piece B (to be pushed).
     // p0: The Lovers, World's own target - kept away from m0/n0/o0 so the
     // push destination (o0) never collides with it.
@@ -4527,6 +4563,55 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
     });
 
+    // Regression: a two-stage special (magicianChoice, hermitTeleport) that
+    // Fool reveals must be click-driven from the very first click, when
+    // nothing has been clicked yet THIS turn - movebox.value is still ""
+    // (untouched since the last real commit), not seeded with "use 00" by
+    // an earlier "Use Card X" click (skipped entirely now - see
+    // getActionButtons()'s own docs). handleClickCore's own parsePendingStep
+    // calls need pendingPower's root seeded in for them in this case.
+    it("a revealed Magician's own suit buttons are click-driven even before anything else has been clicked this turn", () => {
+        const g = setupFool();
+        pluckCard(g, major(1).uid);
+        pluckCard(g, "AS");
+        g.drawPile.unshift(major(1).uid); // force the flip to reveal The Magician
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", major(1).uid]);
+
+        const suitClick = g.handleClick("", -1, -1, "_btn_magician_C");
+        expect(suitClick.valid).to.be.true;
+        expect(suitClick.move).eq(`use ${major(0).uid}, m0.1 C`);
+
+        // Regression: syncing the engine to this still-incomplete segment
+        // (suit chosen, mode not yet - same as the playground's own
+        // preview flow between every click) must neither silently
+        // complete the step early nor lose track of the suit already
+        // chosen - the bar should show CUPS' OWN mode buttons directly,
+        // not the suit-picker again, and "Decline 01" (the Magician, not
+        // the Fool) stays put throughout.
+        g.move(suitClick.move, { partial: true });
+        expect(buttonValues(g)).to.include.members(["mode_C_own", "mode_C_enemy", "mode_C_new"]);
+        expect(buttonValues(g)).to.not.include("magician_R");
+        const midRep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
+        const midBar = midRep.areas!.find(a => a.type === "buttonBar")!;
+        expect(midBar.buttons!.find(b => b.value === "decline_power")!.label).eq("Decline 01");
+
+        const modeClick = g.handleClick(suitClick.move, -1, -1, "_btn_mode_C_own");
+        expect(modeClick.valid).to.be.true;
+
+        // Regression: once Magician's own power genuinely completes (via
+        // this same partial sync), Fool's own next flip becomes the
+        // active step - mandatory, not optional (see walkFrameStack's own
+        // docs) - so there is nothing left to decline here at all.
+        g.move(modeClick.move, { partial: true });
+        expect(buttonValues(g)).to.not.include("decline_power");
+
+        g.drawPile.unshift("AS"); // force what Fool's own automatic second flip reveals
+        g.move(modeClick.move, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AS"]); // Fool's own 2nd flip auto-fired
+        expect(g.currplayer).eq(1);
+    });
+
     // Regression: Fool's own draws are never optional (walkFrameStack's
     // own docs) - declining what the first flip revealed auto-continues
     // straight into the second flip, IN THE SAME SUBMISSION, rather than
@@ -4659,11 +4744,40 @@ describe("Gnostica: Fool and World", () => {
         // about WHAT was revealed.
         expect(preview.discardPile.length).eq(0);
         expect(preview.pendingPower?.stack).to.have.length(1);
+        // Regression: that bookkeeping-only pendingPower must NOT be
+        // mistaken for a genuine, already-existing obligation - nothing
+        // has actually been committed yet, so there's nothing to decline,
+        // and the bar should be the plain, uncollapsed top-level set
+        // (Use Territory bold, since this was "use 00") with no
+        // "decline_power" mixed in.
+        expect(buttonValues(preview)).to.not.include("decline_power");
+        const rep = preview.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas!.find(a => a.type === "buttonBar")!;
+        const useBtn = bar.buttons!.find(b => b.value === "use")!;
+        expect(useBtn.attributes).to.deep.equal([{ name: "font-weight", value: "bold" }]);
 
         // The real commit is what actually flips and pauses.
         const real = setupFool();
         real.move(cellClick.move);
         expect(real.pendingPower).to.not.be.undefined;
+    });
+
+    // Same regression as the "use" case above, but for "play" (Fool from
+    // hand) - the exact scenario reported: before ever submitting, the
+    // full top-level bar (Play Card bold) plus a nonsensical "Decline 00"
+    // both showed, even though nothing had been drawn yet to decline.
+    it("playing the Fool from hand, before submitting, shows no Decline button either", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        g.hands[0].push("00"); // Fool, injected regardless of the random deal
+
+        g.move("play 00", { partial: true });
+        expect(buttonValues(g)).to.not.include("decline_power");
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas!.find(a => a.type === "buttonBar")!;
+        const playBtn = bar.buttons!.find(b => b.value === "play")!;
+        expect(playBtn.attributes).to.deep.equal([{ name: "font-weight", value: "bold" }]);
     });
 
     // Regression: since Fool's own second flip is never a separate,
@@ -4692,11 +4806,13 @@ describe("Gnostica: Fool and World", () => {
         preview.drawPile.unshift("AC");
         preview.move(`use ${major(0).uid}, fool`, { trusted: true });
         preview.move(declined.move, { partial: true });
-        // No button for Fool's own (automatic) flip - just the decline of
-        // AC (the card that WAS actually drawn), persisting bolded, same
-        // as "Use Territory"/"Play Card" persists once chosen.
+        // No button for Fool's own (automatic) flip - the bar falls back
+        // to the plain top-level set (nothing left to click for Fool's
+        // own step, same as any other click-only stage) plus the decline
+        // of AC (the card that WAS actually drawn), persisting bolded,
+        // same as "Use Territory"/"Play Card" persists once chosen.
         expect(buttonValues(preview)).to.not.include("power_fool");
-        expect(buttonValues(preview)).to.deep.equal(["use", "decline_power", "declare"]);
+        expect(buttonValues(preview)).to.deep.equal(["use", "play", "orient", "discard", "pass", "declare", "decline_power"]);
         const rep = preview.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
@@ -4723,6 +4839,47 @@ describe("Gnostica: Fool and World", () => {
         // A minor card's own synthesized primitive step is a fresh (step
         // 0) choice - CHOOSE_STEP is the right message key, now naming AC.
         expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
+    });
+
+    // Regression: validateResumePendingPower's own 0-segment case used to
+    // reuse POWER_STEP_REQUIRED (the #49 ROOT-only "must be used, at least
+    // in part... or use 'discard draw 0'" message) - wrong for a
+    // resumed/pushed frame, which is never mandatory, and "discard draw 0"
+    // isn't even how you'd give it up (Decline is). Only validateMove("")
+    // (the empty string) had the correct, Decline-aware wording before
+    // this fix - the bare-but-non-empty resume string ("use 00" alone,
+    // e.g. what "Use Card X" itself builds) did not.
+    it("validating a bare resume (no steps typed yet) names Decline, not the #49 root-only 'discard draw 0' wording", () => {
+        const g = setupFool();
+        pluckCard(g, major(1).uid); // Magician
+        g.drawPile.unshift(major(1).uid);
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+
+        const bare = g.validateMove(`use ${major(0).uid}`);
+        expect(bare.valid).to.be.true;
+        expect(bare.complete).to.eq(-1);
+        expect(bare.message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(1).name }));
+        expect(bare.message).to.not.eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+    });
+
+    // Regression: the SAME wrong message also showed up one click later -
+    // validateFrameStack's own "given segment is still incomplete, nothing
+    // more to check" fallback (shared by every use/play, resumed or not)
+    // reused POWER_STEP_REQUIRED unconditionally too. Reported live: after
+    // Fool reveals the Magician and Cups is picked (suit chosen, mode not
+    // yet), the message still said "must be used... discard draw 0"
+    // instead of naming Decline.
+    it("validating a still-incomplete resumed step (a real segment given, but not enough of one) also names Decline", () => {
+        const g = setupFool();
+        pluckCard(g, major(1).uid); // Magician
+        g.drawPile.unshift(major(1).uid);
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+
+        const suitChosen = g.validateMove(`use ${major(0).uid}, m0.1 C`); // suit picked, no mode yet
+        expect(suitChosen.valid).to.be.true;
+        expect(suitChosen.complete).to.eq(-1);
+        expect(suitChosen.message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(1).name }));
+        expect(suitChosen.message).to.not.eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
     });
 
     // Regression: declining a revealed card's own power exposes Fool's own

@@ -5833,7 +5833,7 @@
             "NO_TERRITORY_TRACKED": "There is no territory tracked at that location.",
             "ORIENT_ARGS_REQUIRED": "You must click a neighboring cell to change direction, or the same cell to point up.",
             "ORIENT_NO_OP": "This minion is already facing that way - reorienting it wouldn't change anything. Choose a different direction, or use another action instead.",
-            "PENDING_POWER_CHOICE": "You may now use {{card}}'s power - click Continue to keep resolving it, or Decline to end its effect early.",
+            "PENDING_POWER_CHOICE": "You may now use {{card}}'s power - choose a step below, or click Decline to give it up.",
             "PENDING_POWER_MISMATCH": "You must resume the same card's power you paused, using the same action you started with.",
             "PENDING_POWER_ONE_STEP": "You may only supply one power step per submission while resuming a paused activation.",
             "PICK_CARD_TO_ACTIVATE": "Click a cell on the board to activate that territory.",

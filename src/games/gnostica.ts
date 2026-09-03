@@ -565,6 +565,36 @@ export class GnosticaGame extends GameBaseSequenced {
     private liveMove: IParsedMove | undefined;
     private buffers: Direction[] = [];
     private discarded: string[] = [];
+    // Transient click-UI hint, not part of persisted game state. A REAL
+    // (non-partial) commit's own this.pendingPower is always genuine,
+    // whether it already existed or was just created (e.g. High Priestess
+    // round 1 -> round 2). But a card's own first step can ALSO
+    // force-pause during a merely PARTIAL preview of its own
+    // still-being-typed root activation (Fool's flip, say - see
+    // walkFrameStack's own docs), setting this.pendingPower as a side
+    // effect of the CURRENT click alone, with nothing genuinely committed
+    // - #49 makes that root step mandatory in the first place, so there's
+    // nothing to decline yet regardless. A partial call only counts as
+    // genuine when it's simply CONTINUING an obligation that already
+    // existed before it ran (e.g. building High Priestess's own discard
+    // list via repeated hand-card clicks). Reading this flag (rather than
+    // this.pendingPower directly) is how getActionButtons() tells those
+    // two apart.
+    private pendingPowerIsGenuine = false;
+    // How many of THIS move()'s own liveMove.stepSegments are already
+    // reflected in this.pendingPower.stack's current nextStepIndex/frame
+    // shape, set alongside every this.pendingPower assignment inside
+    // walkFrameStack. Every segment EXCEPT a still-incomplete final one
+    // (a mode chosen but no args yet, a suit chosen but no mode yet, etc -
+    // see walkFrameStack's own "declined so far" precheck) ends up fully
+    // reflected, so this is usually just liveMove.stepSegments.length -
+    // it's the one case where it's one less that this field exists for.
+    // computeActionButtons()'s own pendingMinor needs it to replay only
+    // the genuinely-unreflected TAIL of liveMove against pendingPower's
+    // stack, rather than either re-walking a segment the stack has
+    // already moved past (double-applying it) or discarding a
+    // still-open one entirely (losing whatever was already typed for it).
+    private pendingPowerConsumedSegments = 0;
 
     private targetScore(): number {
         if (this.variants.includes("target-8")) {
@@ -699,6 +729,13 @@ export class GnosticaGame extends GameBaseSequenced {
         this.turnOrder = [...state.turnOrder];
         this.frames = state.frames ? [...state.frames] : [];
         this.pendingPower = state.pendingPower;
+        // A freshly loaded state's own pendingPower (if any) is, by
+        // definition, from a genuine prior REAL commit - see
+        // pendingPowerIsGenuine's own docs.
+        this.pendingPowerIsGenuine = this.pendingPower !== undefined;
+        // No liveMove yet either (nothing's been clicked this turn) - see
+        // pendingPowerConsumedSegments's own docs.
+        this.pendingPowerConsumedSegments = 0;
         return this;
     }
 
@@ -931,6 +968,13 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
+        // A real (non-partial) commit's own resulting pendingPower is
+        // always genuine, whether it already existed or is being created
+        // fresh right now - only a MERELY PARTIAL call needs the "did it
+        // already exist BEFORE this call" check, captured here before
+        // anything below can mutate it - see pendingPowerIsGenuine's own
+        // docs.
+        this.pendingPowerIsGenuine = !partial || this.pendingPower !== undefined;
         m = m.trim();
         if (!trusted) {
             const result = this.validateMove(m);
@@ -1240,6 +1284,25 @@ export class GnosticaGame extends GameBaseSequenced {
         const stepsPart = p.stepSegments.map(s => s.join(" ")).join("/");
         const base = stepsPart.length === 0 ? headPart : `${headPart}, ${stepsPart}`;
         return p.announceLast ? (base.length === 0 ? "(last)" : `${base} (last)`) : base;
+    }
+
+    // Builds the move string computeActionButtons()'s own pendingMinor
+    // seeding replays against this.pendingPower.stack - see
+    // pendingPowerConsumedSegments's own docs on why it's the bare root
+    // string PLUS whatever tail of this.liveMove's segments the stack
+    // doesn't already reflect, rather than either the bare root alone or
+    // the whole of liveMove.
+    private pendingPowerSeedMoveString(): string {
+        const pending = this.pendingPower!;
+        const base = `${pending.source} ${pending.rootCardUid}`;
+        if (this.liveMove === undefined || this.liveMove.head !== pending.source || this.liveMove.rest[0] !== pending.rootCardUid) {
+            return base;
+        }
+        const unreflected = this.liveMove.stepSegments.slice(this.pendingPowerConsumedSegments);
+        if (unreflected.length === 0) {
+            return base;
+        }
+        return `${base}, ${unreflected.map(s => s.join(" ")).join("/")}`;
     }
 
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
@@ -1642,7 +1705,76 @@ export class GnosticaGame extends GameBaseSequenced {
         return discardUids.length === 0 && drawIdx !== -1 && rest[drawIdx + 1] === "0";
     }
 
+    // Wraps computeActionButtons() (the real logic - see its own docs)
+    // to unconditionally fold a persisting "Decline X" into whatever bar
+    // it produces, whenever a genuine pendingPower obligation exists.
+    // Every such obligation's own card can always be declined outright,
+    // at ANY point while still building how to use it - not just via a
+    // one-time "Use Card X" screen before anything else is offered. This
+    // matters concretely: a player who commits to using a revealed
+    // card's power and then finds every one of its own buttons a dead
+    // end (e.g. Rods' own mode buttons, all struck through because
+    // every minion is upright) would otherwise have no way out at all.
     private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        const bar = this.computeActionButtons();
+        if (bar === undefined || this.pendingPower === undefined) {
+            return bar;
+        }
+        // A card's own first step can force-pause even during a PARTIAL
+        // preview of its own still-being-typed root activation (Fool's
+        // flip, say - see walkFrameStack's own docs), setting
+        // this.pendingPower as a side effect of THIS CLICK alone, not
+        // because anything was genuinely, already committed - #49 makes
+        // that root step mandatory in the first place, so there's
+        // nothing to decline yet regardless. pendingPowerIsGenuine is
+        // what actually distinguishes that from a real, pre-existing (or
+        // freshly, REALLY committed) obligation worth a persisting
+        // Decline button - see its own docs.
+        if (!this.pendingPowerIsGenuine) {
+            return bar;
+        }
+        if (bar.some(b => b.value === "decline_power")) {
+            // Fool's own step has nothing else to offer, so
+            // computeActionButtons() already returns its own explicit
+            // Use/Decline pair directly for it - nothing to add here.
+            return bar;
+        }
+        const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
+        const lastSeg = this.liveMove?.stepSegments[this.liveMove.stepSegments.length - 1];
+        const justDeclined = lastSeg !== undefined && lastSeg.length === 1 && lastSeg[0].toLowerCase() === "decline";
+        if (this.topStepIsFool(this.pendingPower.stack) && !justDeclined) {
+            // Fool's own flip is never optional (see walkFrameStack's own
+            // docs) - there's nothing to decline once a revealed card's
+            // own steps have simply run their course (via clicks) and
+            // exposed Fool's own mandatory next flip underneath. An
+            // explicit decline the player just typed is different
+            // (justDeclined, below) - that persisting button names
+            // whatever was ACTUALLY declined, not Fool's own step.
+            return bar;
+        }
+        // Fool's own remaining flip auto-continues past ANY decline that
+        // exposes it (see walkFrameStack's own docs) rather than sitting
+        // as its own separate choice - so if a decline just happened and
+        // Fool's own frame is what's active now, what still needs
+        // naming here is whatever was ACTUALLY just declined, not Fool
+        // itself. Fool always sends what it flips straight to the
+        // discard pile and nothing else touches it in between, so the
+        // pile's own last entry names it reliably.
+        const declinedUid = (justDeclined && activeTop.cardUid === "00")
+            ? (this.discardPile[this.discardPile.length - 1] ?? activeTop.cardUid)
+            : activeTop.cardUid;
+        const declineBtn: ButtonBarButton = { label: `Decline ${declinedUid}`, value: "decline_power" };
+        if (justDeclined) {
+            // Bold marks a button matching what this.liveMove ALREADY
+            // says (see highlightedButtonValues' own docs) - once the
+            // player has actually clicked this, it stays confirmed
+            // rather than reverting to an open choice.
+            declineBtn.attributes = [{ name: "font-weight", value: "bold" }];
+        }
+        return [...bar, declineBtn] as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    private computeActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         if (this.gameover) {
             return undefined;
         }
@@ -1657,51 +1789,16 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.phase === "redraw") {
             return [{ label: "Redraw", value: "redraw", attributes: [{ name: "font-weight", value: "bold" }] }];
         }
-        // A paused High Priestess activation obligates this seat before
-        // anything else is legal - offer only its own two options, same
-        // "only one thing possible right now" pattern as bidding/redraw
-        // above. Once "Continue" is clicked, the existing hand-card-click
-        // toggle (handleClickCore's own pendingForCard?.special ===
-        // "highPriestess" branch) builds the discard list unmodified,
-        // since it only ever parses the in-progress move string, not any
-        // pendingPower-aware state.
-        if (this.pendingPower !== undefined && this.liveMove === undefined) {
-            // Named after the ACTIVE (top-of-stack) card's own uid, not
-            // rootCardUid - rootCardUid never changes even once a pushed
-            // frame's own card becomes the active one (Fool revealing the
-            // High Priestess, say), so naming the button after it would
-            // name the wrong card. The uid (not the full name) keeps the
-            // label short; the status message (PENDING_POWER_CHOICE)
-            // already spells out the full name for anyone who needs it.
-            const activeUid = this.pendingPower.stack[this.pendingPower.stack.length - 1].cardUid;
-            //
-            // Neither option is bold here - bold marks a button matching
-            // what this.liveMove ALREADY says (see highlightedButtonValues'
-            // own docs), and at this point nothing has been chosen yet;
-            // Use and Decline are both genuinely open choices, not one
-            // recommended over the other.
-            return [
-                { label: `Use Card ${activeUid}`, value: "resume_power" },
-                // "Decline" alone (no "Card") - unlike "Use", which could
-                // in principle mean using the card's minion presence or
-                // other actions elsewhere in the game, a decline is only
-                // ever offered for a card's own power, so naming it is
-                // enough without the extra word.
-                { label: `Decline ${activeUid}`, value: "decline_power" },
-            ];
-        }
-        // A live preview of "use"/"play" can only ever have STARTED
-        // with the acting player already having board presence - both
-        // throw via move()'s own top-level hasPiecesOnBoard gate otherwise
-        // - so a piece count
-        // of zero mid-preview (e.g. a Sword attack that ends up destroying
-        // the acting player's own last minion) is a legitimate side effect
-        // of the very same in-progress move, not a sign a fresh placement
-        // turn is needed. Without this, hasPiecesOnBoard() below would
-        // misread that transient state and collapse the bar down to
-        // "Place" mid-preview, even though the in-progress move is still
-        // perfectly valid and submittable as-is.
-        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play";
+        // A live preview of "use"/"play" - or a genuine pendingPower
+        // obligation, which always implies the acting player already had
+        // board presence when the obligation was created - can never
+        // legitimately collapse down to "Place" mid-preview. Without
+        // this, hasPiecesOnBoard() below could misread a transient
+        // zero-piece moment (e.g. a Sword attack that ends up destroying
+        // the acting player's own last minion) as a sign a fresh
+        // placement turn is needed, even though the in-progress move (or
+        // pending obligation) is still perfectly valid and submittable.
+        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play" || this.pendingPower !== undefined;
         if ((!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement()) {
             // Only one action is legal here regardless of which case this
             // is - place is a full turn on its own with zero real board
@@ -1753,26 +1850,31 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         // this.liveMove was populated by THIS SAME instance's own preceding
-        // move(..., {partial: true}) call (see move()'s own docs) - once
-        // pendingPower is set, that call has ALREADY consumed every
-        // segment liveMove carries (a real forcePause can only fire from
-        // inside a real apply, never a hypothetical replay), so
-        // parsePendingStep must be seeded from pendingPower.stack's
-        // CURRENT top directly - re-parsing liveMove's own stepSegments on
-        // top of that would double-apply the very segment that just
+        // move(..., {partial: true}) call (see move()'s own docs). Most of
+        // ITS OWN segments are already fully reflected in
+        // pendingPower.stack's current nextStepIndex/frame shape by now -
+        // re-walking those from scratch would double-apply whatever just
         // forced the pause (e.g. Fool's "fool" token misread as a stray
-        // leading token of whatever got pushed). Every OTHER
-        // parsePendingStep call site in this file passes an externally
-        // built, not-yet-applied move string against a COLD this (either
-        // handleClickCore's own hypothetical in-progress string, checked
-        // before any move() call ever runs, or a fresh GameFactory reload
-        // in the real client - see boardClick()'s own per-click
-        // reconstruction) - only this one, direct pendingMinor read is
-        // special.
-        const pendingMinor = this.liveMove === undefined
-            ? undefined
-            : this.pendingPower !== undefined
-                ? this.parsePendingStep(`${this.pendingPower.source} ${this.pendingPower.rootCardUid}`)
+        // leading token of whatever got pushed) - EXCEPT a still-open
+        // final segment (a suit chosen but no mode yet, say), which
+        // pendingPower.stack deliberately does NOT reflect (see
+        // walkFrameStack's own "declined so far" precheck) and so must
+        // still be replayed for the bar to show anything past it.
+        // pendingPowerConsumedSegments (also set by walkFrameStack) is how
+        // many of liveMove's segments fall in the first, already-reflected
+        // group - pendingPowerSeedMoveString() below replays only the
+        // rest, on top of pendingPower's own current stack. Seeded this
+        // way REGARDLESS of whether anything's been clicked yet this turn
+        // (liveMove may still be undefined, consumedSegments then moot) -
+        // so a revealed/targeted card's own real buttons (mode buttons,
+        // High Priestess's own count picker, etc.) can be offered
+        // immediately, without a separate "Use Card X" click first (see
+        // getActionButtons()'s own docs on how a persisting Decline
+        // button composes with whatever this produces).
+        const pendingMinor = this.pendingPower !== undefined
+            ? this.parsePendingStep(this.pendingPowerSeedMoveString())
+            : this.liveMove === undefined
+                ? undefined
                 : this.parsePendingStep(this.pickleMove(this.liveMove));
         if (pendingMinor === undefined) {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
@@ -1789,37 +1891,25 @@ export class GnosticaGame extends GameBaseSequenced {
         const selected = topLevel.find(b => b.value === pendingMinor.head);
         const declareBtn = topLevel.find(b => b.value === "declare");
 
-        // Fool's own step is never itself clickable - flipping is
-        // automatic on a real commit, whether this is the mandatory root
-        // activation, a resume already opted into via Continue, or
-        // exposed by declining what an earlier flip revealed (see
-        // walkFrameStack's own docs). The one case that still needs its
-        // OWN button here is that last one: the decline the player just
-        // made is a genuine, already-final choice about a REAL drawn
-        // card, and should keep showing (bolded) exactly like the
-        // top-level "Use"/"Play" choice persists, rather than collapsing
-        // to the plain top-level bar as if nothing had been decided. The
-        // declined card's own uid isn't recoverable from
-        // this.pendingPower.stack any more (the preceding partial apply
-        // already popped it for real), but Fool always sends what it
-        // flips straight to the discard pile and nothing else touches it
-        // between the flip and this decline, so the pile's own last
-        // entry is it.
+        // Fool's own step has nothing to configure at all - no target,
+        // no mode - so there's nothing for a real button bar to offer
+        // for it. Before anything's been clicked this turn, that means
+        // the ORIGINAL explicit Use/Decline pair (mirroring
+        // FOOL_FLIP1_READY's own "just submit" messaging) is the only
+        // sensible thing to show. Once something HAS been clicked
+        // (liveMove set) and Fool's own step is STILL what's active,
+        // that can only mean an earlier click declined whatever a flip
+        // revealed and Fool auto-continued past it (see walkFrameStack's
+        // own docs) - nothing more to show beyond the plain top-level
+        // context; getActionButtons()'s own persisting-Decline wrapper
+        // is what actually keeps a real choice visible there.
         if (pendingMinor.special === "fool") {
-            const lastTypedSegment = this.liveMove?.stepSegments[this.liveMove.stepSegments.length - 1];
-            const reachedViaDecline = lastTypedSegment !== undefined
-                && lastTypedSegment.length === 1 && lastTypedSegment[0].toLowerCase() === "decline";
-            const declinedUid = reachedViaDecline ? this.discardPile[this.discardPile.length - 1] : undefined;
-            if (declinedUid !== undefined) {
-                const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-                buttons.push({
-                    label: `Decline ${declinedUid}`, value: "decline_power",
-                    attributes: [{ name: "font-weight", value: "bold" }],
-                });
-                if (declareBtn !== undefined) {
-                    buttons.push(declareBtn);
-                }
-                return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+            if (this.liveMove === undefined) {
+                const activeUid = this.pendingPower!.stack[this.pendingPower!.stack.length - 1].cardUid;
+                return [
+                    { label: `Use Card ${activeUid}`, value: "resume_power" },
+                    { label: `Decline ${activeUid}`, value: "decline_power" },
+                ];
             }
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
@@ -3074,6 +3164,21 @@ export class GnosticaGame extends GameBaseSequenced {
             // tree - see handleBiddingClick's own docs.
             if (this.phase !== "main") {
                 return this.handleBiddingClick(move, piece);
+            }
+            // A genuine pending obligation's own real buttons/click targets
+            // (mode_, magician_, hermit_, minion_, board/hand-card clicks)
+            // now show up directly - see getActionButtons()'s own docs on
+            // why "Use Card X" is skipped whenever possible - so `move`
+            // (movebox.value, from the caller) may still be whatever was
+            // left over from BEFORE this obligation existed (typically "",
+            // untouched since the last real commit). Every helper below
+            // that parses `move` for its own head/rootCardUid needs the
+            // obligation's own seed regardless of whether anything's been
+            // clicked yet this turn - mirrors resume_power's own identical,
+            // one-off seeding further down, just applied uniformly here so
+            // every OTHER handler doesn't have to duplicate it.
+            if (this.pendingPower !== undefined && this.pendingPowerIsGenuine && this.parseMove(move).head === undefined) {
+                move = `${this.pendingPower.source} ${this.pendingPower.rootCardUid}`;
             }
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
@@ -4679,6 +4784,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // is the least misleading approximation available
                     // without actually knowing what a real flip reveals.
                     this.pendingPower = { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
+                    this.pendingPowerConsumedSegments = i;
                     return;
                 }
                 tokens = ["fool"];
@@ -4699,6 +4805,31 @@ export class GnosticaGame extends GameBaseSequenced {
                     GnosticaGame.popExhaustedFrames(this, stack);
                     continue; // no result to group/snapshot for a pure decline
                 }
+            }
+            // A still-being-typed segment (minion earmarked but no mode
+            // yet, mode chosen but args incomplete, magicianChoice's suit
+            // without a mode yet, etc.) must pause here WITHOUT advancing
+            // nextStepIndex - applyPowerStep's own "declined so far"
+            // tolerance returns undefined for both this case AND a step
+            // that's genuinely done but has no outcome fields to report
+            // (judgementDraw, say), so that return value alone can't tell
+            // the two apart. validatePowerStep's `complete` flag can
+            // (mirrors validateFrameStack's own identical check) - checked
+            // read-only here, on the CURRENT real state, before applying
+            // anything for this segment.
+            const preCheck = this.validatePowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length);
+            if (preCheck.failed) {
+                throw new UserFacingError("VALIDATION_GENERAL", preCheck.result.message);
+            }
+            if (preCheck.complete === false) {
+                this.pendingPower = { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
+                // `i` was already advanced past THIS segment above (the
+                // cursor's own bookkeeping, needed regardless of outcome),
+                // but the segment itself never actually got applied - so
+                // it's excluded here, unlike every other pendingPower
+                // assignment in this function.
+                this.pendingPowerConsumedSegments = i - 1;
+                return;
             }
             // Snapshot BEFORE every step except the first processed one
             // this call - equivalent to the old "after every step except
@@ -4735,9 +4866,11 @@ export class GnosticaGame extends GameBaseSequenced {
             GnosticaGame.popExhaustedFrames(this, stack);
             if (outcome?.forcePause === true) {
                 this.pendingPower = stack.length > 0 ? { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] } : undefined;
+                this.pendingPowerConsumedSegments = i;
                 return;
             }
         }
+        this.pendingPowerConsumedSegments = i;
         // Segments exhausted (or stack empty) with no forced pause: implicitly
         // decline whatever's left of the CURRENT (top) frame. Fool's own step
         // never reaches here - see this method's own docs.
@@ -4863,7 +4996,29 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (stepResult.complete === false) {
                 if (i >= stepSegments.length) {
-                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+                    // this.pendingPower (the REAL, persisted field - never
+                    // touched by any validate*() method, so it still
+                    // reflects whatever it was before this whole
+                    // validateMove() call started) is exactly
+                    // pendingPowerIsGenuine's own "was there already a
+                    // real, resumable obligation" signal, checked here
+                    // read-only: set means this walk was entered via
+                    // validateResumePendingPower (a genuine cross-turn
+                    // resume - Fool's reveal, World's target, HP round 2 -
+                    // where a persisting Decline button really is offered,
+                    // so #49's ROOT-only "must be used... discard draw 0"
+                    // wording is wrong regardless of which frame is
+                    // active); undefined means a fresh validateMajorPower
+                    // activation, where #49's wording still applies even
+                    // once it pushes into a nominally-optional later frame
+                    // (e.g. World->Lovers typed as one hand-typed chain) -
+                    // matching move()'s own pendingPowerIsGenuine, which
+                    // likewise never treats a same-call chain as genuine.
+                    if (this.pendingPower === undefined) {
+                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+                    }
+                    const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
+                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
                 }
                 // An earlier segment being incomplete means a later one
                 // couldn't legitimately exist - defensive, shouldn't fire.
@@ -4926,8 +5081,19 @@ export class GnosticaGame extends GameBaseSequenced {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
             // everywhere else for an in-progress chain. Fool's own step is
-            // exempt - see topStepIsFool's own docs.
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+            // exempt - see topStepIsFool's own docs. POWER_STEP_REQUIRED
+            // (used at every OTHER 0-segment site in this file) is wrong
+            // here specifically - it's worded for the #49 ROOT-only rule
+            // ("must be used, at least in part... or discard draw 0"),
+            // but a RESUMED/pushed frame is never mandatory (see
+            // validateMajorPower's own docs) and "discard draw 0" isn't
+            // even how you'd give it up - Decline is. PENDING_POWER_CHOICE
+            // is the correctly-worded, Decline-aware message already used
+            // for this exact situation by validateMove("")'s own status
+            // line right after a real commit.
+            const activeTop = stack[stack.length - 1];
+            const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
         }
         return this.validateFrameStack(stack, stepSegments);
     }

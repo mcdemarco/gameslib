@@ -36,3 +36,5 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #67 - "Use Territory"/"Play Card" buttons could show the active card's slug too, not just which action started the move
 - #68 - The corner case of no bid resolution (all players lose, if possible)
 - #69 - Edit messages.
+- #70 - Improve Fool move strings
+- #71 - Address Fool corner cases: nothing to draw, no second card to draw, declaring mid-stride, etc.
