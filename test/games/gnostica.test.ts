@@ -4968,4 +4968,65 @@ describe("Gnostica: Fool and World", () => {
         expect(g.discardPile).to.not.include("20");
         expect(g.currplayer).eq(2);
     });
+
+    // Regression: drawing/using a power is a UX convenience (#49), never a
+    // rules requirement, and it never applies to a card Fool reveals -
+    // Judgement's own draw has always been optional (0 cards is legal).
+    // The player is also never responsible for foreseeing that a legal
+    // choice will starve Fool's OWN mandatory next flip - drawing the
+    // discard pile's only card (even Judgement itself) back into hand is
+    // still just Judgement's own ordinary power, fully legal, and Fool's
+    // subsequent flip finding nothing simply completes the whole Fool
+    // activation there, gracefully - not an error, and not something
+    // validation should reject in advance either.
+    it("Judgement draws the discard pile's only card (itself) back, leaving nothing for Fool's mandatory second flip - completes gracefully", () => {
+        const g = setupFool();
+        const judgementUid = major(20).uid;
+        g.drawPile = [];
+        g.discardPile = [judgementUid]; // the only card anywhere in the game
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", judgementUid]);
+        g.hands[0].pop(); // make room for Judgement's own draw
+
+        const move = `use ${major(0).uid}, m0.1 ${judgementUid}`;
+        const validated = g.validateMove(move);
+        expect(validated.valid).to.be.true;
+        expect(validated.complete).to.eq(1); // a fully complete, submittable move - not rejected in advance
+
+        g.move(move, { trusted: true });
+        expect(g.hands[0]).to.include(judgementUid); // Judgement drew itself back
+        expect(g.discardPile).to.be.empty;
+        expect(g.drawPile).to.be.empty;
+        expect(g.pendingPower).to.be.undefined; // Fool's own second flip found nothing and completed - no error, no pause
+        expect(g.currplayer).eq(2); // the turn actually ended
+    });
+
+    // The two cases that stay hard rejections: activating Fool with
+    // NOTHING anywhere to flip, before any commitment has been made at
+    // all. "use" is simply a no-op the player should pass instead of
+    // (a UX nudge, not a rules requirement - #49's own root-only scope).
+    // "play" is the one genuinely irreversible case: playing Fool
+    // discards its own physical card FIRST, which would let the very
+    // next flip succeed by finding nothing but Fool itself, forever -
+    // an unbounded self-reveal loop the player has no way out of, so
+    // it stays blocked rather than "gracefully" handed to them.
+    it("use/play 00 with nothing anywhere to flip yet are still rejected outright, not gracefully completed", () => {
+        const use = setupFool();
+        use.drawPile = [];
+        use.discardPile = [];
+        const useValidated = use.validateMove(`use ${major(0).uid}`);
+        expect(useValidated.valid).to.be.false;
+        expect(useValidated.message).to.eq(i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY"));
+
+        const play = new GnosticaGame(2);
+        clearBoard(play);
+        forceCardAt(play, 0, 0, () => major(3)); // any other major, so Fool stays in hand
+        play.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        play.hands[0].push(major(0).uid);
+        play.drawPile = [];
+        play.discardPile = [];
+        const playValidated = play.validateMove(`play ${major(0).uid}`);
+        expect(playValidated.valid).to.be.false;
+        expect(playValidated.message).to.eq(i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY"));
+    });
 });

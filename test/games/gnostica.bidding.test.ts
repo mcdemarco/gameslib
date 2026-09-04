@@ -104,18 +104,30 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.biddingPool.length).eq(9);
     });
 
-    it("exhaustion fallback: an unresolvable tie keeps the tied players in their existing (lowest-player-number-first) order", () => {
+    // #68: the rules text assumes "repeated until one player wins the bid"
+    // always eventually converges, and doesn't cover the case where hands
+    // run dry first. The engine's resolution: nobody has managed to
+    // outbid anybody, so the game simply ends with no winner at all -
+    // gameover with an empty winner array, exactly like any other
+    // win/loss condition (see checkEOG()'s own docs) - rather than
+    // falling back to some arbitrary deterministic turn order and letting
+    // play continue as if a real winner had been chosen.
+    it("exhaustion: an unresolvable tie ends the game with no winner, rather than picking one arbitrarily", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         // Single-card hands that immediately tie and can't be re-bid.
         g.hands[0] = [minor("KS").uid];
         g.hands[1] = [minor("KR").uid];
         g.move("bid 1", { trusted: true });
         g.move("bid 1", { trusted: true });
-        expect(g.phase).eq("redraw");
-        expect(g.bidWinner).eq(1); // lowest-numbered tied player, not random
+        expect(g.phase).eq("bidding"); // never reaches redraw - there's no winner to hand off to
+        expect(g.gameover).eq(true);
+        expect(g.winner).to.deep.equal([]);
         expect(g.hands[0]).to.be.empty;
         expect(g.hands[1]).to.be.empty;
         expect(g.biddingPool).to.have.members([minor("KS").uid, minor("KR").uid]);
+        expect(g.results.some(r => r.type === "eog")).eq(true);
+        const winnersResult = g.results.find(r => r.type === "winners") as { type: "winners"; players: number[] } | undefined;
+        expect(winnersResult?.players).to.deep.equal([]);
     });
 
     it("exhaustion fires exactly when hands would run out, even after several genuinely tied rounds - never attempts a round with empty hands", () => {
@@ -133,18 +145,19 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.bidRound).eq(1);
         expect(g.hands[0].length).eq(1);
         expect(g.hands[1].length).eq(1);
+        expect(g.gameover).eq(false);
 
         g.move("bid 1", { trusted: true }); // P1: Ace of Cups
         g.move("bid 1", { trusted: true }); // P2: Ace of Rods - ties again, and now both hands are empty
-        expect(g.phase).eq("redraw"); // exhaustion fallback fired on round 2, not a stalled round 3
+        expect(g.gameover).eq(true); // exhaustion fired on round 2, not a stalled round 3
+        expect(g.winner).to.deep.equal([]);
         expect(g.bidRound).eq(2);
-        expect(g.bidWinner).eq(1); // lowest-numbered tied player, not random
         expect(g.hands[0]).to.be.empty;
         expect(g.hands[1]).to.be.empty;
         expect(g.biddingPool).to.have.members([minor("KS").uid, minor("KR").uid, minor("AC").uid, minor("AR").uid]);
     });
 
-    it("exhaustion fallback: with only a subset of players tied, still picks the lowest-numbered player among just that subset", () => {
+    it("exhaustion: still ends the game with no winner even when only a subset of players are tied", () => {
         const g = new GnosticaGame(3, ["bidding"]);
         // P2 and P3 tie both rounds (Kings, then Queens); P1 bids the
         // lowest possible card (an Ace) both times so they never
@@ -160,8 +173,13 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1", { trusted: true }); // P1: Ace of Discs
         g.move("bid 1", { trusted: true }); // P2: Queen of Swords
         g.move("bid 1", { trusted: true }); // P3: Queen of Rods - P2/P3 tie again, hands now empty
-        expect(g.phase).eq("redraw");
-        expect(g.bidWinner).eq(2); // lowest-numbered of the tied {2, 3}, not player 1
+        expect(g.gameover).eq(true);
+        // Every player loses here, even P1 (who was never even part of
+        // the tie) - a subset tying forever is just as unresolvable as
+        // everyone tying, since the rules only ever break a tie by
+        // finding a unique highest bidder among however many players are
+        // still in it.
+        expect(g.winner).to.deep.equal([]);
     });
 
     it("computes turnOrder as tournament rules require - the rank order of the last cards bid - and redrawOrder as its exact reverse", () => {

@@ -3910,20 +3910,19 @@ export class GnosticaGame extends GameBaseSequenced {
         // Tied - "set aside the bidding cards and then every player must
         // bid again, repeated until one player wins the bid." Every
         // player re-bids, not just the tied ones. This can only fail to
-        // converge if someone's hand is now empty (nothing left to bid);
-        // the rules don't cover that case. The engine-level fallback:
-        // keep the tied players in the order they were already in -
-        // `winners` is built by scanning players 1..numplayers in order
-        // (see the loop above), so its first entry is simply the
-        // lowest-numbered tied player, taken deterministically rather
-        // than broken at random - setTurnOrder()'s own player-id tiebreak
-        // agrees, so turnOrder[0] still matches winners[0] here too.
-        // bidRound's own getter already reflects this round's tie -
-        // biddingPool just grew by numplayers above, no separate
-        // increment needed.
+        // converge if someone's hand is now empty (nothing left to bid) -
+        // the rules don't cover that case explicitly, but the intended
+        // resolution is that nobody wins: every player has failed to
+        // outbid the others, so the game simply ends with no winner
+        // (#68). "bid" moves skip move()'s own generic nextPlayer()/
+        // checkEOG() tail (see its own docs on why), so checkEOG() is
+        // called directly here - the only place that happens for this
+        // path - to push the standard {type:"eog"}/{type:"winners"}
+        // results the same way every other win/loss condition does.
         if (this.hands.some(h => h.length === 0)) {
-            setTurnOrder();
-            this.beginRedraw();
+            this.gameover = true;
+            this.winner = [];
+            this.checkEOG();
             return;
         }
         this.currplayer = 1;
@@ -4707,6 +4706,22 @@ export class GnosticaGame extends GameBaseSequenced {
             const frameDef = this.resolveFrameDef(top.cardUid);
             const step = frameDef.powers[top.nextStepIndex];
             const isFoolStep = "special" in step && step.special === "fool";
+            // True only for the ROOT Fool card's own very first flip
+            // attempt - never yet touched, and still the card the player
+            // actually typed use/play against (not something IT pushed
+            // into, and not a later flip of the SAME frame). checkFool
+            // failing here is the one case that stays a hard rejection
+            // (see applyPowerStep's own docs on why) - everywhere else
+            // (Fool's own second flip; Fool/World reached via a push;
+            // a nested Fool-reveals-Fool) it's graceful instead, since the
+            // player had no way to have avoided it by the time they're
+            // here. `stack.length===1` alone isn't enough - World's own
+            // 1-step frame pops immediately after pushing Fool, leaving a
+            // length-1 stack that LOOKS like a fresh root Fool activation
+            // structurally - rootCardUid (fixed for the whole activation,
+            // even as frames get pushed for OTHER cards) is what actually
+            // tells the two apart.
+            const isFreshRootFool = isFoolStep && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
             let tokens: string[];
             if (isFoolStep) {
                 const next = stepSegments[i];
@@ -4770,7 +4785,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 });
             }
             const resultsBefore = this.results.length;
-            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial);
+            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial, isFreshRootFool);
             if (outcome === undefined) {
                 // A still-being-typed segment (minion earmarked but no
                 // mode yet, mode chosen but args incomplete, magicianChoice's
@@ -4893,7 +4908,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // an actual commit happens - unlike walkFrameStack, this loop has no
     // outer segment-count bound to lean on for that, since Fool consumes
     // none, so the stop has to be explicit here.
-    private validateFrameStack(stack: IPowerFrame[], stepSegments: string[][]): IValidationResult | undefined {
+    private validateFrameStack(stack: IPowerFrame[], stepSegments: string[][], rootCardUid: string): IValidationResult | undefined {
         let clone: GnosticaGame | undefined;
         let i = 0;
         for (;;) {
@@ -4908,6 +4923,10 @@ export class GnosticaGame extends GameBaseSequenced {
             const stepIndex = top.nextStepIndex;
             const step = frameDef.powers[stepIndex];
             const isFoolStep = "special" in step && step.special === "fool";
+            // Mirrors walkFrameStack's own identical computation - see its
+            // docs on why the ROOT's own untouched first flip is the one
+            // case that stays a hard rejection.
+            const isFreshRootFool = isFoolStep && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
             let tokens: string[];
             if (isFoolStep) {
                 const next = stepSegments[i];
@@ -4934,7 +4953,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     continue;
                 }
             }
-            const stepResult = (clone ?? this).validatePowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length);
+            const stepResult = (clone ?? this).validatePowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, isFreshRootFool);
             if (stepResult.failed) {
                 return stepResult.result;
             }
@@ -4990,7 +5009,7 @@ export class GnosticaGame extends GameBaseSequenced {
             GnosticaGame.popExhaustedFrames(this, stack);
             if (i < stepSegments.length || stack.length > 0) {
                 clone ??= this.cloneLive();
-                clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true);
+                clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true, isFreshRootFool);
             }
         }
     }
@@ -5010,7 +5029,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
-        return this.validateFrameStack(stack, stepSegments);
+        return this.validateFrameStack(stack, stepSegments, def.uid);
     }
 
     // Mirrors resumePendingPower's own dispatch, read-only - the `source`
@@ -5039,7 +5058,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
         }
-        return this.validateFrameStack(stack, stepSegments);
+        return this.validateFrameStack(stack, stepSegments, pending.rootCardUid);
     }
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as
@@ -5048,6 +5067,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // with no minion reference at all (it's pure hand/pile manipulation).
     private applyPowerStep(
         step: PowerStep, minions: IMinionRef[], tokens: string[], def: MajorArcanaDef, stepIndex: number, totalSteps: number, partial: boolean,
+        isFreshRootFool = false,
     ): IStepOutcome | undefined {
         if ("special" in step && step.special === "highPriestess") {
             this.applyHighPriestess(tokens, partial);
@@ -5074,6 +5094,40 @@ export class GnosticaGame extends GameBaseSequenced {
             // happens exactly once, on the actual non-partial commit.
             if (partial) {
                 return { forcePause: true };
+            }
+            const failure = checkFool(this.buildPowerContext());
+            if (failure) {
+                if (isFreshRootFool) {
+                    // The player directly chose to use/play the Fool
+                    // itself with nothing anywhere to flip - not a corner
+                    // case they need protecting from (there's always a
+                    // better alternative: pass instead of a no-op "use",
+                    // or don't play it at all - playing discards the
+                    // physical card first, which would otherwise flip it
+                    // right back into an unbounded self-reveal loop with
+                    // literally nothing else ever entering the mix). This
+                    // is the one case that stays a hard rejection -
+                    // validateResumePendingPower/validateMajorPower's own
+                    // lookahead already catches it before a real commit
+                    // for an untrusted caller; this throw only matters for
+                    // a trusted one that skipped that check.
+                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params));
+                }
+                // Anywhere else - Fool's own mandatory second flip, or a
+                // flip reached via a push (World's target, a nested
+                // Fool-reveals-Fool) - the player made a legal choice to
+                // get here (e.g. Judgement drawing the pile's only
+                // remaining card, itself, back into hand) and had no way
+                // to have avoided this by the time they submitted it.
+                // Finding nothing left to flip just means the Fool's use
+                // is complete, gracefully, right here - not an error, and
+                // not something to reject in advance either. Returning a
+                // plain (if empty) outcome rather than throwing lets
+                // walkFrameStack's own generic bookkeeping do the rest:
+                // nextStepIndex still advances, popExhaustedFrames still
+                // pops this frame (or the whole activation) once spent -
+                // no special-casing needed there at all.
+                return {};
             }
             const revealed = fool(this.buildPowerContext());
             this.pushStubResult({ type: "revealFlip", what: revealed.uid });
@@ -5153,6 +5207,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // comments below and applyPowerStep's own docs.
     private validatePowerStep(
         step: PowerStep, minions: IMinionRef[], tokens: string[], def: MajorArcanaDef, stepIndex: number, totalSteps: number,
+        isFreshRootFool = false,
     ): StepValidation {
         if ("special" in step && step.special === "highPriestess") {
             const failure = this.validateHighPriestess(tokens);
@@ -5167,7 +5222,21 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             const failure = checkFool(this.buildPowerContext());
             if (failure) {
-                return { failed: true, result: this.failureResult(failure) };
+                if (isFreshRootFool) {
+                    // See applyPowerStep's own docs on why this one case
+                    // - the ROOT Fool card's own untouched first flip -
+                    // stays a hard rejection.
+                    return { failed: true, result: this.failureResult(failure) };
+                }
+                // Anywhere else, gracefully complete instead - see
+                // applyPowerStep's own docs. No outcome fields at all
+                // (not even forcePause): there's nothing left to reveal,
+                // so nothing more can legally follow this segment either,
+                // but that falls out naturally from popExhaustedFrames
+                // once nextStepIndex advances - no need to also forbid
+                // further segments the way a genuine reveal's forcePause
+                // does.
+                return { failed: false };
             }
             // Can't know what gets pushed without actually flipping (that's
             // the whole point) - forcePause alone is enough to stop
