@@ -4463,6 +4463,20 @@ export class GnosticaGame extends GameBaseSequenced {
         if (card === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid }));
         }
+        // Playing the Fool discards its own physical card FIRST (below),
+        // which would otherwise let its own first flip trivially
+        // "succeed" by finding nothing to reveal but itself - checked
+        // here, on the REAL pre-play state, for every caller (not just an
+        // untrusted one - see validatePlay's own mirror for why this
+        // can't just rely on checkFool's own generic emptiness check
+        // further down the line, which by then would see the
+        // just-discarded Fool and wrongly consider the pile non-empty).
+        // If there's genuinely nothing else anywhere in the game, that's
+        // an unbounded self-reveal loop with no way out, not a
+        // legitimate use of the card.
+        if (uid === "00" && this.drawPile.length === 0 && this.discardPile.length === 0) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY"));
+        }
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         this.discarded.push(uid);
@@ -4472,10 +4486,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.applyCardPower(card, eligible, stepSegments, "play", partial);
     }
 
-    // Doesn't need to simulate cmdPlay's own hand mutation (removing the
-    // card before resolving its power) - eligibleMinionsForPlay() only
-    // reads board state, never hand contents, so the two are independent
-    // regardless of ordering.
     private validatePlay(args: string[], stepSegments: string[][]): IValidationResult | undefined {
         const [uid] = args;
         if (uid === undefined) {
@@ -4490,21 +4500,33 @@ export class GnosticaGame extends GameBaseSequenced {
         if (card === undefined) {
             return this.invalid("apgames:validation.gnostica.UNKNOWN_CARD", { uid });
         }
+        // Mirrors cmdPlay's own explicit guard - see its docs. Checked on
+        // the REAL, pre-play state, same as cmdPlay - the discard-push
+        // simulation just below would otherwise mask this by the time
+        // checkFool ever runs.
+        if (uid === "00" && this.drawPile.length === 0 && this.discardPile.length === 0) {
+            return this.invalid("apgames:validation.gnostica.DRAW_PILE_EMPTY");
+        }
         const eligible = this.eligibleMinionsForPlay();
-        // cmdPlay removes the card from hand BEFORE resolving its power
-        // (see its own docs) - a power that reads hand SIZE (High
-        // Priestess's own draw-count bound, or Judgement's pip-count cap)
-        // needs to see that same, already-reduced hand here too, or its
-        // own bounds would be off by one relative to what actually
-        // happens on commit (the eligible pool above is unaffected -
-        // eligibleMinionsForPlay only reads board state, never hand
-        // contents). Mirrors that removal for the DURATION of this
-        // validation call only, always restored via finally.
+        // cmdPlay removes the card from hand AND pushes it to discard
+        // BEFORE resolving its power (see its own docs) - a power that
+        // reads hand SIZE (High Priestess's own draw-count bound,
+        // Judgement's pip-count cap) or discard pile CONTENTS (Judgement
+        // drawing the very card that was just played, itself included -
+        // see the regression test this fixes) needs to see that same,
+        // already-updated state here too, or it would validate against a
+        // precondition that no longer holds by the time a real commit
+        // runs (the eligible pool above is unaffected - eligibleMinionsForPlay
+        // only reads board state, never hand/discard contents). Mirrors
+        // both for the DURATION of this validation call only, always
+        // restored via finally.
         hand.splice(handIdx, 1);
+        this.discardPile.push(uid);
         try {
             return this.validateCardPower(card, eligible, stepSegments);
         } finally {
             hand.splice(handIdx, 0, uid);
+            this.discardPile.pop();
         }
     }
 

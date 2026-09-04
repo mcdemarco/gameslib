@@ -4969,6 +4969,32 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
     });
 
+    // Regression: validatePlay used to simulate cmdPlay's own hand
+    // removal but NOT its discard-pile push, so a power that reads
+    // discard pile CONTENTS (not just count) - Judgement drawing the
+    // very card that was just played, itself included - validated
+    // against a discard pile one card short of what a real commit would
+    // actually see, wrongly rejecting this exact legal move with
+    // NOT_IN_DISCARD for any ORDINARY (untrusted) player, even though the
+    // {trusted: true} version directly above has always worked. Fixed by
+    // having validatePlay simulate the discard push too.
+    it("regression: playing Judgement and drawing itself back also validates correctly for an ordinary (untrusted) player", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        pluckCard(g, "20");
+        g.hands[0] = g.hands[0].slice(0, 5);
+        g.hands[0].push("20");
+        g.discardPile.push("21");
+
+        const move = "play 20, m0.1 20";
+        const validated = g.validateMove(move);
+        expect(validated.valid).to.be.true;
+        expect(() => g.move(move)).to.not.throw(); // untrusted - the real client path
+        expect(g.hands[0]).to.include("20");
+        expect(g.currplayer).eq(2);
+    });
+
     // Regression: drawing/using a power is a UX convenience (#49), never a
     // rules requirement, and it never applies to a card Fool reveals -
     // Judgement's own draw has always been optional (0 cards is legal).
@@ -5028,5 +5054,17 @@ describe("Gnostica: Fool and World", () => {
         const playValidated = play.validateMove(`play ${major(0).uid}`);
         expect(playValidated.valid).to.be.false;
         expect(playValidated.message).to.eq(i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY"));
+
+        // Regression: cmdPlay's own real discard-push happens BEFORE
+        // applyPowerStep's fool branch ever runs, so checkFool alone
+        // would see the just-played Fool card and wrongly allow the
+        // flip (setting up the exact infinite self-reveal loop this test
+        // exists to prevent) for a caller that skips validateMove -
+        // {trusted: true} included. cmdPlay needs its OWN explicit guard,
+        // checked before it ever discards the card - this confirms it
+        // fires even when validation is bypassed entirely.
+        expect(() => play.move(`play ${major(0).uid}`, { trusted: true })).to.throw();
+        expect(play.hands[0]).to.include(major(0).uid); // never actually played
+        expect(play.discardPile).to.be.empty;
     });
 });
