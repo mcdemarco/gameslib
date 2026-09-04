@@ -26,6 +26,17 @@ function msg(key: string): string {
     return i18next.t(`apgames:validation.acity.${key}`);
 }
 
+// Fill column d (x = 3) except d5, pinching the empty network into a left
+// half (cols a-c) and a right half (cols e-h) joined only at d5.
+function pinchedBoard(): ACityGame {
+    const g = new ACityGame();
+    setUniformStart(g);
+    for (const row of [10, 9, 8, 7, 6, 4, 3, 2, 1]) {
+        g.board.set(`d${row}`, "ND");
+    }
+    return g;
+}
+
 describe("Alien City", () => {
     before(() => {
         addResource("en");
@@ -103,17 +114,6 @@ describe("Alien City", () => {
     });
 
     describe("road connectivity rules", () => {
-        // Fill column d (x = 3) except d5, pinching the empty network into a
-        // left half (cols a-c) and a right half (cols e-h) joined only at d5.
-        function pinchedBoard(): ACityGame {
-            const g = new ACityGame();
-            setUniformStart(g);
-            for (const row of [10, 9, 8, 7, 6, 4, 3, 2, 1]) {
-                g.board.set(`d${row}`, "ND");
-            }
-            return g;
-        }
-
         it("isConnected() is true while the pinch point is still open", () => {
             expect(pinchedBoard().isConnected()).to.be.true;
         });
@@ -309,6 +309,41 @@ describe("Alien City", () => {
         });
     });
 
+    // These exercise real move()/load() calls rather than direct board.set(),
+    // since ROAD/ISOLATED detection is cached per board state: any mutation
+    // path that doesn't invalidate the cache would leave it stale.
+    describe("road-check cache invalidation", () => {
+        it("stays correct across a real move() sequence that pinches the road", () => {
+            const g = new ACityGame();
+            setUniformStart(g, "N");
+            const rows = [10, 9, 8, 7, 6, 4, 3, 2, 1]; // skip d5, the pinch point
+            const domeTypes = ["ND", "RD", "BD", "GD"];
+            rows.forEach((row, i) => {
+                g.move(`${domeTypes[i % domeTypes.length]}-d${row}`);
+            });
+            const r = g.validateMove("ND-d5");
+            expect(r.valid).to.be.false;
+            expect(r.message).to.equal(i18next.t("apgames:validation.acity.BROKEN_ROAD", { where: "d5" }));
+        });
+
+        it("recomputes correctly after load() jumps to an earlier, unpinched state", () => {
+            const g = new ACityGame();
+            setUniformStart(g, "N");
+            const rows = [10, 9, 8, 7, 6, 4, 3, 2, 1];
+            const domeTypes = ["ND", "RD", "BD", "GD"];
+            rows.forEach((row, i) => {
+                g.move(`${domeTypes[i % domeTypes.length]}-d${row}`);
+            });
+            // stack[5] = after placing d10,d9,d8,d7,d6 only: d4-d1 still open,
+            // so d5 is not yet a pinch point.
+            g.load(5);
+            expect(g.validateMove("ND-d5").valid).to.be.true;
+            // back to the fully-pinched state
+            g.load(-1);
+            expect(g.validateMove("ND-d5").valid).to.be.false;
+        });
+    });
+
     describe("end of game", () => {
         it("ends after two consecutive passes and ties on an empty board", () => {
             const g = new ACityGame();
@@ -409,6 +444,27 @@ describe("Alien City", () => {
             setUniformStart(g, "N");
             const rep = g.render();
             expect(rep.board).to.not.be.undefined;
+        });
+
+        it("plain render() draws no road markers", () => {
+            const rep = pinchedBoard().render();
+            const markers = (rep.board as { markers?: { type: string }[] }).markers ?? [];
+            expect(markers.some((m) => m.type === "line" || m.type === "dots")).to.be.false;
+        });
+
+        it("render({altDisplay:'roads'}) marks the pinch chain (c5-d5-e5)", () => {
+            const rep = pinchedBoard().render({ altDisplay: "roads" });
+            const markers = (rep.board as { markers?: { type: string, points: { col: number, row: number }[] }[] }).markers ?? [];
+            const lines = markers.filter((m) => m.type === "line");
+            const dots = markers.filter((m) => m.type === "dots");
+            // d5 (col 3, row 5) is the mid-chain cell: it breaks the road but
+            // has two illegal neighbours (c5, e5), so it gets connecting
+            // lines rather than its own dot.
+            expect(lines.some((m) => m.points.some((p) => p.col === 3 && p.row === 5))).to.be.true;
+            expect(dots.some((m) => m.points.some((p) => p.col === 3 && p.row === 5))).to.be.false;
+            // c5 (col 2) and e5 (col 4) are the terminal ends of the chain.
+            expect(dots.some((m) => m.points.some((p) => p.col === 2 && p.row === 5))).to.be.true;
+            expect(dots.some((m) => m.points.some((p) => p.col === 4 && p.row === 5))).to.be.true;
         });
 
         it("handleClick on a stash piece selects it", () => {

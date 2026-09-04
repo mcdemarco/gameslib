@@ -4181,6 +4181,12 @@
         }
     },
     "displays": {
+        "acity": {
+            "roads": {
+                "description": "Display the growing road network.",
+                "name": "Roads"
+            }
+        },
         "akron": {
             "orb-3d": {
                 "description": "Use plain 3D orb textures.",
@@ -4680,6 +4686,12 @@
             "isometric-5": {
                 "description": "Subtle elevation: A quasi-3d view of the field where the spaces get higher as you move away from the centre.",
                 "name": "Isometric: Subtle Elevation"
+            }
+        },
+        "acity": {
+            "roads": {
+                "name": "Roads",
+                "description": "Highlight lots where building would break the road network or strand a structure."
             }
         }
     },

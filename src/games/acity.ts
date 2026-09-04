@@ -1,7 +1,7 @@
 
-import {  GameBase, IAPGameState, IClickResult, IIndividualState, IScores, IValidationResult, IStashEntry, ICustomButton, type ChatLogCollectContext, type ChatLogLine } from "./_base.js";
+import {  GameBase, IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult, IStashEntry, ICustomButton, type ChatLogCollectContext, type ChatLogLine } from "./_base.js";
 import type { APGamesInformation } from "../schemas/gameinfo.js";
-import { APRenderRep, AreaPieces, BoardBasic, Colourfuncs, Glyph, MarkerGlyph, MarkerShading } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaPieces, BoardBasic, Colourfuncs, Glyph, MarkerDots, MarkerGlyph, MarkerLine, MarkerShading } from "@abstractplay/renderer/build/schemas/schema";
 import type { APMoveResult } from "../schemas/moveresults.js";
 import { reviver, UserFacingError, shuffle, cloneState } from "../common/index.js";
 import i18next from "i18next";
@@ -90,7 +90,8 @@ export class ACityGame extends GameBase {
             },
         ],
         categories: ["goal>score>eog", "mechanic>network", "mechanic>place", "mechanic>random>setup", "board>shape>rect", "board>connect>rect", "components>pyramids", "components>piecepack"],
-        flags: ["player-stashes", "scores", "no-moves", "custom-colours", "random-start", "custom-buttons", "custom-randomization"]
+        flags: ["player-stashes", "scores", "no-moves", "custom-colours", "random-start", "custom-buttons", "custom-randomization"],
+        displays: [{uid: "roads"}],
     };
 
     public static piece2string(pc: Piece): string {
@@ -138,6 +139,11 @@ export class ACityGame extends GameBase {
     public results: Array<APMoveResult> = [];
     public startpos!: [Color,MarkerPos][];
     public claimed!: [string[],string[]];
+    // Cache of ROAD/ISOLATED placement results for the current board state,
+    // shared across every candidate in moves(). Invalidated whenever the
+    // board changes (placePiece(), move(), load()).
+    private _roadBreakingCache: Set<string> | undefined;
+    private _isolatingCache: Set<string> | undefined;
 
     constructor(state?: IACityState | string) {
         super();
@@ -191,6 +197,8 @@ export class ACityGame extends GameBase {
         this.results = [...state._results];
         this.stashes = cloneState(state.stashes) as [Piece[],Piece[]];
         this.claimed = cloneState(state.claimed) as [string[],string[]];
+        this._roadBreakingCache = undefined;
+        this._isolatingCache = undefined;
         this.buildGraph();
         return this;
     }
@@ -531,6 +539,8 @@ export class ACityGame extends GameBase {
                 this.graph.graph.dropEdge(cell, n);
             }
         }
+        this._roadBreakingCache = undefined;
+        this._isolatingCache = undefined;
     }
 
     // To test for connectivity, you have to delete all the placed buildings
@@ -545,22 +555,93 @@ export class ACityGame extends GameBase {
         return cloned.graph.isConnected();
     }
 
+    // Cut vertices (articulation points) of the empty-cell graph: building on
+    // one of these would split the road network into disconnected pieces.
+    // Computed once per board state and reused by canPlace() and render().
+    private computeRoadBreakingCells(): Set<string> {
+        if (this._roadBreakingCache !== undefined) { return this._roadBreakingCache; }
+        const empties = (this.graph.listCells() as string[]).filter(c => ! this.board.has(c));
+        this._roadBreakingCache = this.findArticulationPoints(empties);
+        return this._roadBreakingCache;
+    }
+
+    // Cells where building would strand a piece (itself or an existing
+    // neighbour) with zero remaining empty neighbours. Also cached per board state.
+    private computeIsolatingCells(): Set<string> {
+        if (this._isolatingCache !== undefined) { return this._isolatingCache; }
+        const isolating = new Set<string>();
+        const empties = (this.graph.listCells() as string[]).filter(c => ! this.board.has(c));
+
+        // An empty cell with no empty neighbour would strand itself if built on.
+        for (const cell of empties) {
+            const emptyNbrs = this.graph.neighbours(cell).filter(n => ! this.board.has(n));
+            if (emptyNbrs.length === 0) { isolating.add(cell); }
+        }
+        // An occupied cell's only empty neighbour would strand that piece if built on.
+        for (const cell of this.board.keys()) {
+            const emptyNbrs = this.graph.neighbours(cell).filter(n => ! this.board.has(n));
+            if (emptyNbrs.length === 1) { isolating.add(emptyNbrs[0]); }
+        }
+        this._isolatingCache = isolating;
+        return isolating;
+    }
+
+    // Union of the two caches above: cells illegal to place on for structural
+    // (road/isolation) reasons. Used by render()'s road display.
+    private computeIllegalCells(): Set<string> {
+        return new Set([...this.computeRoadBreakingCells(), ...this.computeIsolatingCells()]);
+    }
+
+    // Standard Tarjan's articulation-point algorithm over the empty-cell
+    // adjacency graph. O(V+E). Shared by computeRoadBreakingCells above.
+    private findArticulationPoints(empties: string[]): Set<string> {
+        const adj = new Map<string, string[]>();
+        for (const c of empties) {
+            adj.set(c, this.graph.neighbours(c).filter(n => ! this.board.has(n)));
+        }
+        const visited = new Set<string>();
+        const disc = new Map<string, number>();
+        const low = new Map<string, number>();
+        const articulation = new Set<string>();
+        let timer = 0;
+
+        const dfs = (u: string, parent: string | null, isRoot: boolean) => {
+            visited.add(u);
+            disc.set(u, timer);
+            low.set(u, timer);
+            timer++;
+            let children = 0;
+            for (const v of adj.get(u)!) {
+                if (v === parent) { continue; }
+                if (! visited.has(v)) {
+                    children++;
+                    dfs(v, u, false);
+                    low.set(u, Math.min(low.get(u)!, low.get(v)!));
+                    if ( (! isRoot) && (low.get(v)! >= disc.get(u)!) ) {
+                        articulation.add(u);
+                    }
+                } else {
+                    low.set(u, Math.min(low.get(u)!, disc.get(v)!));
+                }
+            }
+            if (isRoot && children > 1) { articulation.add(u); }
+        };
+
+        for (const c of empties) {
+            if (! visited.has(c)) { dfs(c, null, true); }
+        }
+        return articulation;
+    }
+
     // RECURSION ALERT!
     // This function has to call itself to validate certain types of placement.
     private canPlace(piece: Piece, cell: string): PlacementResult {
-        // ROAD
-        let cloned = Object.assign(new ACityGame(), cloneState(this) as ACityGame);
-        cloned.buildGraph();
-        cloned.placePiece(piece, cell);
-        if (! cloned.isConnected()) {
+        // ROAD / ISOLATED: O(1) after the first call for this board state.
+        if (this.computeRoadBreakingCells().has(cell)) {
             return "ROAD";
         }
-
-        // ISOLATED
-        for (const c of cloned.board.keys()) {
-            if (cloned.graph.neighbours(c).length === 0) {
-                return "ISOLATED";
-            }
+        if (this.computeIsolatingCells().has(cell)) {
+            return "ISOLATED";
         }
 
         // DOMES
@@ -570,11 +651,11 @@ export class ACityGame extends GameBase {
         if (piece.endsWith("D")) {
             if (pcColor !== cellColor) {
                 // get list of empty cells of that colour
-                const cells = cloned.getEmptyGuild(pcColor);
+                const cells = this.getEmptyGuild(pcColor);
                 // check that every cell breaks the road
                 let broken = true;
                 for (const c of cells) {
-                    cloned = Object.assign(new ACityGame(), cloneState(this) as ACityGame);
+                    const cloned = Object.assign(new ACityGame(), cloneState(this) as ACityGame);
                     cloned.buildGraph();
                     cloned.placePiece(piece, c);
                     if (cloned.isConnected()) {
@@ -619,7 +700,7 @@ export class ACityGame extends GameBase {
             let otherOptions = false;
             for (const other of empties) {
                 for (const pc of allPieces) {
-                    cloned = Object.assign(new ACityGame(), cloneState(this) as ACityGame);
+                    const cloned = Object.assign(new ACityGame(), cloneState(this) as ACityGame);
                     cloned.buildGraph();
                     if (cloned.canPlace(pc as Piece, other) === "GOOD") {
                         otherOptions = true;
@@ -684,7 +765,7 @@ export class ACityGame extends GameBase {
                 if (this.board.has(to)) {
                     throw new Error(`The lot ${to} is already occupied!`);
                 }
-                this.board.set(to, piece as Piece);
+                this.placePiece(piece as Piece, to);
                 this.results.push({type: "place", where: to, what: ACityGame.piece2string(piece as Piece)});
                 // claim if given
                 if ( (claim !== undefined) && (claim !== null) && (claim.length > 0) ) {
@@ -797,7 +878,9 @@ export class ACityGame extends GameBase {
         }
     }
 
-    public render(): APRenderRep {
+    public render(opts?: IRenderOpts): APRenderRep {
+        const showRoads = opts?.altDisplay === "roads";
+
         // Build piece string
         let pieceRep: string[][][] | null = [];
         const cells = this.graph.listCells(true) as string[][];
@@ -825,7 +908,7 @@ export class ACityGame extends GameBase {
         }
 
         // Build rep
-        const markers: (MarkerShading|MarkerGlyph)[] = [];
+        const markers: (MarkerShading|MarkerGlyph|MarkerLine|MarkerDots)[] = [];
         // very lightly shade in tiles
         for (let i = 0; i < this.startpos.length; i++) {
             const tile = this.startpos[i];
@@ -878,6 +961,47 @@ export class ACityGame extends GameBase {
                 glyph: suit,
                 points: [{col: mx, row: my}]
             });
+        }
+
+        // Road display: highlight lots that are illegal to build on for
+        // structural (road/isolation) reasons. Only computed when the "roads"
+        // alt display is active, so normal play pays nothing for this.
+        if (showRoads) {
+            const illegal = this.computeIllegalCells();
+
+            // Lines between orthogonally adjacent illegal cells. Looking only
+            // "right" or "down" from each cell dedupes each edge to one line.
+            for (const cell of illegal) {
+                const [x, y] = this.graph.algebraic2coords(cell);
+                for (const n of this.graph.neighbours(cell)) {
+                    if (! illegal.has(n)) { continue; }
+                    const [nx, ny] = this.graph.algebraic2coords(n);
+                    if ( (nx < x) || ( (nx === x) && (ny < y) ) ) { continue; }
+                    markers.push({
+                        type: "line",
+                        points: [{col: x, row: y}, {col: nx, row: ny}],
+                        colour: "_context_strokes",
+                        centered: true,
+                    });
+                }
+            }
+
+            // Dots only at terminal cells (illegal cells with at most one
+            // illegal neighbour); intersections and mid-chain cells get none.
+            const terminalPoints = [...illegal]
+                .filter(cell => this.graph.neighbours(cell).filter(n => illegal.has(n)).length <= 1)
+                .map(cell => {
+                    const [x, y] = this.graph.algebraic2coords(cell);
+                    return {col: x, row: y};
+                });
+            if (terminalPoints.length > 0) {
+                markers.push({
+                    type: "dots",
+                    points: terminalPoints as [{col: number, row: number}, ...{col: number, row: number}[]],
+                    colour: "_context_strokes",
+                    size: 0.15,
+                });
+            }
         }
 
         const board: BoardBasic = {
