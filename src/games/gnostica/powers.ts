@@ -120,7 +120,7 @@ export const hasStashAvailable = (ctx: PowerContext, player: number, size: Pips)
 const getCellContents = (ctx: PowerContext, x: number, y: number): CellContents => {
     const t = ctx.board.get(x, y);
     if (t === undefined) {
-        throw new GnosticaRulesError("NO_TERRITORY_TRACKED", { x, y });
+        throw new GnosticaRulesError("NO_TERRITORY", { x, y });
     }
     return t;
 };
@@ -634,7 +634,7 @@ export const checkAttackPiece = (
         return { key: "TOO_FEW_PIPS", params: { size: victim.size, pips } };
     }
     if (resultSize > 0 && !opts.skipStashCheck && !hasStashAvailable(ctx, victim.owner, resultSize as Pips)) {
-        return { key: "VICTIM_STASH_EMPTY", params: { player: victim.owner, size: resultSize } };
+        return { key: "STASH_EMPTY", params: { player: victim.owner, size: resultSize } };
     }
     return undefined;
 };

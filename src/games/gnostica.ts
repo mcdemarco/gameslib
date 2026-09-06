@@ -4053,13 +4053,12 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validatePass(): IValidationResult | undefined {
-        // An eliminated player has nothing left to do but sit out the rest
-        // of the game - "pass" is unconditionally their only legal move,
-        // phase-independent (see move()'s own eliminatedPass exemption).
+        // An eliminated player must pass;
+        // other players may pass by a different mechanism.
         if (this.eliminated.includes(this.currplayer)) {
             return undefined;
         }
-        return this.invalid("apgames:validation.gnostica.NOTHING_TO_PASS");
+        return this.invalid("apgames:validation.gnostica.BAD_PASS");
     }
 
     // The "autopass" flag's own signal (see gameinfo's own flags): a real
