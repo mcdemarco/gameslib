@@ -39,3 +39,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #70 - Improve Fool move strings
 - #71 - Address Fool corner cases: declaring mid-stride, etc. (nothing to draw at all, and no card left partway through, are both handled now - the former rejects use/play outright, the latter gracefully completes the Fool's use.)
 - #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
+- #73 - Fix dark mode
