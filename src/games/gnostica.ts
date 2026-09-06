@@ -175,7 +175,12 @@ function handHasCardOfValue(pile: string[], value: number): boolean {
 // optional fields instead - each of those functions asserts `suitUid!`
 // once at its own top, documented there, rather than scattering asserts.
 interface IPendingStep {
-    head: "use" | "play";
+    // The literal head this step's move string was parsed from -
+    // "continue" for anything seeded from a genuine resume (see
+    // parsePendingStep's own docs on why that carries no verb of its
+    // own), so assembleStepMove keeps reconstructing "continue ..." for
+    // further clicks rather than echoing back "use"/"play".
+    head: "use" | "play" | "continue";
     headArg: string;
     // For a minor card, its own suit. For a major card's `primitive` step,
     // the suit that primitive maps to (create→C, move→R, grow→D,
@@ -801,16 +806,22 @@ export class GnosticaGame extends GameBaseSequenced {
         // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
         const head = parsed.head;
 
-        // A paused High Priestess activation obligates this seat to resume
-        // it (with the same head it started with) before anything else is
-        // legal - short-circuits ahead of every other gate below, since
-        // phase/hasPiecesOnBoard checks don't apply to a resume submission.
-        if (this.pendingPower !== undefined) {
-            if (head !== this.pendingPower.source) {
-                return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
+        // "continue" resumes a genuine cross-turn pause (Fool's second
+        // flip, a revealed/targeted card's own subactions, High Priestess
+        // round 2). Gated on pendingPowerIsGenuine, not just
+        // this.pendingPower - a still-incomplete FRESH "use"/"play" also
+        // sets pendingPower (walkFrameStack), and must keep using "use"/
+        // "play", not "continue". Short-circuits ahead of the other gates
+        // below since they don't apply to a resume.
+        if (head === "continue") {
+            if (this.pendingPower === undefined || !this.pendingPowerIsGenuine) {
+                return this.invalid("apgames:validation.gnostica.NOTHING_TO_CONTINUE");
             }
             const failure = requireValidStepShapes() ?? this.validateResumePendingPower(parsed.rest, parsed.stepSegments);
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        }
+        if (this.pendingPower !== undefined && this.pendingPowerIsGenuine) {
+            return this.invalid("apgames:validation.gnostica.PENDING_POWER_NEEDS_CONTINUE");
         }
 
         if (head === "bid" || head === "redraw" || head === "pass") {
@@ -1042,6 +1053,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     requireValidStepShapes();
                         this.cmdPlay(parsed.rest, parsed.stepSegments, partial);
                         break;
+                    case "continue":
+                        requireValidStepShapes();
+                        this.cmdContinue(parsed.stepSegments, partial);
+                        break;
                 }
 
                 if (parsed.announceLast) {
@@ -1178,7 +1193,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private parseMove(m: string): IParsedMove {
-        const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw", "pass"];
+        const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "continue", "bid", "redraw", "pass"];
         const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
         
         const trimmed = m.trim();
@@ -1223,8 +1238,15 @@ export class GnosticaGame extends GameBaseSequenced {
     // the whole of liveMove.
     private pendingPowerSeedMoveString(): string {
         const pending = this.pendingPower!;
-        const base = `${pending.source} ${pending.rootCardUid}`;
-        if (this.liveMove === undefined || this.liveMove.head !== pending.source || this.liveMove.rest[0] !== pending.rootCardUid) {
+        const base = `continue ${pending.rootCardUid}`;
+        // this.liveMove's own head is "continue" for a genuine resume, but
+        // still the ORIGINAL "use"/"play" verb for a fresh activation
+        // whose own first step just hasn't finished being typed yet (see
+        // walkFrameStack's own docs on why that ALSO sets this.pendingPower,
+        // even though it isn't a genuine cross-turn obligation) - both are
+        // legitimate matches here, only a genuinely unrelated liveMove
+        // (some other head/card entirely) isn't.
+        if (this.liveMove === undefined || (this.liveMove.head !== "continue" && this.liveMove.head !== pending.source) || this.liveMove.rest[0] !== pending.rootCardUid) {
             return base;
         }
         const unreflected = this.liveMove.stepSegments.slice(this.pendingPowerConsumedSegments);
@@ -1618,6 +1640,11 @@ export class GnosticaGame extends GameBaseSequenced {
             // clicking Pass or by hand-building an equivalent Discard/Draw
             // move (0 discards, explicit draw 0).
             found.add("pass");
+        } else if (head === "continue" && this.pendingPower !== undefined) {
+            // "continue" itself has no top-level button of its own to
+            // bold - it always resumes whatever the ORIGINAL activation
+            // was, so that's what stays highlighted throughout.
+            found.add(this.pendingPower.source);
         } else if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
         }
@@ -1817,7 +1844,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // available throughout (it's an orthogonal end-of-turn flourish,
         // not a step in this particular choice), tacked on at the end
         // rather than lost.
-        const selected = topLevel.find(b => b.value === pendingMinor.head);
+        // "continue" itself matches no topLevel button - fall back to
+        // whichever verb actually started the activation (see
+        // highlightedButtonValues's own identical reasoning).
+        const selectedValue = pendingMinor.head === "continue" ? this.pendingPower!.source : pendingMinor.head;
+        const selected = topLevel.find(b => b.value === selectedValue);
         const declareBtn = topLevel.find(b => b.value === "declare");
 
         // Fool's own step has nothing to configure at all - no target,
@@ -2054,16 +2085,28 @@ export class GnosticaGame extends GameBaseSequenced {
     private parsePendingStep(moveStr: string, callOpts: { preferCurrent?: boolean } = {}): IPendingStep | undefined {
         const parsed = this.parseMove(moveStr);
         const head = parsed.head;
-        if (head !== "use" && head !== "play") {
+        if (head !== "use" && head !== "play" && head !== "continue") {
             return undefined;
         }
         const headArg = parsed.rest[0];
         if (headArg === undefined) {
             return undefined;
         }
+        // "continue" carries no verb of its own - it always means "resume
+        // this.pendingPower" (see cmdActivate's/resumePendingPower's own
+        // docs), so whichever verb actually started the activation comes
+        // from there instead. Bails out (nothing to preview) if there's
+        // genuinely nothing pending, or the uid doesn't match it, rather
+        // than guessing.
+        const effectiveSource = head === "continue"
+            ? (this.pendingPower?.rootCardUid === headArg ? this.pendingPower.source : undefined)
+            : head;
+        if (effectiveSource === undefined) {
+            return undefined;
+        }
         let card: Card | undefined;
         let eligible: IMinionRef[];
-        if (head === "use") {
+        if (effectiveSource === "use") {
             const loc = this.findCardCell(headArg);
             if (loc === undefined) {
                 return undefined;
@@ -2094,12 +2137,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // separately from `minions` (which keeps accreting via newMinion
         // chaining), exactly like the outer eligible/minions split above
         // already does for a minor card. Seeded from this.pendingPower
-        // when this call is about a genuine resume (matching source AND
-        // rootCardUid - see IPendingMajorPower's own docs on why
-        // rootCardUid, not the top frame's own cardUid, is what a resume
-        // is keyed on), otherwise fresh from the root card just resolved.
+        // when this call is about a genuine resume ("continue" always
+        // means exactly that - see effectiveSource's own docs above -
+        // matched against rootCardUid, not the top frame's own cardUid,
+        // per IPendingMajorPower's own docs on why), otherwise fresh from
+        // the root card just resolved.
         const stack: { cardUid: string; nextStepIndex: number; eligible: IMinionRef[]; minions: IMinionRef[] }[] =
-            this.pendingPower !== undefined && this.pendingPower.source === head && this.pendingPower.rootCardUid === headArg
+            head === "continue" && this.pendingPower !== undefined && this.pendingPower.rootCardUid === headArg
                 ? this.pendingPower.stack.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }))
                 : [{ cardUid: def.uid, nextStepIndex: 0, eligible: [...eligible], minions: [...eligible] }];
 
@@ -2257,7 +2301,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // move string those functions build), letting that entire existing
     // machinery drive stage 2 completely unmodified.
     private buildSpecialPending(
-        special: SpecialPower, head: "use" | "play", headArg: string,
+        special: SpecialPower, head: "use" | "play" | "continue", headArg: string,
         eligible: IMinionRef[], minions: IMinionRef[], priorSteps: string[], tokens: string[],
     ): IPendingStep {
         if (special === "magicianChoice" && ALL_SUITS.some(s => s.uid === tokens[1])) {
@@ -3119,7 +3163,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // one-off seeding further down, just applied uniformly here so
             // every OTHER handler doesn't have to duplicate it.
             if (this.pendingPower !== undefined && this.pendingPowerIsGenuine && this.parseMove(move).head === undefined) {
-                move = `${this.pendingPower.source} ${this.pendingPower.rootCardUid}`;
+                move = `continue ${this.pendingPower.rootCardUid}`;
             }
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
@@ -3298,7 +3342,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (this.pendingPower === undefined) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        const seeded = `${this.pendingPower.source} ${this.pendingPower.rootCardUid}`;
+                        const seeded = `continue ${this.pendingPower.rootCardUid}`;
                         // The message is about whichever frame is actually
                         // active right now (the top of the stack - e.g. a
                         // card Fool revealed, not necessarily rootCardUid
@@ -3319,7 +3363,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (this.pendingPower === undefined) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        const declined = `${this.pendingPower.source} ${this.pendingPower.rootCardUid}, decline`;
+                        const declined = `continue ${this.pendingPower.rootCardUid}, decline`;
                         // Declining pops the CURRENT top frame. What's left
                         // underneath is never itself a genuine further
                         // choice any more - Fool's own remaining flip (the
@@ -3622,7 +3666,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 resultMessageKey = newOrientation === targetPiece.orientation
                     ? undefined
                     : "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
-            } else if (head === "use" || head === "play") {
+            } else if (head === "use" || head === "play" || head === "continue") {
                 // Once a minor-arcana power step's mode is already chosen,
                 // a board click is target/arg cycling for that step first -
                 // see handlePendingStepBoardClick's own docs. Falls
@@ -3719,11 +3763,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         return result;
                     }
                 }
-                if (head === "play") {
+                if (head === "play" || (head === "continue" && this.pendingPower?.source === "play")) {
                     // "play" has no cell of its own to re-pick the way
                     // "use" does below - a board click here only ever
                     // means pending-step cycling (handled above); anything
-                    // else is ambiguous.
+                    // else is ambiguous. A "continue"-headed resume of a
+                    // "play"-sourced activation is the same situation -
+                    // there's still no cell of its own to fall back to.
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
                 }
                 const t = this.board.get(x, y);
@@ -4031,14 +4077,8 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    // "pass" - legal in exactly one situation: an eliminated player sitting
-    // out the rest of the game (phase-independent - see validatePass()'s
-    // own docs). Not a general-purpose pass otherwise: it's illegal
-    // anywhere else, including an ordinary main-phase turn (a bare
-    // "discard" already fills that role there). A real server auto-submits
-    // this via the "autopass" flag + moves() the instant it's the only
-    // legal option, so a human should never actually need to submit it by
-    // hand.
+    // "pass" is only used for an eliminated player sitting out the game.
+    // Ususally handled by the server with the "autopass" flag.
     private cmdPass(partial = false): void {
         const failure = this.validatePass();
         if (failure !== undefined) {
@@ -4395,11 +4435,11 @@ export class GnosticaGame extends GameBaseSequenced {
         return eligible;
     }
 
+    // "use"/"play" always mean a FRESH activation now - resuming an
+    // already-open power goes exclusively through "continue"/cmdContinue
+    // (see validateMove's own gate, which rejects "use"/"play" outright
+    // while this.pendingPower is set, before this ever runs).
     private cmdActivate(args: string[], stepSegments: string[][], partial: boolean): void {
-        if (this.pendingPower !== undefined) {
-            this.resumePendingPower(args, stepSegments, "use", partial);
-            return;
-        }
         const [cardUid] = args;
         if (cardUid === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ACTIVATE_UID_REQUIRED"));
@@ -4444,11 +4484,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // "Play a card from your hand to the discard pile. All your pieces on
     // the board are minions [...]"
+    // Same "fresh activation only" note as cmdActivate's own docs.
     private cmdPlay(args: string[], stepSegments: string[][], partial: boolean): void {
-        if (this.pendingPower !== undefined) {
-            this.resumePendingPower(args, stepSegments, "play", partial);
-            return;
-        }
         const [uid] = args;
         if (uid === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PLAY_UID_REQUIRED"));
@@ -4469,6 +4506,18 @@ export class GnosticaGame extends GameBaseSequenced {
 
         const eligible = this.eligibleMinionsForPlay();
         this.applyCardPower(card, eligible, stepSegments, "play", partial);
+    }
+
+    // "continue" is the ONLY legal way to resume an already-open power -
+    // validateMove's own gate already rejects anything else while
+    // this.pendingPower is set, so this only needs to guard the trivial
+    // "nothing pending at all" case for a trusted caller that skipped
+    // validation (an untrusted one already got NOTHING_TO_CONTINUE there).
+    private cmdContinue(stepSegments: string[][], partial: boolean): void {
+        if (this.pendingPower === undefined) {
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOTHING_TO_CONTINUE"));
+        }
+        this.resumePendingPower(stepSegments, partial);
     }
 
     private validatePlay(args: string[], stepSegments: string[][]): IValidationResult | undefined {
@@ -4878,14 +4927,17 @@ export class GnosticaGame extends GameBaseSequenced {
     // once the reveal has happened) - walkFrameStack handles this
     // uniformly, re-pausing again if anything genuinely optional and
     // still needing real input remains once segments run out.
-    private resumePendingPower(args: string[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
+    //
+    // No uid/verb to check here anymore - "continue" carries neither (see
+    // cmdActivate's own docs), so there's nothing left to mismatch against
+    // other than this.pendingPower itself. validateResumePendingPower is
+    // where a wrong uid is still caught, for a real (untrusted) submission -
+    // this is the apply side, which trusts that already happened.
+    private resumePendingPower(stepSegments: string[][], partial: boolean): void {
         const pending = this.pendingPower!;
-        if (pending.source !== source || args[0] !== pending.rootCardUid) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
-        }
         const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
-            // A bare "<source> <rootCardUid>" seed - the client always
+            // A bare "continue <rootCardUid>" seed - the client always
             // sends this to populate a partial preview before any step is
             // typed (see boardClick()'s own convention). Nothing to
             // process yet; pendingPower stays exactly as it was. Fool's
@@ -4894,7 +4946,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // seed against it should go ahead and take the flip.
             return;
         }
-        this.walkFrameStack(stack, stepSegments, source, pending.rootCardUid, partial);
+        this.walkFrameStack(stack, stepSegments, pending.source, pending.rootCardUid, partial);
     }
 
     // Read-only counterpart to walkFrameStack, mirroring its own inline
@@ -5031,8 +5083,10 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.validateFrameStack(stack, stepSegments, def.uid);
     }
 
-    // Mirrors resumePendingPower's own dispatch, read-only - the `source`
-    // match itself is checked by validateMove()'s own early gate, not here.
+    // Mirrors resumePendingPower's own dispatch, read-only. There's no
+    // verb to mismatch anymore ("continue" carries none - validateMove's
+    // own gate already confirmed the head itself before this ever runs) -
+    // a wrong uid is the one thing left to catch here.
     private validateResumePendingPower(args: string[], stepSegments: string[][]): IValidationResult | undefined {
         const pending = this.pendingPower!;
         if (args[0] !== pending.rootCardUid) {
@@ -6221,7 +6275,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // coverage of Fool/World's own decision points (see this
         // function's own class-level docs on why that's out of scope).
         if (this.pendingPower !== undefined) {
-            return `${this.pendingPower.source} ${this.pendingPower.rootCardUid}, decline`;
+            return `continue ${this.pendingPower.rootCardUid}, decline`;
         }
         if (this.phase === "bidding") {
             const hand = this.hands[this.currplayer - 1];
