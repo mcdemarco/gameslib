@@ -2,7 +2,7 @@
 import "mocha";
 import { expect } from "chai";
 import i18next from "i18next";
-import { APRenderRep, AreaButtonBar } from "@abstractplay/renderer/build/schemas/schema";
+import type { APRenderRep, AreaButtonBar } from "@abstractplay/renderer/build/schemas/schema";
 import { addResource } from "../../src";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { majorCards, minorCards } from "../../src/common/tarot";

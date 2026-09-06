@@ -5649,7 +5649,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 growPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, newOrientation);
-                this.results.push({ type: "convert", what: `size-${beforeSize}`, into: `size-${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
+                this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
                 if (owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
                     return { newMinion: { x: target.x, y: target.y, index: newIndex } };
@@ -8014,7 +8014,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             }
                             break;
                         case "convert":
-                            if (r.into.startsWith("size-")) {
+                            if (r.into.startsWith("size ")) {
                                 node.push(i18next.t("apresults:CONVERT.gnostica_piece", { player, what: r.what, into: r.into, where: r.where }));
                             } else if (r.into.startsWith("owner-")) {
                                 const target = this.otherPlayerName(r.who, player, players);
