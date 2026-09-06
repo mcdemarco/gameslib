@@ -4463,20 +4463,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (card === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid }));
         }
-        // Playing the Fool discards its own physical card FIRST (below),
-        // which would otherwise let its own first flip trivially
-        // "succeed" by finding nothing to reveal but itself - checked
-        // here, on the REAL pre-play state, for every caller (not just an
-        // untrusted one - see validatePlay's own mirror for why this
-        // can't just rely on checkFool's own generic emptiness check
-        // further down the line, which by then would see the
-        // just-discarded Fool and wrongly consider the pile non-empty).
-        // If there's genuinely nothing else anywhere in the game, that's
-        // an unbounded self-reveal loop with no way out, not a
-        // legitimate use of the card.
-        if (uid === "00" && this.drawPile.length === 0 && this.discardPile.length === 0) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY"));
-        }
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         this.discarded.push(uid);
@@ -4500,10 +4486,18 @@ export class GnosticaGame extends GameBaseSequenced {
         if (card === undefined) {
             return this.invalid("apgames:validation.gnostica.UNKNOWN_CARD", { uid });
         }
-        // Mirrors cmdPlay's own explicit guard - see its docs. Checked on
-        // the REAL, pre-play state, same as cmdPlay - the discard-push
-        // simulation just below would otherwise mask this by the time
-        // checkFool ever runs.
+        // Playing the Fool discards its own physical card FIRST (cmdPlay's
+        // own docs), which would otherwise let its own first flip
+        // trivially "succeed" by finding nothing to reveal but itself -
+        // if there's genuinely nothing else anywhere in the game, that's
+        // an unbounded self-reveal loop, not a legitimate use of the
+        // card. Checked HERE, on the REAL pre-play state, rather than
+        // relying on checkFool's own generic emptiness check further down
+        // the line - by the time that runs, the discard-push simulation
+        // just below would already make the pile look non-empty. This is
+        // a validate-only guard, deliberately not mirrored in cmdPlay
+        // itself - a trusted caller is expected to have validated first,
+        // same as every other legality check in this file.
         if (uid === "00" && this.drawPile.length === 0 && this.discardPile.length === 0) {
             return this.invalid("apgames:validation.gnostica.DRAW_PILE_EMPTY");
         }
@@ -4728,22 +4722,6 @@ export class GnosticaGame extends GameBaseSequenced {
             const frameDef = this.resolveFrameDef(top.cardUid);
             const step = frameDef.powers[top.nextStepIndex];
             const isFoolStep = "special" in step && step.special === "fool";
-            // True only for the ROOT Fool card's own very first flip
-            // attempt - never yet touched, and still the card the player
-            // actually typed use/play against (not something IT pushed
-            // into, and not a later flip of the SAME frame). checkFool
-            // failing here is the one case that stays a hard rejection
-            // (see applyPowerStep's own docs on why) - everywhere else
-            // (Fool's own second flip; Fool/World reached via a push;
-            // a nested Fool-reveals-Fool) it's graceful instead, since the
-            // player had no way to have avoided it by the time they're
-            // here. `stack.length===1` alone isn't enough - World's own
-            // 1-step frame pops immediately after pushing Fool, leaving a
-            // length-1 stack that LOOKS like a fresh root Fool activation
-            // structurally - rootCardUid (fixed for the whole activation,
-            // even as frames get pushed for OTHER cards) is what actually
-            // tells the two apart.
-            const isFreshRootFool = isFoolStep && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
             let tokens: string[];
             if (isFoolStep) {
                 const next = stepSegments[i];
@@ -4807,7 +4785,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 });
             }
             const resultsBefore = this.results.length;
-            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial, isFreshRootFool);
+            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial);
             if (outcome === undefined) {
                 // A still-being-typed segment (minion earmarked but no
                 // mode yet, mode chosen but args incomplete, magicianChoice's
@@ -5031,7 +5009,7 @@ export class GnosticaGame extends GameBaseSequenced {
             GnosticaGame.popExhaustedFrames(this, stack);
             if (i < stepSegments.length || stack.length > 0) {
                 clone ??= this.cloneLive();
-                clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true, isFreshRootFool);
+                clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true);
             }
         }
     }
@@ -5089,7 +5067,6 @@ export class GnosticaGame extends GameBaseSequenced {
     // with no minion reference at all (it's pure hand/pile manipulation).
     private applyPowerStep(
         step: PowerStep, minions: IMinionRef[], tokens: string[], def: MajorArcanaDef, stepIndex: number, totalSteps: number, partial: boolean,
-        isFreshRootFool = false,
     ): IStepOutcome | undefined {
         if ("special" in step && step.special === "highPriestess") {
             this.applyHighPriestess(tokens, partial);
@@ -5119,36 +5096,19 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             const failure = checkFool(this.buildPowerContext());
             if (failure) {
-                if (isFreshRootFool) {
-                    // The player directly chose to use/play the Fool
-                    // itself with nothing anywhere to flip - not a corner
-                    // case they need protecting from (there's always a
-                    // better alternative: pass instead of a no-op "use",
-                    // or don't play it at all - playing discards the
-                    // physical card first, which would otherwise flip it
-                    // right back into an unbounded self-reveal loop with
-                    // literally nothing else ever entering the mix). This
-                    // is the one case that stays a hard rejection -
-                    // validateResumePendingPower/validateMajorPower's own
-                    // lookahead already catches it before a real commit
-                    // for an untrusted caller; this throw only matters for
-                    // a trusted one that skipped that check.
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params));
-                }
-                // Anywhere else - Fool's own mandatory second flip, or a
-                // flip reached via a push (World's target, a nested
-                // Fool-reveals-Fool) - the player made a legal choice to
-                // get here (e.g. Judgement drawing the pile's only
-                // remaining card, itself, back into hand) and had no way
-                // to have avoided this by the time they submitted it.
-                // Finding nothing left to flip just means the Fool's use
-                // is complete, gracefully, right here - not an error, and
-                // not something to reject in advance either. Returning a
-                // plain (if empty) outcome rather than throwing lets
-                // walkFrameStack's own generic bookkeeping do the rest:
-                // nextStepIndex still advances, popExhaustedFrames still
-                // pops this frame (or the whole activation) once spent -
-                // no special-casing needed there at all.
+                // Validation is what stops a real player from getting here
+                // in the first place (see validatePowerStep's/validatePlay's
+                // own docs on the ROOT-only rejection) - apply's own job is
+                // just to do the thing, not re-litigate whether it should
+                // have been allowed. Finding nothing left to flip - for any
+                // reason, including a trusted caller that skipped
+                // validation entirely - just means the Fool's use is
+                // complete, gracefully, right here. Returning a plain (if
+                // empty) outcome rather than throwing lets walkFrameStack's
+                // own generic bookkeeping do the rest: nextStepIndex still
+                // advances, popExhaustedFrames still pops this frame (or
+                // the whole activation) once spent - no special-casing
+                // needed there at all.
                 return {};
             }
             const revealed = fool(this.buildPowerContext());

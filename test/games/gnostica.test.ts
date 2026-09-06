@@ -5054,17 +5054,8 @@ describe("Gnostica: Fool and World", () => {
         const playValidated = play.validateMove(`play ${major(0).uid}`);
         expect(playValidated.valid).to.be.false;
         expect(playValidated.message).to.eq(i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY"));
-
-        // Regression: cmdPlay's own real discard-push happens BEFORE
-        // applyPowerStep's fool branch ever runs, so checkFool alone
-        // would see the just-played Fool card and wrongly allow the
-        // flip (setting up the exact infinite self-reveal loop this test
-        // exists to prevent) for a caller that skips validateMove -
-        // {trusted: true} included. cmdPlay needs its OWN explicit guard,
-        // checked before it ever discards the card - this confirms it
-        // fires even when validation is bypassed entirely.
-        expect(() => play.move(`play ${major(0).uid}`, { trusted: true })).to.throw();
-        expect(play.hands[0]).to.include(major(0).uid); // never actually played
-        expect(play.discardPile).to.be.empty;
+        // A {trusted: true} caller is expected to have already validated,
+        // same as every other legality check in this file - this guard
+        // is validate-only by design, not mirrored in cmdPlay itself.
     });
 });
