@@ -271,21 +271,25 @@ interface IPendingStep {
 // uses - see IPendingStep/parsePendingStep. See docs on `move()` below.
 // One snapshot of state per completed step of a 2+-step major-arcana
 // chain (see applyMajorPower's own docs on when/how these get pushed) -
-// deliberately not a full state snapshot, only the fields that can
-// actually mutate mid-chain (mirrors frogger.ts's own FrameState, whose
-// own restraint of omitting anything that can't change mid-move this
-// mirrors exactly). `results` is NOT a field here - per-frame
-// annotations are handled via `_group`-wrapping this.results itself
-// (see applyMajorPower/render's own docs), not by duplicating results
-// into each frame. `drawPile` is also excluded - every power that
-// touches it (High Priestess, Fool, Wheel of Fortune) either forces a
-// pause immediately or falls outside the same-call step count, so no
-// existing chain ever produces two same-call frames with different
-// drawPile contents.
+// only fields that are BOTH mutable mid-chain AND actually consumed
+// per-frame somewhere, not a full state snapshot. `results` is NOT a
+// field here - per-frame annotations are handled via `_group`-wrapping
+// this.results itself (see applyMajorPower/render's own docs), not by
+// duplicating results into each frame. `drawPile` is excluded - every
+// power that touches it (High Priestess, Fool, Wheel of Fortune) either
+// forces a pause immediately or falls outside the same-call step count,
+// so no existing chain ever produces two same-call frames with different
+// drawPile contents. `stashes` is excluded - the only place it's ever
+// surfaced is getPlayerStash(), which the client calls directly on the
+// live game instance, never on a frame snapshot, so a frame-specific
+// value would never be read. `hands` is excluded too, even though it
+// genuinely can change mid-chain (e.g. the Empress's own Cups "new"
+// step) - renderCurrent()'s own suppressHands flag skips the hand area
+// entirely for every intermediate frame, matching frogger.ts's own
+// last-frame-only hand area, so there's no per-frame hand value to
+// capture here at all (a stale one would never be shown either way).
 export type FrameState = {
     board: UnboundedSquareBoard<CellContents>;
-    hands: string[][];
-    stashes: Map<playerid, Stash>;
     discardPile: string[];
 };
 
@@ -4842,8 +4846,6 @@ export class GnosticaGame extends GameBaseSequenced {
             if (stepsProcessed > 0) {
                 this.frames.push({
                     board: this.board.clone().store,
-                    hands: this.hands.map(h => [...h]),
-                    stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
                     discardPile: [...this.discardPile],
                 });
             }
@@ -7118,7 +7120,12 @@ export class GnosticaGame extends GameBaseSequenced {
     // into that dispatcher's own array-building logic. `suppressButtons`
     // is set only by that dispatcher, for an intermediate frame of a
     // fully-committed historical chain (see its own docs on why).
-    private renderCurrent(opts?: IRenderOpts, suppressButtons = false): APRenderRep {
+    // `suppressHands` is set for every intermediate frame regardless -
+    // FrameState doesn't capture hands at all (see its own docs), so an
+    // intermediate frame's own hand area would just be the live/final
+    // hand mislabeled as that step's own, matching frogger.ts's own
+    // last-frame-only hand area instead of showing a stale one.
+    private renderCurrent(opts?: IRenderOpts, suppressButtons = false, suppressHands = false): APRenderRep {
         let altDisplay: string | undefined;
         if (opts !== undefined) {
             altDisplay = opts.altDisplay;
@@ -7200,46 +7207,50 @@ export class GnosticaGame extends GameBaseSequenced {
             rowLabels.push((y === 0 ? 0 : -y).toString());
         }
 
-        // One area per player's hand, full-size (non-spaced) card faces.
+        // One area per player's hand, full-size (non-spaced) card faces -
+        // skipped entirely for an intermediate frame (see suppressHands's
+        // own docs above).
         const areas: (AreaPieces | AreaButtonBar | AreaKey)[] = [];
-        for (let p = 1; p <= this.numplayers; p++) {
-            const hand = this.hands[p - 1].slice() ?? [];
-            if (hand.length === 0) {
-                continue;
-            }
-            //Hand sorting is now done in the render only.
-            hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
-            const newUids = this.newHandCardUids(p as playerid);
-            const handKeys: string[] = [];
-            for (const uid of hand) {
-                const card = allCards().find(c => c.uid === uid);
-                if (card === undefined) {
-                    handKeys.push("hand_UNKNOWN");
+        if (!suppressHands) {
+            for (let p = 1; p <= this.numplayers; p++) {
+                const hand = this.hands[p - 1].slice() ?? [];
+                if (hand.length === 0) {
                     continue;
                 }
-                // A card just added to hand (see newHandCardUids's own
-                // docs) gets its own tagged legend entry - same face,
-                // just tinted so it's easy to spot regardless of where
-                // rank-order sorting happened to place it.
-                const isNew = newUids.has(uid);
-                const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
-                if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
+                //Hand sorting is now done in the render only.
+                hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
+                const newUids = this.newHandCardUids(p as playerid);
+                const handKeys: string[] = [];
+                for (const uid of hand) {
+                    const card = allCards().find(c => c.uid === uid);
+                    if (card === undefined) {
+                        handKeys.push("hand_UNKNOWN");
+                        continue;
+                    }
+                    // A card just added to hand (see newHandCardUids's own
+                    // docs) gets its own tagged legend entry - same face,
+                    // just tinted so it's easy to spot regardless of where
+                    // rank-order sorting happened to place it.
+                    const isNew = newUids.has(uid);
+                    const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
+                    if (!(key in legend)) {
+                        legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
+                    }
+                    handKeys.push(key);
                 }
-                handKeys.push(key);
+                areas.push({
+                    type: "pieces",
+                    pieces: handKeys as [string, ...string[]],
+                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurnAnnouncedBy && this.lastTurnAnnouncedBy === p ? "(declarer)" : "" }),
+                    // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter
+                    // than the default auto-wrap-at-board-width spacing, and a
+                    // fixed width (hands are always <=6 cards) rather than
+                    // letting row width drift with the board's own size.
+                    spacing: 0.25,
+                    width: 6,
+                    ownerMark: p,
+                });
             }
-            areas.push({
-                type: "pieces",
-                pieces: handKeys as [string, ...string[]],
-                label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurnAnnouncedBy && this.lastTurnAnnouncedBy === p ? "(declarer)" : "" }),
-                // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter
-                // than the default auto-wrap-at-board-width spacing, and a
-                // fixed width (hands are always <=6 cards) rather than
-                // letting row width drift with the board's own size.
-                spacing: 0.25,
-                width: 6,
-                ownerMark: p,
-            });
         }
 
         // The "bidding" variant's shared pool - every card revealed by the
@@ -7395,13 +7406,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
-    // A throwaway GnosticaGame reflecting `frame`'s own board/hands/
-    // stashes/discardPile instead of live state - extends the existing
-    // cloneLive() pattern (built earlier for an unrelated reason) with
-    // field overrides instead of a straight live copy. The clone's own
-    // `frames` stays empty, so callers must call .renderCurrent()
-    // directly on it, not the public .render() - calling the latter
-    // would risk recursing back into array-building logic.
+    // A throwaway GnosticaGame reflecting `frame`'s own board/discardPile
+    // instead of live state (see FrameState's own docs on why only those
+    // two fields) - extends the existing cloneLive() pattern (built
+    // earlier for an unrelated reason) with field overrides instead of a
+    // straight live copy. The clone's own `frames` stays empty, so
+    // callers must call .renderCurrent() directly on it, not the public
+    // .render() - calling the latter would risk recursing back into
+    // array-building logic.
     private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
         // this.results holds one _group entry per step of the chain that
         // produced these frames (see applyMajorPower's own docs) - pull
@@ -7412,8 +7424,6 @@ export class GnosticaGame extends GameBaseSequenced {
         raw.stack = [{
             ...this.moveState(),
             board: frame.board,
-            hands: frame.hands,
-            stashes: frame.stashes,
             discardPile: frame.discardPile,
             _results: groups[stepIndex] !== undefined ? [groups[stepIndex]] : [],
         }];
@@ -7449,7 +7459,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // buttons (renderFrameSnapshot's own liveMove override) are
         // always used, so suppression never applies there.
         const historical = this.liveMove === undefined;
-        const reps = this.frames.map((f, i) => this.renderFrameSnapshot(f, i).renderCurrent(opts, historical));
+        const reps = this.frames.map((f, i) => this.renderFrameSnapshot(f, i).renderCurrent(opts, historical, true));
         reps.push(this.renderCurrent(opts));
         return reps;
     }

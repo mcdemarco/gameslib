@@ -1746,6 +1746,12 @@ describe("Gnostica: handleClick", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
+        // Force a card whose own "use" is never immediately complete - the
+        // random deal could otherwise occasionally land Fool/World at m0,
+        // both of which produce a complete:0 root activation with no power
+        // step needed at all (see their own dedicated tests), which this
+        // test isn't exercising.
+        forceCardAt(g, 0, 0, () => aceOfCups());
         const [row, col] = rowColFor(g, 0, 0);
         const uid0 = g.board.get(0, 0)!.card!.uid;
         const seed = g.handleClick("", -1, -1, "_btn_use");
