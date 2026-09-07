@@ -539,15 +539,10 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         expect(poolArea).to.not.be.undefined;
     });
 
-    // Regression: a live-preview call (move(m, {partial: true}), exactly
-    // what the playground/front end uses to render a hover/click preview
-    // on a disposable reconstructed instance - see move()'s own docs on
-    // `partial`) must never actually commit the bid/redraw for real. Found
-    // by testing in an actual browser, not by any of the tests above -
-    // none of them ever exercised `partial: true` at all, which is
-    // exactly how this slipped through: cmdBid/cmdRedraw didn't check the
-    // flag, so clicking a card to preview it silently resolved the whole
-    // round/redraw turn a move ahead of schedule.
+    // A live-preview call (move(m, {partial: true}), exactly what the
+    // playground/front end uses to render a hover/click preview on a
+    // disposable reconstructed instance - see move()'s own docs on
+    // `partial`) must never actually commit the bid/redraw for real.
     it("a bid preview (partial: true) must not resolve the round for real", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = [minor("KS").uid, "AC", "2C", "3C", "4C", "5C"];

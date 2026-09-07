@@ -7,9 +7,8 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
     // the UI preview walker (parsePendingStep) each consult independently
     // - see stepShapes.ts's own docs on why. Pinned here at the unit level
     // rather than only indirectly through gnostica.test.ts's own apply/
-    // validate/click-flow tests, since a regression here would otherwise
-    // only surface as one of those three quietly disagreeing with the
-    // other two again - exactly the bug class this file exists to prevent.
+    // validate/click-flow tests, so a regression can't surface as those
+    // three quietly disagreeing with each other instead.
 
     it("primitiveStepShape: mode undefined is incomplete, unknown mode is malformed, short args is incomplete, enough args is complete", () => {
         expect(primitiveStepShape("C", [])).to.deep.equal({ status: "incomplete" });
@@ -54,17 +53,14 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
         expect(SPECIAL_STEP_SHAPES.judgementDraw(["AS", "2C"])).to.deep.equal({ status: "complete" });
     });
 
-    // Regression: highPriestess/fool are handled by an EARLY special-case
-    // in both applyPowerStep and validatePowerStep, so their entries here
-    // are consulted ONLY by parsePendingStep (the UI walker) - never by
-    // apply/validate. For highPriestess specifically, "complete" would be
-    // WRONG there: its discard list has no fixed grammar boundary and
-    // must stay editable (toggle cards, pick a draw count) right up until
-    // Submit, so the generic same-call "walk past" mechanism must never
-    // fire for it, regardless of how many tokens are already present -
-    // exactly the bug this test would have caught (it broke three
-    // High Priestess click-flow tests in gnostica.test.ts when this was
-    // briefly "always complete" during this refactor).
+    // highPriestess/fool are handled by an EARLY special-case in both
+    // applyPowerStep and validatePowerStep, so their entries here are
+    // consulted ONLY by parsePendingStep (the UI walker) - never by apply/
+    // validate. For highPriestess specifically, "complete" would be WRONG
+    // there: its discard list has no fixed grammar boundary and must stay
+    // editable (toggle cards, pick a draw count) right up until Submit, so
+    // the generic same-call "walk past" mechanism must never fire for it,
+    // regardless of how many tokens are already present.
     it("SPECIAL_STEP_SHAPES.highPriestess/fool: always incomplete, regardless of token count", () => {
         expect(SPECIAL_STEP_SHAPES.highPriestess([])).to.deep.equal({ status: "incomplete" });
         expect(SPECIAL_STEP_SHAPES.highPriestess(["AS", "2C", "draw", "3"])).to.deep.equal({ status: "incomplete" });

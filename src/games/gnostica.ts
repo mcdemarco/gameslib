@@ -459,11 +459,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // How many tied rounds have happened so far (0-indexed) - biddingPool
     // grows by exactly `numplayers` cards every time a round resolves,
     // tied or not, so this is exact for as long as anyone's actually
-    // looking at it (mid-"bidding"). It stops being meaningful the
-    // instant a round resolves WITH a winner (no tie => no increment in
-    // the old field-based version, but the pool still grew) - that's
-    // also exactly the instant phase leaves "bidding", so nothing is
-    // ever actually reading a stale value.
+    // looking at it (mid-"bidding"). It stops being meaningful the instant
+    // a round resolves with a winner, but that's also exactly the instant
+    // phase leaves "bidding", so nothing ever reads a stale value.
     public get bidRound(): number {
         return Math.floor(this.biddingPool.length / this.numplayers);
     }
@@ -1624,7 +1622,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // this.results' own shape: results exist to describe game events
         // for chat/history, not to signal UI state, so a chat-only change
         // there (e.g. tagging place's own result with `how: "initial"`)
-        // has no business breaking this check - and previously did.
+        // has no business breaking this check.
         return this.liveMove.head?.toLowerCase() === "place";
     }
 
@@ -2185,14 +2183,13 @@ export class GnosticaGame extends GameBaseSequenced {
             const tokens = parsed.stepSegments[segIdx];
             const isLastSegment = segIdx === parsed.stepSegments.length - 1;
             if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                // Mirrors validateFrameStack's own decline branch - missing
-                // here used to mean a declined pushed frame (e.g. Fool's
-                // reveal) left this UI-only walk unable to make sense of
-                // the segment at all, silently falling all the way back to
-                // the generic top-level bar instead of showing whatever
-                // frame the decline exposes underneath (which may itself
-                // need its own Continue/Decline-style choice, or - if it's
-                // already exhausted - nothing further at all).
+                // Mirrors validateFrameStack's own decline branch - a
+                // declined pushed frame (e.g. Fool's reveal) needs to keep
+                // walking into whatever frame the decline exposes
+                // underneath (which may itself need its own Continue/
+                // Decline-style choice, or - if already exhausted - nothing
+                // further at all), not fall back to the generic top-level
+                // bar.
                 priorSteps.push(tokens.join(" "));
                 stack.pop();
                 GnosticaGame.popExhaustedFrames(this, stack);
@@ -3376,14 +3373,12 @@ export class GnosticaGame extends GameBaseSequenced {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
                         const declined = `continue ${this.pendingPower.rootCardUid}, decline`;
-                        // Declining pops the CURRENT top frame. What's left
-                        // underneath is never itself a genuine further
-                        // choice any more - Fool's own remaining flip (the
-                        // only thing that used to sit there) auto-resolves
-                        // on this same real commit instead of pausing (see
-                        // walkFrameStack's own docs) - so name that
-                        // outcome plainly rather than a card that isn't
-                        // known yet.
+                        // Declining pops the CURRENT top frame. The only
+                        // thing that can be left underneath - Fool's own
+                        // remaining flip - auto-resolves on this same real
+                        // commit instead of pausing (see walkFrameStack's
+                        // own docs), so name that outcome plainly rather
+                        // than a card that isn't known yet.
                         const remaining = this.pendingPower.stack.slice(0, -1);
                         return this.provisionalResult(
                             declined,
@@ -4566,14 +4561,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // BEFORE resolving its power (see its own docs) - a power that
         // reads hand SIZE (High Priestess's own draw-count bound,
         // Judgement's pip-count cap) or discard pile CONTENTS (Judgement
-        // drawing the very card that was just played, itself included -
-        // see the regression test this fixes) needs to see that same,
-        // already-updated state here too, or it would validate against a
-        // precondition that no longer holds by the time a real commit
-        // runs (the eligible pool above is unaffected - eligibleMinionsForPlay
-        // only reads board state, never hand/discard contents). Mirrors
-        // both for the DURATION of this validation call only, always
-        // restored via finally.
+        // drawing the very card that was just played, itself included)
+        // needs to see that same, already-updated state here too, or it
+        // would validate against a stale precondition (the eligible pool
+        // above is unaffected - eligibleMinionsForPlay only reads board
+        // state, never hand/discard contents). Mirrors both for the
+        // DURATION of this validation call only, always restored via
+        // finally.
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         try {
@@ -4666,10 +4660,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // Same #49 principle as the stepSegments.length===0 case above: a
         // cell chosen but not which minion is ALSO genuinely still
-        // incomplete - previously this returned bare `undefined`, which
-        // validateMove()'s own tail treats as "no objection" and defaults
-        // to complete:1/valid, the exact "looks like a valid move"
-        // false-positive this fixes.
+        // incomplete - a bare `undefined` here would read as "no
+        // objection" to validateMove()'s own tail, defaulting to
+        // complete:1/valid, a false "looks like a valid move".
         if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
         }
@@ -4824,10 +4817,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             }
             // Snapshot BEFORE every step except the first processed one
-            // this call - equivalent to the old "after every step except
-            // the last" (there's no way to know in advance whether an
-            // auto-resolved Fool step will follow a given one), and lets
-            // undo/redo still stop at any intermediate point. Taken before
+            // this call (there's no way to know in advance whether an
+            // auto-resolved Fool step will follow a given one), so undo/
+            // redo can still stop at any intermediate point. Taken before
             // knowing whether this step will actually complete, since
             // applyPowerStep is a guaranteed no-op when it returns
             // undefined (its own shape check, in stepShapes.ts, runs
@@ -7621,12 +7613,10 @@ export class GnosticaGame extends GameBaseSequenced {
     // `orientation: "vertical"` - correction for rotation.
     private buildCardFace(card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: ColourResolvable } = {}): Glyph[] {
         const BOARD_TILE_GRID_CORNER = 650;
-        // Opacity 0 by default - matching Jacynth's own Card.toGlyph() (see
-        // its own docs) - so an ordinary card face has no filled square at
-        // all, letting the theme's own board/background colour show
-        // through instead of a hardcoded white (#73: previously opaque
-        // white in every theme, since an unset opacity defaults to fully
-        // opaque). The stroke/border stays drawn regardless (a separate,
+        // Opacity 0 by default, matching Jacynth's own Card.toGlyph() - an
+        // ordinary card face has no filled square at all, so the theme's
+        // own board/background colour shows through it rather than a fixed
+        // white. The stroke/border stays drawn regardless (a separate,
         // always-visible outline), so the cell boundary is still legible.
         const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1, opacity: 0 };
         if (opts.background !== undefined) {
@@ -7707,8 +7697,7 @@ export class GnosticaGame extends GameBaseSequenced {
             stack.push(...this.buildCardFace(t.card, !dontSpace, owner));
         } else if (cls === "wasteland") {
             // Same transparent-by-default convention as buildCardFace's own
-            // backdrop (#73) - otherwise this defaults to opaque white
-            // regardless of theme, same bug, different glyph name.
+            // backdrop, so the theme's board colour shows through here too.
             stack.push({ name: "piece-square-dashed", scale: 1, opacity: 0 });
         } else {
             // Void, in principle - the main render loop already short-

@@ -287,7 +287,7 @@ describe("Gnostica: new-card hand highlight", () => {
         expect(handArea?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
     });
 
-    // Regression: the "_new" suffix is part of the CLICKABLE piece
+    // The "_new" suffix is part of the CLICKABLE piece
     // identifier too (AreaPieces reuses the same string for both the
     // legend key and what the renderer reports back on click), not just
     // a cosmetic legend tag - a real click on a highlighted card must
@@ -582,17 +582,15 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         expect(g.winner).to.deep.equal([1]);
     });
 
-    // Regression test for a reported bug: winning via resolveAnnouncedTurn()
-    // sets this.gameover directly (unlike an elimination-triggered endgame,
-    // where checkEOG() sets it only AFTER nextPlayer() already ran) - so
-    // nextPlayer()'s own former "if (this.gameover) return" guard was
-    // skipping the rotation specifically on the winning move itself,
-    // leaving currplayer pinned to the winner instead of advancing past
-    // them. External move-history/chat logs attribute move N to whichever
-    // player stack[N-1].currplayer names, so a currplayer that doesn't
-    // rotate on the final move makes it look like the PREVIOUS player
-    // acted twice in a row instead of the actual winner having the last
-    // turn. Checked for both 2 and 3 players, matching the report.
+    // currplayer must still rotate past the winner on the winning move
+    // itself, even though winning via resolveAnnouncedTurn() sets
+    // this.gameover directly (unlike an elimination-triggered endgame,
+    // where checkEOG() sets it only AFTER nextPlayer() already ran).
+    // External move-history/chat logs attribute move N to whichever player
+    // stack[N-1].currplayer names, so a currplayer that doesn't rotate on
+    // the final move makes it look like the PREVIOUS player acted twice in
+    // a row instead of the actual winner having the last turn. Checked for
+    // both 2 and 3 players.
     for (const numplayers of [2, 3] as const) {
         it(`currplayer still rotates past the winner on the winning move itself (${numplayers}-player)`, () => {
             const g = new GnosticaGame(numplayers);
@@ -615,8 +613,8 @@ describe("Gnostica: announce last turn / win / elimination", () => {
             g.move("discard", { trusted: true }); // player 1's resolving turn - wins
             expect(g.gameover).eq(true);
             expect(g.winner).to.deep.equal([1]);
-            // The bug: this used to stay 1 (pinned to the winner) instead
-            // of rotating to 2, exactly as every other move does.
+            // currplayer must rotate to 2 on the winning move itself,
+            // exactly as every other move does.
             expect(g.currplayer).eq(2);
         });
     }
@@ -749,11 +747,9 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         expect(actorsAfterElimination).to.not.include(1);
         expect(plies[plies.length - 1].actor).eq(2);
         const log = g.chatLog(["Alice", "Bob", "Carol"]);
-        // The eliminated ply's own line still names the actual actor (Alice,
-        // who WAS still currplayer for that ply) even though currplayer
-        // itself has since moved on - the old `state.currplayer - 1` guess
-        // would have misattributed this once elimination started skipping
-        // seats.
+        // The eliminated ply's own line must still name the actual actor
+        // (Alice, who WAS still currplayer for that ply) even though
+        // currplayer itself has since moved on past the skipped seats.
         const eliminatedLine = log.find(node => node.some(l => l.includes("eliminated")));
         expect(eliminatedLine?.some(l => l.includes("Alice"))).eq(true);
         // The final, post-elimination line correctly names Bob, not a
@@ -1129,14 +1125,11 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(lastNode.some(l => l.includes("added"))).eq(true); // step 2 (cups-own)
     });
 
-    // Regression test for task #45: validateMove() itself never mutates
-    // the board, so a later step naming the exact minion an earlier step
-    // in this SAME chain just moved/created had nowhere real to read it
-    // from (checkX/getPiece in powers.ts threw NO_TERRITORY_TRACKED) -
-    // the untrusted `move()` path (which calls validateMove() first)
-    // crashed instead of validating or applying. The Lovers test above
-    // only ever exercises this with {trusted: true}, which skips
-    // validateMove() (and therefore this bug) entirely.
+    // validateMove() itself never mutates the board, so a later step
+    // naming the exact minion an earlier step in this SAME chain just
+    // moved/created must still resolve correctly for an untrusted caller
+    // (the Lovers test above only exercises this with {trusted: true},
+    // which skips validateMove() entirely).
     it("Chariot (move, then move): an untrusted move validates and applies when step 2 acts through step 1's own relocated piece", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
@@ -1357,9 +1350,7 @@ describe("Gnostica: piece grid fallback order (#48)", () => {
             new Piece(1, 1, "N"),
             new Piece(1, 1, "E"),
             // N and E both already taken - per #48's fallback order for N
-            // (E, W, U, S) this must land on W next, not jump straight to
-            // S the way the OLD fixed global order (N, S, E, W, U) would
-            // have.
+            // (E, W, U, S) this must land on W next, not jump straight to S.
             new Piece(1, 1, "N"),
         ];
         const slots = gridSlots(g, pieces);
@@ -1424,10 +1415,9 @@ describe("Gnostica: render", () => {
     });
 
     // A cell can legitimately exceed the normal 3-piece capacity (some
-    // major arcana powers bypass CellContents.canAdd()'s check), and pyramids
-    // must never be rendered stacked/overlapping. Regression test for
-    // exactly that bug: the old fixed 3-slot nudge table silently reused
-    // slot 1's coordinates for every piece beyond the 3rd.
+    // major arcana powers bypass CellContents.canAdd()'s check), and
+    // pyramids must never be rendered stacked/overlapping past that point
+    // either.
     it("never gives two pieces on the same territory identical render coordinates, even past normal capacity", () => {
         const g = new GnosticaGame(2);
         const t = g.board.get(0, 0)!;
@@ -1607,9 +1597,8 @@ describe("Gnostica: handleClick", () => {
     // A bare "place <cell>" is already grammatically complete (orientation
     // defaults to "U"), so validateMove() alone would mark it complete:1 -
     // but handleClick has to downgrade that to 0, or the interface would
-    // auto-submit "U" on the very first click, before the player ever
-    // gets a chance to click again and cycle to a real facing (the
-    // reported bug this guards against).
+    // auto-submit "U" on the very first click, before the player ever gets
+    // a chance to click again and cycle to a real facing.
     it("place: the first click is never auto-submittable - complete stays 0 even though the move is already valid", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 0, 0);
@@ -1618,14 +1607,12 @@ describe("Gnostica: handleClick", () => {
         expect(result.complete).eq(0);
     });
 
-    // Regression: playground.js's boardClick() only re-renders the live
-    // preview (updating the button bar) when canrender or complete>=0 is
-    // set - a valid but complete:-1 result (the common case since #49,
-    // e.g. right after picking a card or a top-level button) used to
-    // leave the button bar visibly stale after a real click, even though
-    // the returned message was correct. canrender must be set on every
-    // valid click result regardless of complete, not just the ones that
-    // happen to be complete:0/1.
+    // playground.js's boardClick() only re-renders the live preview
+    // (updating the button bar) when canrender or complete>=0 is set, so
+    // canrender must be set on every valid click result regardless of
+    // complete - not just the ones that happen to be complete:0/1 - or the
+    // button bar goes visibly stale after a real click even though the
+    // returned message was correct.
     it("sets canrender on a valid complete:-1 result - a top-level button choice - not just complete>=0 ones", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
@@ -1892,14 +1879,11 @@ describe("Gnostica: handleClick", () => {
         expect(bar!.buttons!.length).greaterThan(1);
     });
 
-    // hasLiveMoveInProgress() is the fix for a real bug: this.lastmove/
-    // this.results don't reset between turns on their own, so without this
-    // guard a committed action from the PREVIOUS player's finished turn
-    // would misread as the NEW current player's own in-progress action
-    // (most visibly when the two share a contested cell) - wrongly
-    // highlighting a button, or worse, collapsing the whole bar down to a
-    // stale single button or mode-button set. This is the direct
-    // regression test: right after a real commit, before the next player
+    // this.lastmove/this.results don't reset between turns on their own,
+    // so hasLiveMoveInProgress() must keep a committed action from the
+    // PREVIOUS player's finished turn from misreading as the NEW current
+    // player's own in-progress action (most visibly when the two share a
+    // contested cell) - right after a real commit, before the next player
     // has clicked anything at all, nothing should be highlighted.
     it("does not highlight a stale button before the next player's own first click", () => {
         const g = new GnosticaGame(2);
@@ -2011,12 +1995,11 @@ describe("Gnostica: handleClick", () => {
         expect(activateBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
     });
 
-    // The bug this whole guard exists for: a CONTESTED cell (both players
-    // have a piece there) defeats the narrower "does the current player
-    // own a piece at that result's cell" checks alone, since the new
-    // current player genuinely does have a piece there too - only knowing
-    // whether a move() call has happened yet THIS turn can tell the two
-    // apart.
+    // A CONTESTED cell (both players have a piece there) defeats the
+    // narrower "does the current player own a piece at that result's
+    // cell" check alone, since the new current player genuinely does have
+    // a piece there too - only knowing whether a move() call has happened
+    // yet THIS turn can tell the two apart.
     it("does not carry a stale mode-button set into a contested cell on the next player's fresh turn", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
@@ -2083,14 +2066,10 @@ describe("Gnostica: handleClick", () => {
     // The playground's live-preview mechanism calls move(m, {partial:
     // true}) on every click to show what the in-progress move would do,
     // without treating it as a final, committed turn (see move()'s own
-    // comment for the full story - this was a real, previously-missing
-    // piece of the engine, not a click-building bug). Without honouring
-    // `partial`, every preview call fully committed: advanced the turn,
-    // drew for real, and pushed onto the stack - so a player toggling
-    // multiple hand cards into one discard move would see each card
-    // discarded and immediately replaced one at a time, rather than the
-    // whole batch resolving together only once the move is truly
-    // submitted.
+    // docs) - a player toggling multiple hand cards into one discard move
+    // must see the whole batch resolve together only once the move is
+    // truly submitted, not each card discarded and immediately replaced
+    // one at a time.
     it("move(..., {partial: true}) applies the move's effects without advancing the turn or persisting it", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
@@ -2263,7 +2242,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.true;
     });
 
-    // Regression: same "_new" suffix stripping as the hand-card click -
+    // Same "_new" suffix stripping as the hand-card click -
     // AreaPieces reuses the pieces[] entry as both the legend key and the
     // clickable identifier, so a real click on a highlighted discard-pile
     // card (Judgement's own picker) must still resolve to its real uid/
@@ -2365,8 +2344,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // Cell chosen, card uid not yet supplied - genuinely still
         // building (complete:-1), not just soft-pedaled to 0 - a bare
         // hand-typed submission of this exact string must not look
-        // "valid" (the false-positive this fixes; see validateMinorPower's
-        // own docs).
+        // "valid" (see validateMinorPower's own docs).
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(-1);
         const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
@@ -2556,12 +2534,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.stashes.get(1)![0]).eq(5); // returned to its own stash
     });
 
-    // Regression test for a reported bug: using a Sword to attack a
-    // neighbouring enemy instead attacked the acting player's own minion,
-    // because the mode button unconditionally defaulted to self. Attacking
-    // yourself is almost never what's wanted (unlike Rods' "move self" or
-    // Discs' "grow self", both genuinely common choices) - when the minion
-    // is actually facing an enemy, that's what the default should target.
+    // Attacking yourself is almost never what's wanted (unlike Rods' "move
+    // self" or Discs' "grow self", both genuinely common choices) - when
+    // the minion is actually facing an enemy, that's what the default
+    // should target.
     it("Swords (piece): with a piece in the facing cell, defaults to attacking THAT instead of self", () => {
         const g = new GnosticaGame(2);
         clearBoard(g); // fully deterministic - see clearBoard's own docs
@@ -2675,16 +2651,12 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(ownBtn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
     });
 
-    // Regression test for a second reported bug, hit via the Sword
-    // self-attack above: destroying the acting player's own last minion
-    // mid-preview made getActionButtons() misread "zero pieces on board
-    // right now" as "fresh turn, needs a placement" and collapse the whole
-    // bar down to a single Place button - even though the in-progress
-    // activate/play move was still perfectly valid and just needed
-    // submitting. A live "activate"/"play" preview can only ever have
-    // started with board presence (both throw otherwise), so this piece
-    // count is a legitimate mid-action side effect, not a fresh-turn
-    // signal.
+    // A live "activate"/"play" preview can only ever have started with
+    // board presence (both throw otherwise), so zero pieces on the board
+    // mid-preview is a legitimate mid-action side effect (e.g. a Sword
+    // step destroying the acting player's own last minion), not a
+    // fresh-turn signal - getActionButtons() must not collapse the bar
+    // down to a single Place button in that case.
     it("does not collapse to the Place button mid-preview when a power step destroys the acting player's own last minion", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfSwords());
@@ -2918,15 +2890,10 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
     });
 });
 
-// Regression tests for validateMove()'s rearchitecture: a genuine,
-// non-mutating validator (gnostica.ts's validateX tree + gnostica/powers.ts's
-// checkX functions) replacing the old "clone this, try running the move on
-// the clone, catch whatever it throws" mechanism. That old mechanism silently
-// discarded every specific reason a suit-power move was illegal, since the
-// thrown GnosticaRulesError wasn't a UserFacingError and the catch block
-// only ever unwrapped UserFacingError's own message - every powers.ts
-// failure surfaced as the generic INVALID_MOVE fallback instead of its real
-// message.
+// validateMove() is a genuine, non-mutating validator (gnostica.ts's
+// validateX tree + gnostica/powers.ts's checkX functions) - every
+// powers.ts failure must surface its own real message, not a generic
+// INVALID_MOVE fallback, and validation must never mutate game state.
 describe("Gnostica: validateMove architecture (non-mutating validator)", () => {
     before(() => {
         addResource("en");
@@ -2963,13 +2930,10 @@ describe("Gnostica: validateMove architecture (non-mutating validator)", () => {
         expect(g.discardPile.length).to.eq(discardBefore);
     });
 
-    // Second bug found while building this refactor: Cups "own"/"enemy"
-    // previously looked up the target cell with the throwing
-    // getCellContents() helper, which threw on a genuinely untouched
-    // wasteland (no stored CellContents object at all, since one is only
-    // ever created for a cell that already has a card or a piece) -
-    // inconsistent with movePiece/hermitMovePiece, which already handle
-    // exactly this case by creating one on the fly. Now fixed to match.
+    // A genuinely untouched wasteland has no stored CellContents object at
+    // all (one is only ever created for a cell that already has a card or
+    // a piece) - Cups "own"/"enemy" must handle that the same way
+    // movePiece/hermitMovePiece already do, by creating one on the fly.
     it("Cups (own) can target a genuinely untouched wasteland, not just an existing territory", () => {
         const g = new GnosticaGame(2);
         const [cx, cy] = [1, 1]; // a corner of the initial 3x3
@@ -2987,10 +2951,10 @@ describe("Gnostica: validateMove architecture (non-mutating validator)", () => {
     });
 });
 
-// Regression tests for the piece-reference notation itself
-// ("<cell>.<pips>[.<orientation>][.<player>]", replacing the old opaque
-// array-index "<cell>.<index>") - each field is included only when the
-// ones before it don't already narrow a target cell's pieces down to one.
+// The piece-reference notation itself
+// ("<cell>.<pips>[.<orientation>][.<player>]") - each field is included
+// only when the ones before it don't already narrow a target cell's
+// pieces down to one.
 describe("Gnostica: piece-reference notation", () => {
     before(() => {
         addResource("en");
@@ -3229,20 +3193,18 @@ describe("Gnostica: click-to-orient messaging", () => {
 });
 
 // The bare "activate <cell>"/"play <uid>" state, right after picking the
-// card and before any suit mode or major-arcana power step. Per #49 this
-// is no longer a complete, submittable move - it's still "in progress"
-// (valid:true, complete:-1). The MESSAGE shown here is a click-driven UI
-// nudge, not a validation complaint - a real Submit is disabled client-
-// side in this state anyway, so there's nothing to warn the player away
-// from; it just points at the button bar (CHOOSE_STEP). The raw
-// POWER_STEP_REQUIRED validation reason still exists (see
+// card and before any suit mode or major-arcana power step, is still "in
+// progress" (valid:true, complete:-1), per #49. The MESSAGE shown here is
+// a click-driven UI nudge, not a validation complaint - a real Submit is
+// disabled client-side in this state anyway, so there's nothing to warn
+// the player away from; it just points at the button bar (CHOOSE_STEP).
+// The raw POWER_STEP_REQUIRED validation reason still exists (see
 // validateMinorPower/validateMajorPower's own tests, checked directly via
 // validateMove()) - it surfaces only for an actual submit attempt while
 // incomplete (e.g. a hand-typed move), never through this click path.
 // Applies equally to a minor or a major arcana card, and to both activate
-// and play - except Fool/World, permanently exempt since neither can
-// ever take a real step (not yet supported), where the old fully-
-// complete/POWER_STILL_OPTIONAL behavior still applies.
+// and play - except Fool/World, which stay complete/optional (neither can
+// ever take a real step - not yet supported).
 describe("Gnostica: choose-step click messaging", () => {
     before(() => {
         addResource("en");
@@ -3349,17 +3311,14 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(resumed.message).eq(round2Msg);
     });
 
-    // Regression: bold marks a button matching what this.liveMove ALREADY
-    // says (see highlightedButtonValues' own docs) - Continue and Decline
-    // are both genuinely open choices at this point, neither "selected",
-    // so neither should be bold.
-    // Regression: a genuine pendingPower obligation used to always show a
-    // one-time "Use Card X/Decline X" screen before anything else, even
-    // when X's own step (like High Priestess's round 2) has real buttons
-    // of its own to offer immediately - forcing an extra click just to
-    // reach them. Now X's own buttons (here, the Draw N count picker)
-    // show directly, with "Decline X" persisting alongside them so the
-    // player is never stuck without a way out.
+    // Bold marks a button matching what this.liveMove ALREADY says (see
+    // highlightedButtonValues' own docs) - Continue and Decline are both
+    // genuinely open choices at this point, neither "selected", so neither
+    // should be bold. A genuine pendingPower obligation shows X's own
+    // buttons directly (here, the Draw N count picker) whenever X's own
+    // step (like High Priestess's round 2) has real buttons to offer, with
+    // "Decline X" persisting alongside them so the player always has a way
+    // out.
     it("a pending obligation's own buttons show directly, with an unbold persisting Decline button - nothing has been chosen yet", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2));
@@ -3377,11 +3336,11 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(declineBtn.attributes).to.be.undefined;
     });
 
-    // Regression: the persisting Decline button used to be labeled after
-    // rootCardUid - always the ORIGINALLY used/played card, never the
-    // actual active one. Once Fool reveals a DIFFERENT card (here, the
-    // High Priestess), that label would misleadingly say "Decline 00"
-    // while what it actually declines is the High Priestess's own power.
+    // The persisting Decline button must be labeled after the ACTIVE
+    // card's uid, not rootCardUid (always the ORIGINALLY used/played
+    // card) - once Fool reveals a DIFFERENT card (here, the High
+    // Priestess), "Decline 00" would misleadingly point at the Fool while
+    // what it actually declines is the High Priestess's own power.
     it("the persisting Decline button is named after the ACTIVE card's uid, not the root card's", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(0)); // The Fool
@@ -3409,12 +3368,12 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(declineBtn.label).eq("Decline 02");
     });
 
-    // Regression: the real client calls validateMove("") right after every
-    // real commit, purely to populate the status line for the render that
-    // follows (see playground.js's own moveBtn handler) - this used to
-    // always say INITIAL_INSTRUCTIONS ("click a top-level button"), which
-    // is wrong the moment that render is actually the forced Continue/
-    // Decline screen, not the ordinary button bar.
+    // The real client calls validateMove("") right after every real
+    // commit, purely to populate the status line for the render that
+    // follows (see playground.js's own moveBtn handler) - INITIAL_
+    // INSTRUCTIONS ("click a top-level button") is wrong the moment that
+    // render is actually the forced Continue/Decline screen, not the
+    // ordinary button bar.
     it("validateMove(\"\") reports the pending-power choice, not the generic top-level-button instructions, once a card's power is paused", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
@@ -3640,7 +3599,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_new");
         expect(modeClick.move).eq(`use ${major(14).uid}, l0.1 new k0`);
-        expect(modeClick.valid).to.be.true; // used to be false - a major step's own mode had no "declined so far" tolerance
+        expect(modeClick.valid).to.be.true; // still-incomplete ("new" needs a card uid) but not an error
         const supplied = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
         expect(supplied.move).eq(`use ${major(14).uid}, l0.1 new k0 ${spotUid}`);
         expect(supplied.valid).to.be.true;
@@ -3912,11 +3871,10 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(round2Draw.message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
     });
 
-    // Regression: clicking a "Draw N" button early, then going back to
-    // discard ANOTHER card, used to append the new uid AFTER the "draw n"
-    // tail (e.g. "5C draw 1 AR") - drawIdx-based parsing then silently
-    // dropped everything past "draw", so the new card was never actually
-    // discarded at all, despite the move looking "valid".
+    // Clicking a "Draw N" button early, then going back to discard ANOTHER
+    // card, must drop the stale "draw N" tail rather than appending the
+    // new uid after it - a card added past the "draw" token must actually
+    // be discarded, not silently ignored.
     it("highPriestess: discarding another card after already choosing a draw count drops the stale count and adds the card", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2));
@@ -3942,12 +3900,11 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.hands[0].length).eq(6); // defaulted to max (1 remaining + 5 drawn), not stuck at a stale count
     });
 
-    // Regression: playing High Priestess (as opposed to using it already on
-    // the board) removes the card from hand BEFORE its own power resolves
-    // (cmdPlay's own docs) - validation never accounted for that extra
-    // card leaving, so its own max-draw bound was off by one relative to
-    // what actually happens on commit (a 6-card hand, played + 2 discards,
-    // is genuinely down to 3 - the true max draw is 3, not 2).
+    // Playing High Priestess (as opposed to using it already on the
+    // board) removes the card from hand BEFORE its own power resolves
+    // (cmdPlay's own docs), so the max-draw bound must account for that
+    // extra card leaving too: a 6-card hand, played + 2 discards, is
+    // genuinely down to 3 - the true max draw is 3, not 2.
     it("highPriestess (played from hand): the draw-count max accounts for the played card itself leaving the hand", () => {
         const g = new GnosticaGame(2);
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")]; // some piece on the board, for eligibleMinionsForPlay
@@ -3975,12 +3932,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.hands[0]).to.not.include("5C");
     });
 
-    // Regression: the real client's boardClick() calls game.move(result.move,
-    // {partial: true}) after EVERY click, to render a live preview - this
-    // used to trigger the actual (random) redraw immediately, before the
-    // player had finished building their discard list or ever clicked
-    // Submit. Mirrors cmdDiscard's own "discard eagerly, defer the draw"
-    // convention for the ordinary end-of-turn action.
+    // The real client's boardClick() calls game.move(result.move, {partial:
+    // true}) after EVERY click, to render a live preview - the actual
+    // (random) redraw must not fire until Submit, before the player has
+    // even finished building their discard list. Mirrors cmdDiscard's own
+    // "discard eagerly, defer the draw" convention for the ordinary
+    // end-of-turn action.
     it("highPriestess: a partial preview discards eagerly but does not redraw until the real, non-partial commit", () => {
         // A fresh instance per call, exactly like the real client's own
         // boardClick() convention (a fresh GameFactory reload from the
@@ -4317,19 +4274,16 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         expect(g.hands[0].length).eq(6); // redrawn back up again
     });
 
-    // Regression: "continue" is the only legal way to resume - there's no
-    // "wrong action (use vs play)" mismatch left to test (it carries no
-    // verb of its own to get wrong), replaced with the new PENDING_POWER_NEEDS_CONTINUE
-    // guard instead. Wrong-uid and too-many-segments still apply, now
-    // phrased as "continue X, ...".
+    // "continue" is the only legal way to resume: a bare "use"/"play"
+    // gets PENDING_POWER_NEEDS_CONTINUE, a wrong card uid gets
+    // PENDING_POWER_MISMATCH, and more than one step segment still throws.
     it("resume-mismatch guards reject a wrong card uid, a bare use/play instead of continue, and more than one step segment", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
         g.move(`use ${major(2).uid}, 5C`, { trusted: true });
         expect(g.pendingPower).to.not.be.undefined;
         // Wrong cardUid: caught by validation only (validateResumePendingPower)
-        // - a {trusted: true} caller is never expected to submit something
-        // invalid in the first place, so apply itself no longer checks this
+        // - apply trusts that a {trusted: true} caller already validated
         // (see resumePendingPower's own docs).
         expect(g.validateMove("continue 07, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
         expect(g.validateMove(`use ${major(2).uid}, decline`).message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_NEEDS_CONTINUE")); // needs "continue", not "use"
@@ -4386,13 +4340,12 @@ describe("Gnostica: Fool and World", () => {
         return g;
     };
 
-    // Regression: a revealed card's own real buttons now show immediately
-    // (no separate "Use Card X" click first - see getActionButtons()'s
-    // own docs), and a persisting "Decline X" is always folded in
-    // alongside them. Before this fix, committing to "Use Card X" for a
-    // Rods card whose every eligible minion is upright (Rods rejects
-    // upright minions for every mode) left the player with nothing but
-    // struck-through buttons and no way back out.
+    // A revealed card's own real buttons show immediately (no separate
+    // "Use Card X" click first - see getActionButtons()'s own docs), with
+    // a persisting "Decline X" always folded in alongside them - even for
+    // a Rods card whose every eligible minion is upright (Rods rejects
+    // upright minions for every mode), so the player always has a way
+    // back out.
     it("a revealed Rods card with only upright minions leaves every mode struck through, but the persisting Decline button is still there", () => {
         const g = setupFool();
         pluckCard(g, "2R");
@@ -4582,12 +4535,10 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
     });
 
-    // Regression: a two-stage special (magicianChoice, hermitTeleport) that
-    // Fool reveals must be click-driven from the very first click, when
-    // nothing has been clicked yet THIS turn - movebox.value is still ""
-    // (untouched since the last real commit), not seeded with "use 00" by
-    // an earlier "Use Card X" click (skipped entirely now - see
-    // getActionButtons()'s own docs). handleClickCore's own parsePendingStep
+    // A two-stage special (magicianChoice, hermitTeleport) that Fool
+    // reveals must be click-driven from the very first click, when nothing
+    // has been clicked yet THIS turn - movebox.value is still "" (untouched
+    // since the last real commit). handleClickCore's own parsePendingStep
     // calls need pendingPower's root seeded in for them in this case.
     it("a revealed Magician's own suit buttons are click-driven even before anything else has been clicked this turn", () => {
         const g = setupFool();
@@ -4601,13 +4552,13 @@ describe("Gnostica: Fool and World", () => {
         expect(suitClick.valid).to.be.true;
         expect(suitClick.move).eq(`continue ${major(0).uid}, m0.1 C`);
 
-        // Regression: syncing the engine to this still-incomplete segment
-        // (suit chosen, mode not yet - same as the playground's own
-        // preview flow between every click) must neither silently
-        // complete the step early nor lose track of the suit already
-        // chosen - the bar should show CUPS' OWN mode buttons directly,
-        // not the suit-picker again, and "Decline 01" (the Magician, not
-        // the Fool) stays put throughout.
+        // Syncing the engine to this still-incomplete segment (suit
+        // chosen, mode not yet - same as the playground's own preview flow
+        // between every click) must neither silently complete the step
+        // early nor lose track of the suit already chosen - the bar should
+        // show CUPS' OWN mode buttons directly, not the suit-picker again,
+        // and "Decline 01" (the Magician, not the Fool) stays put
+        // throughout.
         g.move(suitClick.move, { partial: true });
         expect(buttonValues(g)).to.include.members(["mode_C_own", "mode_C_enemy", "mode_C_new"]);
         expect(buttonValues(g)).to.not.include("magician_R");
@@ -4618,10 +4569,10 @@ describe("Gnostica: Fool and World", () => {
         const modeClick = g.handleClick(suitClick.move, -1, -1, "_btn_mode_C_own");
         expect(modeClick.valid).to.be.true;
 
-        // Regression: once Magician's own power genuinely completes (via
-        // this same partial sync), Fool's own next flip becomes the
-        // active step - mandatory, not optional (see walkFrameStack's own
-        // docs) - so there is nothing left to decline here at all.
+        // Once Magician's own power genuinely completes (via this same
+        // partial sync), Fool's own next flip becomes the active step -
+        // mandatory, not optional (see walkFrameStack's own docs) - so
+        // there is nothing left to decline here at all.
         g.move(modeClick.move, { partial: true });
         expect(buttonValues(g)).to.not.include("decline_power");
 
@@ -4631,11 +4582,11 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(1);
     });
 
-    // Regression: Fool's own draws are never optional (walkFrameStack's
-    // own docs) - declining what the first flip revealed auto-continues
-    // straight into the second flip, IN THE SAME SUBMISSION, rather than
-    // needing a separate "Continue"/resume round just to ask whether
-    // Fool should draw again.
+    // Fool's own draws are never optional (walkFrameStack's own docs) -
+    // declining what the first flip revealed auto-continues straight into
+    // the second flip, IN THE SAME SUBMISSION, rather than needing a
+    // separate "Continue"/resume round just to ask whether Fool should
+    // draw again.
     it("declining what the first flip revealed auto-continues into a mandatory second flip, in one submission", () => {
         const g = setupFool();
         pluckCard(g, "AC");
@@ -4766,12 +4717,11 @@ describe("Gnostica: Fool and World", () => {
         // about WHAT was revealed.
         expect(preview.discardPile.length).eq(0);
         expect(preview.pendingPower?.stack).to.have.length(1);
-        // Regression: that bookkeeping-only pendingPower must NOT be
-        // mistaken for a genuine, already-existing obligation - nothing
-        // has actually been committed yet, so there's nothing to decline,
-        // and the bar should be the plain, uncollapsed top-level set
-        // (Use Territory bold, since this was "use 00") with no
-        // "decline_power" mixed in.
+        // That bookkeeping-only pendingPower must NOT be mistaken for a
+        // genuine, already-existing obligation - nothing has actually been
+        // committed yet, so there's nothing to decline, and the bar should
+        // be the plain, uncollapsed top-level set (Use Territory bold,
+        // since this was "use 00") with no "decline_power" mixed in.
         expect(buttonValues(preview)).to.not.include("decline_power");
         const rep = preview.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
@@ -4784,10 +4734,9 @@ describe("Gnostica: Fool and World", () => {
         expect(real.pendingPower).to.not.be.undefined;
     });
 
-    // Same regression as the "use" case above, but for "play" (Fool from
-    // hand) - the exact scenario reported: before ever submitting, the
-    // full top-level bar (Play Card bold) plus a nonsensical "Decline 00"
-    // both showed, even though nothing had been drawn yet to decline.
+    // Same as the "use" case above, but for "play" (Fool from hand) -
+    // before submitting, there's nothing yet to decline, so no
+    // "Decline 00" should show alongside the bold Play Card button.
     it("playing the Fool from hand, before submitting, shows no Decline button either", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
@@ -4802,14 +4751,13 @@ describe("Gnostica: Fool and World", () => {
         expect(playBtn.attributes).to.deep.equal([{ name: "font-weight", value: "bold" }]);
     });
 
-    // Regression: since Fool's own second flip is never a separate,
-    // optional choice any more (it fires automatically the moment
-    // declining a reveal exposes it - see walkFrameStack's own docs),
-    // there's no longer a "Continue"/resume round for it at all. Clicking
-    // "Decline" on a revealed card's own power already produces a
-    // complete, submit-ready move whose real commit performs BOTH the
-    // decline and the automatic second flip - the button bar has nothing
-    // Fool-specific to offer at any point in this preview.
+    // Fool's own second flip is never a separate, optional choice - it
+    // fires automatically the moment declining a reveal exposes it (see
+    // walkFrameStack's own docs), so clicking "Decline" on a revealed
+    // card's own power already produces a complete, submit-ready move
+    // whose real commit performs BOTH the decline and the automatic
+    // second flip - the button bar has nothing Fool-specific to offer at
+    // any point in this preview.
     it("declining a revealed card's power in the click preview is already complete, and the decline choice persists (bolded)", () => {
         const g = setupFool();
         pluckCard(g, "AC");
@@ -4842,11 +4790,10 @@ describe("Gnostica: Fool and World", () => {
         expect(declineBtn.attributes).to.deep.equal([{ name: "font-weight", value: "bold" }]);
     });
 
-    // Regression: a real flip's own message (validateMove("") right after
-    // commit, the Continue/Decline screen) and the message shown once
-    // Continue is clicked both used to be generic, never naming what was
-    // actually revealed - the player could only learn that from the chat
-    // log, easy to miss. Both must name the revealed card explicitly.
+    // A real flip's own message (validateMove("") right after commit, the
+    // Continue/Decline screen) and the message shown once Continue is
+    // clicked must both name the revealed card explicitly, not force the
+    // player to check the chat log.
     it("Fool's real flip and its Continue click both name the revealed card in the message, not just the chat log", () => {
         const g = setupFool();
         pluckCard(g, "AC");
@@ -4863,14 +4810,11 @@ describe("Gnostica: Fool and World", () => {
         expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
     });
 
-    // Regression: validateResumePendingPower's own 0-segment case used to
-    // reuse POWER_STEP_REQUIRED (the #49 ROOT-only "must be used, at least
-    // in part... or use 'discard draw 0'" message) - wrong for a
-    // resumed/pushed frame, which is never mandatory, and "discard draw 0"
-    // isn't even how you'd give it up (Decline is). Only validateMove("")
-    // (the empty string) had the correct, Decline-aware wording before
-    // this fix - the bare-but-non-empty resume string ("use 00" alone,
-    // e.g. what "Use Card X" itself builds) did not.
+    // A resumed/pushed frame is never mandatory the way #49's ROOT-only
+    // "must be used, at least in part" rule is, and "discard draw 0" isn't
+    // even how you'd give it up (Decline is) - a bare-but-non-empty resume
+    // string ("use 00" alone, e.g. what "Use Card X" itself builds) must
+    // get the same Decline-aware wording as validateMove("").
     it("validating a bare resume (no steps typed yet) names Decline, not the #49 root-only 'discard draw 0' wording", () => {
         const g = setupFool();
         pluckCard(g, major(1).uid); // Magician
@@ -4884,13 +4828,12 @@ describe("Gnostica: Fool and World", () => {
         expect(bare.message).to.not.eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
     });
 
-    // Regression: the SAME wrong message also showed up one click later -
+    // Same Decline-aware wording applies one click later too -
     // validateFrameStack's own "given segment is still incomplete, nothing
     // more to check" fallback (shared by every use/play, resumed or not)
-    // reused POWER_STEP_REQUIRED unconditionally too. Reported live: after
+    // must not fall back to the #49 ROOT-only wording either, e.g. once
     // Fool reveals the Magician and Cups is picked (suit chosen, mode not
-    // yet), the message still said "must be used... discard draw 0"
-    // instead of naming Decline.
+    // yet).
     it("validating a still-incomplete resumed step (a real segment given, but not enough of one) also names Decline", () => {
         const g = setupFool();
         pluckCard(g, major(1).uid); // Magician
@@ -4904,14 +4847,12 @@ describe("Gnostica: Fool and World", () => {
         expect(suitChosen.message).to.not.eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
     });
 
-    // Regression: declining a revealed card's own power exposes Fool's own
-    // remaining flip underneath (see walkFrameStack's own
-    // "lastWasExplicitDecline" docs) - the click PREVIEW of that decline
-    // used to fall back to the generic top-level bar and a bare "Looks
-    // like a valid move" message, because getActionButtons()'s own
-    // pendingPower-reseeded read of parsePendingStep always started
-    // priorSteps at [] (see reachedViaDecline's own docs), indistinguishable
-    // from a genuinely fresh/mandatory activation.
+    // Declining a revealed card's own power exposes Fool's own remaining
+    // flip underneath (see walkFrameStack's own "lastWasExplicitDecline"
+    // docs) - the click PREVIEW of that decline must recognize this as a
+    // complete, submit-ready move (see reachedViaDecline's own docs), not
+    // fall back to the generic top-level bar and a bare "Looks like a
+    // valid move" message as if it were a fresh/mandatory activation.
     it("World's target-cell click on Fool already produces a complete, submit-ready move - no button needed", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
@@ -4991,15 +4932,11 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
     });
 
-    // Regression: validatePlay used to simulate cmdPlay's own hand
-    // removal but NOT its discard-pile push, so a power that reads
-    // discard pile CONTENTS (not just count) - Judgement drawing the
-    // very card that was just played, itself included - validated
-    // against a discard pile one card short of what a real commit would
-    // actually see, wrongly rejecting this exact legal move with
-    // NOT_IN_DISCARD for any ORDINARY (untrusted) player, even though the
-    // {trusted: true} version directly above has always worked. Fixed by
-    // having validatePlay simulate the discard push too.
+    // validatePlay must simulate cmdPlay's own discard-pile push, not just
+    // its hand removal, so a power that reads discard pile CONTENTS (not
+    // just count) - Judgement drawing the very card that was just played,
+    // itself included - validates against the same discard pile a real
+    // commit would actually see, for an ORDINARY (untrusted) player too.
     it("regression: playing Judgement and drawing itself back also validates correctly for an ordinary (untrusted) player", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
@@ -5017,7 +4954,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
     });
 
-    // Regression: drawing/using a power is a UX convenience (#49), never a
+    // Drawing/using a power is a UX convenience (#49), never a
     // rules requirement, and it never applies to a card Fool reveals -
     // Judgement's own draw has always been optional (0 cards is legal).
     // The player is also never responsible for foreseeing that a legal

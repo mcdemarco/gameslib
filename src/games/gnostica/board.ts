@@ -99,19 +99,15 @@ export class GnosticaBoard {
     // Deletes {x,y}'s own stored CellContents once it's become empty (no
     // card, no pieces) - the invariant this class's own header comment
     // promises ("a wasteland with no pieces on it is never actually
-    // stored on the board"), but which only destroyTerritory/
-    // evictVoidPieces previously enforced, and only for a cell that
-    // reclassifies all the way down to "void". A wasteland cell (one
-    // still adjacent to a card-bearing neighbour) that loses its last
-    // piece - e.g. it moves, is destroyed, or its owner is eliminated -
-    // never reclassifies to "void" at all, so it was never pruned: the
-    // empty CellContents stayed in the map forever, artificially inflating
-    // minX/maxX/minY/maxY (and so the rendered window) even though
-    // nothing was actually there anymore. Deliberately classify()-
-    // agnostic - emptiness alone is the only thing that matters here.
-    // Every caller that removes a piece from a cell without immediately
-    // adding a different one back to that same cell needs to call this
-    // afterward (see movePiece/attackPiece/hermitMovePiece in
+    // stored on the board"). A wasteland cell (one still adjacent to a
+    // card-bearing neighbour) that loses its last piece never reclassifies
+    // to "void", so an empty CellContents left behind there would stay in
+    // the map forever, artificially inflating minX/maxX/minY/maxY (and so
+    // the rendered window) even though nothing is actually there anymore -
+    // deliberately classify()-agnostic, since emptiness alone is what
+    // matters here. Every caller that removes a piece from a cell without
+    // immediately adding a different one back to that same cell needs to
+    // call this afterward (see movePiece/attackPiece/hermitMovePiece in
     // powers.ts, and eliminatePlayer in gnostica.ts).
     public pruneIfEmpty(x: number, y: number): void {
         const t = this.cells.get(x, y);
