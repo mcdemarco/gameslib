@@ -2366,10 +2366,13 @@ export class GnosticaGame extends GameBaseSequenced {
     // this window too, with no need to separately account for the raw
     // stored-cell bounds at all. Falls back to a trivial single-cell
     // window if there are somehow no territories at all (shouldn't
-    // happen once the game has actually started).
-    private renderWindow(): { minX: number; maxX: number; minY: number; maxY: number } {
+    // happen once the game has actually started). Takes an explicit
+    // board (defaulting to the live one) so renderFrame() can compute a
+    // historical frame's own window from that frame's own board, not the
+    // live one - board window can genuinely differ mid-chain.
+    private renderWindow(board: GnosticaBoard = this.board): { minX: number; maxX: number; minY: number; maxY: number } {
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const [x, y, t] of this.board.entries()) {
+        for (const [x, y, t] of board.entries()) {
             if (t.card === undefined) {
                 continue;
             }
@@ -7115,17 +7118,18 @@ export class GnosticaGame extends GameBaseSequenced {
     // notation), so this only needs ONE extra coordinate layer
     // (window-relative row/col), not two.
     // The actual, single-state render body - renamed from render() so the
-    // new public render() dispatcher (below) can call it directly on a
-    // throwaway per-frame snapshot without any risk of recursing back
-    // into that dispatcher's own array-building logic. `suppressButtons`
-    // is set only by that dispatcher, for an intermediate frame of a
-    // fully-committed historical chain (see its own docs on why).
-    // `suppressHands` is set for every intermediate frame regardless -
-    // FrameState doesn't capture hands at all (see its own docs), so an
-    // intermediate frame's own hand area would just be the live/final
-    // hand mislabeled as that step's own, matching frogger.ts's own
-    // last-frame-only hand area instead of showing a stale one.
-    private renderCurrent(opts?: IRenderOpts, suppressButtons = false, suppressHands = false): APRenderRep {
+    // new public render() dispatcher (below) can call it directly. A
+    // finished/historical chain's own frames are built entirely from
+    // renderFrame() instead (no buttons/hands there at all - see its own
+    // docs), so this only ever runs on a genuinely live state: either the
+    // real current one, or (mid-build, via renderFrameSnapshot's clone)
+    // the acting player's own still-in-progress chain, which DOES need
+    // real interactive buttons for whatever comes next. `suppressHands`
+    // still applies to that mid-build clone case - FrameState doesn't
+    // capture hands at all (see its own docs), so even there an
+    // intermediate step's own hand area would just be the live/final hand
+    // mislabeled as that step's own.
+    private renderCurrent(opts?: IRenderOpts, suppressHands = false): APRenderRep {
         let altDisplay: string | undefined;
         if (opts !== undefined) {
             altDisplay = opts.altDisplay;
@@ -7352,7 +7356,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Discard/Pass/Declare) as buttons - see getActionButtons()'s own
         // docs for why a button bar rather than inferring intent from
         // board clicks alone.
-        const actionButtons = suppressButtons ? undefined : this.getActionButtons();
+        const actionButtons = this.getActionButtons();
         if (actionButtons !== undefined) {
             areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
         }
@@ -7406,14 +7410,140 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
+    // Builds a finished/historical chain's own intermediate frame DIRECTLY
+    // from FrameState's own board/discardPile - no clone, no live-instance
+    // fallback for anything. Never builds a hand, draw-pile, bidding-pool,
+    // declaration-banner, turn-order-key, or button area at all (rather
+    // than building then suppressing them) - none of those are genuinely
+    // per-step data (see FrameState's own docs), so there's nothing there
+    // worth reconstructing for a fixed point in a chain's own history.
+    // Only used once liveMove is undefined (the chain is fully committed,
+    // being reviewed rather than still built) - see render()'s own
+    // dispatch; while still mid-build, renderFrameSnapshot's clone is used
+    // instead, since that case genuinely needs real interactive buttons
+    // for whatever comes next, not just a static picture of what already
+    // happened.
+    private renderFrame(frame: FrameState, stepIndex: number, opts?: IRenderOpts): APRenderRep {
+        let altDisplay: string | undefined;
+        if (opts !== undefined) {
+            altDisplay = opts.altDisplay;
+        }
+        const largerCards = altDisplay === "larger-cards";
+
+        const board = new GnosticaBoard(frame.board);
+        const { minX, maxX, minY, maxY } = this.renderWindow(board);
+        const width = maxX - minX + 1;
+        const height = maxY - minY + 1;
+
+        const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
+        const pieceRows: string[] = [];
+        const markers: MarkerOutline[] = [];
+        for (let y = minY; y <= maxY; y++) {
+            const rowCells: string[] = [];
+            for (let x = minX; x <= maxX; x++) {
+                const cls = board.classify(x, y);
+                if (cls === "void") {
+                    rowCells.push("-");
+                    continue;
+                }
+                const t = board.get(x, y);
+                const key = this.cellRenderKey(t, cls);
+                if (!(key in legend)) {
+                    let owner = 0;
+                    const players = t?.card !== undefined ? t.playersPresent() : undefined;
+                    if (players !== undefined && players.size === 1) {
+                        [owner] = players;
+                        markers.push({
+                            type: "outline",
+                            colour: owner,
+                            points: [{ row: y - minY, col: x - minX }],
+                        });
+                    }
+                    legend[key] = this.buildCellGlyph(t, cls, largerCards, owner);
+                }
+                rowCells.push(key);
+            }
+            pieceRows.push(rowCells.join(","));
+        }
+
+        const columnLabels: string[] = [];
+        for (let x = minX; x <= maxX; x++) {
+            columnLabels.push(GnosticaBoard.coords2algebraic(x, 0).slice(0, -1));
+        }
+        const rowLabels: string[] = [];
+        for (let y = maxY; y >= minY; y--) {
+            rowLabels.push((y === 0 ? 0 : -y).toString());
+        }
+
+        // The discard pile is always face-up/public - unlike hands or the
+        // draw pile, both never shown for a historical frame at all (see
+        // this function's own docs) - so it's the one non-board area worth
+        // reconstructing here. No "just discarded" tinting: that reads
+        // this.discarded, a live-only concept, not something a fixed
+        // historical snapshot needs.
+        const areas: AreaPieces[] = [];
+        const discardArea = this.buildDeckSummaryArea(
+            frame.discardPile, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
+        );
+        if (discardArea !== undefined) {
+            areas.push(discardArea);
+        }
+
+        const rep: APRenderRep = {
+            board: {
+                style: "squares",
+                width,
+                height,
+                columnLabels,
+                rowLabels,
+                strokeColour: {
+                    func: "flatten",
+                    fg: "_context_strokes",
+                    bg: "_context_board",
+                    opacity: 0,
+                },
+                markers,
+            },
+            legend,
+            pieces: pieceRows.join("\n"),
+            areas: areas.length > 0 ? areas : undefined,
+        };
+
+        // Same _group unwrapping as the live render's own annotation loop
+        // (see applyMajorPower's own docs on why chained results are
+        // wrapped this way) - pull just this step's own group by
+        // position, matching frogger.ts's identical frame[i]/results[i]
+        // pairing.
+        const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
+        const stepResults = groups[stepIndex]?.results ?? [];
+        const annotations: NonNullable<APRenderRep["annotations"]> = [];
+        for (const r of stepResults) {
+            if (r.type === "place" && r.where !== undefined) {
+                const [x, y] = GnosticaBoard.algebraic2coords(r.where);
+                annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
+            } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
+                const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
+                const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
+                annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
+            }
+        }
+        if (annotations.length > 0) {
+            rep.annotations = annotations;
+        }
+
+        return rep;
+    }
+
     // A throwaway GnosticaGame reflecting `frame`'s own board/discardPile
     // instead of live state (see FrameState's own docs on why only those
     // two fields) - extends the existing cloneLive() pattern (built
     // earlier for an unrelated reason) with field overrides instead of a
-    // straight live copy. The clone's own `frames` stays empty, so
-    // callers must call .renderCurrent() directly on it, not the public
-    // .render() - calling the latter would risk recursing back into
-    // array-building logic.
+    // straight live copy. Only used mid-build (see render()'s own
+    // dispatch) - a finished chain's own historical frames use
+    // renderFrame() directly instead, with no clone at all. The clone's
+    // own `frames` stays empty, so callers must call .renderCurrent()
+    // directly on it, not the public .render() - calling the latter would
+    // risk recursing back into array-building logic.
     private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
         // this.results holds one _group entry per step of the chain that
         // produced these frames (see applyMajorPower's own docs) - pull
@@ -7451,15 +7581,18 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.renderCurrent(opts);
         }
         // No live in-progress move left to reconstruct buttons from means
-        // this is a fully committed move being reviewed later (a reload,
-        // a spectator) - showing the final/next-turn button state on an
-        // intermediate historical frame would misleadingly imply you can
-        // still act from that point, so suppress buttons on those frames
-        // entirely instead. While mid-build, reconstructed per-frame
-        // buttons (renderFrameSnapshot's own liveMove override) are
-        // always used, so suppression never applies there.
+        // this is a fully committed move being reviewed later (a reload, a
+        // spectator) - build each frame directly from FrameState itself
+        // (renderFrame(), no clone, no buttons/hands to suppress - see its
+        // own docs), since there's nothing left to interact with. While
+        // still mid-build (the acting player paging through their own
+        // not-yet-submitted chain), reconstructed per-frame buttons
+        // (renderFrameSnapshot's own liveMove override) are genuinely
+        // needed instead, for whatever comes next.
         const historical = this.liveMove === undefined;
-        const reps = this.frames.map((f, i) => this.renderFrameSnapshot(f, i).renderCurrent(opts, historical, true));
+        const reps = historical
+            ? this.frames.map((f, i) => this.renderFrame(f, i, opts))
+            : this.frames.map((f, i) => this.renderFrameSnapshot(f, i).renderCurrent(opts, true));
         reps.push(this.renderCurrent(opts));
         return reps;
     }
