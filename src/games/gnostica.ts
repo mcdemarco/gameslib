@@ -354,22 +354,35 @@ interface IMoveState extends IIndividualState {
     // array would misread every still-open slot as already filled.
     // Deliberately a position, not a card uid - see cmdBid's docs for why
     // storing the identity here would leak it the instant the move is
-    // submitted.
-    bidPositions: (number | null)[];
+    // submitted. The field itself is optional (undefined outside the
+    // "bidding"/"redraw" phases) so a game that never uses the "bidding"
+    // variant - or one that already finished it - doesn't carry a
+    // meaningless all-null array in every stack entry.
+    bidPositions?: (number | null)[];
     // Every card actually revealed by a bid, across every round played
     // (tied rounds and the final decisive one alike) - the shared pool
     // every player draws back up to 6 from during "redraw". bidRound
     // (how many tied rounds have happened so far, 0-indexed) and
     // bidWinner/redrawOrder are DERIVED from this plus phase and
     // turnOrder rather than separately stored - see their own getters.
-    biddingPool: string[];
+    // Optional, same reasoning as bidPositions/turnOrder - undefined
+    // outside the "bidding" variant, and cleared back to undefined once
+    // redraw concludes (it's spent by then, same as bidPositions, not
+    // permanently meaningful the way turnOrder is).
+    biddingPool?: string[];
     // "Tournament rules": the order of play for the rest of the game is
     // exactly the rank order of the cards everyone bid (highest first;
     // majors always outrank minors) - see resolveBidRound's own docs.
     // Starts as plain ascending player order ([1,2,...,N]) so the
     // opening bidding round itself (before any rank is known) still
-    // advances player-to-player the ordinary way via nextPlayer().
-    turnOrder: playerid[];
+    // advances player-to-player the ordinary way via nextPlayer(). Only
+    // ever set at all for the "bidding" variant - nextPlayer() falls back
+    // to that same identity order itself when this is undefined, so a
+    // non-bidding game never needs to carry a redundant [1,2,...,N] copy
+    // in every stack entry. Once set, it stays set for the rest of that
+    // game (unlike bidPositions) - it's the real, permanent play order,
+    // not a transient bidding-only artifact.
+    turnOrder?: playerid[];
 }
 
 export interface IGnosticaState extends IAPGameState {
@@ -441,34 +454,36 @@ export class GnosticaGame extends GameBaseSequenced {
     // The "bidding" variant's own state - see IMoveState's own docs on
     // each field.
     public phase!: "bidding" | "redraw" | "main";
-    public bidPositions: (number | null)[] = [];
-    public biddingPool: string[] = [];
-    public turnOrder: playerid[] = [];
+    public bidPositions: (number | null)[] | undefined;
+    public biddingPool: string[] | undefined;
+    public turnOrder: playerid[] | undefined;
 
     // How many tied rounds have happened so far (0-indexed) - biddingPool
     // grows by exactly `numplayers` cards every time a round resolves,
     // tied or not, so this is exact for as long as anyone's actually
     // looking at it (mid-"bidding"). It stops being meaningful the instant
     // a round resolves with a winner, but that's also exactly the instant
-    // phase leaves "bidding", so nothing ever reads a stale value.
+    // phase leaves "bidding" (and biddingPool goes back to undefined), so
+    // nothing ever reads a stale value - 0 for a non-bidding game too.
     public get bidRound(): number {
-        return Math.floor(this.biddingPool.length / this.numplayers);
+        return Math.floor((this.biddingPool?.length ?? 0) / this.numplayers);
     }
 
     // turnOrder[0] is the bid winner by construction (see its own docs -
     // it's sorted by rank, and the winner has the highest rank). Only
     // meaningful once a bid has actually resolved (phase left "bidding")
-    // - before that, turnOrder is still its initial [1,2,...,N], so
-    // turnOrder[0] would misleadingly read as "player 1 already won".
+    // - before that (or for a non-bidding game, where turnOrder is never
+    // even set), there's no bid winner to report.
     public get bidWinner(): playerid | undefined {
-        return this.phase === "bidding" ? undefined : this.turnOrder[0];
+        return this.phase === "bidding" ? undefined : this.turnOrder?.[0];
     }
 
     // Exact reverse of turnOrder (see its own docs) - worst bidder
     // redraws first, the winner last. Only ever read during "redraw", by
-    // which point turnOrder is already finalized.
+    // which point turnOrder is already finalized (guaranteed set - see
+    // its own docs).
     public get redrawOrder(): playerid[] {
-        return [...this.turnOrder].reverse();
+        return [...this.turnOrder!].reverse();
     }
 
     // How many players have already redrawn this round. Deliberately
@@ -603,9 +618,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 eliminated: [],
                 lastTurnAnnouncedBy: undefined,
                 phase: this.variants.includes("bidding") ? "bidding" : "main",
-                bidPositions: new Array(this.numplayers).fill(null),
-                biddingPool: [],
-                turnOrder: [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid),
+                bidPositions: this.variants.includes("bidding") ? new Array(this.numplayers).fill(null) as (number | null)[] : undefined,
+                biddingPool: this.variants.includes("bidding") ? [] : undefined,
+                turnOrder: this.variants.includes("bidding") ? [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid) : undefined,
                 buffer: undefined
             };
             this.stack = [fresh];
@@ -657,9 +672,9 @@ export class GnosticaGame extends GameBaseSequenced {
         this.lastTurnAnnouncedBy = state.lastTurnAnnouncedBy;
         this.lastmove = state.lastmove;
         this.phase = state.phase;
-        this.bidPositions = [...state.bidPositions];
-        this.biddingPool = [...state.biddingPool];
-        this.turnOrder = [...state.turnOrder];
+        this.bidPositions = state.bidPositions !== undefined ? [...state.bidPositions] : undefined;
+        this.biddingPool = state.biddingPool !== undefined ? [...state.biddingPool] : undefined;
+        this.turnOrder = state.turnOrder !== undefined ? [...state.turnOrder] : undefined;
         this.frames = state.frames ? [...state.frames] : [];
         this.pendingPower = state.pendingPower;
         // A freshly loaded state's own pendingPower (if any) is, by
@@ -688,9 +703,9 @@ export class GnosticaGame extends GameBaseSequenced {
             lastTurnAnnouncedBy: this.lastTurnAnnouncedBy,
             lastmove: this.lastmove,
             phase: this.phase,
-            bidPositions: [...this.bidPositions],
-            biddingPool: [...this.biddingPool],
-            turnOrder: [...this.turnOrder],
+            bidPositions: this.bidPositions !== undefined ? [...this.bidPositions] : undefined,
+            biddingPool: this.biddingPool !== undefined ? [...this.biddingPool] : undefined,
+            turnOrder: this.turnOrder !== undefined ? [...this.turnOrder] : undefined,
             frames: this.frames.length > 0 ? [...this.frames] : [],
             pendingPower: this.pendingPower,
         };
@@ -3123,7 +3138,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // click handling above for the identical pattern.
         if (this.phase === "redraw" && piece?.startsWith("pool_")) {
             const uid = piece.slice("pool_".length);
-            if (!this.biddingPool.includes(uid)) {
+            if (!this.biddingPool!.includes(uid)) {
                 return { move, valid: false, message: i18next.t("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid }) };
             }
             const { head, rest: args } = this.parseMove(move);
@@ -3864,9 +3879,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return;
         }
         const n = Number(args[0]);
-        this.bidPositions[this.currplayer - 1] = n;
+        this.bidPositions![this.currplayer - 1] = n;
         this.results.push({ type: "select", who: this.currplayer, what: "bid" });
-        if (this.bidPositions.every(p => p !== null)) {
+        if (this.bidPositions!.every(p => p !== null)) {
             this.resolveBidRound();
         } else {
             this.nextPlayer();
@@ -3887,7 +3902,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // (and resets every slot to null) the instant the last player's
         // slot is filled, so currplayer can never be asked to bid twice
         // within the same still-open round.
-        if (this.bidPositions[this.currplayer - 1] !== null) {
+        if (this.bidPositions![this.currplayer - 1] !== null) {
             return this.invalid("apgames:validation.gnostica.ALREADY_BID");
         }
         return undefined;
@@ -3901,11 +3916,11 @@ export class GnosticaGame extends GameBaseSequenced {
     private resolveBidRound(): void {
         const revealed: { player: playerid; card: TarotCard }[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
-            const idx = this.bidPositions[p - 1]! - 1;
+            const idx = this.bidPositions![p - 1]! - 1;
             const hand = this.hands[p - 1];
             const uid = hand[idx];
             hand.splice(idx, 1);
-            this.biddingPool.push(uid);
+            this.biddingPool!.push(uid);
             revealed.push({ player: p as playerid, card: allCards().find(c => c.uid === uid)! });
         }
         this.bidPositions = new Array(this.numplayers).fill(null) as (number | null)[];
@@ -4010,7 +4025,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const hand = this.hands[this.currplayer - 1];
         for (const uid of args) {
-            this.biddingPool.splice(this.biddingPool.indexOf(uid), 1);
+            this.biddingPool!.splice(this.biddingPool!.indexOf(uid), 1);
             hand.push(uid);
         }
         if (partial) {
@@ -4048,6 +4063,14 @@ export class GnosticaGame extends GameBaseSequenced {
             // this variant ever needs, when it's needed at all, already
             // happened back at beginRedraw()).
             this.phase = "main";
+            // Nothing left to hide or replay once "bidding" is over for
+            // good - clear both so they stop appearing in every subsequent
+            // turn's state for the rest of the game (see IMoveState's own
+            // docs on why these fields are optional at all). biddingPool
+            // is already empty by this point regardless (see above) -
+            // this just drops the now-permanently-spent `[]` too.
+            this.bidPositions = undefined;
+            this.biddingPool = undefined;
             if (this.numplayers !== 2) {
                 this.currplayer = this.bidWinner!;
             }
@@ -4066,7 +4089,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid });
             }
             seen.add(uid);
-            if (!this.biddingPool.includes(uid)) {
+            if (!this.biddingPool!.includes(uid)) {
                 return this.invalid("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid });
             }
         }
@@ -6063,7 +6086,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // (see redrawOrder's own getter), so it's derived in chatLog() from
     // this same array rather than stored a second time.
     private pushTurnOrderResult(): void {
-        this.results.push({ type: "turnOrder", order: [...this.turnOrder] } as unknown as APMoveResult);
+        this.results.push({ type: "turnOrder", order: [...this.turnOrder!] } as unknown as APMoveResult);
     }
 
     // Magician: <minionRef> <suitLetter: C|R|D|S> <mode> <args...> - the
@@ -6103,18 +6126,20 @@ export class GnosticaGame extends GameBaseSequenced {
     // Steps forward through turnOrder (not raw player-id arithmetic) -
     // "tournament rules" means play order isn't just 1,2,3...N, it's
     // whatever resolveBidRound() sets turnOrder to once a bid resolves
-    // (see its own docs). Before any bid has ever resolved, turnOrder is
-    // still its initial [1,2,...,N], so the opening bid-collection round
-    // (cmdBid's own nextPlayer() calls between bidders) advances in plain
-    // ascending order exactly as before - nothing special-cased here for
-    // phase, this one array covers both.
+    // (see its own docs). turnOrder is undefined outside the "bidding"
+    // variant entirely (see its own docs) - falling back here to the same
+    // plain ascending order it would otherwise start as means the opening
+    // bid-collection round (cmdBid's own nextPlayer() calls between
+    // bidders) still advances correctly too, nothing special-cased here
+    // for phase, this one fallback covers both.
     private nextPlayer(): void {
-        const pos = this.turnOrder.indexOf(this.currplayer);
+        const order = this.turnOrder ?? [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid);
+        const pos = order.indexOf(this.currplayer);
         let next = pos;
         do {
-            next = (next + 1) % this.turnOrder.length;
-        } while (this.eliminated.includes(this.turnOrder[next]) && this.turnOrder[next] !== this.currplayer);
-        this.currplayer = this.turnOrder[next];
+            next = (next + 1) % order.length;
+        } while (this.eliminated.includes(order[next]) && order[next] !== this.currplayer);
+        this.currplayer = order[next];
     }
 
     // Stay open while a High Priestess obligation is pending, even if
@@ -6275,7 +6300,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (this.phase === "redraw") {
             const needed = 6 - this.hands[this.currplayer - 1].length;
-            const picks = (shuffle(this.biddingPool) as string[]).slice(0, needed);
+            const picks = (shuffle(this.biddingPool!) as string[]).slice(0, needed);
             return `redraw ${picks.join(" ")}`.trim();
         }
         if (!this.hasPiecesOnBoard(this.currplayer)) {
@@ -7222,7 +7247,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // from (see cmdRedraw's own docs). Fully public by the time it's
         // ever non-empty, unlike hands - no redaction/placeholder handling
         // needed at all.
-        if (this.biddingPool.length > 0) {
+        if (this.biddingPool !== undefined && this.biddingPool.length > 0) {
             const poolKeys: string[] = [];
             for (const uid of this.biddingPool) {
                 const card = allCards().find(c => c.uid === uid)!;
@@ -7299,7 +7324,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // separate fallback is needed here.
         if (this.numplayers >= 3 && this.variants.includes("bidding")) {
             const list: AreaKey["list"] = [];
-            this.turnOrder.forEach((p, i) => {
+            this.turnOrder!.forEach((p, i) => {
                 const key = `turnorder_p${p}`;
                 if (!(key in legend)) {
                     legend[key] = { name: "pyramid-up-small", colour: p };
@@ -7447,7 +7472,7 @@ export class GnosticaGame extends GameBaseSequenced {
         for (const uid of this.discardPile) {
             visible.add(uid);
         }
-        for (const uid of this.biddingPool) {
+        for (const uid of this.biddingPool ?? []) {
             visible.add(uid);
         }
         for (const hand of this.hands) {

@@ -40,7 +40,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1", { trusted: true }); // player 2 bids the Queen
         expect(g.phase).eq("redraw");
         expect(g.bidWinner).eq(1); // King beats Queen
-        expect(g.biddingPool).to.have.members([minor("KS").uid, minor("QS").uid]);
+        expect(g.biddingPool!).to.have.members([minor("KS").uid, minor("QS").uid]);
         expect(g.hands[0]).to.not.include(minor("KS").uid); // spent
         expect(g.hands[1]).to.not.include(minor("QS").uid);
     });
@@ -87,21 +87,21 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.bidRound).eq(1);
         expect(g.currplayer).eq(1);
         expect(g.bidPositions).to.deep.equal([null, null, null]);
-        expect(g.biddingPool).to.have.members([minor("KS").uid, minor("KR").uid, minor("2D").uid]);
+        expect(g.biddingPool!).to.have.members([minor("KS").uid, minor("KR").uid, minor("2D").uid]);
 
         g.move("bid 1", { trusted: true }); // P1 bids Ace of Cups
         g.move("bid 1", { trusted: true }); // P2 bids Ace of Rods
         g.move("bid 1", { trusted: true }); // P3 bids Ace of Discs - now everyone tied on Ace!
         expect(g.phase).eq("bidding");
         expect(g.bidRound).eq(2);
-        expect(g.biddingPool.length).eq(6);
+        expect(g.biddingPool!.length).eq(6);
 
         g.move("bid 1", { trusted: true }); // P1: 2C
         g.move("bid 1", { trusted: true }); // P2: 2R
         g.move("bid 1", { trusted: true }); // P3: 3D
         expect(g.phase).eq("redraw"); // no more ties possible - 2 vs 2 vs 3
         expect(g.bidWinner).eq(3);
-        expect(g.biddingPool.length).eq(9);
+        expect(g.biddingPool!.length).eq(9);
     });
 
     // #68: the rules text assumes "repeated until one player wins the bid"
@@ -124,7 +124,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.winner).to.deep.equal([]);
         expect(g.hands[0]).to.be.empty;
         expect(g.hands[1]).to.be.empty;
-        expect(g.biddingPool).to.have.members([minor("KS").uid, minor("KR").uid]);
+        expect(g.biddingPool!).to.have.members([minor("KS").uid, minor("KR").uid]);
         expect(g.results.some(r => r.type === "eog")).eq(true);
         const winnersResult = g.results.find(r => r.type === "winners") as { type: "winners"; players: number[] } | undefined;
         expect(winnersResult?.players).to.deep.equal([]);
@@ -154,7 +154,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.bidRound).eq(2);
         expect(g.hands[0]).to.be.empty;
         expect(g.hands[1]).to.be.empty;
-        expect(g.biddingPool).to.have.members([minor("KS").uid, minor("KR").uid, minor("AC").uid, minor("AR").uid]);
+        expect(g.biddingPool!).to.have.members([minor("KS").uid, minor("KR").uid, minor("AC").uid, minor("AR").uid]);
     });
 
     it("exhaustion: still ends the game with no winner even when only a subset of players are tied", () => {
@@ -272,7 +272,7 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         const g = setupRedraw();
         expect(g.hands[g.currplayer - 1].length).eq(5); // needs exactly 1 back
         expect(() => g.move("redraw")).to.throw(); // too few (0)
-        expect(() => g.move(`redraw ${g.biddingPool[0]} ${g.biddingPool[1]}`)).to.throw(); // too many (2)
+        expect(() => g.move(`redraw ${g.biddingPool![0]} ${g.biddingPool![1]}`)).to.throw(); // too many (2)
     });
 
     it("rejects a uid that isn't in the bidding pool", () => {
@@ -286,7 +286,7 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         // naming the same uid twice exercises duplicate-detection
         // specifically, rather than just tripping the count check.
         g.hands[g.currplayer - 1] = g.hands[g.currplayer - 1].slice(0, 4);
-        const uid = g.biddingPool[0];
+        const uid = g.biddingPool![0];
         expect(() => g.move(`redraw ${uid} ${uid}`)).to.throw();
     });
 
@@ -294,20 +294,20 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         const g = setupRedraw();
         expect(g.redrawOrder).to.deep.equal([3, 2, 1]); // winner is 1, so right-neighbour (3) first
         expect(g.currplayer).eq(3);
-        const poolStart = [...g.biddingPool];
+        const poolStart = [...g.biddingPool!];
 
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
         expect(g.currplayer).eq(2);
         expect(g.phase).eq("redraw");
 
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
         expect(g.currplayer).eq(1);
         expect(g.phase).eq("redraw");
 
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(1); // the bid winner
-        expect(g.biddingPool).to.be.empty;
+        expect(g.biddingPool).to.be.undefined; // spent - cleared once redraw concludes
         for (const h of g.hands) {
             expect(h.length).eq(6);
         }
@@ -320,9 +320,9 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
 
     it("normal play resumes immediately once redraw completes", () => {
         const g = setupRedraw();
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
         expect(g.phase).eq("main");
         expect(() => g.move("place l0")).to.not.throw();
     });
@@ -343,9 +343,9 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.turnOrder).to.deep.equal([2, 1, 3]);
         expect(g.redrawOrder).to.deep.equal([3, 1, 2]);
 
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(2); // the actual bid winner starts, not player 1
 
@@ -371,9 +371,9 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.currplayer).eq(1); // the loser, reached via nextPlayer(), never a direct jump
         expect(g.moves()).to.deep.equal([]); // nothing forced - player 1 has a genuine redraw available
 
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true }); // P1 (loser) redraws first
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P1 (loser) redraws first
         expect(g.currplayer).eq(2);
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true }); // P2 (winner) redraws last - completes redraw
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P2 (winner) redraws last - completes redraw
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(2); // the actual bid winner starts
         expect(g.results.some(r => r.type === "pass")).to.be.false; // no pass anywhere in this sequence
@@ -391,16 +391,16 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.phase).eq("redraw");
         expect(g.currplayer).eq(1); // player 1 (the winner) - not allowed to redraw yet
         expect(g.moves()).to.deep.equal(["pass"]); // the autopass flag's own signal: nothing else legal
-        expect(() => g.move(`redraw ${g.biddingPool[0]}`, { trusted: true })).to.throw(); // blocked - must pass first
+        expect(() => g.move(`redraw ${g.biddingPool![0]}`, { trusted: true })).to.throw(); // blocked - must pass first
 
         g.move("pass", { trusted: true }); // a real move, exactly what a server's own autopass would submit
         expect(g.results.some(r => r.type === "pass" && r.who === 1)).to.be.true;
         expect(g.currplayer).eq(2);
         expect(g.moves()).to.deep.equal([]); // player 2 (the loser) has a genuine redraw available now
 
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true }); // P2 (loser) redraws first
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P2 (loser) redraws first
         expect(g.currplayer).eq(1);
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true }); // P1 (winner) redraws last - completes redraw
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P1 (winner) redraws last - completes redraw
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(1); // the actual bid winner starts
         */
@@ -423,13 +423,13 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
 
     it("survives a real serialize/deserialize round-trip mid-redraw", () => {
         const g = setupRedraw();
-        g.move(`redraw ${g.biddingPool[0]}`, { trusted: true }); // player 3's turn done
+        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // player 3's turn done
         const reloaded = new GnosticaGame(g.serialize());
         expect(reloaded.phase).eq("redraw");
         expect(reloaded.currplayer).eq(2);
         expect(reloaded.redrawOrder).to.deep.equal([3, 2, 1]);
-        expect(() => reloaded.move(`redraw ${reloaded.biddingPool[0]}`)).to.not.throw();
-        expect(() => reloaded.move(`redraw ${reloaded.biddingPool[0]}`)).to.not.throw();
+        expect(() => reloaded.move(`redraw ${reloaded.biddingPool![0]}`)).to.not.throw();
+        expect(() => reloaded.move(`redraw ${reloaded.biddingPool![0]}`)).to.not.throw();
         expect(reloaded.phase).eq("main");
         expect(reloaded.currplayer).eq(1);
     });
@@ -478,7 +478,7 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
 
     it("clicking pool cards during redraw toggles a uid list, building redraw <uid...>", () => {
         const g = setupRedraw();
-        const [uidA, uidB] = g.biddingPool;
+        const [uidA, uidB] = g.biddingPool!;
         const click1 = g.handleClick("", -1, -1, `pool_${uidA}`);
         expect(click1.move).eq(`redraw ${uidA}`);
         const click2 = g.handleClick(click1.move, -1, -1, `pool_${uidA}`); // toggle back off
@@ -511,7 +511,7 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
 
         // Redraw: each player in redrawOrder clicks their one needed pool card.
         for (let i = 0; i < 3; i++) {
-            const click = g.handleClick("", -1, -1, `pool_${g.biddingPool[0]}`);
+            const click = g.handleClick("", -1, -1, `pool_${g.biddingPool![0]}`);
             g.move(click.move, { trusted: true });
         }
         expect(g.phase).eq("main");
@@ -552,13 +552,13 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         expect(g.phase).eq("bidding"); // must NOT have jumped to "redraw"
         expect(g.currplayer).eq(2); // must NOT have advanced
         expect(g.bidPositions).to.deep.equal([1, null]); // player 2's slot must still be open
-        expect(g.biddingPool).to.be.empty;
+        expect(g.biddingPool!).to.be.empty;
         expect(g.hands[1]).to.deep.equal([minor("QS").uid, "AR", "2R", "3R", "4R", "5R"]); // untouched
     });
 
     it("a redraw preview (partial: true) may show the pending pick, but must not advance redrawPos/currplayer/phase", () => {
         const g = setupRedraw();
-        const uid = g.biddingPool[0];
+        const uid = g.biddingPool![0];
         const handBefore = [...g.hands[g.currplayer - 1]];
         g.move(`redraw ${uid}`, { partial: true });
         expect(g.phase).eq("redraw"); // must NOT have advanced to "main"
@@ -568,7 +568,7 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         // (mirrors cmdDiscard's own precedent), unlike bid's own
         // "nothing to safely preview" case.
         expect(g.hands[2]).to.deep.equal([...handBefore, uid]);
-        expect(g.biddingPool).to.not.include(uid);
+        expect(g.biddingPool!).to.not.include(uid);
 
         // Confirm the REAL (non-partial) submit, from a fresh instance
         // built off the true persisted state, is unaffected by the
@@ -576,6 +576,6 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         const fresh = new GnosticaGame(g.serialize());
         expect(fresh.phase).eq("redraw");
         expect(fresh.currplayer).eq(3);
-        expect(fresh.biddingPool).to.include(uid); // the preview never actually persisted
+        expect(fresh.biddingPool!).to.include(uid); // the preview never actually persisted
     });
 });

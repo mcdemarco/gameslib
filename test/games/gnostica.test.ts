@@ -544,7 +544,7 @@ describe("Gnostica: bidding-variant player reordering and pass removal", () => {
             expect(g.bidWinner).eq(2);
             for (let i = 0; i < numplayers; i++) {
                 const needed = 6 - g.hands[g.currplayer - 1].length;
-                const picks = g.biddingPool.slice(0, needed);
+                const picks = g.biddingPool!.slice(0, needed);
                 g.move(`redraw ${picks.join(" ")}`, { trusted: true });
             }
             expect(g.phase).eq("main");
