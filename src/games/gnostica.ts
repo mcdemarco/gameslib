@@ -271,27 +271,35 @@ interface IPendingStep {
 // uses - see IPendingStep/parsePendingStep. See docs on `move()` below.
 // One snapshot of state per completed step of a 2+-step major-arcana
 // chain (see applyMajorPower's own docs on when/how these get pushed) -
-// only fields that are BOTH mutable mid-chain AND actually consumed
-// per-frame somewhere, not a full state snapshot. `results` is NOT a
-// field here - per-frame annotations are handled via `_group`-wrapping
-// this.results itself (see applyMajorPower/render's own docs), not by
-// duplicating results into each frame. `drawPile` is excluded - every
-// power that touches it (High Priestess, Fool, Wheel of Fortune) either
-// forces a pause immediately or falls outside the same-call step count,
-// so no existing chain ever produces two same-call frames with different
-// drawPile contents. `stashes` is excluded - the only place it's ever
-// surfaced is getPlayerStash(), which the client calls directly on the
-// live game instance, never on a frame snapshot, so a frame-specific
-// value would never be read. `hands` is excluded too, even though it
-// genuinely can change mid-chain (e.g. the Empress's own Cups "new"
-// step) - renderCurrent()'s own suppressHands flag skips the hand area
-// entirely for every intermediate frame, matching frogger.ts's own
-// last-frame-only hand area, so there's no per-frame hand value to
-// capture here at all (a stale one would never be shown either way).
+// only fields renderFrame() itself actually draws directly from, not a
+// full state snapshot. `results` is NOT a field here - per-frame
+// annotations are handled via `_group`-wrapping this.results itself (see
+// applyMajorPower/render's own docs), not by duplicating results into
+// each frame. `drawPile`/`stashes`/`hands` are excluded entirely -
+// renderFrame() never builds a draw-pile, stash, or hand area at all for
+// a historical frame (see its own docs), so there's nothing for those to
+// feed. `discardSummary` is the one exception: the discard area IS shown
+// per-frame (it's always public, unlike a hand), but only ever needs
+// the abbreviated form buildAreaFromSummary() consumes - individual
+// major uids plus per-(suit, spot/royal) minor counts, exactly what the
+// area itself displays - not the raw uid list buildDeckSummaryArea()
+// needs for the live view's own "just discarded" tinting, which a fixed
+// historical snapshot has no equivalent concept for anyway.
 export type FrameState = {
     board: UnboundedSquareBoard<CellContents>;
-    discardPile: string[];
+    discardSummary: DiscardSummary;
 };
+
+// The discard/draw-pile summary areas both ever show only two kinds of
+// information - an individual major arcana card's own uid, or a per-suit,
+// per-(spot|royal) minor arcana COUNT (see buildDeckSummaryArea's own
+// docs on why minors are never shown individually) - so this is a
+// lossless-for-display abbreviation of a raw uid list, small enough to
+// store directly in a FrameState entry instead of the full list.
+export interface DiscardSummary {
+    majorUids: string[];
+    counts: Map<string, number>;
+}
 
 // One card's own power-array progress, wherever it sits in the resolution
 // stack. cardUid/nextStepIndex re-derive the actual step list via
@@ -4849,7 +4857,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (stepsProcessed > 0) {
                 this.frames.push({
                     board: this.board.clone().store,
-                    discardPile: [...this.discardPile],
+                    discardSummary: this.summarizeDiscardPile(this.discardPile),
                 });
             }
             const resultsBefore = this.results.length;
@@ -7482,8 +7490,8 @@ export class GnosticaGame extends GameBaseSequenced {
         // this.discarded, a live-only concept, not something a fixed
         // historical snapshot needs.
         const areas: AreaPieces[] = [];
-        const discardArea = this.buildDeckSummaryArea(
-            frame.discardPile, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
+        const discardArea = this.buildAreaFromSummary(
+            frame.discardSummary, "discard", legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
         );
         if (discardArea !== undefined) {
             areas.push(discardArea);
@@ -7534,16 +7542,19 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
-    // A throwaway GnosticaGame reflecting `frame`'s own board/discardPile
-    // instead of live state (see FrameState's own docs on why only those
-    // two fields) - extends the existing cloneLive() pattern (built
-    // earlier for an unrelated reason) with field overrides instead of a
+    // A throwaway GnosticaGame reflecting `frame`'s own board instead of
+    // live state - extends the existing cloneLive() pattern (built
+    // earlier for an unrelated reason) with a field override instead of a
     // straight live copy. Only used mid-build (see render()'s own
     // dispatch) - a finished chain's own historical frames use
-    // renderFrame() directly instead, with no clone at all. The clone's
-    // own `frames` stays empty, so callers must call .renderCurrent()
-    // directly on it, not the public .render() - calling the latter would
-    // risk recursing back into array-building logic.
+    // renderFrame() directly instead, with no clone at all. discardPile
+    // is deliberately NOT overridden here - it falls back to the live
+    // value via moveState()'s own spread, same tolerance already accepted
+    // for hands in this exact case (see FrameState's own docs); only
+    // board is worth a real clone override for a still-mid-build preview.
+    // The clone's own `frames` stays empty, so callers must call
+    // .renderCurrent() directly on it, not the public .render() - calling
+    // the latter would risk recursing back into array-building logic.
     private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
         // this.results holds one _group entry per step of the chain that
         // produced these frames (see applyMajorPower's own docs) - pull
@@ -7554,7 +7565,6 @@ export class GnosticaGame extends GameBaseSequenced {
         raw.stack = [{
             ...this.moveState(),
             board: frame.board,
-            discardPile: frame.discardPile,
             _results: groups[stepIndex] !== undefined ? [groups[stepIndex]] : [],
         }];
         const snapshot = new GnosticaGame(JSON.stringify(raw, replacer));
@@ -7626,6 +7636,72 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return visible;
+    }
+
+    // The abbreviation FrameState.discardSummary itself stores - see its
+    // own docs. Pure bucketing, no "new"/tinting concept at all (that's a
+    // live-only idea - see buildAreaFromSummary's own docs), so it's just
+    // the first half of buildDeckSummaryArea's own logic, minus newUids.
+    private summarizeDiscardPile(uids: string[]): DiscardSummary {
+        const majorUids: string[] = [];
+        const counts = new Map<string, number>();
+        for (const uid of uids) {
+            const card = allCards().find(c => c.uid === uid);
+            if (card === undefined) {
+                continue;
+            }
+            if (card.major) {
+                majorUids.push(uid);
+            } else {
+                const bucket = `${card.suit.uid}_${card.court ? "royal" : "spot"}`;
+                counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+            }
+        }
+        return { majorUids, counts };
+    }
+
+    // Builds a discard area straight from an already-summarized
+    // DiscardSummary (see its own docs) - used only for a historical
+    // frame (renderFrame()), which has no "just discarded" cards to tint
+    // (that's this.discarded, a live-only concept with no equivalent for
+    // a fixed point in the past) and no raw uid list to re-derive one
+    // from anyway. Otherwise identical output to buildDeckSummaryArea's
+    // own pieces-building half, just skipping the tinting split.
+    private buildAreaFromSummary(
+        summary: DiscardSummary, keyPrefix: string, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string,
+    ): AreaPieces | undefined {
+        const pieces: string[] = [];
+        for (const suit of suits) {
+            for (const category of ["spot", "royal"] as const) {
+                const bucket = `${suit.uid}_${category}`;
+                const count = summary.counts.get(bucket);
+                if (count === undefined) {
+                    continue;
+                }
+                const representativeRank = ranks.find(r => r.court === (category === "royal"))!;
+                const representative = new Card({ name: `${representativeRank.name} of ${suit.name}`, rank: representativeRank, suit, major: false });
+                const key = `${keyPrefix}_${bucket}`;
+                if (!(key in legend)) {
+                    legend[key] = this.buildCardFace(representative, false, 0, {
+                        borderless: true,
+                        rankText: `${count}x`,
+                    }) as [Glyph, ...Glyph[]];
+                }
+                pieces.push(key);
+            }
+        }
+        for (const uid of summary.majorUids.sort()) {
+            const key = `${keyPrefix}_${uid}`;
+            if (!(key in legend)) {
+                const card = allCards().find(c => c.uid === uid)!;
+                legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
+            }
+            pieces.push(key);
+        }
+        if (pieces.length === 0) {
+            return undefined;
+        }
+        return { type: "pieces", pieces: pieces as [string, ...string[]], label, spacing: 0.25, width: 10 };
     }
 
     // Draw/discard piles can hold most of the 78-card deck at once - too
