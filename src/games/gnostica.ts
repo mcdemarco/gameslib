@@ -149,13 +149,13 @@ const ALL_SUITS: { uid: string; label: string }[] = [
 // A theme-relative "muted" tone, matching hand_UNKNOWN's own established
 // placeholder colour below - used anywhere a hardcoded grey would
 // otherwise go, e.g. a struck-through/disabled button fill or a "newly
-// added" highlight backdrop. #73: a literal "#999"/"#ccc" stayed a fixed
-// hex value regardless of theme; _context_fill flips from near-black
-// (light) to near-white (dark), so flattening it toward the background
-// stays genuinely visible - not just "a different colour" - in both,
-// unlike _context_strokes, which stays a dark-ish grey in either theme
-// and nearly vanishes against a dark board.
-const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_fill", bg: "_context_background", opacity: 0.5 };
+// added" highlight backdrop. Blends toward _context_strokes specifically
+// (not _context_fill) because that's the colour the rank/suit glyphs
+// drawn ON TOP of this backdrop actually use - keeping the tint a
+// consistent distance from the text sitting on it in both themes, rather
+// than an unrelated fill colour that happens to land close to the real
+// text colour once flattened (as _context_fill did in dark mode).
+const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 
 // True iff `pile` (hand or discard-pile uids) holds a card worth exactly
 // `value` points - lets minorModeAvailability tell apart a mode whose
