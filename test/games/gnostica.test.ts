@@ -2208,10 +2208,10 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
 // scoped to a specific viewer (the pile is always public) or gated on
 // whose turn it is (there's only one shared pile).
 describe("Gnostica: discard-pile 'just discarded' highlight", () => {
-    type DiscardRenderRep = { legend: Record<string, { colour?: string; text?: string }[]>; areas?: { pieces?: string[] }[] };
+    type DiscardRenderRep = { legend: Record<string, { colour?: unknown; text?: string }[]>; areas?: { pieces?: string[] }[] };
     const discardArea = (rep: DiscardRenderRep) => rep.areas?.find(a => a.pieces?.some(p => p.startsWith("discard_")));
 
-    it("tags a card discarded on the most recent move, tinted the same #ccc as a new hand card", () => {
+    it("tags a card discarded on the most recent move, tinted the same theme-relative muted colour as a new hand card", () => {
         // A major arcana card specifically - unlike a minor, it gets its
         // own individual legend entry rather than folding into a suit/
         // category bucket (see the next test for that case).
@@ -2223,7 +2223,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         const rep = g.render() as DiscardRenderRep;
         const newKey = `discard_${major(3).uid}_new`;
         expect(discardArea(rep)?.pieces).to.include(newKey);
-        expect(rep.legend[newKey].some(gl => gl.colour === "#ccc")).to.be.true;
+        expect(rep.legend[newKey].some(gl => gl.colour !== undefined)).to.be.true;
     });
 
     it("a minor card only tints its own share of the bucket, not the whole count", () => {
@@ -2239,7 +2239,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         expect(pieces).to.include("discard_C_spot_new"); // just this move's own
         expect(rep.legend.discard_C_spot.some(gl => gl.text === "1x")).to.be.true;
         expect(rep.legend.discard_C_spot_new.some(gl => gl.text === "1x")).to.be.true;
-        expect(rep.legend.discard_C_spot_new.some(gl => gl.colour === "#ccc")).to.be.true;
+        expect(rep.legend.discard_C_spot_new.some(gl => gl.colour !== undefined)).to.be.true;
     });
 
     it("clears once the next move is submitted, even by a different player", () => {

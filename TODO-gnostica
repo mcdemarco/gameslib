@@ -35,8 +35,8 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #66 - test fool messaging on reload in production
 - #67 - "Use Territory"/"Play Card" buttons could show the active card's slug too, not just which action started the move
 ✔ #68 - an unresolvable bid tie (hands run dry) now ends the game with no winner, instead of falling back to an arbitrary turn order. @done(26-09-03)
-- #69 - Edit messages.
-- #70 - Improve Fool move strings
-- #71 - Address Fool corner cases: declaring mid-stride, etc. (nothing to draw at all, and no card left partway through, are both handled now - the former rejects use/play outright, the latter gracefully completes the Fool's use.)
+✔ #69 - Edit messages; trimmed/reworded validation text and dropped translation-key mimicry from powers.ts's trusted-path backstop errors. @done(26-09-06)
+✔ #70 - Improve Fool move strings; added a dedicated "continue" head word for resuming a paused power instead of re-typing use/play. @done(26-09-06)
+✔ #71 - Address Fool corner cases: declaring mid-stride, etc. (nothing to draw at all, and no card left partway through, are both handled now - the former rejects use/play outright, the latter gracefully completes the Fool's use.) @done(26-09-06)
 - #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
-- #73 - Fix dark mode
+✔ #73 - Fix dark mode; cards/wasteland cells now default to a transparent backdrop (matching Jacynth's Card.toGlyph() convention) instead of opaque white. @done(26-09-06)

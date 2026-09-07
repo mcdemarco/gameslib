@@ -3,6 +3,7 @@ import { GameBaseSequenced } from "./_turn-sequenced";
 import type { IGamePly } from "./_turn-model";
 import { APGamesInformation } from "../schemas/gameinfo";
 import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
+import type { ColourResolvable, Colourfuncs } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { Direction, replacer, reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
@@ -144,6 +145,17 @@ const ALL_SUITS: { uid: string; label: string }[] = [
     { uid: "D", label: "Discs" },
     { uid: "S", label: "Swords" },
 ];
+
+// A theme-relative "muted" tone, matching hand_UNKNOWN's own established
+// placeholder colour below - used anywhere a hardcoded grey would
+// otherwise go, e.g. a struck-through/disabled button fill or a "newly
+// added" highlight backdrop. #73: a literal "#999"/"#ccc" stayed a fixed
+// hex value regardless of theme; _context_fill flips from near-black
+// (light) to near-white (dark), so flattening it toward the background
+// stays genuinely visible - not just "a different colour" - in both,
+// unlike _context_strokes, which stays a dark-ish grey in either theme
+// and nearly vanishes against a dark board.
+const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_fill", bg: "_context_background", opacity: 0.5 };
 
 // True iff `pile` (hand or discard-pile uids) holds a card worth exactly
 // `value` points - lets minorModeAvailability tell apart a mode whose
@@ -1913,7 +1925,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // actual click on it immediately with the same message.
                 if (pendingMinor.suitUid === "R" && piece.orientation === "U") {
                     button.attributes = [{ name: "text-decoration", value: "line-through" }];
-                    button.fill = "#999";
+                    button.fill = MUTED_FILL;
                 }
                 buttons.push(button);
             }
@@ -2003,7 +2015,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // with the specific reason.
                 if (!feasible.has(mode)) {
                     attrs.push({ name: "text-decoration", value: "line-through" });
-                    button.fill = "#999";
+                    button.fill = MUTED_FILL;
                 }
                 if (attrs.length > 0) {
                     button.attributes = attrs as [{ name: string; value: string }, ...{ name: string; value: string }[]];
@@ -7207,7 +7219,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const isNew = newUids.has(uid);
                 const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
                 if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
+                    legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
                 }
                 handKeys.push(key);
             }
@@ -7540,7 +7552,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         legend[key] = this.buildCardFace(representative, false, 0, {
                             borderless: true,
                             rankText: `${newCount}x`,
-                            background: "#ccc",
+                            background: MUTED_FILL,
                         }) as [Glyph, ...Glyph[]];
                     }
                     pieces.push(key);
@@ -7552,7 +7564,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const key = isNew ? `${keyPrefix}_${uid}_new` : `${keyPrefix}_${uid}`;
             if (!(key in legend)) {
                 const card = allCards().find(c => c.uid === uid)!;
-                legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: "#ccc" } : {}) as [Glyph, ...Glyph[]];
+                legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
             }
             pieces.push(key);
         }
@@ -7607,11 +7619,19 @@ export class GnosticaGame extends GameBaseSequenced {
     // (same purpose - a count like "3x" instead of a real rank/numeral).
     // Every glyph EXCEPT the plain background square carries
     // `orientation: "vertical"` - correction for rotation.
-    private buildCardFace(card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: string } = {}): Glyph[] {
-        const BOARD_TILE_GRID_CORNER = 650;        
-        const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1 };
+    private buildCardFace(card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: ColourResolvable } = {}): Glyph[] {
+        const BOARD_TILE_GRID_CORNER = 650;
+        // Opacity 0 by default - matching Jacynth's own Card.toGlyph() (see
+        // its own docs) - so an ordinary card face has no filled square at
+        // all, letting the theme's own board/background colour show
+        // through instead of a hardcoded white (#73: previously opaque
+        // white in every theme, since an unset opacity defaults to fully
+        // opaque). The stroke/border stays drawn regardless (a separate,
+        // always-visible outline), so the cell boundary is still legible.
+        const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1, opacity: 0 };
         if (opts.background !== undefined) {
             backdrop.colour = opts.background;
+            backdrop.opacity = 1;
         }
         if (owner > 0) {
             backdrop.colour = owner;
@@ -7686,7 +7706,10 @@ export class GnosticaGame extends GameBaseSequenced {
             const dontSpace = largerCards && t.playersPresent().size === 0;
             stack.push(...this.buildCardFace(t.card, !dontSpace, owner));
         } else if (cls === "wasteland") {
-            stack.push({ name: "piece-square-dashed", scale: 1 });
+            // Same transparent-by-default convention as buildCardFace's own
+            // backdrop (#73) - otherwise this defaults to opaque white
+            // regardless of theme, same bug, different glyph name.
+            stack.push({ name: "piece-square-dashed", scale: 1, opacity: 0 });
         } else {
             // Void, in principle - the main render loop already short-
             // circuits every void cell to a bare "-" before this is ever
