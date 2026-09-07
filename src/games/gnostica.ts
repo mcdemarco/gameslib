@@ -277,27 +277,16 @@ interface IPendingStep {
 // mirrors exactly). `results` is NOT a field here - per-frame
 // annotations are handled via `_group`-wrapping this.results itself
 // (see applyMajorPower/render's own docs), not by duplicating results
-// into each frame. `drawPile` IS included, despite an earlier draft of
-// this excluding it wholesale as a "deck-draw mechanic" needing
-// deferral - that was an overgeneralization: the only thing that
-// genuinely needs deferring is a draw whose OUTCOME the current player
-// needs to see before deciding a LATER step in the SAME chain, pending
-// real multi-turn engine support. Wheel of Fortune (Cups "new" with
-// allowRandomDraw) is a single-step card, so it never even reaches a
-// multi-step chain - no issue there. High Priestess (two `highPriestess`
-// steps) is genuinely split: its SECOND draw is fine (nothing in the
-// same turn depends on it), but its FIRST draw's outcome DOES need to
-// inform what the player discards for the second step - that specific
-// case (a 2-step High Priestess chain) is a known, accepted gap this
-// field doesn't fix, still waiting on that same future engine support.
-// Every other field here is unaffected - board/hands/stashes/discardPile
-// stay accurate regardless.
+// into each frame. `drawPile` is also excluded - every power that
+// touches it (High Priestess, Fool, Wheel of Fortune) either forces a
+// pause immediately or falls outside the same-call step count, so no
+// existing chain ever produces two same-call frames with different
+// drawPile contents.
 export type FrameState = {
     board: UnboundedSquareBoard<CellContents>;
     hands: string[][];
     stashes: Map<playerid, Stash>;
     discardPile: string[];
-    drawPile: string[];
 };
 
 // One card's own power-array progress, wherever it sits in the resolution
@@ -4833,7 +4822,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     hands: this.hands.map(h => [...h]),
                     stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
                     discardPile: [...this.discardPile],
-                    drawPile: [...this.drawPile],
                 });
             }
             const resultsBefore = this.results.length;
@@ -7402,7 +7390,6 @@ export class GnosticaGame extends GameBaseSequenced {
             hands: frame.hands,
             stashes: frame.stashes,
             discardPile: frame.discardPile,
-            drawPile: frame.drawPile,
             _results: groups[stepIndex] !== undefined ? [groups[stepIndex]] : [],
         }];
         const snapshot = new GnosticaGame(JSON.stringify(raw, replacer));
@@ -7933,13 +7920,8 @@ export class GnosticaGame extends GameBaseSequenced {
                             break;
                         case "orient": {
                             // The Devil's orientAny can reorient ANY
-                            // player's piece, not just the acting minion's
-                            // own (see checkOrientAny/applyOrientAny - no
-                            // "must be your own" restriction); an ordinary
-                            // "orient" turn action never sets `who` at all
-                            // (always self - see cmdOrient), so this falls
-                            // back to the plain wording exactly like
-                            // destroy's tile case does.
+                            // player's piece, not just the player's own.
+                            // The regular "orient" action doesn't set `who`.
                             const target = this.otherPlayerName(r.who, player, players);
                             node.push(target === undefined
                                 ? i18next.t("apresults:ORIENT.gnostica", { player, where: r.where, what: r.what, facing: r.facing })
