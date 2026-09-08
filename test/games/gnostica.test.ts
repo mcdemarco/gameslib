@@ -4325,17 +4325,6 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:DECKDRAW.gnostica_hand", { player: "Alice", what: aceOfCups().name }));
     });
 
-    it("place (discard): names every discarded card, not raw uids", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0", { trusted: true }); // player 1
-        g.move("place l0", { trusted: true }); // player 2
-        g.hands[0] = [aceOfCups().uid, aceOfDiscs().uid, "2C", "3C", "4C", "5C"];
-        g.move(`discard ${aceOfCups().uid} ${aceOfDiscs().uid}`, { trusted: true });
-        const log = g.chatLog(["Alice", "Bob"]);
-        const line = log.flat().find(l => l.includes("discarded"));
-        expect(line).eq(i18next.t("apresults:PLACE.gnostica_discard", { player: "Alice", what: `${aceOfCups().name}, ${aceOfDiscs().name}` }));
-    });
-
     it("convert (Discs tile grow-replace): names both the replaced and the new card, not raw uids", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfDiscs());

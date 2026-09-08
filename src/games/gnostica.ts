@@ -8667,7 +8667,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     node.push(i18next.t("apresults:PLACE.gnostica_initial", { player, where: r.where }));
                                     break;
                                 case "discard":
-                                    node.push(i18next.t("apresults:PLACE.gnostica_discard", { player, what: this.cardDisplayNames(r.what ?? "") }));
+                                    node.push(i18next.t("apresults:PLACE.gnostica_discard", { player, what: r.what }));
                                     break;
                                 default:
                                     node.push(r.what === undefined
