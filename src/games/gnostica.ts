@@ -1586,13 +1586,16 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // Fool: no button, no choice - engaging it at all (root, or as a
         // revealed/targeted card elsewhere) already produces a complete
-        // move, since BOTH of its own flips fire automatically once
-        // started (see walkFrameStack's own docs) - the message's whole
-        // job is telling the player what Submit will do. Only ever
-        // reached at its own first step (nextStepIndex 0) - the second
-        // never pauses separately to ask again.
+        // move, since every flip fires automatically once started (see
+        // walkFrameStack's own docs) - the message's whole job is telling
+        // the player what Submit will do, regardless of which flip
+        // (nextStepIndex) is actually about to fire - the wording itself
+        // is deliberately flip-number-agnostic, since a LATER flip can be
+        // reached this way too (a completed prior step cascading straight
+        // into it - see forcePauseReadyMessage's own docs on the specific
+        // gap this closes).
         if (headArg === "00") {
-            return { key: "apgames:validation.gnostica.FOOL_FLIP1_READY" };
+            return { key: "apgames:validation.gnostica.FOOL_FLIP_READY" };
         }
         // World: the same "click-driven, no button" gap as tradeHands/
         // orientAny/hierophantReplace/orientMinion/judgementDraw below
@@ -1619,6 +1622,38 @@ export class GnosticaGame extends GameBaseSequenced {
                 : "apgames:validation.gnostica.CHOOSE_STEP",
             params: { card: cardName },
         };
+    }
+
+    // The "ready to submit" message for a step whose own outcome forces a
+    // pause (Fool's own flip, High Priestess's own round - the only two
+    // things that ever set forcePause, per applyPowerStep's own docs)
+    // once it's ALREADY genuinely complete - distinct from
+    // powerStepMessageKey's own job of saying what to type NEXT, which
+    // would be actively wrong to show once there's nothing left to type
+    // (High Priestess's own HIGH_PRIESTESS_ROUND1 text opens with "Click
+    // hand cards to discard" - correct advice before typing that round's
+    // own args, nonsensical once they're already typed and validated).
+    // cardUid/nextStepIndex describe the step that JUST completed
+    // (pre-increment, matching powerStepMessageKey's own second param and
+    // the hpdraw_ button click handler's identical derivation) - this is
+    // what closes the gap where validateFrameStack's own forcePause exit
+    // used to return a bare `undefined`, falling all the way through to
+    // the generic VALID_MOVE fallback with no hint that submitting will
+    // ALSO immediately trigger this step's own hidden continuation.
+    private forcePauseReadyMessage(cardUid: string, nextStepIndex: number): { key: string; params?: Record<string, unknown> } {
+        if (cardUid === "02") {
+            return { key: nextStepIndex > 0
+                ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"
+                : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1_READY" };
+        }
+        if (cardUid === "00") {
+            return { key: "apgames:validation.gnostica.FOOL_FLIP_READY" };
+        }
+        // Defensive only - no other card currently sets forcePause at
+        // all, so this should never actually fire; falls back to the
+        // ordinary VALID_MOVE wording rather than silently mislabeling
+        // some future third case with either of the above.
+        return { key: "apgames:validation._general.VALID_MOVE" };
     }
 
     // The six top-level turn choices, as buttons - see the class-level docs
@@ -1912,7 +1947,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // no mode - so there's nothing for a real button bar to offer
         // for it. Before anything's been clicked this turn, that means
         // the ORIGINAL explicit Use/Decline pair (mirroring
-        // FOOL_FLIP1_READY's own "just submit" messaging) is the only
+        // FOOL_FLIP_READY's own "just submit" messaging) is the only
         // sensible thing to show. Once something HAS been clicked
         // (liveMove set) and Fool's own step is STILL what's active,
         // that can only mean an earlier click declined whatever a flip
@@ -5193,10 +5228,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens = ["fool"];
             } else {
                 if (i >= stepSegments.length) {
-                    // Nothing more given - this frame's own remaining step
-                    // stays optional and silently declines, UNLESS it's
-                    // provably impossible right now (no legal target at
-                    // all - see specialStepHasNoLegalTarget's own docs),
+                    // Nothing more given - a step past the frame's own
+                    // first one (root or pushed alike, once that frame has
+                    // begun) stays optional and silently declines, UNLESS
+                    // it's provably impossible right now (no legal target
+                    // at all - see specialStepHasNoLegalTarget's own docs),
                     // in which case that deserves an explicit heads-up
                     // instead of the generic VALID_MOVE fallback (#63-style
                     // guidance for a doomed step, just surfaced here
@@ -5213,6 +5249,31 @@ export class GnosticaGame extends GameBaseSequenced {
                             ? "apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET"
                             : "apgames:validation.gnostica.HIEROPHANT_SKIPPED_NO_TARGET";
                         return { valid: true, complete: 1, message: i18next.t(key, { card: cardName }) };
+                    }
+                    // A frame's OWN first step (nextStepIndex still 0) is
+                    // different: for anything but the root, arriving here
+                    // with literally nothing supplied for it yet is
+                    // reachable ONLY via World's own worldUseAny push -
+                    // Fool's own push always carries forcePause (see
+                    // applyPowerStep's/validatePowerStep's own "fool"
+                    // cases), so a Fool-revealed frame can never be pushed
+                    // and then found empty within this SAME call; it's
+                    // always a separate, later "continue" resume instead,
+                    // already covered by validateResumePendingPower's own
+                    // zero-segment check. Naming a target via World has no
+                    // effect of its own (unlike Fool's flip, which really
+                    // does draw a card) - so completing here with zero
+                    // steps taken on it would make the whole move a no-op
+                    // in every way that matters, exactly what #49 exists
+                    // to forbid for anything but Fool (see
+                    // validateMajorPower's own docs on Fool's narrower
+                    // exemption). Root's own frame can never reach this
+                    // with i===0 and no segments - the caller's own
+                    // upfront check already turned that away before this
+                    // loop ever started.
+                    if (stack.length > 1 && top.nextStepIndex === 0) {
+                        const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
+                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
                     }
                     return undefined;
                 }
@@ -5275,7 +5336,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (i < stepSegments.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "STEPS_AFTER_FORCED_PAUSE" });
                 }
-                return undefined;
+                // The move as typed is already genuinely complete - but
+                // submitting it will ALSO immediately trigger this step's
+                // own hidden, automatic continuation (Fool's next flip,
+                // High Priestess's next round), which nothing on the
+                // board hints at. Named via forcePauseReadyMessage (see
+                // its own docs on why powerStepMessageKey itself would be
+                // wrong here) instead of falling through to the generic
+                // VALID_MOVE fallback, which says nothing about what
+                // submitting will actually do next.
+                const readyMsg = this.forcePauseReadyMessage(top.cardUid, top.nextStepIndex);
+                return { valid: true, complete: 1, message: i18next.t(readyMsg.key, readyMsg.params) };
             }
             // Captured BEFORE chainMinion updates top.minions below - the
             // replay call further down re-runs THIS SAME step (same
@@ -5302,14 +5373,24 @@ export class GnosticaGame extends GameBaseSequenced {
     private validateMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
         // #49: a use/play must take at least one meaningful step - see
         // validateMinorPower's own docs for why this is a deliberate break
-        // from a literal "all powers are optional" reading. This applies
-        // ONLY to the root activation - a card reached via a push (World's
-        // target, Fool's reveal) stays fully optional, including zero
-        // steps: the committing action (naming a target, flipping) already
-        // happened, so forcing further action on top of it would
-        // contradict "all powers are optional" for what it revealed. Fool's
-        // own root step is exempt from the "need a real segment" check
-        // below - see topStepIsFool's own docs.
+        // from a literal "all powers are optional" reading. This zero-
+        // segments-overall check only ever catches a bare root activation
+        // with nothing typed at all - but the SAME commitment is owed by
+        // every frame this walk ever reaches, not just the root: a card
+        // reached via a push (World's target, or whatever Fool reveals)
+        // still needs a real step or an explicit "decline" once its own
+        // turn comes, exactly like the root does here. That's enforced
+        // just as strictly, just at different call sites, since a push
+        // isn't always resolvable within THIS SAME call - see
+        // validateFrameStack's own "nothing more given" docs (World's
+        // push, having no forcePause, can run dry in this very call) and
+        // validateResumePendingPower's own zero-segment check (which
+        // catches Fool's own push - always deferred to a later "continue"
+        // call by its forcePause - the same way). The one real exemption
+        // is narrower than either of those: Fool's own flip step itself
+        // needs no real segment (see topStepIsFool's own docs), since
+        // flipping - unlike merely naming a target - is already a real,
+        // committing action requiring no further input to mean something.
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };

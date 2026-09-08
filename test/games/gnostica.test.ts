@@ -4500,6 +4500,18 @@ describe("Gnostica: Fool and World", () => {
         expect(flat.some(r => r.type === "use" && (r as { what?: string; count?: number }).what === major(6).uid && (r as { count?: number }).count === 21)).eq(true);
     });
 
+    it("World -> Lovers, then nothing more: rejected as incomplete, not silently accepted as a no-op move", () => {
+        // Regression: naming Lovers as World's target has no board effect
+        // of its own (unlike Fool's flip) - completing right there would
+        // make the whole move a no-op in every way that matters, exactly
+        // what #49 forbids for anything but Fool's own reveal.
+        const g = setupWorldLovers();
+        const result = g.validateMove(`use ${theWorld().uid}, m0.1 ${major(6).uid}`);
+        expect(result.valid).to.be.true;
+        expect(result.complete).eq(-1);
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(6).name }));
+    });
+
     it("World -> Lovers via clicks: the pushed frame's own steps become click-driven too", () => {
         const setup = setupWorldLovers;
         const g = setup();
@@ -4914,7 +4926,7 @@ describe("Gnostica: Fool and World", () => {
         expect(cellClick.move).eq(`use ${major(0).uid}`);
         expect(cellClick.valid).to.be.true;
         expect(cellClick.complete).to.eq(0); // already complete, just not yet submitted
-        expect(cellClick.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP1_READY"));
+        expect(cellClick.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP_READY"));
 
         // No button offered - the root's flip is mandatory (#49), so
         // there's nothing left to click.

@@ -40,3 +40,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #71 - Address Fool corner cases: declaring mid-stride, etc. (nothing to draw at all, and no card left partway through, are both handled now - the former rejects use/play outright, the latter gracefully completes the Fool's use.) @done(26-09-06)
 - #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
 ✔ #73 - Fix dark mode; cards/wasteland cells now default to a transparent backdrop (matching Jacynth's Card.toGlyph() convention) instead of opaque white. @done(26-09-06)
+- #74 - Need an informative move string to replace the "continue 00" strings. Put "continue 00" in parentheses somewhere (like declare), and instead the head word would be indicative of what's happening for the particular turn:  "play 9S" or "decline 9S", for example.

@@ -5792,7 +5792,7 @@
             "DECLINE_THEN_AUTO_DRAW": "Submit to decline this card's power, and the second card for the Fool (00) will be drawn automatically.",
             "DISCARD_CARDS_OPTIONAL": "Click hand cards to discard, if desired, then choose a number of cards to draw and/or submit.  If no number is chosen, you will draw back up to the hand limit.",
             "DRAW_PILE_EMPTY": "There are no cards to draw.",
-            "FOOL_FLIP1_READY": "Submit, and the first card for the Fool (00) will be drawn automatically.",
+            "FOOL_FLIP_READY": "Submit, and the next card for the Fool (00) will be drawn automatically.",
             "HERMIT_NEEDS_EMPTY": "The Hermit (VIIII) cannot move a piece to an occupied card.",
             "HIEROPHANT_MUST_TARGET_ENEMY": "The Hierophant (V) must target an enemy piece.",
             "HIEROPHANT_SKIPPED_NO_TARGET": "There is no enemy piece for {{card}} to replace, so that part of its power will be skipped when you submit.",
