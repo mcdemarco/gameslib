@@ -6159,8 +6159,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 attackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, newOrientation, opts);
-                this.results.push({ type: "destroy", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.getPipsFromRef(targetRef), who: owner });
                 const resultSize = beforeSize - pips;
+                const where = GnosticaBoard.coords2algebraic(target.x, target.y);
+                if (resultSize === 0) {
+                    this.results.push({ type: "destroy", where, what: this.getPipsFromRef(targetRef), who: owner });
+                } else {
+                    this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${resultSize}`, where });
+                }
                 if (resultSize > 0 && owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
                     return { newMinion: { x: target.x, y: target.y, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
@@ -6173,7 +6178,16 @@ export class GnosticaGame extends GameBaseSequenced {
                 const pips = parseInt(pipsStr, 10);
                 const beforeUid = this.board.get(tx, ty)!.card!.uid;
                 attackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
-                this.results.push({ type: "destroy", where: cellStr, what: beforeUid });
+                // A replacement card means the territory survived, shrunk
+                // (checkAttackTerritory's own REPLACEMENT_CARD_REQUIRED/
+                // DESTROYED_NEEDS_NO_CARD pairing guarantees the two are
+                // mutually exclusive) - only a true wipeout (no
+                // replacement) is a "destroy".
+                if (newCardUid === undefined) {
+                    this.results.push({ type: "destroy", where: cellStr, what: beforeUid });
+                } else {
+                    this.results.push({ type: "convert", what: beforeUid, into: newCardUid, where: cellStr });
+                }
                 return {};
             }
             default:
@@ -8698,14 +8712,29 @@ export class GnosticaGame extends GameBaseSequenced {
                             break;
                         case "convert":
                             if (r.into.startsWith("size ")) {
-                                node.push(i18next.t("apresults:CONVERT.gnostica_piece", { player, what: r.what, into: r.into, where: r.where }));
+                                // Discs' own growth and Swords' own attack
+                                // shrink both land here (same "size N"
+                                // what/into shape) - the numbers themselves
+                                // say which direction actually happened.
+                                const grew = parseInt(r.into.slice(5), 10) > parseInt(r.what.slice(5), 10);
+                                const key = grew ? "apresults:CONVERT.gnostica_piece" : "apresults:CONVERT.gnostica_piece_shrink";
+                                node.push(i18next.t(key, { player, what: r.what, into: r.into, where: r.where }));
                             } else if (r.into.startsWith("owner-")) {
                                 const target = this.otherPlayerName(r.who, player, players);
                                 node.push(target === undefined
                                     ? i18next.t("apresults:CONVERT.gnostica_hierophant", { player, where: r.where })
                                     : i18next.t("apresults:CONVERT.gnostica_hierophant_target", { player, where: r.where, target }));
                             } else {
-                                node.push(i18next.t("apresults:CONVERT.gnostica_tile", { player, what: this.cardDisplayName(r.what), into: this.cardDisplayName(r.into), where: r.where }));
+                                // Discs' own grow-replace and Swords' own
+                                // attack-and-replace both land here (same
+                                // what/into/where shape) - point value is
+                                // the only thing distinguishing which
+                                // direction actually happened.
+                                const before = allCards().find(c => c.uid === r.what);
+                                const after = allCards().find(c => c.uid === r.into);
+                                const grew = before !== undefined && after !== undefined && cardPointValue(after) > cardPointValue(before);
+                                const key = grew ? "apresults:CONVERT.gnostica_tile" : "apresults:CONVERT.gnostica_tile_shrink";
+                                node.push(i18next.t(key, { player, what: this.cardDisplayName(r.what), into: this.cardDisplayName(r.into), where: r.where }));
                             }
                             break;
                         case "eliminated": {
