@@ -8515,7 +8515,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return uid ?? "";
         }
         if (!card.major) {
-            return card.name;
+            return "the " + card.name;
         }
         return `${card.name} (${card.romanNumeral})`;
     }
