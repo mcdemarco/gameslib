@@ -1993,6 +1993,12 @@ describe("Gnostica: handleClick", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
+        // The random initial deal could otherwise occasionally put The Fool
+        // itself at m0, whose own root activation shows a dedicated Use/
+        // Decline pair instead of the ordinary top-level bar this test
+        // means to check (see forceCardAt's own docs on this exact class
+        // of flake).
+        forceCardAt(g, 0, 0, () => major(1)); // The Magician
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const uid0 = g.board.get(0, 0)!.card!.uid;
@@ -4691,15 +4697,43 @@ describe("Gnostica: Fool and World", () => {
             expect(result.message).eq(skippedMsg);
         }
         {
+            // Same again, but step 1 uses Rods' "piece" mode (moving the
+            // acting minion itself) rather than "tile" (pushing territory,
+            // which leaves the minion in place). This APPENDS a second,
+            // post-move minion ref onto the frame's own minions array
+            // rather than replacing the pre-move one (see walkFrameStack's/
+            // validateFrameStack's own `[...top.minions, newMinion]`) -
+            // specialStepHasNoLegalTarget must still recognize this as
+            // doomed by checking the piece's CURRENT (moved) position, not
+            // bail out just because more than one entry is now present.
+            const g = setupFool();
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+            forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - where the piece relocates to
+            pluckCard(g, major(12).uid);
+            g.drawPile.unshift(major(12).uid);
+            g.move(`use ${major(0).uid}, fool`, { trusted: true });
+            const result = g.validateMove(`continue ${major(0).uid}, m0.1 piece m0.1 1`);
+            expect(result.valid).to.be.true;
+            expect(result.complete).eq(1);
+            expect(result.message).eq(skippedMsg);
+        }
+        {
             // Sanity: a real, reachable enemy means no message at all - the
             // decline (if it happens) is a genuine, silent choice again.
+            // "piece m0.1 1" actually RELOCATES the acting minion (target
+            // self, distance 1) to n0, still facing east - so the enemy
+            // has to sit at o0, the piece's own NEW facing cell once it
+            // gets there, not at n0 itself (n0 is just a wasteland the
+            // piece passes onto, per Rods' own "piece" mode - see
+            // applyRods's own docs).
             const g = new GnosticaGame(2);
             clearBoard(g);
             forceCardAt(g, 0, 0, () => major(12));
             forceCardAt(g, 1, 0, () => aceOfDiscs());
             g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // an enemy sits on n0
-            const result = g.validateMove(`use ${major(12).uid}, m0.1 piece m0.1 1`); // a no-op self-move, still facing n0's enemy
+            g.board.store.set(2, 0, new CellContents());
+            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy at o0
+            const result = g.validateMove(`use ${major(12).uid}, m0.1 piece m0.1 1`);
             expect(result.message).to.not.eq(skippedMsg);
         }
     });

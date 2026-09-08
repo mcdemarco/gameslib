@@ -2375,13 +2375,36 @@ export class GnosticaGame extends GameBaseSequenced {
     // that one facing cell. orientAny/hermitTeleport have no such
     // restriction (self always qualifies - see pickPieceTargetClick's own
     // docs), so they can never be doomed this way.
-    private specialStepHasNoLegalTarget(step: PowerStep, minion: IMinionRef): boolean {
+    //
+    // Checked against EVERY minion in `minions`, not just the frame's own
+    // first one - a step whose own PRIOR step actually moved the acting
+    // piece (Rods' own "piece" mode, say) appends that new position onto
+    // the array without removing the old one (see walkFrameStack's/
+    // validateFrameStack's own `top.minions = [...top.minions, newMinion]`
+    // - the pre-move entry is kept around for result-reporting, not as a
+    // genuinely separate candidate). Filtered here to whichever entries
+    // still resolve to a real, currently-owned piece on `ctx`'s OWN board
+    // - a stale pre-move entry silently drops out rather than being
+    // checked against a piece that isn't there anymore. `ctx` (not
+    // `this`) matters for the identical reason: validateFrameStack applies
+    // a still-being-validated step to a CLONE, not `this` - the acting
+    // piece's real, current position/orientation only exists there.
+    // Doomed only when EVERY still-live candidate is - if a still-eligible
+    // OTHER minion might yet reach an enemy, there's a genuine choice
+    // left, so nothing should be said.
+    private specialStepHasNoLegalTarget(ctx: GnosticaGame, step: PowerStep, minions: readonly IMinionRef[]): boolean {
         if (!("special" in step) || (step.special !== "tradeHands" && step.special !== "hierophantReplace")) {
             return false;
         }
-        const [faceX, faceY] = this.minorTargetCell(minion);
-        const t = this.board.get(faceX, faceY);
-        return t === undefined || !t.pieces.some(p => p.owner !== this.currplayer);
+        const live = minions.filter(m => ctx.board.get(m.x, m.y)?.pieces[m.index]?.owner === ctx.currplayer);
+        if (live.length === 0) {
+            return false; // can't tell which piece is even real anymore - say nothing rather than guess
+        }
+        return live.every(m => {
+            const [faceX, faceY] = ctx.minorTargetCell(m);
+            const t = ctx.board.get(faceX, faceY);
+            return t === undefined || !t.pieces.some(p => p.owner !== ctx.currplayer);
+        });
     }
 
     // The shared board window every renderable/clickable grid scan uses -
@@ -5059,11 +5082,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     // guidance for a doomed step, just surfaced here
                     // instead of at click time - see pickPieceTargetClick's
                     // own tree-pruning docs on the click-time half of this).
-                    // Only checked with a single, unambiguous acting minion
-                    // - an ambiguous pool might still have a piece that
-                    // DOES have a legal target, so there's nothing safe to
-                    // say without knowing which one the player would pick.
-                    if (top.minions.length === 1 && this.specialStepHasNoLegalTarget(step, top.minions[0])) {
+                    // Checked against `clone ?? this` (not always `this`) -
+                    // a real, prior step in THIS SAME validation may have
+                    // only been applied to `clone` (see just below), so
+                    // the acting piece's current, real position/orientation
+                    // only exists there once one has run.
+                    if (this.specialStepHasNoLegalTarget(clone ?? this, step, top.minions)) {
                         const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
                         const key = (step as { special: SpecialPower }).special === "tradeHands"
                             ? "apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET"
