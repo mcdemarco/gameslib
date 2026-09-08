@@ -1162,6 +1162,64 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.frames[0].board.get(2, 0)).eq(undefined);
     });
 
+    // Direct, low-level regression coverage for chainMinion itself (the
+    // Phase 1 fragility fix) - a relocation/in-place mutation prunes its
+    // own pre-mutation ref (never left dangling to be mistaken for a
+    // second, still-live candidate), while a genuine creation is purely
+    // additive (both the acting piece and the new one stay real,
+    // independent candidates for whatever step comes next).
+    it("chainMinion: a relocation replaces its own pre-move ref; a creation is purely additive", () => {
+        const g = new GnosticaGame(2);
+        const chainMinion = (GnosticaGame as unknown as {
+            chainMinion: (minions: { x: number; y: number; index: number }[], outcome: { newMinion?: { x: number; y: number; index: number }; replacesMinion?: { x: number; y: number; index: number } }) => { x: number; y: number; index: number }[];
+        }).chainMinion;
+        void g; // unused - chainMinion is static, called on the class itself
+
+        const original = [{ x: 0, y: 0, index: 0 }];
+        // Relocation (Rods' own "piece" move, Discs' grow, Swords' shrink,
+        // Hierophant's replace, Hermit's teleport, orientMinion/orientAny's
+        // own reorient all set replacesMinion) - the old ref is gone.
+        const afterMove = chainMinion(original, {
+            newMinion: { x: 1, y: 0, index: 0 },
+            replacesMinion: { x: 0, y: 0, index: 0 },
+        });
+        expect(afterMove).to.deep.equal([{ x: 1, y: 0, index: 0 }]);
+
+        // Creation (Cups' own "create" modes - the only newMinion producer
+        // that never sets replacesMinion) - both the original piece and
+        // the freshly created one remain real, independent candidates.
+        const afterCreate = chainMinion(original, {
+            newMinion: { x: 2, y: 0, index: 0 },
+        });
+        expect(afterCreate).to.deep.equal([{ x: 0, y: 0, index: 0 }, { x: 2, y: 0, index: 0 }]);
+
+        // No outcome at all (judgementDraw, a declined step, etc.) - the
+        // pool is returned completely unchanged.
+        expect(chainMinion(original, {})).to.deep.equal(original);
+    });
+
+    // randomMove()'s own separate simulator (buildRandomChain) threads
+    // chainMinion the same way walkFrameStack/validateFrameStack do -
+    // stress-tested here since Chariot's own "move, then move" is exactly
+    // the shape (a second step whose own target only exists at the FIRST
+    // step's post-move position) that exposed the chainMinion ordering
+    // bug this session's own Phase 1 fix addressed. Chariot is the ONLY
+    // card player 1 has a piece on, so randomUseOrPlayMove("use") always
+    // resolves to it specifically, rather than leaving that to chance
+    // across whatever else randomMove()'s own top-level dispatch might
+    // otherwise pick.
+    it("randomMove() stress check: Chariot's own 'move, then move' never throws, however randomChain happens to build it", () => {
+        for (let i = 0; i < 60; i++) {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(7)); // The Chariot
+            forceCardAt(g, 3, 0, () => aceOfDiscs());
+            g.move("place m0 E", { trusted: true });
+            g.move("place l0", { trusted: true });
+            expect(() => (g as unknown as { randomUseOrPlayMove: (head: "use" | "play") => string | undefined }).randomUseOrPlayMove("use")).to.not.throw();
+        }
+    });
+
     it("Strength: a single grow step may skip straight from spot to major arcana (skipLadder)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(8)); // Strength
@@ -4435,7 +4493,11 @@ describe("Gnostica: Fool and World", () => {
         // steps) means every one of them gets its own _group wrapper.
         expect(g.results.filter(r => r.type === "_group")).to.have.length(3);
         const flat = g.results.flatMap(r => r.type === "_group" ? r.results : [r]);
-        expect(flat.some(r => (r as unknown as { type: string }).type === "borrowPower")).eq(true);
+        // World's own step reuses the ordinary "use" result type (no more
+        // stubbed "borrowPower" - see chatLog's own docs), tagged with
+        // count: 21 so chatLog can still say "borrowed the power of X"
+        // instead of the plain "used X" wording an ordinary activation gets.
+        expect(flat.some(r => r.type === "use" && (r as { what?: string; count?: number }).what === major(6).uid && (r as { count?: number }).count === 21)).eq(true);
     });
 
     it("World -> Lovers via clicks: the pushed frame's own steps become click-driven too", () => {
@@ -5119,7 +5181,10 @@ describe("Gnostica: Fool and World", () => {
         const worldGame = setupWorldLovers();
         worldGame.move(`use ${theWorld().uid}, m0.1 ${major(6).uid}, m0.1 piece n0.1 1 U, o0.1 own o0 U`, { trusted: true });
         const worldRows = worldGame.chatLog(["Alice", "Bob"]);
-        expect(worldRows[worldRows.length - 1].some(line => line.includes(major(6).name))).to.be.true;
+        // cardDisplayName() adds the major-arcana numeral to the card's
+        // own stored name as-is (e.g. "The Lovers (VI)").
+        const lovers = `${major(6).name} (${major(6).romanNumeral})`;
+        expect(worldRows[worldRows.length - 1].some(line => line.includes(lovers))).to.be.true;
     });
 
     it("randomMove() sanity check: a paused activation always yields something validateMove() accepts", () => {
