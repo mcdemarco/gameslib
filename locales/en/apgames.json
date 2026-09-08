@@ -5830,7 +5830,7 @@
             "NO_POWER_STEPS_HERE": "The move is incomplete.",
             "NO_SUCH_MAJOR_ON_BOARD": "That major arcana card is not currently on the board.",
             "NO_TERRITORY_THAT_WAY": "There is no territory there to move.",
-            "NOTHING_TO_CONTINUE": "There's no action to continue.",
+            "NOTHING_TO_DECLINE": "There's nothing to decline right now.",
             "ORIENT_ARGS_REQUIRED": "You must click a neighboring cell to change direction, or the same cell to point up.",
             "ORIENT_NO_OP": "The minion is already facing in that direction.  Please choose a different direction or a different action.",
             "PENDING_POWER_CHOICE": "Choose an action for {{card}}, or click Decline if you do not want to use it.",

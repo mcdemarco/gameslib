@@ -3402,7 +3402,7 @@ describe("Gnostica: choose-step click messaging", () => {
         g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true }); // step 1: a real discard, pauses on step 2
         expect(g.pendingPower).to.not.be.undefined;
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
-        expect(resumed.move).eq(`continue ${major(2).uid}`);
+        expect(resumed.move).eq(`use ${major(2).uid} (via ${major(2).uid})`);
         expect(resumed.message).eq(round2Msg);
     });
 
@@ -3484,7 +3484,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(g.pendingPower).to.not.be.undefined;
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"));
 
-        g.move(`continue ${major(2).uid}, decline`, { trusted: true }); // clears the obligation
+        g.move(`decline ${major(2).uid} (via ${major(2).uid})`, { trusted: true }); // clears the obligation
         expect(g.pendingPower).to.be.undefined;
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
     });
@@ -3928,7 +3928,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.discardPile).to.include("5C");
         expect(g.currplayer).eq(1); // same seat still owes step 2
         expect(g.pendingPower).to.not.be.undefined;
-        g.move(`continue ${major(2).uid}, decline`, { trusted: true }); // declines the second highPriestess step
+        g.move(`decline ${major(2).uid} (via ${major(2).uid})`, { trusted: true }); // declines the second highPriestess step
         expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
     });
@@ -4365,40 +4365,49 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         expect(g.pendingPower).to.not.be.undefined;
         expect(g.hands[0]).to.not.include("5C");
         expect(g.hands[0].length).eq(6);
-        g.move(`continue ${major(2).uid}, AR`, { trusted: true }); // step 2: discard AR instead of declining
+        g.move(`play ${major(2).uid}, AR (via ${major(2).uid})`, { trusted: true }); // step 2: discard AR instead of declining
         expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
         expect(g.hands[0]).to.not.include("AR");
         expect(g.hands[0].length).eq(6); // redrawn back up again
     });
 
-    // "continue" is the only legal way to resume: a bare "use"/"play"
-    // gets PENDING_POWER_NEEDS_CONTINUE, a wrong card uid gets
-    // PENDING_POWER_MISMATCH, and more than one step segment still throws.
-    it("resume-mismatch guards reject a wrong card uid, a bare use/play instead of continue, and more than one step segment", () => {
+    // There's no dedicated "resume" head word anymore (#74) - whenever a
+    // genuine obligation is open, EVERY move is dispatched as resuming
+    // it, regardless of what verb the (purely decorative) front spells -
+    // "use"/"play"/"decline" all work identically as long as the real
+    // uid (a "(via <uid>)" marker, or the bare root when nothing's been
+    // pushed) matches the obligation. What's still guarded: a wrong uid
+    // gets PENDING_POWER_MISMATCH, and more than one step segment still
+    // throws.
+    it("resume-mismatch guards reject a wrong card uid regardless of head word, and more than one step segment", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
         g.move(`use ${major(2).uid}, 5C`, { trusted: true });
         expect(g.pendingPower).to.not.be.undefined;
-        // Wrong cardUid: caught by validation only (validateResumePendingPower)
+        // Wrong uid: caught by validation only (validateResumePendingPower)
         // - apply trusts that a {trusted: true} caller already validated
-        // (see resumePendingPower's own docs).
-        expect(g.validateMove("continue 07, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
-        expect(g.validateMove(`use ${major(2).uid}, decline`).message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_NEEDS_CONTINUE")); // needs "continue", not "use"
-        expect(g.validateMove(`play ${major(2).uid}, decline`).message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_NEEDS_CONTINUE")); // nor "play"
-        expect(() => g.move(`continue ${major(2).uid}, AR, 2C`, { trusted: true })).to.throw(); // more than one step segment
+        // (see resumePendingPower's own docs). Checked via both spellings -
+        // a "(via <wrong>)" marker, and a bare wrong uid with no marker at
+        // all - neither is special-cased over the other.
+        expect(g.validateMove("decline 07 (via 07)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        expect(g.validateMove("use 07, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        // The CORRECT uid works regardless of which verb fronts it - there's
+        // no dedicated resume word to get wrong anymore.
+        expect(g.validateMove(`play ${major(2).uid}, decline (via ${major(2).uid})`).valid).to.be.true;
+        expect(g.validateMove(`use ${major(2).uid}, decline`).valid).to.be.true;
+        expect(() => g.move(`play ${major(2).uid}, AR, 2C (via ${major(2).uid})`, { trusted: true })).to.throw(); // more than one step segment
         // None of the rejected attempts cleared the obligation.
         expect(g.pendingPower).to.not.be.undefined;
         expect(g.currplayer).eq(1);
     });
 
-    it("\"continue\" with nothing pending is rejected outright", () => {
+    it("a bare 'decline' with nothing pending is rejected outright", () => {
         const g = setupHP();
         expect(g.pendingPower).to.be.undefined;
-        const validated = g.validateMove(`continue ${major(2).uid}`);
+        const validated = g.validateMove(`decline ${major(2).uid} (via ${major(2).uid})`);
         expect(validated.valid).to.be.false;
-        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.NOTHING_TO_CONTINUE"));
-        expect(() => g.move(`continue ${major(2).uid}`, { trusted: true })).to.throw();
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.NOTHING_TO_DECLINE"));
     });
 });
 
@@ -4539,7 +4548,7 @@ describe("Gnostica: Fool and World", () => {
 
         expect(buttonValues(g)).to.not.include("decline_power");
 
-        const result = g.validateMove(`continue ${theWorld().uid}, decline`);
+        const result = g.validateMove(`decline ${major(6).uid} (via ${theWorld().uid})`);
         expect(result.valid).to.be.false;
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.CANNOT_DECLINE_BORROWED_POWER", { card: major(6).name }));
     });
@@ -4567,12 +4576,15 @@ describe("Gnostica: Fool and World", () => {
         preview1.move(targetClick.move, { partial: true });
         expect(buttonValues(preview1)).to.include("mode_R_piece");
 
+        // From here on, the move string relabels itself around the ACTIVE
+        // card (Lovers, not World) the moment a later click re-walks a
+        // string that's already pushed - #74's own same-call extension.
         const modeClick = g.handleClick(targetClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${theWorld().uid}, m0.1 ${major(6).uid}/m0.1 piece m0.1 1`);
+        expect(modeClick.move).eq(`use ${major(6).uid}, m0.1 ${major(6).uid}/m0.1 piece m0.1 1 (via ${theWorld().uid})`);
 
         const [rowN, colN] = rowColFor(g, 1, 0);
         const redirected = g.handleClick(modeClick.move, rowN, colN);
-        expect(redirected.move).eq(`use ${theWorld().uid}, m0.1 ${major(6).uid}/m0.1 piece n0.1 1`);
+        expect(redirected.move).eq(`use ${major(6).uid}, m0.1 ${major(6).uid}/m0.1 piece n0.1 1 (via ${theWorld().uid})`);
         expect(redirected.valid).to.be.true;
 
         const preview2 = setup();
@@ -4587,6 +4599,48 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
         expect(g.board.get(2, 0)!.pieces.length).eq(1); // B, pushed to o0
         expect(g.board.get(1, 0)!.pieces.length).eq(1); // Lovers' own new piece, at n0 (now vacant)
+    });
+
+    // #67: the collapsed top-level button names the active card's own
+    // uid, not just which action started the move - and once World's own
+    // push resolves onto Lovers, the label follows the ACTIVE card
+    // (Lovers), not the root (World), matching #74's own "via" reasoning.
+    it("Use Territory names the active card's uid once one's known, following World's own push", () => {
+        const g = setupWorldLovers();
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [rowM, colM] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, rowM, colM);
+
+        // World's own step is itself a chained segment, so render() may
+        // return an array of per-frame reps once a frame boundary exists
+        // (see the shared buttonValues helper's own identical docs) - the
+        // live button bar is always on the last one.
+        const buttonLabel = (g2: GnosticaGame, value: string): string | undefined => {
+            const raw = g2.render();
+            const rep = (Array.isArray(raw) ? raw[raw.length - 1] : raw) as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
+            const bar = rep.areas!.find(a => a.type === "buttonBar")!;
+            return bar.buttons!.find(b => b.value === value)?.label;
+        };
+
+        const preview = setupWorldLovers();
+        preview.move(cellClick.move, { partial: true });
+        expect(buttonLabel(preview, "use")).eq(`Use Territory (${theWorld().uid})`);
+
+        // "still incomplete" states (Lovers' own chain has a 2nd step left
+        // to go - see "World -> Lovers via clicks" above) keep this.liveMove
+        // set for the NEXT click to build on, unlike modeClick's own
+        // self-target default, which is already a syntactically complete
+        // step and so - via the same implicit-decline path an explicit
+        // "decline" click would take - can auto-resolve Lovers' own
+        // remaining (optional) 2nd step and end the whole turn right there.
+        const [rowP, colP] = rowColFor(g, 3, 0);
+        const targetClick = g.handleClick(cellClick.move, rowP, colP);
+        const modeClick = g.handleClick(targetClick.move, -1, -1, "_btn_mode_R_piece");
+        const [rowN, colN] = rowColFor(g, 1, 0);
+        const redirected = g.handleClick(modeClick.move, rowN, colN);
+        const preview2 = setupWorldLovers();
+        preview2.move(redirected.move, { partial: true });
+        expect(buttonLabel(preview2, "use")).eq(`Use Territory (${major(6).uid})`);
     });
 
     it("World rejects a self-reference and an off-board target; declining its own power outright needs a trusted caller (#49, same as any other major)", () => {
@@ -4642,7 +4696,7 @@ describe("Gnostica: Fool and World", () => {
         // and pausing on ITS OWN choice, rather than a separate "should
         // Fool draw again" prompt.
         g.drawPile.unshift("AS"); // force what that automatic second flip reveals
-        g.move(`continue ${major(0).uid}, m0.1 piece n0.1 1 U, o0.1 own o0 U`, { trusted: true });
+        g.move(`play 06, m0.1 piece n0.1 1 U, o0.1 own o0 U (via ${major(0).uid})`, { trusted: true });
         expect(g.pendingPower).to.not.be.undefined;
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AS"]);
         expect(g.pendingPower!.stack[0].nextStepIndex).eq(2); // Fool's own frame is now fully spent
@@ -4652,7 +4706,7 @@ describe("Gnostica: Fool and World", () => {
         // Declining the second reveal's own power now fully resolves the
         // whole activation in one more submission (Fool's frame is
         // already spent, so nothing is left to auto-continue).
-        g.move(`continue ${major(0).uid}, decline`, { trusted: true });
+        g.move(`decline AS (via ${major(0).uid})`, { trusted: true });
         expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
 
@@ -4670,13 +4724,13 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AC"]);
         g.drawPile.unshift("AS"); // force what Fool's own automatic second flip reveals
-        g.move(`continue ${major(0).uid}, m0.1 own m0 U`, { trusted: true });
+        g.move(`play AC, m0.1 own m0 U (via ${major(0).uid})`, { trusted: true });
         expect(g.pendingPower).to.not.be.undefined; // Fool's own second flip auto-fired, in the same submission
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AS"]);
         expect(g.currplayer).eq(1);
         expect(g.board.get(0, 0)!.pieces.length).eq(2); // Fool's own minion, plus the new Cups piece
 
-        g.move(`continue ${major(0).uid}, decline`, { trusted: true });
+        g.move(`decline AS (via ${major(0).uid})`, { trusted: true });
         expect(g.pendingPower).to.be.undefined;
         expect(g.currplayer).eq(2);
     });
@@ -4696,7 +4750,7 @@ describe("Gnostica: Fool and World", () => {
 
         const suitClick = g.handleClick("", -1, -1, "_btn_magician_C");
         expect(suitClick.valid).to.be.true;
-        expect(suitClick.move).eq(`continue ${major(0).uid}, m0.1 C`);
+        expect(suitClick.move).eq(`use ${major(1).uid}, m0.1 C (via ${major(0).uid})`);
 
         // Syncing the engine to this still-incomplete segment (suit
         // chosen, mode not yet - same as the playground's own preview flow
@@ -4743,7 +4797,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AC"]);
 
         g.drawPile.unshift("AD");
-        g.move(`continue ${major(0).uid}, decline`, { trusted: true }); // decline AC's own step
+        g.move(`decline AC (via ${major(0).uid})`, { trusted: true }); // decline AC's own step
         expect(g.pendingPower).to.not.be.undefined;
         // Fool's own frame is now fully exhausted (both flips done), but
         // the forced pause on the SECOND flip's own reveal fires before
@@ -4778,7 +4832,7 @@ describe("Gnostica: Fool and World", () => {
         // Only step 1 (the push) is typed - no enemy exists anywhere to
         // trade hands with, so step 2 is left entirely unaddressed rather
         // than explicitly declined.
-        g.move(`continue ${major(0).uid}, m0.1 tile 1`, { trusted: true });
+        g.move(`play ${major(12).uid}, m0.1 tile 1 (via ${major(0).uid})`, { trusted: true });
         expect(g.board.has(1, 0)).eq(false); // the push actually happened
         expect(g.pendingPower).to.not.be.undefined;
         // tradeHands never even shows up on the stack - it's popped by
@@ -4819,7 +4873,7 @@ describe("Gnostica: Fool and World", () => {
             pluckCard(g, major(12).uid);
             g.drawPile.unshift(major(12).uid);
             g.move(`use ${major(0).uid}, fool`, { trusted: true });
-            const result = g.validateMove(`continue ${major(0).uid}, m0.1 tile 1`);
+            const result = g.validateMove(`play ${major(12).uid}, m0.1 tile 1 (via ${major(0).uid})`);
             expect(result.valid).to.be.true;
             expect(result.complete).eq(1);
             expect(result.message).eq(skippedMsg);
@@ -4840,7 +4894,7 @@ describe("Gnostica: Fool and World", () => {
             pluckCard(g, major(12).uid);
             g.drawPile.unshift(major(12).uid);
             g.move(`use ${major(0).uid}, fool`, { trusted: true });
-            const result = g.validateMove(`continue ${major(0).uid}, m0.1 piece m0.1 1`);
+            const result = g.validateMove(`play ${major(12).uid}, m0.1 piece m0.1 1 (via ${major(0).uid})`);
             expect(result.valid).to.be.true;
             expect(result.complete).eq(1);
             expect(result.message).eq(skippedMsg);
@@ -4912,7 +4966,7 @@ describe("Gnostica: Fool and World", () => {
         // automatically, in this SAME submission, revealing a new card
         // and pausing on IT instead.
         g.drawPile.unshift("AS");
-        g.move(`continue ${theWorld().uid}, decline`, { trusted: true }); // decline the reveal (AC's own step)
+        g.move(`decline AC (via ${theWorld().uid})`, { trusted: true }); // decline the reveal (AC's own step)
         expect(g.pendingPower).to.not.be.undefined;
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["21", "00", "AS"]);
         expect(g.pendingPower!.stack[1].nextStepIndex).eq(2); // Fool's own frame is now fully spent
@@ -4945,9 +4999,9 @@ describe("Gnostica: Fool and World", () => {
         // (see the identical "wrong cardUid" note in the HP resume-mismatch
         // test above); a {trusted: true} apply-side call has no uid check
         // left to catch this itself.
-        expect(g2.validateMove("continue AC, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        expect(g2.validateMove("decline AC (via AC)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
         expect(g2.pendingPower).to.not.be.undefined;
-        expect(() => g2.move(`continue ${theWorld().uid}, decline`, { trusted: true })).to.not.throw();
+        expect(() => g2.move(`decline AC (via ${theWorld().uid})`, { trusted: true })).to.not.throw();
     });
 
     it("Fool's own root activation needs no button - selecting it already produces a complete, submittable move", () => {
@@ -5022,7 +5076,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.pendingPower).to.not.be.undefined;
 
         const declined = g.handleClick("", -1, -1, "_btn_decline_power");
-        expect(declined.move).eq(`continue ${major(0).uid}, decline`);
+        expect(declined.move).eq(`decline AC (via ${major(0).uid})`);
         expect(declined.valid).to.be.true;
         expect(declined.complete).to.eq(0);
         expect(declined.message).to.eq(i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW"));
@@ -5063,7 +5117,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
 
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
-        expect(resumed.move).eq(`continue ${major(0).uid}`);
+        expect(resumed.move).eq(`use AC (via ${major(0).uid})`);
         // A minor card's own synthesized primitive step is a fresh (step
         // 0) choice - CHOOSE_STEP is the right message key, now naming AC.
         expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
@@ -5080,7 +5134,7 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift(major(1).uid);
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
 
-        const bare = g.validateMove(`continue ${major(0).uid}`);
+        const bare = g.validateMove(`play ${major(1).uid} (via ${major(0).uid})`);
         expect(bare.valid).to.be.true;
         expect(bare.complete).to.eq(-1);
         expect(bare.message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(1).name }));
@@ -5099,7 +5153,7 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift(major(1).uid);
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
 
-        const suitChosen = g.validateMove(`continue ${major(0).uid}, m0.1 C`); // suit picked, no mode yet
+        const suitChosen = g.validateMove(`play ${major(1).uid}, m0.1 C (via ${major(0).uid})`); // suit picked, no mode yet
         expect(suitChosen.valid).to.be.true;
         expect(suitChosen.complete).to.eq(-1);
         expect(suitChosen.message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(1).name }));
@@ -5172,7 +5226,7 @@ describe("Gnostica: Fool and World", () => {
         const [rowN, colN] = rowColFor(g, 1, 0);
         const targetClick = g.handleClick("", rowN, colN);
         expect(targetClick.valid).to.be.true;
-        expect(targetClick.move).eq(`continue ${major(0).uid}, m0.1 ${major(1).uid}`);
+        expect(targetClick.move).eq(`use ${theWorld().uid}, m0.1 ${major(1).uid} (via ${major(0).uid})`);
     });
 
     // Regression: Fool -> Hanged Man -> (Rods "piece" mode relocates the
@@ -5185,9 +5239,9 @@ describe("Gnostica: Fool and World", () => {
     // longer occupies at all; the first thing that tried to read a piece
     // there (a board click on World's own target) crashed outright
     // instead of failing gracefully. Also covers parsePendingStep's own,
-    // separate copy of the same staleness bug (its own "continue" resume
-    // re-derives eligibility from the ROOT card's own cell, which the
-    // acting piece has since moved away from too).
+    // separate copy of the same staleness bug (its own resume re-derives
+    // eligibility from the ROOT card's own cell, which the acting piece
+    // has since moved away from too).
     it("Fool -> Hanged Man (piece relocates) -> World: the relocated piece's CURRENT position survives, not its pre-move one", () => {
         const g = setupFool();
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // facing n0
@@ -5197,7 +5251,7 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
 
         g.drawPile.unshift(theWorld().uid); // Fool's mandatory 2nd flip reveals World
-        g.move(`continue ${major(0).uid}, m0.1 piece m0.1 1`, { trusted: true }); // moves to n0; tradeHands auto-declines (no enemy)
+        g.move(`play ${major(12).uid}, m0.1 piece m0.1 1 (via ${major(0).uid})`, { trusted: true }); // moves to n0; tradeHands auto-declines (no enemy)
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", theWorld().uid]);
         // Both frames now agree on the piece's CURRENT cell (n0), not its
         // original one (m0) - this is the actual bug this test guards.
@@ -5209,7 +5263,7 @@ describe("Gnostica: Fool and World", () => {
         expect(() => g.handleClick("", rowN, colN)).to.not.throw();
         const targetClick = g.handleClick("", rowN, colN);
         expect(targetClick.valid).to.be.true;
-        expect(targetClick.move).eq(`continue ${major(0).uid}, n0.1 ${major(5).uid}`);
+        expect(targetClick.move).eq(`use ${theWorld().uid}, n0.1 ${major(5).uid} (via ${major(0).uid})`);
     });
 
     it("chatLog() renders revealFlip/borrowPower lines, naming the actual card, not a bare uid", () => {
@@ -5238,7 +5292,7 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use ${major(0).uid}, fool`, { trusted: true });
         expect(g.pendingPower).to.not.be.undefined;
         const move = g.randomMove();
-        expect(move).eq(`continue ${major(0).uid}, decline`);
+        expect(move).eq(`decline AC (via ${major(0).uid})`);
         expect(g.validateMove(move).valid).to.be.true;
         expect(() => g.move(move, { trusted: true })).to.not.throw();
     });
@@ -5298,7 +5352,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", judgementUid]);
         g.hands[0].pop(); // make room for Judgement's own draw
 
-        const move = `continue ${major(0).uid}, m0.1 ${judgementUid}`;
+        const move = `play ${judgementUid}, m0.1 ${judgementUid} (via ${major(0).uid})`;
         const validated = g.validateMove(move);
         expect(validated.valid).to.be.true;
         expect(validated.complete).to.eq(1); // a fully complete, submittable move - not rejected in advance
