@@ -5863,6 +5863,7 @@
             "TRADEHANDS_SKIPPED_NO_TARGET": "There is no one for {{card}} to trade hands with, so that part of its power will be skipped when you submit.",
             "UNKNOWN_CARD": "The requested territory was not found.",
             "USE_PASS_BUTTON": "Please use the pass button to pass your turn.",
+            "WORLD_CHOOSE_TARGET": "Click any major arcana card currently on the board to use its power, or click Decline if you do not want to use The World.",
             "WORLD_SELF_REFERENCE": "You cannot use World (XXI) on World itself.  Please chooose a different major arcana card.",
             "WRONG_PHASE": "\"{{move}}\" is not a legal move right now."
         },

@@ -3290,7 +3290,15 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.message).eq(chooseStepMsg(major(10).name));
     });
 
-    it("activate: World carries the same CHOOSE_STEP message as any other major now", () => {
+    // World's own target is unbounded ("any major arcana card currently on
+    // the board"), unlike every other click-driven special (tradeHands/
+    // orientAny/hierophantReplace/orientMinion), whose target is always
+    // just the acting minion's own obvious self-or-facing cell - CHOOSE_
+    // STEP's generic "use the buttons next to the game board" wording is
+    // actively wrong for it (there ARE no such buttons - see
+    // computeActionButtons' own docs), so it gets real instructions
+    // instead, the same way Fool/High Priestess already do.
+    it("activate: World gets its own real instructions, not the generic CHOOSE_STEP wording", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         g.move("place m0", { trusted: true });
@@ -3300,7 +3308,8 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`use ${theWorld().uid}`);
-        expect(result.message).eq(chooseStepMsg(theWorld().name));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
+        expect(result.message).to.not.eq(chooseStepMsg(theWorld().name));
     });
 
     // High Priestess isn't button-driven at all (CHOOSE_STEP would be
@@ -3391,8 +3400,11 @@ describe("Gnostica: choose-step click messaging", () => {
     // follows (see playground.js's own moveBtn handler) - INITIAL_
     // INSTRUCTIONS ("click a top-level button") is wrong the moment that
     // render is actually the forced Continue/Decline screen, not the
-    // ordinary button bar.
-    it("validateMove(\"\") reports the pending-power choice, not the generic top-level-button instructions, once a card's power is paused", () => {
+    // ordinary button bar. Routed through powerStepMessageKey (the SAME
+    // lookup resume_power's own click handler uses), so a card with real
+    // instructions (High Priestess round 2, here) gets them right at
+    // "beginning of turn" too, not just once the player clicks something.
+    it("validateMove(\"\") reports the pending-power's own real instructions, not the generic top-level-button wording or a bare card name, once a card's power is paused", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -3402,7 +3414,7 @@ describe("Gnostica: choose-step click messaging", () => {
 
         g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true }); // pauses, awaiting round 2
         expect(g.pendingPower).to.not.be.undefined;
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(2).name }));
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"));
 
         g.move(`continue ${major(2).uid}, decline`, { trusted: true }); // clears the obligation
         expect(g.pendingPower).to.be.undefined;
@@ -4929,7 +4941,10 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use ${major(0).uid}`); // real, non-partial commit - actually flips
         expect(g.pendingPower).to.not.be.undefined;
         const acName = minorCards.find(c => c.uid === "AC")!.name;
-        expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: acName }));
+        // Routed through powerStepMessageKey now (see its own docs) - a
+        // minor card's own synthesized step is step 0, so CHOOSE_STEP is
+        // the right key, same as the resume_power click just below gets.
+        expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
 
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
         expect(resumed.move).eq(`continue ${major(0).uid}`);
@@ -5016,6 +5031,32 @@ describe("Gnostica: Fool and World", () => {
         expect(real.pendingPower).to.not.be.undefined; // Fool's own flip actually fired, pausing on what it revealed
         expect(real.pendingPower!.stack.map(f => f.cardUid)[0]).eq("21");
         expect(real.pendingPower!.stack.map(f => f.cardUid)[1]).eq("00");
+    });
+
+    // World's own target is any major arcana card on the board - unlike
+    // every other click-driven special, there's no single obvious cell to
+    // guess, so once genuinely paused (Fool's own reveal, here) the bar
+    // must drop the ordinary 6 buttons entirely (none of them are legal -
+    // validateMove would reject every one with PENDING_POWER_NEEDS_
+    // CONTINUE) and the status line must give real instructions, not just
+    // name the card.
+    it("Fool reveals World: the button bar drops to just Decline, and the message gives real instructions instead of naming the card alone", () => {
+        const g = setupFool();
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, 1, 0, () => major(1)); // a real target for World to use
+        pluckCard(g, theWorld().uid);
+        g.drawPile.unshift(theWorld().uid);
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", theWorld().uid]);
+
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
+        expect(buttonValues(g)).to.deep.equal(["decline_power"]);
+
+        // The click itself still works - only the bar/message were wrong.
+        const [rowN, colN] = rowColFor(g, 1, 0);
+        const targetClick = g.handleClick("", rowN, colN);
+        expect(targetClick.valid).to.be.true;
+        expect(targetClick.move).eq(`continue ${major(0).uid}, m0.1 ${major(1).uid}`);
     });
 
     it("chatLog() renders revealFlip/borrowPower lines, naming the actual card, not a bare uid", () => {

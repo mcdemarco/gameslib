@@ -769,15 +769,18 @@ export class GnosticaGame extends GameBaseSequenced {
             // forced Continue/Decline screen (getActionButtons()'s own
             // pendingPower gate), not the ordinary 6-button bar.
             if (this.pendingPower !== undefined) {
-                // Names the ACTIVE (top-of-stack) card, not always
-                // rootCardUid - this is the only chance the status line
+                // Routed through powerStepMessageKey (the SAME lookup
+                // resume_power's own click handler and computeActionButtons
+                // already use) rather than a separate, generic "just name
+                // the card" copy - this is the only chance the status line
                 // itself (as opposed to the chat log) gets to tell the
-                // player which card's power they're being asked about,
-                // which matters most exactly when it's NOT the card they
-                // themselves used/played (Fool's reveal, World's target).
+                // player which card's power they're being asked about
+                // before they've clicked anything at all, so a card with
+                // real instructions (Fool, High Priestess, World) needs
+                // them here just as much as anywhere else this key is read.
                 const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
-                const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
-                result.message = i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName });
+                const { key, params } = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex);
+                result.message = i18next.t(key, params);
             } else {
                 result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
             }
@@ -1573,6 +1576,16 @@ export class GnosticaGame extends GameBaseSequenced {
         if (headArg === "00") {
             return { key: "apgames:validation.gnostica.FOOL_FLIP1_READY" };
         }
+        // World: the same "click-driven, no button" gap as tradeHands/
+        // orientAny/hierophantReplace/orientMinion/judgementDraw below
+        // (see computeActionButtons' own docs), but those all target the
+        // acting minion's own obvious self-or-facing cell - a player can
+        // guess that with no hint. World's own target is unbounded ("any
+        // major arcana territory currently on the board"), so naming the
+        // card alone leaves no clue at all what to actually click.
+        if (headArg === "21") {
+            return { key: "apgames:validation.gnostica.WORLD_CHOOSE_TARGET" };
+        }
         // Every other card: name it explicitly. A fresh top-level
         // activation is one the player just clicked themselves (so this
         // is a confirming reminder), but a card reached via a push
@@ -1980,18 +1993,40 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // orientMinion/tradeHands/orientAny/hierophantReplace/
         // judgementDraw/worldUseAny are pure click-driven (board or
-        // AreaPieces clicks, no mode to pick via button) - leave the bar
-        // exactly as "orient"/"place" already do (uncollapsed), rather
-        // than collapsing to an empty button set. hermitTeleport (mode not
-        // chosen yet) and magicianChoice (suit not chosen yet) are the two
-        // special powers that DO need their own button set, handled below
-        // instead of falling into the suit-mode loop. Once
+        // AreaPieces clicks, no mode to pick via button). hermitTeleport
+        // (mode not chosen yet) and magicianChoice (suit not chosen yet)
+        // are the two special powers that DO need their own button set,
+        // handled below instead of falling into the suit-mode loop. Once
         // magicianChoice's suit IS chosen, buildSpecialPending has already
         // redirected `pendingMinor` into an ordinary suit-shaped pending
         // (special undefined, suitUid set), so it falls straight through
         // to that same existing loop unmodified.
         if (pendingMinor.special !== undefined && pendingMinor.special !== "hermitTeleport" && pendingMinor.special !== "magicianChoice") {
-            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+            // While still building a FRESH root activation (not yet a
+            // genuine, persisted obligation - see pendingPowerIsGenuine's
+            // own docs), the ordinary top-level bar is still the right
+            // thing to show (matches every other "still typing" preview,
+            // and #49 may still reject this activation outright anyway).
+            if (!this.pendingPowerIsGenuine) {
+                return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+            }
+            // Once genuinely paused, though, NONE of the ordinary 6
+            // buttons are legal here - every one of them would be
+            // rejected outright by validateMove's own PENDING_POWER_NEEDS_
+            // CONTINUE gate while this obligation is open. Showing them
+            // anyway (the bar's old behaviour) is actively misleading -
+            // there's nothing on it the player can actually use, and
+            // worse for World specifically (its own legal target is any
+            // major arcana card anywhere on the board, not a self-evident
+            // cell - see powerStepMessageKey's own WORLD_CHOOSE_TARGET
+            // docs). The one thing that's always legal here regardless of
+            // card (see getActionButtons()'s own docs) is declining
+            // outright, so show ONLY that - matching the Fool-special
+            // pair's own self-contained shape just above, and letting
+            // getActionButtons()'s own persisting-Decline wrapper recognize
+            // a decline_power value is already present and leave it alone.
+            const activeUid = this.pendingPower!.stack[this.pendingPower!.stack.length - 1].cardUid;
+            return [{ label: `Decline ${activeUid}`, value: "decline_power" }];
         }
 
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
