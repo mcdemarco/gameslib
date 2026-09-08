@@ -2167,7 +2167,23 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         let card: Card | undefined;
         let eligible: IMinionRef[];
-        if (effectiveSource === "use") {
+        // A genuine resume's real minions live in this.pendingPower's own
+        // stack (kept current across nested child frames - see popFrame's
+        // own docs), NOT wherever the ROOT card's own cell happens to be -
+        // that cell goes stale the instant the acting piece moves on to a
+        // different one via a nested child frame (Rods' own "move" mode,
+        // say), possibly leaving nothing standing there at all by the
+        // time a "continue" resume is previewed. rootCardUid is always a
+        // major (Fool/World/High Priestess are the only cards a genuine
+        // cross-turn obligation is ever rooted on - see
+        // resumePendingPower's own docs), so `card` only needs to be
+        // truthy and major here; its own identity is irrelevant beyond
+        // that, since the major branch below immediately replaces `stack`
+        // with this.pendingPower's own (already correct) one regardless.
+        if (head === "continue" && this.pendingPower !== undefined && this.pendingPower.rootCardUid === headArg) {
+            card = allCards().find(c => c.uid === headArg);
+            eligible = this.pendingPower.stack[this.pendingPower.stack.length - 1].minions;
+        } else if (effectiveSource === "use") {
             const loc = this.findCardCell(headArg);
             if (loc === undefined) {
                 return undefined;
@@ -2242,7 +2258,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // further at all), not fall back to the generic top-level
                 // bar.
                 priorSteps.push(tokens.join(" "));
-                stack.pop();
+                GnosticaGame.popFrame(stack);
                 GnosticaGame.popExhaustedFrames(this, stack);
                 continue;
             }
@@ -4816,14 +4832,49 @@ export class GnosticaGame extends GameBaseSequenced {
         return { uid: cardUid, name: card.name, seq: -1, icons: [], powers: [{ primitive: GnosticaGame.SUIT_TO_PRIMITIVE[card.suit.uid] }] };
     }
 
-    // Pops fully-exhausted frames off the top of `stack` (mutates in
-    // place) - shared cleanup after every step, since a push (World's
-    // target, Fool's flip) always lands a fresh frame at nextStepIndex 0,
-    // and a card with only one power (World itself) needs to disappear
-    // again immediately rather than sit around already-exhausted.
+    // Pops the top frame off `stack` (mutates in place) - the ONE place
+    // every decline/exhaustion site in this file removes a frame, rather
+    // than a raw `stack.pop()`, specifically so this can also carry the
+    // popped frame's own CURRENT acting piece (its own `minions` last
+    // entry - see IStepOutcome.newMinion's "become a minion" docs) down
+    // into whatever frame is newly exposed beneath it. A buried parent
+    // frame (Fool, or World targeting something) is otherwise frozen at
+    // wherever the piece stood when THAT frame was first pushed - the
+    // instant a child frame sitting on top of it relocates the very same
+    // physical piece (Rods' own "move" mode, say) and then pops, the
+    // parent's own copy goes stale. If that parent later pushes yet
+    // another child of its own (Fool's second flip is the common case),
+    // it would hand the new child a position with no piece on it at all -
+    // the first thing that tries to actually read a piece there
+    // (pieceRefStr, minorTargetCell, ...) crashes. Safe to simply
+    // overwrite rather than merge: by the time a child frame sits on top
+    // of a parent at all, the parent's own triggering step has already
+    // fully resolved (pushing a frame is itself that step's own outcome),
+    // so there's no live ambiguity left in the parent's own `minions` for
+    // this to clobber - the only thing it's still good for is exactly
+    // this handoff.
+    private static popFrame(stack: IPowerFrame[]): void {
+        const spent = stack.pop();
+        if (spent === undefined) {
+            return;
+        }
+        const beneath = stack[stack.length - 1];
+        const current = spent.minions[spent.minions.length - 1];
+        if (beneath !== undefined && current !== undefined) {
+            beneath.minions = [current];
+        }
+    }
+
+    // Pops fully-exhausted frames off the top of `stack` - shared cleanup
+    // after every step, since a push (World's target, Fool's flip) always
+    // lands a fresh frame at nextStepIndex 0, and a card with only one
+    // power (World itself) needs to disappear again immediately rather
+    // than sit around already-exhausted. Each pop goes through popFrame
+    // (not a raw `stack.pop()`) so a relocated acting piece's own current
+    // position survives the cascade - see its own docs.
     private static popExhaustedFrames(target: GnosticaGame, stack: IPowerFrame[]): void {
         while (stack.length > 0 && stack[stack.length - 1].nextStepIndex >= target.resolveFrameDef(stack[stack.length - 1].cardUid).powers.length) {
-            stack.pop();
+            GnosticaGame.popFrame(stack);
         }
     }
 
@@ -4919,14 +4970,14 @@ export class GnosticaGame extends GameBaseSequenced {
                     // second flip is only ever supposed to reach that
                     // dedicated isFoolStep branch above, never sit here
                     // waiting on a "continue" the bar never actually offers).
-                    stack.pop();
+                    GnosticaGame.popFrame(stack);
                     GnosticaGame.popExhaustedFrames(this, stack);
                     continue;
                 }
                 tokens = stepSegments[i];
                 i++;
                 if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                    stack.pop();
+                    GnosticaGame.popFrame(stack);
                     // Popping can expose an ALREADY-exhausted frame directly
                     // beneath (a parent whose own single step already ran, but
                     // whose push left it buried under the very frame just
@@ -5134,7 +5185,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens = stepSegments[i];
                 i++;
                 if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                    stack.pop();
+                    GnosticaGame.popFrame(stack);
                     // Mirrors walkFrameStack's own decline branch - popping can
                     // expose an already-exhausted buried frame (e.g. World's
                     // own spent 1-step frame), which a later segment (if any)

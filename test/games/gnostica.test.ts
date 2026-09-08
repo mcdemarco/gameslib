@@ -171,10 +171,20 @@ describe("Gnostica: hand sort order", () => {
         // before a major), so a spurious pass (already-sorted-by-luck)
         // can't hide a bug. major(21) (The World) is the highest-seq
         // major in the deck - bidding it guarantees player 1 wins
-        // outright regardless of player 2's own uncontrolled random
-        // hand (any major they might hold is seq <= 21 too, at best a
-        // tie the code breaks toward the lower-numbered player anyway).
+        // outright regardless of player 2's own hand (any major they
+        // might hold is seq <= 21 too, at best a tie the code breaks
+        // toward the lower-numbered player anyway). Player 2's own hand
+        // is ALSO forced (to a set with no major at all) rather than left
+        // to the constructor's random deal - the random deal draws from
+        // the SAME single-copy deck this forced hand is also drawn from,
+        // so leaving it uncontrolled could occasionally deal player 2 a
+        // duplicate of one of these same forced uids (most commonly
+        // World itself, per single-copy-deck rules), corrupting deck
+        // integrity and leaving g.bidWinner wrong or undefined.
         g.hands[0] = [card("2R").uid, major(21).uid, card("AC").uid, "3C", "4C", "5C"];
+        g.hands[1] = [card("6R").uid, card("7R").uid, card("8R").uid, card("9R").uid, card("10R").uid, "PR"];
+        const forcedUids = new Set([...g.hands[0], ...g.hands[1]]);
+        g.drawPile = g.drawPile.filter(uid => !forcedUids.has(uid));
         const beforeBid = [...g.hands[0]];
         // Position 2 (still hand-order, not sorted) is the major.
         g.move("bid 2", { trusted: true });
@@ -5057,6 +5067,43 @@ describe("Gnostica: Fool and World", () => {
         const targetClick = g.handleClick("", rowN, colN);
         expect(targetClick.valid).to.be.true;
         expect(targetClick.move).eq(`continue ${major(0).uid}, m0.1 ${major(1).uid}`);
+    });
+
+    // Regression: Fool -> Hanged Man -> (Rods "piece" mode relocates the
+    // acting minion) -> tradeHands auto-declines (no enemy) -> Fool's own
+    // mandatory second flip reveals World, ALL in one submission (the
+    // cascade this session's own earlier fixes made possible). World's
+    // own frame inherits its "acting minion" from Fool's own buried frame
+    // (see popFrame's own docs) - before that fix, it inherited Fool's
+    // own ORIGINAL, pre-move position, which the relocated piece no
+    // longer occupies at all; the first thing that tried to read a piece
+    // there (a board click on World's own target) crashed outright
+    // instead of failing gracefully. Also covers parsePendingStep's own,
+    // separate copy of the same staleness bug (its own "continue" resume
+    // re-derives eligibility from the ROOT card's own cell, which the
+    // acting piece has since moved away from too).
+    it("Fool -> Hanged Man (piece relocates) -> World: the relocated piece's CURRENT position survives, not its pre-move one", () => {
+        const g = setupFool();
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // facing n0
+        forceCardAt(g, 1, 0, () => major(5)); // Hierophant - the piece relocates onto n0, and it's also a real World target
+        pluckCard(g, major(12).uid);
+        g.drawPile.unshift(major(12).uid); // Fool's 1st flip reveals Hanged Man
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+
+        g.drawPile.unshift(theWorld().uid); // Fool's mandatory 2nd flip reveals World
+        g.move(`continue ${major(0).uid}, m0.1 piece m0.1 1`, { trusted: true }); // moves to n0; tradeHands auto-declines (no enemy)
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", theWorld().uid]);
+        // Both frames now agree on the piece's CURRENT cell (n0), not its
+        // original one (m0) - this is the actual bug this test guards.
+        for (const frame of g.pendingPower!.stack) {
+            expect(frame.minions).to.deep.equal([{ x: 1, y: 0, index: 0 }]);
+        }
+
+        const [rowN, colN] = rowColFor(g, 1, 0);
+        expect(() => g.handleClick("", rowN, colN)).to.not.throw();
+        const targetClick = g.handleClick("", rowN, colN);
+        expect(targetClick.valid).to.be.true;
+        expect(targetClick.move).eq(`continue ${major(0).uid}, n0.1 ${major(5).uid}`);
     });
 
     it("chatLog() renders revealFlip/borrowPower lines, naming the actual card, not a bare uid", () => {
