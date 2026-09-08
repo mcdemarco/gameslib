@@ -90,8 +90,11 @@ interface IStepOutcome {
     // Hand off to a DIFFERENT card's own power array - World's chosen
     // target, or Fool's just-flipped card. applyMajorPower's/
     // resumePendingPower's own loops turn this into a fresh IPowerFrame
-    // pushed onto the resolution stack.
-    pushFrame?: { cardUid: string; minions: IMinionRef[] };
+    // pushed onto the resolution stack. `viaFool` records which of those
+    // two this was - Fool's own reveal sets it true; World's own choice
+    // never does - see IPowerFrame's own `viaFool` docs for why that
+    // distinction has to survive onto the pushed frame itself.
+    pushFrame?: { cardUid: string; minions: IMinionRef[]; viaFool?: boolean };
     // Must pause here regardless of how many further step segments the
     // caller already supplied this call - either because what comes next
     // is genuinely unknowable until this step's hidden outcome is seen
@@ -329,6 +332,18 @@ interface IPowerFrame {
     cardUid: string;
     nextStepIndex: number;
     minions: IMinionRef[];
+    // True only for a frame pushed by Fool's own reveal - never set for
+    // the original root frame, and never set for a frame pushed by
+    // World's own worldUseAny choice. This is what makes Decline
+    // available at all: flipping is itself the real, committing action
+    // (a card genuinely gets drawn), so whatever it reveals stays free to
+    // walk away from. Naming a target via World has no effect of its own
+    // - the player is committing to using THAT card's power, not merely
+    // being shown it - so there's nothing to decline once it's chosen;
+    // see getActionButtons'/computeActionButtons' own "declinable" checks
+    // and validateFrameStack's own "nothing more given" docs for the
+    // completeness half of this same distinction.
+    viaFool?: boolean;
 }
 
 // A same-seat obligation left over from a High Priestess/Fool/World
@@ -1788,6 +1803,13 @@ export class GnosticaGame extends GameBaseSequenced {
             return bar;
         }
         const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
+        if (this.pendingPower.stack.length > 1 && activeTop.viaFool !== true) {
+            // World's own borrowed power can't be declined - see
+            // IPowerFrame's own "viaFool" docs. Nothing to add here; the
+            // base bar (whatever computeActionButtons() already produced)
+            // stands as-is.
+            return bar;
+        }
         const lastSeg = this.liveMove?.stepSegments[this.liveMove.stepSegments.length - 1];
         const justDeclined = lastSeg !== undefined && lastSeg.length === 1 && lastSeg[0].toLowerCase() === "decline";
         if (this.topStepIsFool(this.pendingPower.stack) && !justDeclined) {
@@ -2072,14 +2094,24 @@ export class GnosticaGame extends GameBaseSequenced {
             // worse for World specifically (its own legal target is any
             // major arcana card anywhere on the board, not a self-evident
             // cell - see powerStepMessageKey's own WORLD_CHOOSE_TARGET
-            // docs). The one thing that's always legal here regardless of
-            // card (see getActionButtons()'s own docs) is declining
-            // outright, so show ONLY that - matching the Fool-special
-            // pair's own self-contained shape just above, and letting
-            // getActionButtons()'s own persisting-Decline wrapper recognize
-            // a decline_power value is already present and leave it alone.
-            const activeUid = this.pendingPower!.stack[this.pendingPower!.stack.length - 1].cardUid;
-            return [{ label: `Decline ${activeUid}`, value: "decline_power" }];
+            // docs). The one thing that's usually always legal here
+            // regardless of card (see getActionButtons()'s own docs) is
+            // declining outright, so show ONLY that - matching the
+            // Fool-special pair's own self-contained shape just above,
+            // and letting getActionButtons()'s own persisting-Decline
+            // wrapper recognize a decline_power value is already present
+            // and leave it alone. EXCEPT a frame reached via World's own
+            // worldUseAny push (as opposed to World's OWN root step here,
+            // still fully declinable like any other root) - see
+            // IPowerFrame's own "viaFool" docs on why naming a target
+            // forecloses Decline. Nothing legal to offer as a button at
+            // all in that case; the board click itself is the only way
+            // forward.
+            const activeFrame = this.pendingPower!.stack[this.pendingPower!.stack.length - 1];
+            if (this.pendingPower!.stack.length > 1 && activeFrame.viaFool !== true) {
+                return undefined;
+            }
+            return [{ label: `Decline ${activeFrame.cardUid}`, value: "decline_power" }];
         }
 
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
@@ -5110,7 +5142,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             }
             if (outcome.pushFrame !== undefined) {
-                stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions });
+                stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions, viaFool: outcome.pushFrame.viaFool === true });
             }
             GnosticaGame.popExhaustedFrames(this, stack);
             if (outcome.forcePause === true) {
@@ -5260,26 +5292,45 @@ export class GnosticaGame extends GameBaseSequenced {
                     // and then found empty within this SAME call; it's
                     // always a separate, later "continue" resume instead,
                     // already covered by validateResumePendingPower's own
-                    // zero-segment check. Naming a target via World has no
-                    // effect of its own (unlike Fool's flip, which really
-                    // does draw a card) - so completing here with zero
-                    // steps taken on it would make the whole move a no-op
-                    // in every way that matters, exactly what #49 exists
-                    // to forbid for anything but Fool (see
-                    // validateMajorPower's own docs on Fool's narrower
-                    // exemption). Root's own frame can never reach this
-                    // with i===0 and no segments - the caller's own
-                    // upfront check already turned that away before this
-                    // loop ever started.
+                    // zero-segment check (top.viaFool below is expected to
+                    // always be false/undefined here as a result - checked
+                    // explicitly anyway rather than relied on as an
+                    // invariant). Naming a target via World has no effect
+                    // of its own (unlike Fool's flip, which really does
+                    // draw a card) - so completing here with zero steps
+                    // taken on it would make the whole move a no-op in
+                    // every way that matters, exactly what #49 exists to
+                    // forbid for anything but Fool (see validateMajorPower's
+                    // own docs on Fool's narrower exemption). Root's own
+                    // frame can never reach this with i===0 and no
+                    // segments - the caller's own upfront check already
+                    // turned that away before this loop ever started.
+                    // CHOOSE_STEP, not PENDING_POWER_CHOICE, for a non-Fool
+                    // push - IPowerFrame's own `viaFool` docs cover why
+                    // Decline isn't on offer here, so the message shouldn't
+                    // invite it either.
                     if (stack.length > 1 && top.nextStepIndex === 0) {
                         const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
-                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
+                        const key = top.viaFool === true ? "apgames:validation.gnostica.PENDING_POWER_CHOICE" : "apgames:validation.gnostica.CHOOSE_STEP";
+                        return { valid: true, complete: -1, message: i18next.t(key, { card: cardName }) };
                     }
                     return undefined;
                 }
                 tokens = stepSegments[i];
                 i++;
                 if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+                    // A frame reached via World's own push can't be
+                    // declined - see IPowerFrame's own "viaFool" docs. The
+                    // button bar never offers this (computeActionButtons'/
+                    // getActionButtons' own "viaFool" checks), so reaching
+                    // here means a hand-typed "decline" - reject it
+                    // outright rather than silently popping the frame.
+                    // The ROOT frame (stack.length===1) is unaffected -
+                    // this only guards a PUSHED, non-Fool frame.
+                    if (stack.length > 1 && top.viaFool !== true) {
+                        const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
+                        return this.invalid("apgames:validation.gnostica.CANNOT_DECLINE_BORROWED_POWER", { card: cardName });
+                    }
                     GnosticaGame.popFrame(stack);
                     // Mirrors walkFrameStack's own decline branch - popping can
                     // expose an already-exhausted buried frame (e.g. World's
@@ -5360,7 +5411,7 @@ export class GnosticaGame extends GameBaseSequenced {
             top.minions = GnosticaGame.chainMinion(top.minions, stepResult.outcome ?? {});
             top.nextStepIndex++;
             if (stepResult.outcome?.pushFrame !== undefined) {
-                stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions });
+                stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions, viaFool: stepResult.outcome.pushFrame.viaFool === true });
             }
             GnosticaGame.popExhaustedFrames(this, stack);
             if (i < stepSegments.length || stack.length > 0) {
@@ -5485,7 +5536,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // of whether Fool has another flip left - resolving what was
             // just revealed always depends on knowing what it was, and
             // that's never knowable before this step actually commits.
-            return { pushFrame: { cardUid: revealed.uid, minions }, forcePause: true };
+            return { pushFrame: { cardUid: revealed.uid, minions, viaFool: true }, forcePause: true };
         }
         const [minionRef, ...rest] = tokens;
         if (minionRef === undefined) {

@@ -4509,7 +4509,39 @@ describe("Gnostica: Fool and World", () => {
         const result = g.validateMove(`use ${theWorld().uid}, m0.1 ${major(6).uid}`);
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(6).name }));
+        // CHOOSE_STEP, not PENDING_POWER_CHOICE - naming Lovers via World
+        // is a commitment, not a reveal, so there's no Decline to invite
+        // here (see IPowerFrame's own "viaFool" docs).
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(6).name }));
+    });
+
+    // Regression: a card reached via World's own worldUseAny push can
+    // never be declined, even if a chain of events somehow left it
+    // genuinely paused (in ordinary play, World's own push never forces
+    // a pause, so this state is otherwise unreachable through the public
+    // API - injected directly here to cover the guard itself, same as
+    // the earlier direct chainMinion unit test). Fool's own reveal (a
+    // DIFFERENT push mechanism entirely) is unaffected - see
+    // IPowerFrame's own "viaFool" docs and the "Fool reveals World" test
+    // above for that side of the distinction.
+    it("a World-pushed frame can never be declined, even genuinely paused - no button, and a hand-typed decline is rejected", () => {
+        const g = setupWorldLovers();
+        g.board.get(3, 0)!.pieces = [new Piece(1, 1, "U")]; // gives World's own minion pool a real piece at Lovers' cell
+        g.pendingPower = {
+            source: "use",
+            rootCardUid: theWorld().uid,
+            stack: [
+                { cardUid: theWorld().uid, nextStepIndex: 1, minions: [] },
+                { cardUid: major(6).uid, nextStepIndex: 0, minions: [{ x: 3, y: 0, index: 0 }], viaFool: false },
+            ],
+        };
+        (g as unknown as { pendingPowerIsGenuine: boolean }).pendingPowerIsGenuine = true;
+
+        expect(buttonValues(g)).to.not.include("decline_power");
+
+        const result = g.validateMove(`continue ${theWorld().uid}, decline`);
+        expect(result.valid).to.be.false;
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CANNOT_DECLINE_BORROWED_POWER", { card: major(6).name }));
     });
 
     it("World -> Lovers via clicks: the pushed frame's own steps become click-driven too", () => {
