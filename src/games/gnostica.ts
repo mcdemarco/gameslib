@@ -2704,19 +2704,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return `${cell}.${piece.size}.${piece.orientation}.${piece.owner}`;
     }
 
-    // Strips the leading `<cell>.` off a pieceRefStr-shaped string (see
-    // its own docs on the exact format), leaving just the disambiguating
-    // minion detail (size, and orientation/owner only if needed) - for
-    // threading a minion's identity into a result's own `what` without
-    // duplicating the cell a sibling `where`/`from`/`to` field already
-    // carries. Cell notation itself never contains a "." (see
-    // GnosticaBoard.coords2algebraic), so the first one is always the
-    // cell/detail boundary.
-    private stripCellFromRef(ref: string): string {
-        const idx = ref.indexOf(".");
-        return idx === -1 ? ref : ref.slice(idx + 1);
-    }
-
     private getPipsFromRef(ref: string): string {
         const idx = ref.indexOf(".");
         return idx === -1 ? ref : ref.split(".")[1];
@@ -3269,8 +3256,19 @@ export class GnosticaGame extends GameBaseSequenced {
             if (typeof targetResult !== "string") {
                 return targetResult;
             }
+            // Defaulting to "U" unconditionally would be a same-facing
+            // no-op (now a hard rejection - see validateOrientAny's own
+            // docs) whenever the target already faces up, which is common
+            // (every fresh piece's own starting orientation) - fall back
+            // to any other facing in that case so this stage-1 default is
+            // always a genuinely orientable answer, never a dead end the
+            // player has to first "fix" before the click flow's own
+            // "still adjustable" framing even makes sense.
+            const target = this.resolvePieceRef(targetResult);
+            const currentFacing = target.kind === "ok" ? this.board.get(target.ref.x, target.ref.y)!.pieces[target.ref.index].orientation : undefined;
+            const defaultFacing = currentFacing === "U" ? "N" : "U";
             return this.provisionalResult(
-                this.assembleStepMove(pending, [minionRef, targetResult, "U"]),
+                this.assembleStepMove(pending, [minionRef, targetResult, defaultFacing]),
                 "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE",
             );
         }
@@ -5978,11 +5976,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
                 movePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, newOrientation, opts);
                 if (destroyedInVoid) {
-                    this.results.push({ type: "destroy", where: origin, what: this.stripCellFromRef(targetRef), who: movedOwner });
+                    this.results.push({ type: "destroy", where: origin, what: this.getPipsFromRef(targetRef), who: movedOwner });
                     return {};
                 }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
-                this.results.push({ type: "move", from: origin, to: dest, what: this.stripCellFromRef(targetRef), how: "rod-piece", who: movedOwner });
+                this.results.push({ type: "move", from: origin, to: dest, what: this.getPipsFromRef(targetRef), how: "rod-piece", who: movedOwner });
                 if (movedOwner === this.currplayer) {
                     const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                     return { newMinion: { x: destX, y: destY, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
@@ -6161,7 +6159,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 attackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, newOrientation, opts);
-                this.results.push({ type: "destroy", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.stripCellFromRef(targetRef), who: owner });
+                this.results.push({ type: "destroy", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.getPipsFromRef(targetRef), who: owner });
                 const resultSize = beforeSize - pips;
                 if (resultSize > 0 && owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
@@ -6249,7 +6247,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({
             type: "orient",
             where: GnosticaBoard.coords2algebraic(minion.x, minion.y),
-            what: this.stripCellFromRef(this.pieceRefStr(minion.x, minion.y, minion.index)),
+            what: this.getPipsFromRef(this.pieceRefStr(minion.x, minion.y, minion.index)),
             facing: orientation,
         });
         return { newMinion: minion, replacesMinion: minion };
@@ -6257,12 +6255,25 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private validateOrientMinion(minion: IMinionRef, rest: string[]): StepValidation {
         const [orientationStr] = rest;
-        if (this.tryParseOrientation(orientationStr) === undefined) {
+        const orientation = this.tryParseOrientation(orientationStr);
+        if (orientation === undefined) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
         }
         const failure = checkOrientMinion(this.buildPowerContext(), minion.x, minion.y, minion.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
+        }
+        // Same "achieves nothing" principle as the standalone "orient"
+        // command's own ORIENT_NO_OP - but a hard rejection here, not that
+        // command's soft complete:-1 leniency, since nothing about this
+        // step's own click flow (handleOrientMinionClick) ever seeds a
+        // same-facing default the way "orient"'s own piece-click does or
+        // orientAny/hierophantReplace's own target-click does (see
+        // handleOrientAnyOrHierophantClick's own default-seed docs) - a
+        // same-facing answer reaching here is always a genuine, avoidable
+        // player choice, never an unavoidable click-flow artifact.
+        if (orientation === this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation) {
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
         return { failed: false, outcome: { newMinion: minion, replacesMinion: minion } };
     }
@@ -6277,7 +6288,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const orientation = this.parseOrientation(orientationStr);
         orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
-        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.stripCellFromRef(targetRef), facing: orientation, who: owner });
+        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.getPipsFromRef(targetRef), facing: orientation, who: owner });
         return owner === this.currplayer ? { newMinion: target, replacesMinion: target } : {};
     }
 
@@ -6288,12 +6299,22 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
-        if (this.tryParseOrientation(orientationStr) === undefined) {
+        const orientation = this.tryParseOrientation(orientationStr);
+        if (orientation === undefined) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
         }
         const failure = checkOrientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
+        }
+        // See validateOrientMinion's own matching docs - hard rejection,
+        // not "orient"'s own soft leniency, since
+        // handleOrientAnyOrHierophantClick's own stage-1 default seed is
+        // fixed to never itself produce this (see its docs), so a
+        // same-facing answer reaching here is always a genuine, avoidable
+        // choice.
+        if (orientation === this.board.get(target.x, target.y)!.pieces[target.index].orientation) {
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         return owner === this.currplayer ? { failed: false, outcome: { newMinion: target, replacesMinion: target } } : { failed: false };
@@ -6310,7 +6331,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const previousOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
-        this.results.push({ type: "convert", what: this.stripCellFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: previousOwner });
+        this.results.push({ type: "convert", what: this.getPipsFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: previousOwner });
         const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
         return { newMinion: { x: target.x, y: target.y, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
     }
@@ -6348,7 +6369,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
             const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
             hermitMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY, newOrientation);
-            this.results.push({ type: "move", from: origin, to: destCellStr, what: this.stripCellFromRef(targetRef), how: "hermit-piece", who: owner });
+            this.results.push({ type: "move", from: origin, to: destCellStr, what: this.getPipsFromRef(targetRef), how: "hermit-piece", who: owner });
             if (owner === this.currplayer) {
                 const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                 return { newMinion: { x: destX, y: destY, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } };

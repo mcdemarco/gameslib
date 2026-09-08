@@ -1259,6 +1259,18 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.board.get(0, 0)!.pieces.length).eq(4); // ignoreCapacity let a 4th piece in
     });
 
+    it("orientMinion: a same-facing (no-op) reorientation is rejected, not silently accepted as a real step", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(3)); // The Empress
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        const validated = g.validateMove(`use ${major(3).uid}, m0.1 E`);
+        expect(validated.valid).to.be.false;
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        // Genuinely reorienting first still validates fine.
+        expect(g.validateMove(`use ${major(3).uid}, m0.1 N`).valid).to.be.true;
+    });
+
     it("Devil: three orientAny steps, including reorienting the acting minion mid-chain", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(15)); // The Devil
@@ -3795,6 +3807,26 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         g.move(step2.move, { trusted: true }); // declines steps 2 & 3
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1, orientation: "E" });
         expect(g.currplayer).eq(2);
+    });
+
+    it("orientAny (Devil): a same-facing (no-op) reorientation is rejected, and the target-pick default never seeds one", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(15)); // The Devil
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, already facing up
+        const validated = g.validateMove(`use ${major(15).uid}, m0.1 n0.1 U`);
+        expect(validated.valid).to.be.false;
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        // The click-driven default (see handleOrientAnyOrHierophantClick's
+        // own docs) must never itself land on this no-op - it falls back
+        // to a different facing when the target already faces up.
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const [rowN, colN] = rowColFor(g, 1, 0);
+        const step1 = g.handleClick(cellClick.move, rowN, colN);
+        expect(step1.move).to.not.eq(`use ${major(15).uid}, m0.1 n0.1 U`);
+        expect(step1.valid).to.be.true;
     });
 
     it("hierophantReplace: same two-stage target-then-orient flow; the target is replaced by the acting player's own piece", () => {
