@@ -486,7 +486,7 @@
         "gnostica_enemy_target": "{{player}} added a copy of {{target}}'s minion to {{where}}.",
         "gnostica_initial": "{{player}} placed their first minion at {{where}}.",
         "gnostica_own": "{{player}} added one of their own minions to {{where}}.",
-        "gnostica_territory": "{{player}} placed a new territory ({{what}}) at {{where}}.",
+        "gnostica_territory": "{{player}} placed a new territory, {{what}}, at {{where}}.",
         "gorogo_henge": "{{player}} placed a henge piece at {{where}}.",
         "gorogo_piece": "{{player}} placed a piece at {{where}}.",
         "iqishiqi": "{{player}} placed a shared stone at {{where}}.",
