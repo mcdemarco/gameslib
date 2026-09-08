@@ -5871,7 +5871,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 } else {
                     createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 }
-                this.results.push({ type: "place", where: cellStr, how: "territory" });
+                // Read the placed card back off the board rather than
+                // trusting cardArg directly - a "random" draw means the
+                // card actually placed isn't the literal token typed.
+                this.results.push({ type: "place", where: cellStr, how: "territory", what: this.board.get(tx, ty)!.card!.uid });
                 return {};
             }
             default:
@@ -8651,7 +8654,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     break;
                                 }
                                 case "territory":
-                                    node.push(i18next.t("apresults:PLACE.gnostica_territory", { player, where: r.where }));
+                                    node.push(i18next.t("apresults:PLACE.gnostica_territory", { player, where: r.where, what: this.cardDisplayName(r.what) }));
                                     break;
                                 case "initial":
                                     node.push(i18next.t("apresults:PLACE.gnostica_initial", { player, where: r.where }));

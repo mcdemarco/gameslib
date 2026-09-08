@@ -3532,6 +3532,18 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(complete.complete).eq(1);
     });
 
+    it("#75: chatLog() names the card placed by Cups' 'new' mode, not just the destination cell", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => major(3)); // The Empress
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        g.hands[0].push("2S");
+        g.move(`use ${major(3).uid}, m0.1 E/m0.1 new n0 2S`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes(i18next.t("apresults:PLACE.gnostica_territory", { player: "Alice", where: "n0", what: card("2S").name })));
+        expect(line).to.not.be.undefined;
+    });
+
     it("Lovers (move, then create): step 2's Cups buttons appear only once step 1 is complete; a board click still redirects step 1's default target; the chained click sequence resolves correctly", () => {
         // Fully deterministic (see clearBoard's own docs): the random
         // initial deal could otherwise occasionally put The Lovers
