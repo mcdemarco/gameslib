@@ -1814,6 +1814,12 @@ describe("Gnostica: handleClick", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
+        // The random initial deal could otherwise occasionally put The
+        // Fool itself at m0, whose own root activation is immediately
+        // complete:0 (#49 exempts it), breaking this test's own
+        // complete:-1 expectation below (see forceCardAt's own docs on
+        // this exact class of flake).
+        forceCardAt(g, 0, 0, () => major(1)); // The Magician
         const declared = g.handleClick("", -1, -1, "_btn_declare"); // clicked first, no move string yet
         expect(declared.valid).to.be.true;
         expect(declared.complete).eq(-1); // still needs a real action - not submittable as-is
@@ -4648,6 +4654,54 @@ describe("Gnostica: Fool and World", () => {
         expect(g.pendingPower!.stack[0].nextStepIndex).eq(2);
         expect(g.discardPile).to.include.members([major(12).uid, "AS"]);
         expect(g.currplayer).eq(1);
+    });
+
+    // Instead of the generic VALID_MOVE fallback, a tail step that
+    // genuinely cannot be completed (no enemy anywhere for tradeHands to
+    // reach) gets an explicit heads-up that it will be skipped - true
+    // whether Hanged Man was activated directly or reached via the Fool's
+    // own reveal, and whether or not the tradeHands step's own card is the
+    // acting player's LAST step (Justice: tradeHands then attack) - see
+    // specialStepHasNoLegalTarget's own docs.
+    it("a doomed tail step (tradeHands/hierophantReplace with no legal target) gets an explicit skip message, not the generic VALID_MOVE fallback", () => {
+        const skippedMsg = i18next.t("apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET", { card: major(12).name });
+        {
+            // Direct activation - no Fool involved at all.
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(12)); // The Hanged Man
+            forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - the territory to push
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+            const result = g.validateMove(`use ${major(12).uid}, m0.1 tile 1`);
+            expect(result.valid).to.be.true;
+            expect(result.complete).eq(1); // still a genuinely complete, submittable move
+            expect(result.message).eq(skippedMsg);
+        }
+        {
+            // Same scenario, reached via the Fool's own reveal instead.
+            const g = setupFool();
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+            forceCardAt(g, 1, 0, () => aceOfDiscs());
+            pluckCard(g, major(12).uid);
+            g.drawPile.unshift(major(12).uid);
+            g.move(`use ${major(0).uid}, fool`, { trusted: true });
+            const result = g.validateMove(`continue ${major(0).uid}, m0.1 tile 1`);
+            expect(result.valid).to.be.true;
+            expect(result.complete).eq(1);
+            expect(result.message).eq(skippedMsg);
+        }
+        {
+            // Sanity: a real, reachable enemy means no message at all - the
+            // decline (if it happens) is a genuine, silent choice again.
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(12));
+            forceCardAt(g, 1, 0, () => aceOfDiscs());
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // an enemy sits on n0
+            const result = g.validateMove(`use ${major(12).uid}, m0.1 piece m0.1 1`); // a no-op self-move, still facing n0's enemy
+            expect(result.message).to.not.eq(skippedMsg);
+        }
     });
 
     it("Fool -> Fool: playing the Fool discards it first, so an empty draw pile can flip it right back", () => {

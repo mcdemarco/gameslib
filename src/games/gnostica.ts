@@ -2361,6 +2361,29 @@ export class GnosticaGame extends GameBaseSequenced {
         return [minion.x + dx, minion.y + dy];
     }
 
+    // Whether `step` is a piece-target special that CANNOT be completed at
+    // all right now - used only to decide whether an implicit decline
+    // (segments simply ran out - see validateFrameStack's/walkFrameStack's
+    // own docs) deserves an explicit "nothing to do here" message instead
+    // of the ordinary silent-decline every other optional step gets.
+    // tradeHands and hierophantReplace are the only two members of
+    // pickPieceTargetClick's own shared family that can ever have NO legal
+    // candidate: both require an ENEMY specifically, and their only
+    // possible target cell is the acting minion's own self-or-facing cell
+    // (minorTargetCell) - self never counts (it's never an enemy), so
+    // there's nothing left to check but whether an enemy piece sits on
+    // that one facing cell. orientAny/hermitTeleport have no such
+    // restriction (self always qualifies - see pickPieceTargetClick's own
+    // docs), so they can never be doomed this way.
+    private specialStepHasNoLegalTarget(step: PowerStep, minion: IMinionRef): boolean {
+        if (!("special" in step) || (step.special !== "tradeHands" && step.special !== "hierophantReplace")) {
+            return false;
+        }
+        const [faceX, faceY] = this.minorTargetCell(minion);
+        const t = this.board.get(faceX, faceY);
+        return t === undefined || !t.pieces.some(p => p.owner !== this.currplayer);
+    }
+
     // The shared board window every renderable/clickable grid scan uses -
     // one ring beyond the CARD-bearing (territory) cells' own bounding
     // box, deliberately NOT this.board's own raw minX/maxX/minY/maxY
@@ -5027,7 +5050,27 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens = ["fool"];
             } else {
                 if (i >= stepSegments.length) {
-                    return undefined; // nothing more given - this frame's own remaining step stays optional
+                    // Nothing more given - this frame's own remaining step
+                    // stays optional and silently declines, UNLESS it's
+                    // provably impossible right now (no legal target at
+                    // all - see specialStepHasNoLegalTarget's own docs),
+                    // in which case that deserves an explicit heads-up
+                    // instead of the generic VALID_MOVE fallback (#63-style
+                    // guidance for a doomed step, just surfaced here
+                    // instead of at click time - see pickPieceTargetClick's
+                    // own tree-pruning docs on the click-time half of this).
+                    // Only checked with a single, unambiguous acting minion
+                    // - an ambiguous pool might still have a piece that
+                    // DOES have a legal target, so there's nothing safe to
+                    // say without knowing which one the player would pick.
+                    if (top.minions.length === 1 && this.specialStepHasNoLegalTarget(step, top.minions[0])) {
+                        const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
+                        const key = (step as { special: SpecialPower }).special === "tradeHands"
+                            ? "apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET"
+                            : "apgames:validation.gnostica.HIEROPHANT_SKIPPED_NO_TARGET";
+                        return { valid: true, complete: 1, message: i18next.t(key, { card: cardName }) };
+                    }
+                    return undefined;
                 }
                 tokens = stepSegments[i];
                 i++;
