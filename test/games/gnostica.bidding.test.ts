@@ -221,7 +221,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         const players = ["Alice", "Bob", "Carol", "Dave"];
         const rows = g.chatLog(players);
         const line = rows[rows.length - 1].find(l => l.includes("Turn order"));
-        expect(line).eq(i18next.t("apresults:TURNORDER.gnostica", {
+        expect(line).eq(i18next.t("apresults:ANNOUNCE.gnostica", {
             turnOrder: "Alice, Dave, Carol, Bob", // matches g.turnOrder = [1,4,3,2]
             redrawOrder: "Bob, Carol, Dave, Alice", // exact reverse
         }));

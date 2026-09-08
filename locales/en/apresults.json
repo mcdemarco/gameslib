@@ -25,7 +25,7 @@
         "biscuit": "The following cards were in opposing hands: {{cards}}.",
         "deckfish": "{{player}} was unable to move and must pass from now on.",
         "frogger": "{{player}} chose to refill the draw pool.  Other players must pass so he can take his {{moves}} remaining move(s).",
-        "gnostica": "{{player}} traded hands with {{target}}.",
+        "gnostica": "Bidding is resolved. Turn order for the rest of the game will be {{turnOrder}}. Cards will be drawn from the bidding pool in the order {{redrawOrder}}.",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}.",
         "scribe_super": "{{player}}'s super formation: {{formation}}.",
         "stawvs": "{{player}} was unable to move and must pass from now on.  Their pieces remain on the following pyramids: {{pyramids}}."
@@ -203,6 +203,7 @@
         "evenatodds": "{{player}} drew a tile from the boneyard.",
         "gnostica_deck": "{{player}} drew {{count}} card(s) from the deck.",
         "gnostica_discard": "{{player}} drew {{count}} card(s) from the discard pile.",
+        "gnostica_fool": "{{player}} drew {{what}}.",
         "gnostica_hand": "{{player}} played card {{what}}.",
         "gnostica_pool": "{{player}} drew card(s) {{what}} from the bidding pool."
     },
@@ -670,6 +671,7 @@
     },
     "SWAP": {
         "deckfish": "{{player}} swapped {{what}} from the market with {{with}} at {{where}}.",
+        "gnostica": "{{player}} traded hands with {{target}}.",
         "nex": "{{player}} swapped a piece of their colour at {{where}} to a neutral piece.",
         "nex_neutral": "{{player}} swapped a neutral piece at {{where}} to a piece of their colour.",
         "resolve": "The piece is swapped to {{where}}.",
@@ -704,16 +706,8 @@
         "camelot_castle_move_one": "{{player}} used has 1 more castle move.",
         "camelot_castle_move_other": "{{player}} used has {{count}} more castle moves.",
         "camelot_castle_move_none": "{{player}} has no more castle moves.",
-        "gnostica": "{{player}} used territory {{what}}."
-    },
-    "REVEALFLIP": {
-        "gnostica": "{{player}} drew {{what}}."
-    },
-    "BORROWPOWER": {
-        "gnostica": "{{player}} borrowed the power of {{what}}."
-    },
-    "TURNORDER": {
-        "gnostica": "Bidding is resolved. Turn order for the rest of the game: {{turnOrder}}. Redraw order: {{redrawOrder}}."
+        "gnostica": "{{player}} used territory {{what}}.",
+        "gnostica_world": "{{player}} borrowed the power of {{what}}."
     },
     "SCRIBE": {
         "no_formation": "no formations",

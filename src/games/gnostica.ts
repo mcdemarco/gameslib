@@ -4107,7 +4107,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Announce the now-finalized order once, regardless of which of
         // resolveBidRound()'s two call sites got us here (a clean single
         // winner, or the "someone's hand ran dry mid-tie" fallback).
-        this.pushTurnOrderResult();
+        this.results.push({ type: "announce", payload: [...this.turnOrder!] });
         // redrawOrder's own getter already computes turnOrder's reversal -
         // turnOrder[0] is the bid winner by construction, so redrawOrder[0]
         // is always the worst bidder, for every player count. Jump there
@@ -5358,7 +5358,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             const revealed = fool(this.buildPowerContext());
-            this.pushStubResult({ type: "revealFlip", what: revealed.uid });
+            this.results.push({ type: "deckDraw", what: revealed.uid, from: "fool" });
             // Unlike High Priestess, EVERY flip forces a pause, regardless
             // of whether Fool has another flip left - resolving what was
             // just revealed always depends on knowing what it was, and
@@ -5422,7 +5422,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "worldUseAny": {
                 const [chosenUid] = rest;
                 const chosenDef = worldChoosePower(this.buildPowerContext(), chosenUid);
-                this.pushStubResult({ type: "borrowPower", what: chosenUid });
+                this.results.push({ type: "use", what: chosenUid, count: 21 });
                 return { pushFrame: { cardUid: chosenDef.uid, minions: [minion] } };
             }
             default:
@@ -6189,7 +6189,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const targetOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const otherHand = this.hands[targetOwner - 1];
         tradeHands(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, otherHand);
-        this.results.push({ type: "announce", payload: ["tradeHands", this.currplayer, targetOwner] });
+        this.results.push({ type: "swap", where: GnosticaBoard.coords2algebraic(target.x, target.y), who: targetOwner });
         return {};
     }
 
@@ -6250,21 +6250,6 @@ export class GnosticaGame extends GameBaseSequenced {
     private validateWorldChoosePower(chosenUid: string): IValidationResult | undefined {
         const failure = checkWorldChoosePower(this.buildPowerContext(), chosenUid);
         return failure ? this.failureResult(failure) : undefined;
-    }
-
-    // Stand-ins for real schema entries to be added later - see
-    // moveresults.json. Isolates the cast to one place.
-    private pushStubResult(r: { type: "revealFlip" | "borrowPower"; what: string }): void {
-        this.results.push(r as unknown as APMoveResult);
-    }
-
-    // Stand-in for a real schema entry to be added later - see
-    // moveresults.json. Reports the finalized turn order once bidding
-    // concludes - redraw order is always turnOrder's own exact reverse
-    // (see redrawOrder's own getter), so it's derived in chatLog() from
-    // this same array rather than stored a second time.
-    private pushTurnOrderResult(): void {
-        this.results.push({ type: "turnOrder", order: [...this.turnOrder!] } as unknown as APMoveResult);
     }
 
     // Magician: <minionRef> <suitLetter: C|R|D|S> <mode> <args...> - the
@@ -8276,33 +8261,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 // gnostica has no separate chat() dispatcher to do it in).
                 const flatResults = state._results.flatMap(r => r.type === "_group" ? r.results : [r]);
                 for (const r of flatResults) {
-                    // revealFlip/borrowPower/turnOrder are stubs (see
-                    // pushStubResult's/pushTurnOrderResult's own docs) -
-                    // not part of the real APMoveResult union yet, so they
-                    // can't be ordinary switch cases below without a cast.
-                    const stubType = (r as unknown as { type: string }).type;
-                    if (stubType === "revealFlip" || stubType === "borrowPower") {
-                        const stub = r as unknown as { type: "revealFlip" | "borrowPower"; what: string };
-                        // `what` is a bare card uid - resolve to its real
-                        // name for the chat log (this is the only place a
-                        // human actually learns what a Fool draw/World
-                        // borrow revealed - see pushStubResult's own docs).
-                        const cardName = allCards().find(c => c.uid === stub.what)?.name ?? stub.what;
-                        node.push(i18next.t(`apresults:${stubType === "revealFlip" ? "REVEALFLIP" : "BORROWPOWER"}.gnostica`, { player, what: cardName }));
-                        continue;
-                    }
-                    if (stubType === "turnOrder") {
-                        const stub = r as unknown as { type: "turnOrder"; order: number[] };
-                        const nameFor = (p: number): string => p <= players.length ? players[p - 1] : `Player ${p}`;
-                        const turnOrderNames = stub.order.map(nameFor).join(", ");
-                        const redrawOrderNames = [...stub.order].reverse().map(nameFor).join(", ");
-                        node.push(i18next.t("apresults:TURNORDER.gnostica", { turnOrder: turnOrderNames, redrawOrder: redrawOrderNames }));
-                        continue;
-                    }
                     switch (r.type) {
                         case "announce": {
-                            const target = this.otherPlayerName(r.payload[2] as number, player, players) ?? `Player ${r.payload[2]}`;
-                            node.push(i18next.t("apresults:ANNOUNCE.gnostica", { player, target }));
+                            const nameFor = (p: number): string => p <= players.length ? players[p - 1] : `Player ${p}`;
+                            const turnOrderNames = (r.payload as number[]).map(nameFor).join(", ");
+                            const redrawOrderNames = [...r.payload as number[]].reverse().map(nameFor).join(", ");
+                            node.push(i18next.t("apresults:ANNOUNCE.gnostica", { turnOrder: turnOrderNames, redrawOrder: redrawOrderNames }));
+                            break;
+                        }
+                        case "swap": {
+                            const target = this.otherPlayerName(r.who as number, player, players) ?? `Player ${r.who}`;
+                            node.push(i18next.t("apresults:SWAP.gnostica", { player, target }));
                             break;
                         }
                         case "select":
@@ -8322,6 +8291,10 @@ export class GnosticaGame extends GameBaseSequenced {
                                 case "hand":
                                     node.push(i18next.t("apresults:DECKDRAW.gnostica_hand", { player, what: r.what }));
                                     break;
+                                case "fool":
+                                    const cardName = allCards().find(c => c.uid === r.what)?.name ?? r.what;
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_fool", { player, what: cardName }));
+                                    break;
                             }
                             break;
                         case "declare":
@@ -8338,7 +8311,11 @@ export class GnosticaGame extends GameBaseSequenced {
                             break;
                         }
                         case "use":
-                            node.push(i18next.t("apresults:USE.gnostica", { player, what: r.what }));
+                            if (r.count && r.count === 21) {
+                                const cardName = allCards().find(c => c.uid === r.what)?.name ?? r.what;
+                                node.push(i18next.t("apresults:USE.gnostica_world", { player, what: cardName }));
+                            } else
+                                node.push(i18next.t("apresults:USE.gnostica", { player, what: r.what }));
                             break;
                         case "pass":
                             node.push(r.why === "eliminated"

@@ -4137,7 +4137,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.move(`use ${major(11).uid}, m0.1 n0.1`, { trusted: true }); // declines step 2 (attack)
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("traded hands"));
-        expect(line).eq(i18next.t("apresults:ANNOUNCE.gnostica", { player: "Alice", target: "Bob" }));
+        expect(line).eq(i18next.t("apresults:SWAP.gnostica", { player: "Alice", target: "Bob" }));
     });
 
     it("destroy (Swords piece): names whose minion was destroyed", () => {
@@ -4241,7 +4241,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.move(`use ${major(11).uid}, m0.1 n0.1`, { trusted: true });
         const log = g.chatLog([]);
         const line = log.flat().find(l => l.includes("traded hands"));
-        expect(line).eq(i18next.t("apresults:ANNOUNCE.gnostica", { player: "Player 1", target: "Player 2" }));
+        expect(line).eq(i18next.t("apresults:SWAP.gnostica", { player: "Player 1", target: "Player 2" }));
     });
 });
 
