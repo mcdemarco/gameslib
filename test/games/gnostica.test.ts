@@ -4222,7 +4222,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:DESTROY.gnostica_piece", { player: "Alice", what: "1", target: "Bob" }));
     });
 
-    it("destroy (Swords tile): names the destroyed card's uid, not a raw {{what}} placeholder", () => {
+    it("destroy (Swords tile): names the destroyed card, not a raw uid", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfSwords()); // m0, 1 pip
@@ -4233,7 +4233,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(g.board.get(1, 0)?.card).eq(undefined); // territory genuinely destroyed, not just shrunk
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("destroyed"));
-        expect(line).eq(i18next.t("apresults:DESTROY.gnostica_tile", { player: "Alice", what: aceOfDiscs().uid, where: "n0" }));
+        expect(line).eq(i18next.t("apresults:DESTROY.gnostica_tile", { player: "Alice", what: aceOfDiscs().name, where: "n0" }));
     });
 
     it("move (Rods piece): names whose minion was moved when it isn't the acting player's own", () => {
@@ -4301,6 +4301,53 @@ describe("Gnostica: chatLog() other-player naming", () => {
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("oriented"));
         expect(line).eq(i18next.t("apresults:ORIENT.gnostica", { player: "Alice", where: "m0", what: "1", facing: "N" }));
+    });
+
+    it("use (activating a card already on the board): names the card, not a raw uid", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place l0", { trusted: true }); // player 2
+        g.move(`use ${aceOfCups().uid}, m0.1 own n0 U`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("used territory"));
+        expect(line).eq(i18next.t("apresults:USE.gnostica", { player: "Alice", what: aceOfCups().name }));
+    });
+
+    it("deckDraw (playing a card from hand): names the card, not a raw uid", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.hands[0].push(aceOfCups().uid);
+        g.move(`play ${aceOfCups().uid}, m0.1 own m0 U`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("played card"));
+        expect(line).eq(i18next.t("apresults:DECKDRAW.gnostica_hand", { player: "Alice", what: aceOfCups().name }));
+    });
+
+    it("place (discard): names every discarded card, not raw uids", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.hands[0] = [aceOfCups().uid, aceOfDiscs().uid, "2C", "3C", "4C", "5C"];
+        g.move(`discard ${aceOfCups().uid} ${aceOfDiscs().uid}`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("discarded"));
+        expect(line).eq(i18next.t("apresults:PLACE.gnostica_discard", { player: "Alice", what: `${aceOfCups().name}, ${aceOfDiscs().name}` }));
+    });
+
+    it("convert (Discs tile grow-replace): names both the replaced and the new card, not raw uids", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfDiscs());
+        g.board.get(1, 0)!.card = card("2C"); // n0, a known worth-1 spot card
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place l0", { trusted: true }); // player 2
+        const royaltyUid = "KS"; // King of Swords, worth 2
+        g.hands[0].push(royaltyUid);
+        g.move(`use ${aceOfDiscs().uid}, m0.1 tile n0 ${royaltyUid}`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("grew the territory"));
+        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_tile", { player: "Alice", what: card("2C").name, into: card(royaltyUid).name, where: "n0" }));
     });
 
     it("falls back to 'Player N' when no names (or too few) are supplied - old-data/pre-#47 compatibility path", () => {

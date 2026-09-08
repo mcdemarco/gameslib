@@ -8499,6 +8499,13 @@ export class GnosticaGame extends GameBaseSequenced {
         return `${card.name} (${card.romanNumeral})`;
     }
 
+    // Same as cardDisplayName, for the handful of results that carry a
+    // comma-joined list of uids (a redraw pick, a discard) rather than a
+    // single card.
+    private cardDisplayNames(uidsCsv: string): string {
+        return uidsCsv.split(",").filter(uid => uid.length > 0).map(uid => this.cardDisplayName(uid)).join(", ");
+    }
+
     // #47: resolves a player number to their real display name (falling
     // back to "Player N" the same way chatLog() itself does for the
     // acting player), or undefined if `who` is the acting player
@@ -8556,7 +8563,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         case "deckDraw":
                             switch (r.from) {
                                 case "pool":
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_pool", { player, what: r.what }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_pool", { player, what: this.cardDisplayNames(r.what ?? "") }));
                                     break;
                                 case "discard":
                                     node.push(i18next.t("apresults:DECKDRAW.gnostica_discard", { player, count: r.count }));
@@ -8565,7 +8572,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     node.push(i18next.t("apresults:DECKDRAW.gnostica_deck", { player, count: r.count }));
                                     break;
                                 case "hand":
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_hand", { player, what: r.what }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_hand", { player, what: this.cardDisplayName(r.what) }));
                                     break;
                                 case "fool": {
                                     node.push(i18next.t("apresults:DECKDRAW.gnostica_fool", { player, what: this.cardDisplayName(r.what) }));
@@ -8590,7 +8597,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             if (r.count && r.count === 21) {
                                 node.push(i18next.t("apresults:USE.gnostica_world", { player, what: this.cardDisplayName(r.what) }));
                             } else
-                                node.push(i18next.t("apresults:USE.gnostica", { player, what: r.what }));
+                                node.push(i18next.t("apresults:USE.gnostica", { player, what: this.cardDisplayName(r.what) }));
                             break;
                         case "pass":
                             node.push(r.why === "eliminated"
@@ -8606,7 +8613,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     : i18next.t("apresults:DESTROY.gnostica_piece", { player, what: r.what, target }));
                             } else {
                                 //A territory.
-                                node.push(i18next.t("apresults:DESTROY.gnostica_tile", { player, where: r.where, what: r.what }));
+                                node.push(i18next.t("apresults:DESTROY.gnostica_tile", { player, where: r.where, what: this.cardDisplayName(r.what) }));
                             }
                             break;
                         case "move": {
@@ -8660,7 +8667,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     node.push(i18next.t("apresults:PLACE.gnostica_initial", { player, where: r.where }));
                                     break;
                                 case "discard":
-                                    node.push(i18next.t("apresults:PLACE.gnostica_discard", { player, what: r.what }));
+                                    node.push(i18next.t("apresults:PLACE.gnostica_discard", { player, what: this.cardDisplayNames(r.what ?? "") }));
                                     break;
                                 default:
                                     node.push(r.what === undefined
@@ -8677,7 +8684,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     ? i18next.t("apresults:CONVERT.gnostica_hierophant", { player, where: r.where })
                                     : i18next.t("apresults:CONVERT.gnostica_hierophant_target", { player, where: r.where, target }));
                             } else {
-                                node.push(i18next.t("apresults:CONVERT.gnostica_tile", { player, what: r.what, into: r.into, where: r.where }));
+                                node.push(i18next.t("apresults:CONVERT.gnostica_tile", { player, what: this.cardDisplayName(r.what), into: this.cardDisplayName(r.into), where: r.where }));
                             }
                             break;
                         case "eliminated": {

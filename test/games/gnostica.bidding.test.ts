@@ -290,6 +290,16 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(() => g.move(`redraw ${uid} ${uid}`)).to.throw();
     });
 
+    it("chatLog() names the drawn card, not a raw uid, when redrawing from the bidding pool", () => {
+        addResource("en");
+        const g = setupRedraw();
+        const uid = g.biddingPool![0];
+        g.move(`redraw ${uid}`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob", "Carol"]);
+        const line = log[log.length - 1].find(l => l.includes("bidding pool"));
+        expect(line).eq(i18next.t("apresults:DECKDRAW.gnostica_pool", { player: "Carol", what: minor(uid).name }));
+    });
+
     it("walks the full redraw order and hands off to main phase with the bid winner as currplayer", () => {
         const g = setupRedraw();
         expect(g.redrawOrder).to.deep.equal([3, 2, 1]); // winner is 1, so right-neighbour (3) first

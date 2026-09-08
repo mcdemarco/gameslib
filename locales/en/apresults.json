@@ -176,7 +176,7 @@
         "gnostica_hierophant": "{{player}} converted an enemy piece to their own at {{where}}.",
         "gnostica_hierophant_target": "{{player}} converted {{target}}'s piece to their own at {{where}}.",
         "gnostica_piece": "{{player}} grew a piece to {{into}} at {{where}}.",
-        "gnostica_tile": "{{player}} grew a territory into {{into}} at {{where}}.",
+        "gnostica_tile": "{{player}} grew the territory at {{where}} from {{what}} into {{into}}.",
         "magnate_deed": "{{player}} completed their deeded card {{what}} in district {{where}}.",
         "magnate_trade": "{{player}} traded three {{what}} tokens in for one {{into}}.",
         "moonsquad": "{{player}} recruited a squad.",
