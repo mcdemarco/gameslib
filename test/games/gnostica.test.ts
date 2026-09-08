@@ -4616,6 +4616,40 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(1); // still paused on AD's own choice
     });
 
+    // Same cascade as above, but the revealed card's own tail step is
+    // skipped by OMISSION (no legal tradeHands target exists at all, so
+    // there's nothing to type) rather than an explicit "decline" token.
+    // walkFrameStack's own "segments exhausted" implicit-decline branch
+    // used to just pop that one frame and stop, leaving Fool's own
+    // mandatory second flip sitting unexecuted with no button anywhere
+    // to trigger it (the bar only ever offers "Use Card X"/"Decline X"
+    // for a flip still at its own nextStepIndex 0 - see
+    // powerStepMessageKey's own docs) - a real dead end for the player.
+    it("an implicitly-declined tail step (no legal tradeHands target) also auto-continues Fool's own mandatory second flip", () => {
+        const g = setupFool();
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // a real facing - Rods' own move step needs one
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - the territory Hanged Man's own move step pushes
+        pluckCard(g, major(12).uid);
+        g.drawPile.unshift(major(12).uid); // force the flip to reveal The Hanged Man
+        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", major(12).uid]);
+
+        g.drawPile.unshift("AS"); // whatever Fool's own second flip reveals next
+        // Only step 1 (the push) is typed - no enemy exists anywhere to
+        // trade hands with, so step 2 is left entirely unaddressed rather
+        // than explicitly declined.
+        g.move(`continue ${major(0).uid}, m0.1 tile 1`, { trusted: true });
+        expect(g.board.has(1, 0)).eq(false); // the push actually happened
+        expect(g.pendingPower).to.not.be.undefined;
+        // tradeHands never even shows up on the stack - it's popped by
+        // the same implicit-decline branch that walked straight into
+        // Fool's own next mandatory flip within this SAME submission.
+        expect(g.pendingPower!.stack.map(f => f.cardUid)).to.deep.equal(["00", "AS"]);
+        expect(g.pendingPower!.stack[0].nextStepIndex).eq(2);
+        expect(g.discardPile).to.include.members([major(12).uid, "AS"]);
+        expect(g.currplayer).eq(1);
+    });
+
     it("Fool -> Fool: playing the Fool discards it first, so an empty draw pile can flip it right back", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups()); // any real card, distinct from the Fool

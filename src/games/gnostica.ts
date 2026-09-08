@@ -4827,7 +4827,20 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens = ["fool"];
             } else {
                 if (i >= stepSegments.length) {
-                    break;
+                    // Segments exhausted: implicitly decline whatever's left
+                    // of the CURRENT (top) frame - same pop + cascade as an
+                    // explicit "decline" token just below, so a mandatory
+                    // Fool flip exposed this way (e.g. tradeHands silently
+                    // skipped because no enemy target exists at all) still
+                    // fires in this SAME submission, instead of being left
+                    // as a separate, unprompted resume the player has no
+                    // button for (see powerStepMessageKey's own docs - Fool's
+                    // second flip is only ever supposed to reach that
+                    // dedicated isFoolStep branch above, never sit here
+                    // waiting on a "continue" the bar never actually offers).
+                    stack.pop();
+                    GnosticaGame.popExhaustedFrames(this, stack);
+                    continue;
                 }
                 tokens = stepSegments[i];
                 i++;
@@ -4905,14 +4918,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 return;
             }
         }
+        // Only reachable via the top-of-loop `top === undefined` check now -
+        // every other exit (forced pause, a still-being-typed segment, a
+        // fool-step partial preview) returns directly, and an exhausted/
+        // declined non-fool frame loops back via `continue` above instead
+        // of breaking out here. So the stack is already fully resolved by
+        // this point; nothing left to pop or cascade.
         this.pendingPowerConsumedSegments = i;
-        // Segments exhausted (or stack empty) with no forced pause: implicitly
-        // decline whatever's left of the CURRENT (top) frame. Fool's own step
-        // never reaches here - see this method's own docs.
-        if (stack.length > 0) {
-            stack.pop();
-            GnosticaGame.popExhaustedFrames(this, stack);
-        }
         this.pendingPower = stack.length > 0 ? { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] } : undefined;
     }
 
