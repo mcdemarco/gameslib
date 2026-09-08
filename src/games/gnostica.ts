@@ -4179,11 +4179,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // There's nothing else worth rendering for an in-progress bid pick
     // (the acting player's own hand doesn't change until the round
     // actually resolves), so partial is a clean early return.
+    // Legality (a real position index into this player's own hand, not
+    // already bid) is validateBid's own job, not this one's.
     private cmdBid(args: string[], partial = false): void {
-        const failure = this.validateBid(args);
-        if (failure !== undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", failure.message);
-        }
         if (partial) {
             return;
         }
@@ -4327,11 +4325,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // show the pick accumulating - but advancing currplayer/phase is the
     // consequential part move()'s live-preview calls must never trigger
     // for real.
+    // Legality (count matches what's needed, no duplicates, every uid
+    // actually in the pool) is validateRedraw's own job, not this one's.
     private cmdRedraw(args: string[], partial = false): void {
-        const failure = this.validateRedraw(args);
-        if (failure !== undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", failure.message);
-        }
         const hand = this.hands[this.currplayer - 1];
         for (const uid of args) {
             this.biddingPool!.splice(this.biddingPool!.indexOf(uid), 1);
@@ -4406,12 +4402,10 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "pass" is only used for an eliminated player sitting out the game.
-    // Ususally handled by the server with the "autopass" flag.
+    // Ususally handled by the server with the "autopass" flag. Legality
+    // (currplayer is actually eliminated) is validatePass's own job, not
+    // this one's.
     private cmdPass(partial = false): void {
-        const failure = this.validatePass();
-        if (failure !== undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", failure.message);
-        }
         if (partial) {
             return;
         }
@@ -4448,24 +4442,16 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "place <cell> [orientation]" - only legal with zero pieces on board;
-    // orientation defaults to "U".
+    // orientation defaults to "U". Legality (cell required, not already
+    // on board, not void, not occupied) is validatePlace's own job, not
+    // this one's - a trusted caller submitting something that violates
+    // any of those has a bug of its own, not something this function
+    // needs to guard against.
     private cmdPlace(args: string[]): void {
         const [cellStr, orientationStr] = args;
-        if (cellStr === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PLACE_CELL_REQUIRED"));
-        }
-        if (this.hasPiecesOnBoard(this.currplayer)) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ON_BOARD"));
-        }
         const orientation = this.parseOrientation(orientationStr ?? "U");
         const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
-        if (this.board.classify(x, y) === "void") {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PLACE_VOID", { cell: cellStr }));
-        }
         let territory = this.board.get(x, y);
-        if (territory !== undefined && territory.pieces.length > 0) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PLACE_OCCUPIED", { cell: cellStr }));
-        }
         if (territory === undefined) {
             territory = new CellContents(undefined);
             this.board.store.set(x, y, territory);
@@ -4509,17 +4495,13 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    // "orient <pieceRef> <facing>" - only your own piece.
+    // "orient <pieceRef> <facing>" - only your own piece. Legality (args
+    // present, piece actually yours) is validateOrient's own job, not
+    // this one's.
     private cmdOrient(args: string[]): void {
         const [ref, orientationStr] = args;
-        if (ref === undefined || orientationStr === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ORIENT_ARGS_REQUIRED"));
-        }
         const { x, y, index } = this.resolvePieceRefOrThrow(ref);
         const piece = this.board.get(x, y)!.pieces[index];
-        if (piece.owner !== this.currplayer) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_YOUR_MINION"));
-        }
         this.addBufferIfWasteland(x, y);
         const orientation = this.parseOrientation(orientationStr);
         piece.orientation = orientation;
@@ -4623,15 +4605,14 @@ export class GnosticaGame extends GameBaseSequenced {
     // into the deck) on every subsequent click. The hand simply shows
     // smaller while this is in progress; the real draw only happens once,
     // on final submission.
+    // Legality (every named uid actually in hand, the draw count within
+    // range) is validateDiscard's own job, not this one's.
     private cmdDiscard(args: string[], partial = false): void {
         const hand = this.hands[this.currplayer - 1];
         const drawIdx = args.indexOf("draw");
         const discardUids = drawIdx === -1 ? args : args.slice(0, drawIdx);
         for (const uid of discardUids) {
             const idx = hand.indexOf(uid);
-            if (idx === -1) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }));
-            }
             hand.splice(idx, 1);
             this.discardPile.push(uid);
             this.discarded.push(uid);
@@ -4646,11 +4627,7 @@ export class GnosticaGame extends GameBaseSequenced {
         let count = maxDraw;
         if (drawIdx !== -1) {
             const countStr = args[drawIdx + 1];
-            const parsedCount = countStr === undefined ? NaN : Number(countStr);
-            if (!Number.isInteger(parsedCount) || parsedCount < 0 || parsedCount > maxDraw) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw }));
-            }
-            count = parsedCount;
+            count = countStr === undefined ? NaN : Number(countStr);
         }
         let drawnCount = 0;
         while (drawnCount < count) {
@@ -4769,24 +4746,13 @@ export class GnosticaGame extends GameBaseSequenced {
     // regardless of which verb the move string happens to spell, since
     // there's no dedicated "resume" head anymore (see parseMove's own
     // "(via <uid>)" docs).
+    // Legality (uid given, a real card, on the board, with an eligible
+    // minion there) is validateActivate's own job, not this one's.
     private cmdActivate(args: string[], stepSegments: string[][], partial: boolean): void {
         const [cardUid] = args;
-        if (cardUid === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ACTIVATE_UID_REQUIRED"));
-        }
-        if (allCards().find(c => c.uid === cardUid) === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: cardUid }));
-        }
-        const loc = this.findCardCell(cardUid);
-        if (loc === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.CARD_NOT_ON_BOARD", { uid: cardUid }));
-        }
-        const { x, y } = loc;
+        const { x, y } = this.findCardCell(cardUid!)!;
         const t = this.board.get(x, y)!;
         const eligible = this.eligibleMinionsForActivate(x, y);
-        if (eligible.length === 0) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid }));
-        }
         this.results.push({ type: "use", what: t.card!.uid });
         this.applyCardPower(t.card!, eligible, stepSegments, "use", partial);
     }
@@ -4815,20 +4781,13 @@ export class GnosticaGame extends GameBaseSequenced {
     // "Play a card from your hand to the discard pile. All your pieces on
     // the board are minions [...]"
     // Same "fresh activation only" note as cmdActivate's own docs.
+    // Legality (uid given, in hand, a real card) is validatePlay's own
+    // job, not this one's.
     private cmdPlay(args: string[], stepSegments: string[][], partial: boolean): void {
-        const [uid] = args;
-        if (uid === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.PLAY_UID_REQUIRED"));
-        }
+        const uid = args[0]!;
         const hand = this.hands[this.currplayer - 1];
         const handIdx = hand.indexOf(uid);
-        if (handIdx === -1) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }));
-        }
-        const card = allCards().find(c => c.uid === uid);
-        if (card === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid }));
-        }
+        const card = allCards().find(c => c.uid === uid)!;
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         this.discarded.push(uid);
@@ -4909,13 +4868,13 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Tolerant of an incomplete step (mode chosen but not enough trailing
-    // args yet, or no mode at all) rather than throwing - treated as still
+    // args yet, or no mode at all) rather than rejecting - treated as still
     // effectively "declined so far", same trick Magnate's own move parser
     // uses to let the click flow build a move up incrementally across
     // several clicks, each producing a fully-parseable (if still
-    // provisional) move string. Genuinely wrong data (a garbled minionRef,
-    // an unrecognized mode, more than one step) still throws - only
-    // "not enough tokens yet" is swallowed. See MINOR_MODES for minArgs.
+    // provisional) move string. Legality beyond that (single step, minion
+    // ref present, well-formed step shape) is validateMinorPower's own
+    // job, not this one's. See MINOR_MODES for minArgs.
     private applyMinorPower(suitUid: string, eligible: IMinionRef[], stepSegments: string[][]): void {
         if (stepSegments.length === 0) {
             // #49 blocks this at the validate layer (untrusted submissions
@@ -4923,13 +4882,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // can still legitimately be here mid-build, so just no-op.
             return;
         }
-        if (stepSegments.length > 1) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "MINOR_ONE_STEP_ONLY" }));
-        }
         const [minionRef, ...rest] = stepSegments[0];
-        if (minionRef === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }));
-        }
         if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
             return; // cell chosen, which minion there is still undecided - still declined
         }
@@ -4940,9 +4893,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const shape = primitiveStepShape(suitUid, rest);
         if (shape.status === "incomplete") {
             return; // still declined so far
-        }
-        if (shape.status === "malformed") {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${shape.key}`, shape.params));
         }
         const [mode, ...args] = rest;
         this.applySuitPrimitive(suitUid, minion, mode, args, {});
@@ -5138,9 +5088,8 @@ export class GnosticaGame extends GameBaseSequenced {
         for (;;) {
             const top = stack[stack.length - 1];
             if (top === undefined) {
-                if (i < stepSegments.length) {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
-                }
+                // Extra segments once the stack is already empty are
+                // validateFrameStack's own job to reject, not this one's.
                 break;
             }
             const frameDef = this.resolveFrameDef(top.cardUid);
@@ -5611,9 +5560,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return { forcePause: stepIndex + 1 < totalSteps };
         }
         if ("special" in step && step.special === "fool") {
-            if (tokens.length !== 1 || tokens[0].toLowerCase() !== "fool") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: tokens.join(" ") }));
-            }
+            // Legality (the literal "fool" token, nothing else) is
+            // validatePowerStep's own job, not this one's.
             // Unlike High Priestess's redraw (a real quantity that's merely
             // cosmetic to preview early), which card gets flipped is hidden
             // information - a partial preview must never actually flip,
@@ -5651,27 +5599,24 @@ export class GnosticaGame extends GameBaseSequenced {
             // that's never knowable before this step actually commits.
             return { pushFrame: { cardUid: revealed.uid, minions, viaFool: true }, forcePause: true };
         }
+        // Legality beyond this point (minion ref present, well-formed
+        // step shape, a recognized special) is validatePowerStep's own
+        // job, not this one's.
         const [minionRef, ...rest] = tokens;
-        if (minionRef === undefined) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }));
-        }
         if (this.isMinionCellStillNarrowing(minionRef, minions)) {
             return undefined; // cell chosen, which minion there is still undecided - still declined
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
         if ("primitive" in step) {
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-            // "Still building" vs "malformed" vs "ready to act on" is
-            // answered once, uniformly, by stepShapes.ts's own shared
-            // check (see its docs) - validate and the UI preview walker
-            // ask the SAME function, independently, for the SAME
-            // question; none of the three calls each other for it.
+            // "Still building" vs "ready to act on" is answered once,
+            // uniformly, by stepShapes.ts's own shared check (see its
+            // docs) - validate and the UI preview walker ask the SAME
+            // function, independently, for the SAME question; none of
+            // the three calls each other for it.
             const shape = primitiveStepShape(suitUid, rest);
             if (shape.status === "incomplete") {
                 return undefined; // still declined so far
-            }
-            if (shape.status === "malformed") {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${shape.key}`, shape.params));
             }
             const [mode, ...modeArgs] = rest;
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
@@ -5680,9 +5625,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const shape = SPECIAL_STEP_SHAPES[step.special](rest);
         if (shape.status === "incomplete") {
             return undefined; // still declined so far
-        }
-        if (shape.status === "malformed") {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${shape.key}`, shape.params));
         }
         // Every apply* method below can now assume complete, well-formed
         // input - the shape check above already ruled out anything else.
@@ -5933,7 +5875,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             default:
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Cups" }));
+                // Legality (a recognized mode) is validateCups's own job,
+                // not this one's - primitiveStepShape has already gated
+                // entry here for both trusted and validated callers alike,
+                // so an unrecognized mode reaching this point is a bug
+                // upstream, not something to re-litigate gracefully.
+                throw new Error(`Unknown Cups mode "${mode}".`);
         }
     }
 
@@ -6053,7 +6000,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             default:
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Rods" }));
+                // See applyCups's own matching comment - validateRods
+                // owns this legality, not this function.
+                throw new Error(`Unknown Rods mode "${mode}".`);
         }
     }
 
@@ -6144,7 +6093,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             default:
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Discs" }));
+                // See applyCups's own matching comment - validateDiscs
+                // owns this legality, not this function.
+                throw new Error(`Unknown Discs mode "${mode}".`);
         }
     }
 
@@ -6225,7 +6176,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             default:
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Swords" }));
+                // See applyCups's own matching comment - validateSwords
+                // owns this legality, not this function.
+                throw new Error(`Unknown Swords mode "${mode}".`);
         }
     }
 
@@ -6406,7 +6359,9 @@ export class GnosticaGame extends GameBaseSequenced {
             this.results.push({ type: "move", from: targetCellStr, to: destCellStr, how: "hermit-tile" });
             return {};
         }
-        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Hermit" }));
+        // See applyCups's own matching comment - validateHermitStep owns
+        // this legality, not this function.
+        throw new Error(`Unknown Hermit mode "${mode}".`);
     }
 
     private validateHermitStep(minion: IMinionRef, rest: string[]): StepValidation {

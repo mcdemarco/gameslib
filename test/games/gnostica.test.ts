@@ -4377,10 +4377,14 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     // it, regardless of what verb the (purely decorative) front spells -
     // "use"/"play"/"decline" all work identically as long as the real
     // uid (a "(via <uid>)" marker, or the bare root when nothing's been
-    // pushed) matches the obligation. What's still guarded: a wrong uid
-    // gets PENDING_POWER_MISMATCH, and more than one step segment still
-    // throws.
-    it("resume-mismatch guards reject a wrong card uid regardless of head word, and more than one step segment", () => {
+    // pushed) matches the obligation. What's still guarded, but only for
+    // an untrusted caller (validateMove): a wrong uid gets
+    // PENDING_POWER_MISMATCH. A trusted caller submitting more step
+    // segments than the resume actually needs isn't rejected at all -
+    // apply just consumes what it needs and silently drops the rest (see
+    // feedback_no_trusted_path_defense - there's nothing to guard against
+    // once the caller is trusted).
+    it("resume-mismatch guards reject a wrong card uid regardless of head word", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
         g.move(`use ${major(2).uid}, 5C`, { trusted: true });
@@ -4396,10 +4400,19 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         // no dedicated resume word to get wrong anymore.
         expect(g.validateMove(`play ${major(2).uid}, decline (via ${major(2).uid})`).valid).to.be.true;
         expect(g.validateMove(`use ${major(2).uid}, decline`).valid).to.be.true;
-        expect(() => g.move(`play ${major(2).uid}, AR, 2C (via ${major(2).uid})`, { trusted: true })).to.throw(); // more than one step segment
         // None of the rejected attempts cleared the obligation.
         expect(g.pendingPower).to.not.be.undefined;
         expect(g.currplayer).eq(1);
+    });
+
+    it("a trusted resume with more step segments than the obligation needs consumes what it needs and drops the rest", () => {
+        const g = setupHP();
+        g.hands[0] = ["2C", "5C", "AR"];
+        g.move(`use ${major(2).uid}, 5C`, { trusted: true });
+        expect(g.pendingPower).to.not.be.undefined;
+        g.move(`play ${major(2).uid}, AR, 2C (via ${major(2).uid})`, { trusted: true });
+        expect(g.pendingPower).to.be.undefined; // the obligation resolved on "AR" alone
+        expect(g.currplayer).eq(2); // "2C" was never consumed
     });
 
     it("a bare 'decline' with nothing pending is rejected outright", () => {

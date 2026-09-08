@@ -41,3 +41,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
 ✔ #73 - Fix dark mode; cards/wasteland cells now default to a transparent backdrop instead of opaque white. @done(26-09-06)
 ✔ #74 - Replaced "continue 00" move strings with an informative "play 9S (via 00)"/"decline 9S (via 00)" spelling, and extended to World. @done(26-09-08)
+- #75 - Pass in and fully report card name in gnostica_territory.
