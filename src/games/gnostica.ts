@@ -4133,7 +4133,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 // "face up", clicking one of its neighbours means "face
                 // that way" - any OTHER cell is a fresh placement there
                 // instead (defaulting to "U" again), same as clicking a
-                // different cell always has.
+                // different cell always has. The facing is always written
+                // out explicitly ("U" included) - a brand-new minion can't
+                // reasonably go unoriented (see validatePlace's own docs),
+                // matching Cups "own"'s identical mandatory-token rule.
                 const [prevCell] = args;
                 let dir: Orientation | undefined;
                 if (prevCell !== undefined) {
@@ -4143,7 +4146,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (prevCell !== undefined && dir !== undefined) {
                     newmove = `place ${prevCell} ${dir}`;
                 } else {
-                    newmove = `place ${cell}`;
+                    newmove = `place ${cell} U`;
                 }
                 resultMessageKey = "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
             } else if (head === "orient") {
@@ -4327,8 +4330,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             } else if (!this.hasPiecesOnBoard(this.currplayer)) {
                 // Fresh click, nothing placed yet - place is the only legal
-                // start, and needs no button.
-                newmove = `place ${cell}`;
+                // start, and needs no button. The facing is always written
+                // out explicitly (see validatePlace's own mandatory-token
+                // docs) - defaults to "U", still click-adjustable from here.
+                newmove = `place ${cell} U`;
                 resultMessageKey = "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
             } else {
                 // No mode chosen yet (or an unrecognized one) and pieces
@@ -4661,15 +4666,14 @@ export class GnosticaGame extends GameBaseSequenced {
             return [];
     }
 
-    // "place <cell> [orientation]" - only legal with zero pieces on board;
-    // orientation defaults to "U". Legality (cell required, not already
-    // on board, not void, not occupied) is validatePlace's own job, not
-    // this one's - a trusted caller submitting something that violates
-    // any of those has a bug of its own, not something this function
-    // needs to guard against.
+    // "place <cell> <orientation>" - only legal with zero pieces on board.
+    // A real facing is always required (no default here - see
+    // validatePlace's own docs); a trusted caller omitting it has a bug
+    // of its own, not something this function needs to guard against,
+    // same as every other legality check that stays validatePlace's job.
     private cmdPlace(args: string[]): void {
         const [cellStr, orientationStr] = args;
-        const orientation = this.parseOrientation(orientationStr ?? "U");
+        const orientation = this.parseOrientation(orientationStr);
         const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
         let territory = this.board.get(x, y);
         if (territory === undefined) {
@@ -4693,10 +4697,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.hasPiecesOnBoard(this.currplayer)) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
         }
-        const orientation = this.tryParseOrientation(orientationStr ?? "U");
-        if (orientation === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr });
-        }
         const coords = this.tryAlgebraic2coords(cellStr);
         if (coords === undefined) {
             return this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr });
@@ -4711,6 +4711,19 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (!hasStashAvailable(this.buildPowerContext(), this.currplayer, 1)) {
             return this.invalid("apgames:validation.gnostica.STASH_EMPTY", { player: this.currplayer, size: 1 });
+        }
+        // A brand-new minion can't reasonably go unoriented - "U" is a
+        // perfectly real, always-legal choice, but it must be an actual
+        // typed/clicked fact, not silently assumed (same mandatory-token
+        // rule as Cups "own"'s own creation step). The cell itself is
+        // already known-good at this point, so a still-missing facing
+        // just means the click flow hasn't supplied one yet.
+        if (orientationStr === undefined) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE") };
+        }
+        const orientation = this.tryParseOrientation(orientationStr);
+        if (orientation === undefined) {
+            return this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr });
         }
         return undefined;
     }

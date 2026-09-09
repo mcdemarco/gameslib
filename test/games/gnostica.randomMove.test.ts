@@ -197,8 +197,8 @@ describe("Gnostica: randomMove()", () => {
         let sawDeclare = false;
         for (let i = 0; i < 200 && !sawDeclare; i++) {
             const g = new GnosticaGame(2);
-            g.move("place m0", { trusted: true });
-            g.move("place n0", { trusted: true });
+            g.move("place m0 U", { trusted: true });
+            g.move("place n0 U", { trusted: true });
             // Rig every OTHER territory to a known-value major (3 pts),
             // uncontested by player 1 - comfortably >= the default
             // target of 9.
@@ -226,8 +226,8 @@ describe("Gnostica: randomMove()", () => {
     it("never declares (last) while the acting player's own score is still below target", () => {
         for (let i = 0; i < 200; i++) {
             const g = new GnosticaGame(2);
-            g.move("place m0", { trusted: true });
-            g.move("place n0", { trusted: true });
+            g.move("place m0 U", { trusted: true });
+            g.move("place n0 U", { trusted: true });
             commitFixture(g);
             const move = g.randomMove();
             expect(move.includes("(last)"), `should not declare while ineligible: ${move}`).to.be.false;

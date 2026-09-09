@@ -20,7 +20,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
 
     it("every other move head is illegal while a bid is in progress", () => {
         const g = new GnosticaGame(2, ["bidding"]);
-        expect(() => g.move("place k1")).to.throw();
+        expect(() => g.move("place k1 U")).to.throw();
         expect(() => g.move("discard")).to.throw();
     });
 
@@ -248,7 +248,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
     it("the non-bidding game is entirely unaffected: phase stays main, place is legal from turn one", () => {
         const g = new GnosticaGame(2);
         expect(g.phase).eq("main");
-        expect(() => g.move("place l0")).to.not.throw();
+        expect(() => g.move("place l0 U")).to.not.throw();
     });
 });
 
@@ -334,7 +334,7 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
         g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
         expect(g.phase).eq("main");
-        expect(() => g.move("place l0")).to.not.throw();
+        expect(() => g.move("place l0 U")).to.not.throw();
     });
 
     it("turn order actually follows the bid winner, not just the first move after redraw", () => {
@@ -362,11 +362,11 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         // Walk a full cycle of real turns to confirm rotation is genuinely
         // anchored to turnOrder (2 -> 1 -> 3 -> 2), not just the first
         // currplayer value after the handoff.
-        g.move("place l1", { trusted: true });
+        g.move("place l1 U", { trusted: true });
         expect(g.currplayer).eq(1);
-        g.move("place m1", { trusted: true });
+        g.move("place m1 U", { trusted: true });
         expect(g.currplayer).eq(3);
-        g.move("place n1", { trusted: true });
+        g.move("place n1 U", { trusted: true });
         expect(g.currplayer).eq(2);
     });
 
@@ -529,7 +529,7 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
 
         // Normal play resumes, driven by an ordinary click just like any
         // other game - proves the whole variant hands off cleanly.
-        expect(() => g.move("place l0")).to.not.throw();
+        expect(() => g.move("place l0 U")).to.not.throw();
     });
 
     it("render() offers a single bold 'Bid'/'Redraw' button per phase, and the pool area only appears once populated", () => {
