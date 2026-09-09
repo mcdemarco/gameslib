@@ -2344,6 +2344,24 @@ export class GnosticaGame extends GameBaseSequenced {
             if (suitUid === "C" && pendingMinor.mode === "new" && pendingMinor.opts.allowRandomDraw === true) {
                 buttons.push({ label: "Random Card", value: "random" });
             }
+            // Every "piece" mode's target is either self or whatever's at
+            // the facing cell - buildStepModeMove leaves it unset (rather
+            // than picking one) exactly when both genuinely exist, so a
+            // button set is the ONLY way to choose between them (never a
+            // board click - see handlePendingStepBoardClick's own docs on
+            // why overloading self/face clicks with a second meaning
+            // there is confusing).
+            if ((suitUid === "R" || suitUid === "D" || suitUid === "S") && pendingMinor.mode === "piece" && pendingMinor.rest.length === 0) {
+                const [tx, ty] = this.minorTargetCell(pendingMinor.minion);
+                const verb = MINOR_MODES[suitUid].piece.label.replace(" Piece", "");
+                const selfRef = this.pieceRefStr(pendingMinor.minion.x, pendingMinor.minion.y, pendingMinor.minion.index);
+                buttons.push({ label: `${verb} self`, value: `target_${selfRef}` });
+                const facingCell = this.board.get(tx, ty);
+                if ((tx !== pendingMinor.minion.x || ty !== pendingMinor.minion.y) && (facingCell?.pieces.length ?? 0) > 0) {
+                    const faceRef = this.pieceRefStr(tx, ty, 0);
+                    buttons.push({ label: `${verb} ${this.textFormat(facingCell!.pieces[0])}`, value: `target_${faceRef}` });
+                }
+            }
             // Swords pips is pure damage, no destination cell to click
             // (unlike Rods' own distance - see
             // handlePendingStepBoardClick's own docs), so it's a button
@@ -3026,6 +3044,16 @@ export class GnosticaGame extends GameBaseSequenced {
         const selfRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        // Whether the minion is actually facing a piece (not "U", which
+        // has no facing cell at all) - shared by all three "piece" modes
+        // below to decide whether there's a genuine target CHOICE to make
+        // at all. When there is, this button leaves the target unset
+        // rather than picking a side - see getActionButtons' own
+        // "target_" button set, the sole way to choose between them now
+        // (never a board click - see handlePendingStepBoardClick's own
+        // docs on why that would be ambiguous with distance/orientation).
+        const facingHasPiece = (tx !== pending.minion.x || ty !== pending.minion.y)
+            && (this.board.get(tx, ty)?.pieces.length ?? 0) > 0;
         const tokens = [minionRef, ...pending.prefix, mode];
         switch (`${suitUid}.${mode}`) {
             case "C.own":
@@ -3042,33 +3070,26 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens.push(targetCell);
                 break;
             case "R.piece":
-                tokens.push(selfRef, "1");
+                if (!facingHasPiece) {
+                    tokens.push(selfRef, "1");
+                }
                 break;
             case "R.tile":
                 tokens.push("1");
                 break;
             case "D.piece":
-                tokens.push(selfRef);
+                if (!facingHasPiece) {
+                    tokens.push(selfRef);
+                }
                 break;
             case "D.tile":
                 tokens.push(targetCell);
                 break;
-            case "S.piece": {
-                // Unlike Rods (moving yourself is a normal, common choice)
-                // or Discs (growing an ENEMY piece would be self-defeating,
-                // so self is the only sensible default), defaulting an
-                // attack to the acting player's OWN minion is almost never
-                // what's wanted. If the minion is actually facing a piece
-                // (not "U", which has no facing cell at all - self really
-                // is the only legal target there), default to attacking
-                // THAT piece instead - the common case (attack the enemy
-                // this minion is pointing at) then needs no second click at
-                // all, rather than silently defaulting to self-harm.
-                const facingHasPiece = (tx !== pending.minion.x || ty !== pending.minion.y)
-                    && (this.board.get(tx, ty)?.pieces.length ?? 0) > 0;
-                tokens.push(facingHasPiece ? this.pieceRefStr(tx, ty, 0) : selfRef, "1");
+            case "S.piece":
+                if (!facingHasPiece) {
+                    tokens.push(selfRef, "1");
+                }
                 break;
-            }
             case "S.tile":
                 tokens.push(targetCell, "1");
                 break;
@@ -3108,13 +3129,13 @@ export class GnosticaGame extends GameBaseSequenced {
         const suitUid = pending.suitUid!;
         const mode = pending.mode;
         const config = MINOR_MODES[suitUid][mode];
-        // Two refs to the same acting minion, same reasoning as
-        // buildStepModeMove: `minionRef` (minions pool) always fills the
-        // rebuilt move's own selector slot below; `selfRef` (target pool)
-        // is used wherever the piece needs to be named as a TARGET instead
-        // (the "piece"-shape branch's self/face comparisons and rebuilds).
+        // Fills the rebuilt move's own selector slot below - disambiguated
+        // only against the player's OTHER minions currently in play (see
+        // resolvePieceRef's docs on the "minion-selector" pool); the
+        // "piece"-shape branch's own self-or-facing target instead goes
+        // through pickPieceTargetClick, the same primitive tradeHands/
+        // orientAny/hierophantReplace/hermitTeleport already use.
         const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
-        const selfRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
         const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
         const rebuild = (rest: string[], messageKey?: string): IClickResult =>
             this.provisionalResult(this.assembleStepMove(pending, [minionRef, ...pending.prefix, mode, ...rest]), messageKey);
@@ -3122,16 +3143,21 @@ export class GnosticaGame extends GameBaseSequenced {
         if (config.shape === "cell") {
             const [tx, ty] = this.minorTargetCell(pending.minion);
             // Cups "own" is the one cell-shape mode with an orientation arg
-            // (the new piece's own facing) - click-to-orient (see
-            // orientationTowardClick) relative to the target cell, so its
-            // clickable region is that cell PLUS its neighbours, not just
-            // the cell itself like every other cell-shape mode below.
+            // (the new piece's own facing) - a click here is the exact
+            // same trailing-optional-orientation primitive every other
+            // target minion gets (see the "piece"-shape branch's own
+            // docs): it sets the OPTIONAL 3rd token (the reorientation),
+            // never the creation's own mandatory 2nd one, and a same-
+            // facing request is hard-rejected by validateCups itself, not
+            // specially softened here. Clickable region is the target
+            // cell PLUS its neighbours, not just the cell itself like
+            // every other cell-shape mode below.
             if (suitUid === "C" && mode === "own") {
                 const dir = this.orientationTowardClick(tx, ty, x, y);
                 if (dir === undefined) {
                     return undefined;
                 }
-                return rebuild([GnosticaBoard.coords2algebraic(tx, ty), dir], "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE");
+                return rebuild([GnosticaBoard.coords2algebraic(tx, ty), pending.rest[1] ?? "U", dir]);
             }
             if (x !== tx || y !== ty) {
                 return undefined;
@@ -3157,42 +3183,32 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         if (config.shape === "piece") {
-            const [faceX, faceY] = this.minorTargetCell(pending.minion);
-            const isSelfClick = x === pending.minion.x && y === pending.minion.y;
-            const isFaceClick = x === faceX && y === faceY;
-            const currentIsSelf = pending.rest[0] === selfRef;
-            const needsNumeric = !(suitUid === "D" && mode === "piece");
-            const targetResolution = pending.rest.length > 0 ? this.resolvePieceRef(pending.rest[0]) : undefined;
-            const target = targetResolution?.kind === "ok" ? targetResolution.ref : undefined;
+            // The target itself is button-only now (getActionButtons'
+            // own "target_" button set) - a "piece" mode's target is
+            // either self or whatever's at the facing cell, and both of
+            // those same cells are also where distance (Rods) and the
+            // trailing orientation want to click, so overloading them
+            // with a THIRD meaning (retargeting) was genuinely confusing.
+            // Until a button has picked one, there's nothing for a board
+            // click to do here at all.
+            if (pending.rest.length === 0) {
+                return undefined;
+            }
+            const targetResolution = this.resolvePieceRef(pending.rest[0]);
+            const target = targetResolution.kind === "ok" ? targetResolution.ref : undefined;
+            if (target === undefined) {
+                return undefined;
+            }
 
-            // Rods' distance (including a non-upright minion pushing
-            // itself just 1 cell) is a real destination cell, along the
-            // ACTING minion's own facing (matches movePiece's own
-            // computation). Only distance 1 FROM SELF AT THE JUST-SEEDED
-            // DEFAULT coincides with the face cell used to retarget below -
-            // once distance has actually been adjusted away from that
-            // default, the same cell means "back to 1", not "retarget".
-            if (suitUid === "R" && target !== undefined) {
+            // Rods' distance is a real destination cell, along the ACTING
+            // minion's own facing (matches movePiece's own computation).
+            if (suitUid === "R") {
                 const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
-                const isFreshFaceRetarget = currentIsSelf && pending.rest[1] === "1"
-                    && x === target.x + dx && y === target.y + dy;
-                for (let n = isFreshFaceRetarget ? 2 : 1; n <= minionPiece.size; n++) {
+                for (let n = 1; n <= minionPiece.size; n++) {
                     if (x === target.x + dx * n && y === target.y + dy * n) {
                         return rebuild([pending.rest[0], String(n)]);
                     }
                 }
-            }
-
-            if (isSelfClick && !currentIsSelf) {
-                return rebuild(needsNumeric ? [selfRef, "1"] : [selfRef]);
-            }
-            if (isFaceClick && !(faceX === pending.minion.x && faceY === pending.minion.y) && currentIsSelf) {
-                const t = this.board.get(faceX, faceY);
-                if (t === undefined || t.pieces.length === 0) {
-                    return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
-                }
-                const ref = this.pieceRefStr(faceX, faceY, 0);
-                return rebuild(needsNumeric ? [ref, "1"] : [ref]);
             }
 
             // Once the suit action is otherwise complete, a further click
@@ -3201,7 +3217,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // its facing - but only for the player's own piece, matching
             // movePiece/growPiece/attackPiece's own "owner===currplayer"
             // gate in powers.ts.
-            if (target === undefined || pending.rest.length < config.minArgs) {
+            if (pending.rest.length < config.minArgs) {
                 return undefined;
             }
             const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
@@ -3685,15 +3701,23 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (reason !== undefined) {
                         return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${reason.key}`, reason.params ?? {}) };
                     }
-                    // Cups "own" seeds its new piece's facing as "U" by
-                    // default (see buildStepModeMove's own C.own case) -
-                    // still adjustable by clicking around the target cell,
-                    // same as place/orient's own click-to-orient.
-                    const seedsAdjustableDirection = suitUid === "C" && mode === "own";
-                    return this.provisionalResult(
-                        this.buildStepModeMove(pending, mode),
-                        seedsAdjustableDirection ? "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE" : undefined,
-                    );
+                    return this.provisionalResult(this.buildStepModeMove(pending, mode));
+                }
+                if (value.startsWith("target_")) {
+                    // "piece" mode's own target - see getActionButtons'
+                    // own docs on why this is button-only, not a board
+                    // click. Only ever offered while rest is still empty
+                    // (the choice hasn't been made yet), so this always
+                    // starts the step's own trailing args fresh.
+                    const ref = value.slice("target_".length);
+                    const pending = this.parsePendingStep(move);
+                    if (pending === undefined || pending.mode !== "piece"
+                        || (pending.suitUid !== "R" && pending.suitUid !== "D" && pending.suitUid !== "S") || pending.rest.length !== 0) {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
+                    const rest = pending.suitUid === "D" ? [ref] : [ref, "1"];
+                    return this.provisionalResult(this.assembleStepMove(pending, [minionRef, ...pending.prefix, "piece", ...rest]));
                 }
                 if (value.startsWith("pips_")) {
                     // Swords "piece" (attack) pips - see getActionButtons'
@@ -6075,9 +6099,13 @@ export class GnosticaGame extends GameBaseSequenced {
         const ctx = this.buildPowerContext();
         switch (mode) {
             case "own": {
-                const [cellStr, orientationStr] = rest;
+                // rest[2], once present, is the OPTIONAL reorientation of
+                // the just-created piece (see validateCups' own docs) -
+                // rest[1] is the creation's own mandatory (always real,
+                // "U" included) initial facing.
+                const [cellStr, orientationStr, reorientStr] = rest;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const orientation = this.parseOrientation(orientationStr);
+                const orientation = this.parseOrientation(reorientStr ?? orientationStr);
                 createOwn(ctx, minion.x, minion.y, minion.index, tx, ty, orientation, opts);
                 this.addBufferIfWasteland(tx, ty);
                 this.results.push({ type: "place", where: cellStr, how: "cups-own" });
@@ -6129,7 +6157,15 @@ export class GnosticaGame extends GameBaseSequenced {
         const ctx = this.buildPowerContext();
         switch (mode) {
             case "own": {
-                const [cellStr, orientationStr] = rest;
+                // A brand-new minion can't reasonably go unoriented - "U"
+                // is a perfectly real, always-legal choice for it (matches
+                // "new minions default up" - never auto-assigned, but
+                // always REQUIRED as an explicit fact of creation). The
+                // OPTIONAL 3rd token, once present, reorients that just-
+                // created piece via the exact same trailing-orientation
+                // rule every other target minion gets: hard-reject a
+                // request that changes nothing.
+                const [cellStr, orientationStr, reorientStr] = rest;
                 const coords = this.tryAlgebraic2coords(cellStr);
                 if (coords === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
@@ -6138,6 +6174,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 const orientation = this.tryParseOrientation(orientationStr);
                 if (orientation === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                }
+                let finalOrientation = orientation;
+                if (reorientStr !== undefined) {
+                    const reorient = this.tryParseOrientation(reorientStr);
+                    if (reorient === undefined) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: reorientStr }) };
+                    }
+                    if (reorient === orientation) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+                    }
+                    finalOrientation = reorient;
                 }
                 const failure = checkCreateOwn(ctx, minion.x, minion.y, minion.index, tx, ty, opts);
                 if (failure) {
@@ -6149,7 +6196,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // genuinely untouched wasteland), so this ref carries its
                 // own piece data rather than relying on a later board read.
                 const newIndex = this.board.get(tx, ty)?.pieces.length ?? 0;
-                return { failed: false, outcome: { newMinion: { x: tx, y: ty, index: newIndex, piece: new Piece(this.currplayer, 1, orientation) } } };
+                return { failed: false, outcome: { newMinion: { x: tx, y: ty, index: newIndex, piece: new Piece(this.currplayer, 1, finalOrientation) } } };
             }
             case "enemy": {
                 const [cellStr, victimRef] = rest;

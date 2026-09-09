@@ -2443,12 +2443,17 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(modeClick.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 U`);
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(0);
-        const [row2, col2] = rowColFor(g, 1, 0); // n0, the target cell itself - re-affirms "U"
+        // n0 itself is already "U", the creation's own default - a click
+        // there hard-rejects as a no-op (same trailing-orientation rule
+        // every other target minion gets), rather than silently
+        // re-affirming.
+        const [row2, col2] = rowColFor(g, 1, 0);
         const sameCell = g.handleClick(modeClick.move, row2, col2);
-        expect(sameCell.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 U`);
+        expect(sameCell.valid).to.be.false;
+        expect(sameCell.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
         const [row3, col3] = rowColFor(g, 2, 0); // "o0", east of n0 - sets the new piece's facing
         const east = g.handleClick(modeClick.move, row3, col3);
-        expect(east.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 E`);
+        expect(east.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 U E`);
         g.move(modeClick.move, { trusted: true });
         const t = g.board.get(1, 0)!;
         expect(t.pieces.length).eq(1);
@@ -2497,7 +2502,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.hands[0]).to.not.include(spotUid);
     });
 
-    it("Rods (piece): mode button defaults to moving the minion itself; clicking the facing cell redirects", () => {
+    it("Rods (piece): mode button leaves the target unset when the minion is facing another piece - a button picks between them", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfRods());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
@@ -2506,15 +2511,50 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.1 piece m0.1 1`); // defaults to self
-        const [row2, col2] = rowColFor(g, 1, 0); // n0, the facing cell
-        const switched = g.handleClick(modeClick.move, row2, col2);
-        expect(switched.move).eq(`use ${aceOfRods().uid}, m0.1 piece n0.1 1`);
-        g.move(modeClick.move, { trusted: true }); // commit the (unswitched) default: moves itself
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.1 piece`); // genuinely ambiguous - no default
+        expect(modeClick.valid).to.be.true;
+        expect(modeClick.complete).eq(-1);
+        g.move(modeClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("target_m0.1");
+        expect(values).to.include("target_n0.1");
+        const selfClick = g.handleClick(modeClick.move, -1, -1, "_btn_target_m0.1");
+        expect(selfClick.move).eq(`use ${aceOfRods().uid}, m0.1 piece m0.1 1`);
+        const faceClick = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
+        expect(faceClick.move).eq(`use ${aceOfRods().uid}, m0.1 piece n0.1 1`);
+        g.move(selfClick.move, { trusted: true }); // commit moving itself
         expect(g.board.get(0, 0)!.pieces.length).eq(0);
         // n0 already held player 2's piece (pieces[0]) before the move - the
         // mover lands alongside it, not alone.
         expect(g.board.get(1, 0)!.pieces[1]).to.deep.include({ owner: 1, orientation: "E" });
+    });
+
+    it("Rods (piece): once a button targets the OTHER piece at the facing cell, ITS distance 1 is directly click-settable (no self-target collision)", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        forceCardAt(g, 4, 0, () => aceOfDiscs()); // keeps p0 wasteland, not void
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the facing cell
+        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // room to move up to 2
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
+        const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
+        expect(targeted.move).eq(`use ${aceOfRods().uid}, m0.2 piece n0.1 1`); // distance still defaults to 1
+        const [row2, col2] = rowColFor(g, 3, 0); // p0, distance 2 from n0
+        const distClick2 = g.handleClick(targeted.move, row2, col2);
+        expect(distClick2.move).eq(`use ${aceOfRods().uid}, m0.2 piece n0.1 2`);
+        // Unlike a self-target (where distance 1 collides with the
+        // ACTING minion's own facing cell), n0's own distance-1
+        // destination (o0) doesn't coincide with anything else, so it's
+        // directly click-settable even though it's the smallest distance.
+        const [row1, col1] = rowColFor(g, 2, 0); // o0, distance 1 from n0
+        const distClick1 = g.handleClick(distClick2.move, row1, col1);
+        expect(distClick1.move).eq(`use ${aceOfRods().uid}, m0.2 piece n0.1 1`);
     });
 
     it("Rods (tile): mode button defaults to pushing the pointed-at territory 1 space", () => {
@@ -2681,7 +2721,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     // self" or Discs' "grow self", both genuinely common choices) - when
     // the minion is actually facing an enemy, that's what the default
     // should target.
-    it("Swords (piece): with a piece in the facing cell, defaults to attacking THAT instead of self", () => {
+    it("Swords (piece): with a piece in the facing cell, a button offers attacking THAT instead of self", () => {
         const g = new GnosticaGame(2);
         clearBoard(g); // fully deterministic - see clearBoard's own docs
         forceCardAt(g, 0, 0, () => aceOfSwords());
@@ -2691,8 +2731,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
-        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.1 piece n0.1 1`);
-        g.move(modeClick.move, { trusted: true });
+        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.1 piece`); // genuinely ambiguous - no default
+        const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
+        expect(targeted.move).eq(`use ${aceOfSwords().uid}, m0.1 piece n0.1 1`);
+        g.move(targeted.move, { trusted: true });
         expect(g.board.get(0, 0)!.pieces.length).eq(1); // the acting player's own minion survives
         // n0 has no card of its own (cleared above) - once its only piece
         // is destroyed, pruneIfEmpty deletes the cell outright rather than
@@ -2844,11 +2886,9 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row2, col2] = rowColFor(g, 2, 0); // o0, 2 cells east
         const distClick2 = g.handleClick(distClick3.move, row2, col2);
         expect(distClick2.move).eq(`use ${aceOfRods().uid}, m0.3 piece m0.3 2`);
-        // A non-upright minion can push itself just 1 cell too - once
-        // distance has actually been adjusted away from the just-seeded
-        // default, clicking the immediately-facing cell sets distance
-        // back to 1 directly, rather than reinterpreting it as the
-        // (already-passed) retarget gesture.
+        // Distance 1 (n0) is directly click-settable too - now that the
+        // target itself is button-only (see getActionButtons' own
+        // "target_" button set), this cell has exactly one meaning.
         const [row1, col1] = rowColFor(g, 1, 0); // n0, 1 cell east
         const distClick1 = g.handleClick(distClick2.move, row1, col1);
         expect(distClick1.move).eq(`use ${aceOfRods().uid}, m0.3 piece m0.3 1`);
@@ -2869,12 +2909,14 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
-        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 1`); // pips defaults to 1
+        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.2 piece`); // genuinely ambiguous - no default
+        const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.2");
+        expect(targeted.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 1`); // pips defaults to 1
         // partial-applying a Swords step is genuinely destructive (see
         // "does not collapse..." above) - render the bar here, but don't
         // build further click-based moves against a ref this mutation may
         // have invalidated (n0's own piece is about to shrink to 1 pip).
-        g.move(modeClick.move, { partial: true });
+        g.move(targeted.move, { partial: true });
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
@@ -2896,8 +2938,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
-        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 1`);
-        const pips2Click = g.handleClick(modeClick.move, -1, -1, "_btn_pips_2");
+        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.2 piece`); // genuinely ambiguous - no default
+        const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.2");
+        expect(targeted.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 1`);
+        const pips2Click = g.handleClick(targeted.move, -1, -1, "_btn_pips_2");
         expect(pips2Click.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 2`);
         g.move(pips2Click.move, { trusted: true });
         expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // destroyed by the full 2 pips
@@ -2939,16 +2983,16 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_D_piece");
-        expect(modeClick.move).eq(`use ${aceOfDiscs().uid}, m0.1 piece m0.1`); // defaults to self
+        expect(modeClick.move).eq(`use ${aceOfDiscs().uid}, m0.1 piece`); // genuinely ambiguous - no default
         const [rowFace, colFace] = rowColFor(g, 1, 0); // n0, the facing cell
-        const switchToFace = g.handleClick(modeClick.move, rowFace, colFace);
-        expect(switchToFace.move).eq(`use ${aceOfDiscs().uid}, m0.1 piece n0.1`); // retargets to the enemy at n0
+        const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
+        expect(targeted.move).eq(`use ${aceOfDiscs().uid}, m0.1 piece n0.1`); // targets the enemy at n0
         // n0 belongs to player 2 - no trailing orientation is offered for
         // an enemy's own piece (movePiece/growPiece/attackPiece's own
-        // owner===currplayer gate in powers.ts), so a further click there
+        // owner===currplayer gate in powers.ts), so a click there
         // no-ops instead of appending a facing.
-        const clickOnTarget = g.handleClick(switchToFace.move, rowFace, colFace);
-        expect(clickOnTarget.move).eq(switchToFace.move); // unchanged - no facing appended
+        const clickOnTarget = g.handleClick(targeted.move, rowFace, colFace);
+        expect(clickOnTarget.move).eq(targeted.move); // unchanged - no facing appended
         expect(clickOnTarget.valid).to.be.false;
     });
 });
@@ -3441,7 +3485,15 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.message).eq(directionMsg());
     });
 
-    it("Cups (own): the mode button's default facing, and clicking to change it, both carry the message", () => {
+    // Cups "own" always creates its new minion with a real, mandatory
+    // facing ("U" - never left unstated), the same way place's own first
+    // click does - but adjusting that facing afterward is now the exact
+    // same trailing-optional-orientation primitive every other target
+    // minion gets (see handlePendingStepBoardClick's own docs), not a
+    // special "still adjustable" soft-pedal: no message once the create
+    // step is otherwise complete, and a same-facing click is a hard
+    // ORIENT_NO_OP rejection instead of a silent no-change.
+    it("Cups (own): the mode button's default facing needs no message; a click only changes it, hard-rejecting a same-facing request", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
@@ -3451,11 +3503,18 @@ describe("Gnostica: click-to-orient messaging", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_own");
         expect(modeClick.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 U`);
-        expect(modeClick.message).eq(directionMsg());
-        const [rowE, colE] = rowColFor(g, 2, 0); // "o0", east of n0 - changes the new piece's facing
+        expect(modeClick.message).to.not.eq(directionMsg());
+        const [rowN, colN] = rowColFor(g, 1, 0); // n0 itself - "U" again, already the creation default
+        const sameFacing = g.handleClick(modeClick.move, rowN, colN);
+        expect(sameFacing.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 U U`);
+        expect(sameFacing.valid).to.be.false;
+        expect(sameFacing.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        const [rowE, colE] = rowColFor(g, 2, 0); // "o0", east of n0 - a genuine change
         const east = g.handleClick(modeClick.move, rowE, colE);
-        expect(east.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 E`);
-        expect(east.message).eq(directionMsg());
+        expect(east.move).eq(`use ${aceOfCups().uid}, m0.1 own n0 U E`);
+        expect(east.valid).to.be.true;
+        g.move(east.move, { trusted: true });
+        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
     });
 
     it("does not leak the adjustable-direction message onto a move with no facing left to adjust", () => {
@@ -3836,7 +3895,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(modeClick.move).to.not.include(" m0 "); // the STALE, pre-reorientation (east) default
     });
 
-    it("Lovers (move, then create): step 2's Cups buttons appear only once step 1 is complete; a board click still redirects step 1's default target; the chained click sequence resolves correctly", () => {
+    it("Lovers (move, then create): step 2's Cups buttons appear only once step 1 is complete; a target button still picks step 1's target; the chained click sequence resolves correctly", () => {
         // Fully deterministic (see clearBoard's own docs): the random
         // initial deal could otherwise occasionally put The Lovers
         // itself at n0, which forceCardAt's own duplicate-clearing would
@@ -3857,14 +3916,13 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(cellClick.move).eq(`use ${major(6).uid}`);
 
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${major(6).uid}, m0.1 piece m0.1 1`); // defaults to self
+        expect(modeClick.move).eq(`use ${major(6).uid}, m0.1 piece`); // genuinely ambiguous - B sits at n0 too
 
-        // The default already satisfies R.piece's minArgs, but a board
-        // click on the facing cell still redirects THIS step's target
-        // rather than being swallowed as "start step 2" - the exact gap
-        // parsePendingStep's preferCurrent option exists to close.
-        const [rowN, colN] = rowColFor(g, 1, 0); // n0, the facing cell (B)
-        const redirected = g.handleClick(modeClick.move, rowN, colN);
+        // A target button picks THIS step's target, still correctly
+        // scoped to the in-progress step rather than being mistaken for
+        // "start step 2" - the exact gap parsePendingStep's preferCurrent
+        // option exists to close.
+        const redirected = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
         expect(redirected.move).eq(`use ${major(6).uid}, m0.1 piece n0.1 1`);
         expect(redirected.valid).to.be.true;
 
@@ -5026,10 +5084,9 @@ describe("Gnostica: Fool and World", () => {
         // card (Lovers, not World) the moment a later click re-walks a
         // string that's already pushed - #74's own same-call extension.
         const modeClick = g.handleClick(targetClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${major(6).uid}, m0.1 ${major(6).uid}/m0.1 piece m0.1 1 (via ${theWorld().uid})`);
+        expect(modeClick.move).eq(`use ${major(6).uid}, m0.1 ${major(6).uid}/m0.1 piece (via ${theWorld().uid})`);
 
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const redirected = g.handleClick(modeClick.move, rowN, colN);
+        const redirected = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
         expect(redirected.move).eq(`use ${major(6).uid}, m0.1 ${major(6).uid}/m0.1 piece n0.1 1 (via ${theWorld().uid})`);
         expect(redirected.valid).to.be.true;
 
@@ -5082,8 +5139,7 @@ describe("Gnostica: Fool and World", () => {
         const [rowP, colP] = rowColFor(g, 3, 0);
         const targetClick = g.handleClick(cellClick.move, rowP, colP);
         const modeClick = g.handleClick(targetClick.move, -1, -1, "_btn_mode_R_piece");
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const redirected = g.handleClick(modeClick.move, rowN, colN);
+        const redirected = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
         const preview2 = setupWorldLovers();
         preview2.move(redirected.move, { partial: true });
         expect(buttonLabel(preview2, "use")).eq(`Use Territory (${major(6).uid})`);
