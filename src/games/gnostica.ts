@@ -2065,6 +2065,34 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 return countButtons as [ButtonBarButton, ...ButtonBarButton[]];
             }
+            // Orient: a bare cell (not yet a full piece ref - see
+            // handleClickCore's own "orient" docs) means 2+ of the
+            // player's own distinguishable pieces share it and none has
+            // been picked yet - same minion-picker shape "use"/"play"
+            // already get once THEIR own pool narrows to one ambiguous
+            // cell (see the pendingMinor branch further below), just
+            // reached via orient's own (non-IPendingStep) pool/dispatch
+            // since orient has no card/suit-mode machinery to piggyback
+            // on.
+            if (this.liveMove.head?.toLowerCase() === "orient" && this.liveMove.rest.length === 1 && !this.liveMove.rest[0].includes(".")) {
+                const coords = this.tryAlgebraic2coords(this.liveMove.rest[0]);
+                if (coords !== undefined) {
+                    const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1]));
+                    if (ambiguous) {
+                        const buttons: ButtonBarButton[] = [{ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] }];
+                        const seenRefs = new Set<string>();
+                        for (const m of candidates) {
+                            const ref = this.pieceRefStr(m.x, m.y, m.index, candidates);
+                            if (seenRefs.has(ref)) {
+                                continue;
+                            }
+                            seenRefs.add(ref);
+                            buttons.push({ label: this.textFormat(this.board.get(m.x, m.y)!.pieces[m.index]), value: `orientpick_${ref}` });
+                        }
+                        return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+                    }
+                }
+            }
         }
 
         // this.liveMove was populated by THIS SAME instance's own preceding
@@ -2536,35 +2564,50 @@ export class GnosticaGame extends GameBaseSequenced {
             // Walking past this segment (primitive-and-complete, or
             // special-and-complete) is what lets a LATER step of the SAME
             // frame (e.g. Tower's own attack, after its special
-            // orientMinion step 1) become click-driven - a structural
-            // check only, matching this function's own documented
-            // simplification: a chained piece created/moved by an earlier
-            // step is never folded into `minions` here (Phase A's click
-            // flow always defaults to the frame's own fixed pool anyway).
+            // orientMinion step 1) become click-driven - replaying it
+            // against a lazily-created clone (never `this`) keeps
+            // `top.minions` genuinely current, not just positionally
+            // chained: a real commit's own walkFrameStack/validateFrameStack
+            // already replay every step this way (see their own docs) -
+            // this mirrors it for the click-preview path, so a LATER
+            // step's own default/target (e.g. minorTargetCell reading an
+            // EARLIER orientMinion step's new facing) sees the actual
+            // post-step state instead of whatever `this.board` still
+            // holds before a real partial commit.
             priorSteps.push(tokens.join(" "));
-            if (!("special" in step) || step.special !== "worldUseAny") {
-                top.nextStepIndex++;
-                continue;
-            }
-            // worldUseAny is the one step type that can hand off to a
-            // DIFFERENT frame mid-chain (informationally free - no
-            // forcePause), so - unlike every other step above - actually
-            // walking it (via a lazily-created clone, never `this`) is
-            // required to know which frame/def is authoritative for the
-            // NEXT segment. Wrapped defensively: an already-illegal target
-            // (e.g. one a LATER click made stale) should mean "no click
-            // support past here," not a crashed render - matches this
-            // function's own "best-effort, never a source of truth" docs.
             clone ??= this.cloneLive();
             try {
                 const outcome = clone.applyPowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, true);
+                top.minions = GnosticaGame.chainMinion(top.minions, outcome ?? {}).map(m => ({
+                    ...m,
+                    piece: clone!.board.get(m.x, m.y)?.pieces[m.index],
+                }));
                 top.nextStepIndex++;
                 if (outcome?.pushFrame !== undefined) {
                     stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, eligible: [...outcome.pushFrame.minions], minions: [...outcome.pushFrame.minions] });
                 }
                 GnosticaGame.popExhaustedFrames(clone, stack);
             } catch {
-                return undefined;
+                // worldUseAny is the one step type that can hand off to a
+                // DIFFERENT frame mid-chain - not knowing the outcome means
+                // not knowing what governs the NEXT segment at all, so
+                // this has to mean "no click support past here," not a
+                // crashed render (matches this function's own "best-effort,
+                // never a source of truth" docs).
+                if ("special" in step && step.special === "worldUseAny") {
+                    return undefined;
+                }
+                // Every other step's tokens failing to resolve against a
+                // clone seeded from `this.board` means `this.board` has
+                // already advanced past this step for real - render()'s
+                // own frame-stepping reuses this same walk against an
+                // already-historical board to compute each frame's own
+                // button bar (see its own docs), where re-applying an
+                // already-applied step is expected to fail exactly this
+                // way. Nothing to replay there - keep walking with
+                // `top.minions` unchanged, same as before this replay
+                // existed.
+                top.nextStepIndex++;
             }
         }
         const top = stack[stack.length - 1];
@@ -2634,7 +2677,12 @@ export class GnosticaGame extends GameBaseSequenced {
     // minion's own cell switches to that instead, see
     // handlePendingStepBoardClick).
     private minorTargetCell(minion: IMinionRef): [number, number] {
-        const piece = this.board.get(minion.x, minion.y)!.pieces[minion.index];
+        // `minion.piece`, when set, is a snapshot from a clone that
+        // already replayed an earlier step in the SAME still-building
+        // move (see parsePendingStep's own docs) - preferred over a fresh
+        // `this.board` read, which would still show that earlier step's
+        // pre-mutation state until a real partial commit happens.
+        const piece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
         if (piece.orientation === "U") {
             return [minion.x, minion.y];
         }
@@ -2794,7 +2842,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Only ever called for a suit-shaped pending - see buildStepModeMove's
         // own docs on why suitUid is guaranteed set here.
         const suitUid = pending.suitUid!;
-        const minion = this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const minion = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const targetT = this.board.get(tx, ty);
         const cell = GnosticaBoard.coords2algebraic(tx, ty);
@@ -3052,7 +3100,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // (the "piece"-shape branch's self/face comparisons and rebuilds).
         const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
         const selfRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
-        const minionPiece = this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
         const rebuild = (rest: string[], messageKey?: string): IClickResult =>
             this.provisionalResult(this.assembleStepMove(pending, [minionRef, ...pending.prefix, mode, ...rest]), messageKey);
 
@@ -3295,20 +3343,17 @@ export class GnosticaGame extends GameBaseSequenced {
             if (typeof targetResult !== "string") {
                 return targetResult;
             }
-            // Defaulting to "U" unconditionally would be a same-facing
-            // no-op (now a hard rejection - see validateOrientAny's own
-            // docs) whenever the target already faces up, which is common
-            // (every fresh piece's own starting orientation) - fall back
-            // to any other facing in that case so this stage-1 default is
-            // always a genuinely orientable answer, never a dead end the
-            // player has to first "fix" before the click flow's own
-            // "still adjustable" framing even makes sense.
-            const target = this.resolvePieceRef(targetResult);
-            const currentFacing = target.kind === "ok" ? this.board.get(target.ref.x, target.ref.y)!.pieces[target.ref.index].orientation : undefined;
-            const defaultFacing = currentFacing === "U" ? "N" : "U";
+            // The target is chosen; its new facing is a genuinely separate
+            // decision that only the player's own click may make - never
+            // auto-assigned (see validateOrient's own matching docs on
+            // why this applies to every EXISTING minion's reorientation,
+            // not just the standalone "orient" command). Two tokens where
+            // three are expected is "incomplete" per stepShapes.ts's own
+            // fixedArity check, so this is already tolerated as still
+            // building, not an error - see validatePowerStep's own docs.
             return this.provisionalResult(
-                this.assembleStepMove(pending, [minionRef, targetResult, defaultFacing]),
-                "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE",
+                this.assembleStepMove(pending, [minionRef, targetResult]),
+                "apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT",
             );
         }
         const targetRef = pending.rest[0];
@@ -3555,6 +3600,26 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     const minionRef = this.pieceRefStr(resolved.ref.x, resolved.ref.y, resolved.ref.index, pending.minions);
                     return this.provisionalResult(this.assembleStepMove(pending, [minionRef]));
+                }
+                if (value.startsWith("orientpick_")) {
+                    // "orientpick_<ref>" - orient's own minion-picker (see
+                    // computeActionButtons' own docs on why this doesn't
+                    // reuse "minion_": orient has no IPendingStep of its
+                    // own to resolve against). Picking one names ONLY
+                    // which minion to reorient - its new facing is a
+                    // genuinely separate decision the player still has to
+                    // click for (see validateOrient's own
+                    // PICK_DIRECTION_TO_ORIENT docs) - never auto-assigned.
+                    const ref = value.slice("orientpick_".length);
+                    const parsed = this.parseMove(move);
+                    if (parsed.head?.toLowerCase() !== "orient") {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    const resolved = this.resolvePieceRef(ref);
+                    if (resolved.kind !== "ok" || this.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index].owner !== this.currplayer) {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    return this.provisionalResult(`orient ${this.pieceRefStr(resolved.ref.x, resolved.ref.y, resolved.ref.index)}`);
                 }
                 if (value.startsWith("mode_")) {
                     // "mode_<suitUid>_<mode>" - see getActionButtons()'s own
@@ -4006,33 +4071,53 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [prevRef] = args;
                 let dir: Orientation | undefined;
                 let prevLoc: { x: number; y: number; index: number } | undefined;
-                if (prevRef !== undefined) {
+                // A bare cell token (2+ own pieces there, none picked yet -
+                // see computeActionButtons'/validateOrient's own
+                // "orientpick_"/ambiguity docs) isn't a resolvable piece
+                // ref at all - treat it the same as "nothing selected
+                // yet" below, rather than letting resolvePieceRefOrThrow
+                // throw on it.
+                if (prevRef !== undefined && prevRef.includes(".")) {
                     prevLoc = this.resolvePieceRefOrThrow(prevRef);
                     dir = this.orientationTowardClick(prevLoc.x, prevLoc.y, x, y);
                 }
-                let targetPiece: Piece;
-                let newOrientation: Orientation;
                 if (prevLoc !== undefined && dir !== undefined) {
-                    targetPiece = this.board.get(prevLoc.x, prevLoc.y)!.pieces[prevLoc.index];
+                    const targetPiece = this.board.get(prevLoc.x, prevLoc.y)!.pieces[prevLoc.index];
                     newmove = `orient ${prevRef} ${dir}`;
-                    newOrientation = dir;
+                    // A click that would leave the piece facing exactly
+                    // where it already does is a no-op (see validateOrient's
+                    // own ORIENT_NO_OP docs) - let that message through
+                    // unmodified rather than stomping it with the generic
+                    // "still adjustable" one, which would otherwise always
+                    // win here.
+                    resultMessageKey = dir === targetPiece.orientation
+                        ? undefined
+                        : "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
                 } else {
-                    const myPieceIdx = this.board.get(x, y)?.pieces.findIndex(p => p.owner === this.currplayer) ?? -1;
-                    if (myPieceIdx === -1) {
+                    // Fresh selection - routed through the same minion-
+                    // selection primitive "use"/"play" already use
+                    // (eligibleMinionsForOrient/resolveStepMinion), rather
+                    // than grabbing whichever of the player's own pieces
+                    // happened to be first at this cell: 2+ distinguishable
+                    // pieces here means a real choice is needed, offered
+                    // via computeActionButtons' own "orientpick_" buttons.
+                    // Selecting the minion never itself assigns a facing -
+                    // that's the player's own, separate decision (see
+                    // validateOrient's own PICK_DIRECTION_TO_ORIENT docs);
+                    // a fresh piece's own initial facing (Cups "own") is
+                    // the only place a default is legitimate, never an
+                    // existing minion's.
+                    const pool = this.eligibleMinionsForOrient(x, y);
+                    if (pool.length === 0) {
                         return { move, valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE", ref: cell }) };
                     }
-                    targetPiece = this.board.get(x, y)!.pieces[myPieceIdx];
-                    newmove = `orient ${this.pieceRefStr(x, y, myPieceIdx)} U`;
-                    newOrientation = "U";
+                    const { minion, ambiguous } = this.resolveStepMinion(undefined, pool);
+                    if (ambiguous) {
+                        return this.provisionalResult(`orient ${cell}`, "apgames:validation.gnostica.PICK_MINION_BUTTON");
+                    }
+                    newmove = `orient ${this.pieceRefStr(minion.x, minion.y, minion.index)}`;
+                    resultMessageKey = undefined; // let validateOrient's own PICK_DIRECTION_TO_ORIENT show through
                 }
-                // A click that would leave the piece facing exactly where
-                // it already does is a no-op (see validateOrient's own
-                // ORIENT_NO_OP docs) - let that message through unmodified
-                // rather than stomping it with the generic "still
-                // adjustable" one, which would otherwise always win here.
-                resultMessageKey = newOrientation === targetPiece.orientation
-                    ? undefined
-                    : "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
             } else if (head === "use" || head === "play" || (this.pendingPower !== undefined && this.pendingPowerIsGenuine)) {
                 // Once a minor-arcana power step's mode is already chosen,
                 // a board click is target/arg cycling for that step first -
@@ -4547,11 +4632,21 @@ export class GnosticaGame extends GameBaseSequenced {
     // this one's.
     private cmdOrient(args: string[]): void {
         const [ref, orientationStr] = args;
+        // Still building - a bare cell (2+ own pieces there, none picked
+        // yet - see validateOrient's own matching tolerance) or a missing
+        // orientation isn't resolvable yet; a trusted partial preview can
+        // legitimately be here mid-build, so just no-op.
+        if (!ref.includes(".") || orientationStr === undefined) {
+            return;
+        }
         const { x, y, index } = this.resolvePieceRefOrThrow(ref);
-        const piece = this.board.get(x, y)!.pieces[index];
         this.addBufferIfWasteland(x, y);
         const orientation = this.parseOrientation(orientationStr);
-        piece.orientation = orientation;
+        // Reorienting one of your own minions, with no adjacency
+        // restriction, is exactly what orientMinion already is - reuse it
+        // rather than mutating .orientation inline, the same primitive
+        // the Empress/Emperor/Tower/Star's own first step goes through.
+        orientMinion(this.buildPowerContext(), x, y, index, orientation);
         this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: this.getPipsFromRef(ref), facing: orientation });
     }
 
@@ -4596,8 +4691,19 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private validateOrient(args: string[]): IValidationResult | undefined {
         const [ref, orientationStr] = args;
-        if (ref === undefined || orientationStr === undefined) {
+        if (ref === undefined) {
             return this.invalid("apgames:validation.gnostica.ORIENT_ARGS_REQUIRED");
+        }
+        // A bare cell (no ".") with 2+ of the player's own distinguishable
+        // pieces there means the acting minion hasn't been picked yet -
+        // see computeActionButtons'/handleClickCore's own "orientpick_"
+        // docs - still building, not a hard error, the same tolerance
+        // every other minion-selection context already gets.
+        if (!ref.includes(".")) {
+            const coords = this.tryAlgebraic2coords(ref);
+            if (coords !== undefined && this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1])).ambiguous) {
+                return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
+            }
         }
         const result = this.resolvePieceRef(ref);
         if (result.kind !== "ok") {
@@ -4608,24 +4714,24 @@ export class GnosticaGame extends GameBaseSequenced {
         if (piece.owner !== this.currplayer) {
             return this.invalid("apgames:validation.gnostica.NOT_YOUR_MINION");
         }
+        // The minion itself is chosen; its new facing is a genuinely
+        // separate decision that only the player's own click may make -
+        // never auto-assigned (see cmdOrient's/handleClickCore's own
+        // docs) - so this is still building, not an error.
+        if (orientationStr === undefined) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
+        }
         const orientation = this.tryParseOrientation(orientationStr);
         if (orientation === undefined) {
             return this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr });
         }
         // Same "meaningful action" principle as #49: a no-op reorientation
         // (the piece already faces this way) achieves nothing and should
-        // never be the player's actual final move - but unlike Hierophant/
-        // tradeHands' own self-target rejection, this can't be a hard
-        // invalid() here, since selecting a piece to reorient at all
-        // necessarily seeds ITS OWN current facing as the click flow's
-        // starting point ("clicking the same cell re-affirms up" is
-        // deliberate, existing UX - see the click-to-orient tests - and
-        // both real clicks and the playground's own {partial:true}
-        // preview sync go through this same check, not just a genuine
-        // final submission). Same "still building, not a real answer yet"
-        // shape as #49's POWER_STEP_REQUIRED instead: valid, but
-        // complete:-1, so randomMove()/an actual auto-submit can never
-        // land on this as the FINAL move, while normal click navigation
+        // never be the player's actual final move. Still a soft
+        // complete:-1 rather than a hard invalid() here, matching #49's
+        // own POWER_STEP_REQUIRED shape: valid, but not yet a real
+        // answer, so randomMove()/an actual auto-submit can never land on
+        // this as the FINAL move, while normal click navigation
         // still works.
         if (orientation === piece.orientation) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.ORIENT_NO_OP") };
@@ -4763,14 +4869,35 @@ export class GnosticaGame extends GameBaseSequenced {
     // "activate" draws minions from. Returns [] (rather than throwing) for a
     // cell with no card / no eligible piece, so click-time helpers can use
     // this directly without their own duplicate error handling.
-    private eligibleMinionsForActivate(x: number, y: number): IMinionRef[] {
+    // The acting player's own pieces sitting at one cell - shared by
+    // eligibleMinionsForActivate ("use" additionally requires a card
+    // there) and eligibleMinionsForOrient (no card requirement at all).
+    private piecesOwnedAt(x: number, y: number): IMinionRef[] {
         const t = this.board.get(x, y);
-        if (t === undefined || t.card === undefined) {
+        if (t === undefined) {
             return [];
         }
         return t.pieces
             .map((p, index) => ({ x, y, index }))
             .filter(ref => t.pieces[ref.index].owner === this.currplayer);
+    }
+
+    private eligibleMinionsForActivate(x: number, y: number): IMinionRef[] {
+        const t = this.board.get(x, y);
+        if (t === undefined || t.card === undefined) {
+            return [];
+        }
+        return this.piecesOwnedAt(x, y);
+    }
+
+    // The acting player's own pieces at one cell, for the standalone
+    // "orient" command - same shape as eligibleMinionsForActivate's own
+    // single-cell pool (a board click always names one cell directly, so
+    // there's no "play"-style cross-cell narrowing to do), just without
+    // the card requirement - you can orient a minion standing on a bare
+    // wasteland cell too.
+    private eligibleMinionsForOrient(x: number, y: number): IMinionRef[] {
+        return this.piecesOwnedAt(x, y);
     }
 
     // Every piece the acting player owns anywhere on the board - the pool

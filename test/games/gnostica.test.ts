@@ -1770,12 +1770,12 @@ describe("Gnostica: handleClick", () => {
         expect(seed.move).eq("orient");
         const result = g.handleClick(seed.move, row, col);
         expect(result.valid).to.be.true;
-        expect(result.move).eq("orient m0.1 U");
-        // A freshly-placed piece already defaults to "U", so selecting it
-        // to reorient seeds a genuine no-op - complete:-1, not just the
-        // usual auto-submit guard (0), since this isn't submittable as-is
-        // at all (see validateOrient's own ORIENT_NO_OP docs).
+        expect(result.move).eq("orient m0.1");
+        // The minion is chosen; its facing is a separate decision only a
+        // further click may make - never auto-assigned (see
+        // validateOrient's own PICK_DIRECTION_TO_ORIENT docs).
         expect(result.complete).eq(-1);
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
     });
 
     it("orient: clicking the piece's own cell again re-affirms \"up\"; clicking a neighbour sets that facing directly", () => {
@@ -1801,10 +1801,36 @@ describe("Gnostica: handleClick", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const seed = g.handleClick("", -1, -1, "_btn_orient");
         const first = g.handleClick(seed.move, row, col);
-        expect(first.move).eq("orient m0.1 U");
+        expect(first.move).eq("orient m0.1");
         const [rowFar, colFar] = rowColFor(g, 2, 0); // "o0", not adjacent to m0, no piece there either
         const far = g.handleClick(first.move, rowFar, colFar);
         expect(far.valid).to.be.false; // no piece of the acting player's there to (re-)select
+    });
+
+    // Regression: orient's own first click used to grab whichever of the
+    // player's own pieces happened to be first at the clicked cell, with
+    // no way to pick a different one - now routed through the same
+    // minion-selection primitive "use"/"play" already use.
+    it("orient: 2+ of the player's own distinguishable pieces at one cell offer a minion-picker, instead of silently acting on the first", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 2, "U")]; // two distinguishable own minions
+        const [row, col] = rowColFor(g, 0, 0);
+        const seed = g.handleClick("", -1, -1, "_btn_orient");
+        const clicked = g.handleClick(seed.move, row, col);
+        expect(clicked.valid).to.be.true;
+        expect(clicked.complete).eq(-1);
+        expect(clicked.move).eq("orient m0");
+        expect(clicked.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON"));
+        g.move(clicked.move!, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const pickButtons = bar!.buttons!.filter(b => b.value?.startsWith("orientpick_"));
+        expect(pickButtons.length).eq(2);
+        const picked = g.handleClick(clicked.move!, -1, -1, `_btn_${pickButtons[1].value!}`);
+        expect(picked.valid).to.be.true;
+        expect(picked.move).eq("orient m0.2");
     });
 
     it("choosing Orient via the button bar seeds an instructional, not-yet-valid move", () => {
@@ -2003,7 +2029,7 @@ describe("Gnostica: handleClick", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const seed = g.handleClick("", -1, -1, "_btn_orient");
         const clicked = g.handleClick(seed.move, row, col);
-        expect(clicked.move).eq("orient m0.1 U");
+        expect(clicked.move).eq("orient m0.1");
         g.move(clicked.move, { partial: true }); // sync engine state, same as the playground's own preview flow
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
@@ -3214,26 +3240,29 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.message).eq(directionMsg());
     });
 
-    it("orient: clicking a piece to start reorienting it carries the same message", () => {
+    it("orient: clicking a piece to start reorienting it carries the PICK_DIRECTION_TO_ORIENT message, never a facing", () => {
         const g = new GnosticaGame(2);
-        // Facing E, not the click flow's own default "U" - so selecting
-        // it to reorient seeds a genuine change (U), not a no-op (see
-        // ORIENT_NO_OP's own dedicated test below for that case).
         g.move("place m0 E", { trusted: true });
         g.move("place l0", { trusted: true });
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("orient", row, col);
         expect(result.valid).to.be.true;
-        expect(result.move).eq("orient m0.1 U");
-        expect(result.message).eq(directionMsg());
+        expect(result.move).eq("orient m0.1"); // selecting the minion never itself assigns a facing
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
     });
 
-    it("orient: clicking an already-\"U\" piece to start reorienting it is a no-op, and carries the ORIENT_NO_OP message instead", () => {
+    it("orient: a genuine no-op reorientation click (clicking the same cell again) carries the ORIENT_NO_OP message", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true }); // defaults to "U"
         g.move("place l0", { trusted: true });
         const [row, col] = rowColFor(g, 0, 0);
-        const result = g.handleClick("orient", row, col);
+        const selected = g.handleClick("orient", row, col);
+        expect(selected.move).eq("orient m0.1");
+        // Clicking the SAME cell again is a real, deliberate "face up"
+        // click (see orientationTowardClick's own docs) - not an
+        // auto-assigned default - which happens to be a no-op here since
+        // the piece already faces "U".
+        const result = g.handleClick(selected.move!, row, col);
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq("orient m0.1 U");
@@ -3268,7 +3297,7 @@ describe("Gnostica: click-to-orient messaging", () => {
 
         const [row, col] = rowColFor(g, 2, 0);
         const selected = g.handleClick("orient", row, col);
-        expect(selected.move).eq(`orient ${ref} U`);
+        expect(selected.move).eq(`orient ${ref}`);
 
         const [rowVoid, colVoid] = rowColFor(g, 3, 0); // one step east - the void side
         const result = g.handleClick(selected.move!, -1, -1, `${colVoid},${rowVoid}`);
@@ -3649,6 +3678,29 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(line).to.not.be.undefined;
     });
 
+    // Regression: an orientMinion step's own reorientation click, still
+    // mid-chain (never yet committed for real), must be reflected in a
+    // LATER step's own default target - it was previously reading
+    // `this.board`'s pre-reorientation facing instead (see
+    // parsePendingStep's own "always replay" fix).
+    it("Empress (orientMinion, then create): step 2's own default target reflects step 1's just-clicked reorientation, not the piece's original facing", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, -1, 0, () => major(3)); // Empress at l0
+        g.board.get(-1, 0)!.pieces = [new Piece(1, 1, "E")]; // originally facing E, toward m0
+        const [rowL0, colL0] = rowColFor(g, -1, 0);
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const cellClick = g.handleClick(seed.move, rowL0, colL0);
+        expect(cellClick.move).eq(`use ${major(3).uid}`);
+        const [rowS, colS] = rowColFor(g, -1, 1); // south of l0
+        const orientClick = g.handleClick(cellClick.move, rowS, colS);
+        expect(orientClick.move).eq(`use ${major(3).uid}, l0.1 S`);
+        const modeClick = g.handleClick(orientClick.move, -1, -1, "_btn_mode_C_own");
+        const freshTarget = GnosticaBoard.coords2algebraic(-1, 1); // the NEW (south) facing cell
+        expect(modeClick.move).eq(`use ${major(3).uid}, l0.1 S/l0.1 own ${freshTarget} U`);
+        expect(modeClick.move).to.not.include(" m0 "); // the STALE, pre-reorientation (east) default
+    });
+
     it("Lovers (move, then create): step 2's Cups buttons appear only once step 1 is complete; a board click still redirects step 1's default target; the chained click sequence resolves correctly", () => {
         // Fully deterministic (see clearBoard's own docs): the random
         // initial deal could otherwise occasionally put The Lovers
@@ -3881,7 +3933,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(selfClick.move).eq(cellClick.move); // the move string never advances into the doomed state
     });
 
-    it("orientAny (Devil): target pick auto-seeds a default orientation; a further click near the TARGET adjusts it", () => {
+    it("orientAny (Devil): target pick never assigns a default orientation; a further click near the TARGET sets it", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(15)); // The Devil
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
@@ -3891,8 +3943,9 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const [rowN, colN] = rowColFor(g, 1, 0);
         const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use ${major(15).uid}, m0.1 n0.1 U`);
+        expect(step1.move).eq(`use ${major(15).uid}, m0.1 n0.1`); // target chosen, no facing yet
         expect(step1.valid).to.be.true;
+        expect(step1.complete).eq(-1);
         const [rowO, colO] = rowColFor(g, 2, 0); // o0, east of n0 (the target)
         const step2 = g.handleClick(step1.move, rowO, colO);
         expect(step2.move).eq(`use ${major(15).uid}, m0.1 n0.1 E`);
@@ -3932,7 +3985,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const [rowN, colN] = rowColFor(g, 1, 0);
         const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use ${major(5).uid}, m0.1 n0.1 U`);
+        expect(step1.move).eq(`use ${major(5).uid}, m0.1 n0.1`); // target chosen, no facing yet
         const [rowO, colO] = rowColFor(g, 2, 0);
         const step2 = g.handleClick(step1.move, rowO, colO);
         expect(step2.move).eq(`use ${major(5).uid}, m0.1 n0.1 E`);

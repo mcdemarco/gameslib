@@ -771,6 +771,16 @@ export const checkOrientMinion = (ctx: PowerContext, x: number, y: number, index
     return checkOwnMinion(p, ctx.currplayer);
 };
 
+// The one place any orientation actually gets written - orientMinion,
+// orientAny, and the standalone "orient" command (which reuses orientMinion
+// directly, its own legality being identical: reorient one of your own
+// minions) all funnel through here.
+const setPieceOrientation = (
+    ctx: PowerContext, x: number, y: number, index: number, newOrientation: Orientation,
+): void => {
+    getPiece(ctx, x, y, index).orientation = newOrientation;
+};
+
 export const orientMinion = (
     ctx: PowerContext, x: number, y: number, index: number, newOrientation: Orientation,
 ): void => {
@@ -778,7 +788,7 @@ export const orientMinion = (
     if (failure) {
         throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
     }
-    getPiece(ctx, x, y, index).orientation = newOrientation;
+    setPieceOrientation(ctx, x, y, index, newOrientation);
 };
 
 // Devil only: orient ANY piece, even an opponent's - still subject to the
@@ -809,7 +819,7 @@ export const orientAny = (
     if (failure) {
         throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
     }
-    getPiece(ctx, targetX, targetY, targetIndex).orientation = newOrientation;
+    setPieceOrientation(ctx, targetX, targetY, targetIndex, newOrientation);
 };
 
 // Hierophant: replace the target piece (anyone's) with one of the acting
