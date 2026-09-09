@@ -316,7 +316,8 @@ describe("Gnostica: new-card hand highlight", () => {
         expect(g.currplayer).eq(1);
         const newKey = `hand_${card("7C").uid}_new`;
         expect(player1HandArea(g.render() as RenderRep)?.pieces).to.include(newKey); // sanity - not vacuous
-        const click = g.handleClick("", -1, -1, newKey);
+        const seeded = g.handleClick("", -1, -1, "_btn_discard");
+        const click = g.handleClick(seeded.move, -1, -1, newKey);
         expect(click.valid).to.be.true;
         expect(click.move).eq(`discard ${card("7C").uid}`);
     });
@@ -2062,7 +2063,8 @@ describe("Gnostica: handleClick", () => {
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
         const [uid1, uid2] = g.hands[0];
-        const seeded = g.handleClick("", -1, -1, `hand_${uid1}`);
+        const btn = g.handleClick("", -1, -1, "_btn_discard");
+        const seeded = g.handleClick(btn.move, -1, -1, `hand_${uid1}`);
         const built = g.handleClick(seeded.move, -1, -1, `hand_${uid2}`);
         expect(built.move).eq(`discard ${uid1} ${uid2}`);
         const result = g.handleClick(built.move, -1, -1, "_btn_drawcount_1");
@@ -2134,13 +2136,24 @@ describe("Gnostica: handleClick", () => {
         g.move("place m0", { trusted: true }); // discard requires pieces already on the board
         g.move("place l0", { trusted: true }); // back to player 1's turn
         const uid = g.hands[0][0];
-        const first = g.handleClick("", -1, -1, `hand_${uid}`);
+        const btn = g.handleClick("", -1, -1, "_btn_discard");
+        const first = g.handleClick(btn.move, -1, -1, `hand_${uid}`);
         expect(first.valid).to.be.true;
         expect(first.move).eq(`discard ${uid}`);
         expect(first.complete).eq(0); // same auto-submit guard as place/orient
         const second = g.handleClick(first.move, -1, -1, `hand_${uid}`);
         expect(second.valid).to.be.true;
         expect(second.move).eq("discard");
+    });
+
+    it("a bare hand-card click with no action selected yet is rejected, not defaulted into discard", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const uid = g.hands[0][0];
+        const result = g.handleClick("", -1, -1, `hand_${uid}`);
+        expect(result.valid).to.be.false;
+        expect(result.message).to.eq(i18next.t("apgames:validation.gnostica.NO_ACTION_SELECTED"));
     });
 
     it("discard: rejects a hand-card click for a card not in the acting player's hand", () => {

@@ -5814,6 +5814,7 @@
             "MUST_TARGET_ENEMY": "You must select an enemy in the target territory in order to create another enemy there.",
             "MUST_TARGET_FACING": "You must target the cell which your minion is pointing at.",
             "MUST_TARGET_SELF": "An upright minion must target its own cell.",
+            "NO_ACTION_SELECTED": "Please choose an action from the button bar (Use Territory, Play Card, Discard/Draw, etc.) before clicking a card.",
             "NOTHING_TO_ATTACK": "There is no territory there to attack.",
             "NOTHING_TO_GROW": "There is no territory there to grow.",
             "NOT_AN_ELIGIBLE_MINION": "The selected minion is not eligible to act.",

@@ -3726,8 +3726,10 @@ export class GnosticaGame extends GameBaseSequenced {
             // means something different depending on what's already in
             // progress: supplying a card uid for a pending minor-arcana
             // power step in progress (Cups "new", Discs/Swords "tile"),
-            // playing the card outright ("play"), or toggling it into a
-            // discard's uid list (the default, if no mode is active).
+            // playing the card outright ("play"), or toggling it into an
+            // already-selected discard's uid list. With no action
+            // selected yet, the click is rejected outright - the player
+            // needs to pick a button (Use/Play/Discard/etc.) first.
             if (piece !== undefined && piece.startsWith("hand_")) {
                 // A just-drawn card's own rendered/clickable identifier
                 // carries a "_new" suffix (see newHandCardUids's own docs
@@ -3796,20 +3798,27 @@ export class GnosticaGame extends GameBaseSequenced {
                         needsCellClick ? undefined : playMsg.params,
                     );
                 }
-                // Any already-chosen "draw <n>" tail is deliberately
-                // dropped here rather than carried forward - the valid
-                // count range shifts with the discard list itself, so
-                // changing which cards are discarded re-solicits the count
-                // fresh (via getActionButtons()'s own count-picker) rather
-                // than silently keeping a now-possibly-invalid number.
-                const drawIdx = head === "discard" ? args.indexOf("draw") : -1;
-                let discards = head === "discard" ? (drawIdx === -1 ? [...args] : args.slice(0, drawIdx)) : [];
-                if (discards.includes(uid)) {
-                    discards = discards.filter(u => u !== uid);
-                } else {
-                    discards.push(uid);
+                if (head === "discard") {
+                    // Any already-chosen "draw <n>" tail is deliberately
+                    // dropped here rather than carried forward - the valid
+                    // count range shifts with the discard list itself, so
+                    // changing which cards are discarded re-solicits the
+                    // count fresh (via getActionButtons()'s own count-
+                    // picker) rather than silently keeping a now-possibly-
+                    // invalid number.
+                    const drawIdx = args.indexOf("draw");
+                    let discards = drawIdx === -1 ? [...args] : args.slice(0, drawIdx);
+                    if (discards.includes(uid)) {
+                        discards = discards.filter(u => u !== uid);
+                    } else {
+                        discards.push(uid);
+                    }
+                    return this.provisionalResult(["discard", ...discards].join(" "));
                 }
-                return this.provisionalResult(["discard", ...discards].join(" "));
+                // No action selected yet (or one that a hand-card click
+                // makes no sense for) - require a button click first
+                // rather than guessing what the player meant.
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_ACTION_SELECTED") };
             }
 
             // Discard-pile clicks (from the AreaPieces built by
