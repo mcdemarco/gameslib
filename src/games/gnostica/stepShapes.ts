@@ -37,6 +37,17 @@ export interface MinorModeConfig {
 // reorientation after acting on your own piece) are deliberately not
 // counted here, and not click-driven this pass either - every mode is
 // fully usable without one, just not adjustable by click.
+// The four minor-arcana suits - shared by gnostica.ts (button labels,
+// magicianChoice's own suit-choice buttons) and randomMove.ts
+// (magicianChoice's own random suit pick), living here rather than
+// either of those two so neither has to import a value from the other.
+export const ALL_SUITS: { uid: string; label: string }[] = [
+    { uid: "C", label: "Cups" },
+    { uid: "R", label: "Rods" },
+    { uid: "D", label: "Discs" },
+    { uid: "S", label: "Swords" },
+];
+
 export const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
     C: {
         own: { label: "Create Minion", shape: "cell", minArgs: 2 },

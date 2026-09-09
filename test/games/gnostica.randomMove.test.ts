@@ -4,6 +4,7 @@ import { expect } from "chai";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/piece";
 import { CellContents } from "../../src/games/gnostica/cell";
+import { weightedRandomOrientation, randomOrientMove } from "../../src/games/gnostica/randomMove";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
 const major = (seq: number) => majorCards.find(c => c.rank.seq === seq)!;
@@ -245,10 +246,9 @@ describe("Gnostica: randomMove()", () => {
         // creates one directly.
         g.board.store.set(11, 10, new CellContents(minor("AC"))); // east of (10,10)
         expect(g.board.classify(10, 10)).eq("wasteland");
-        const pick = (g as unknown as { weightedRandomOrientation: (x: number, y: number) => string }).weightedRandomOrientation.bind(g);
         const counts: Record<string, number> = { N: 0, S: 0, E: 0, W: 0, U: 0 };
         for (let i = 0; i < 400; i++) {
-            counts[pick(10, 10)]++;
+            counts[weightedRandomOrientation(g, 10, 10)]++;
         }
         const useful = counts.U + counts.E; // U always useful; E points at the one real territory
         const useless = counts.N + counts.S + counts.W; // point at more void
@@ -262,9 +262,8 @@ describe("Gnostica: randomMove()", () => {
     it("randomOrientMove() never generates a no-op (the same facing the piece already has)", () => {
         const g = new GnosticaGame(2);
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        const build = (g as unknown as { randomOrientMove: () => string | undefined }).randomOrientMove.bind(g);
         for (let i = 0; i < 200; i++) {
-            const move = build();
+            const move = randomOrientMove(g);
             expect(move).to.not.eq(undefined);
             expect(move).to.not.eq("orient m0.1 U");
         }

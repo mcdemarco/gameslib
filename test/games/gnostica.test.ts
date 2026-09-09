@@ -8,6 +8,7 @@ import { Piece } from "../../src/games/gnostica/piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
+import { randomUseOrPlayMove } from "../../src/games/gnostica/randomMove";
 
 const theWorld = () => majorCards.find(c => c.rank.seq === 21)!;
 const major = (seq: number) => majorCards.find(c => c.rank.seq === seq)!;
@@ -1220,7 +1221,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             forceCardAt(g, 3, 0, () => aceOfDiscs());
             g.move("place m0 E", { trusted: true });
             g.move("place l0 U", { trusted: true });
-            expect(() => (g as unknown as { randomUseOrPlayMove: (head: "use" | "play") => string | undefined }).randomUseOrPlayMove("use")).to.not.throw();
+            expect(() => randomUseOrPlayMove(g, "use")).to.not.throw();
         }
     });
 
