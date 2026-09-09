@@ -1151,7 +1151,10 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         forceCardAt(g, 3, 0, () => aceOfDiscs()); // keeps o0 (2,0) a genuine wasteland, not void
         g.move("place m0 E", { trusted: true }); // player 1, pointing east
         g.move("place l0", { trusted: true }); // player 2
-        const move = `use ${major(7).uid}, m0.1 piece m0.1 1 E, n0.1 piece n0.1 1 E`;
+        // No trailing orientation on either step - the minion never
+        // changes facing (stays E throughout), and a same-facing "E"
+        // would now be a hard-rejected no-op (#76).
+        const move = `use ${major(7).uid}, m0.1 piece m0.1 1, n0.1 piece n0.1 1`;
         expect(g.validateMove(move).valid).to.be.true;
         expect(() => g.move(move, { trusted: false })).to.not.throw();
         const dest = g.board.get(2, 0)!; // o0
@@ -2815,6 +2818,138 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(values).to.not.deep.equal(["place"]);
         expect(values).to.include("use");
         expect(values).to.include("play");
+    });
+
+    it("Rods (piece): clicking a cell 2+ away along the acting minion's own facing directly sets distance", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        // classify() only looks at IMMEDIATE neighbours (no chaining
+        // through wasteland - see its own docs), so a card is needed
+        // adjacent to EACH destination cell to keep it wasteland, not
+        // void (a void landing destroys the piece outright).
+        forceCardAt(g, 1, 0, () => card("2C")); // keeps o0 wasteland
+        forceCardAt(g, 4, 0, () => aceOfDiscs()); // keeps p0 wasteland
+        g.move("place m0 E", { trusted: true }); // player 1, pointing east
+        g.move("place l0", { trusted: true }); // player 2
+        g.board.get(0, 0)!.pieces = [new Piece(1, 3, "E")]; // room to move up to 3
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.3 piece m0.3 1`); // defaults to distance 1
+        const [row3, col3] = rowColFor(g, 3, 0); // p0, 3 cells east
+        const distClick3 = g.handleClick(modeClick.move, row3, col3);
+        expect(distClick3.move).eq(`use ${aceOfRods().uid}, m0.3 piece m0.3 3`);
+        const [row2, col2] = rowColFor(g, 2, 0); // o0, 2 cells east
+        const distClick2 = g.handleClick(distClick3.move, row2, col2);
+        expect(distClick2.move).eq(`use ${aceOfRods().uid}, m0.3 piece m0.3 2`);
+        // A non-upright minion can push itself just 1 cell too - once
+        // distance has actually been adjusted away from the just-seeded
+        // default, clicking the immediately-facing cell sets distance
+        // back to 1 directly, rather than reinterpreting it as the
+        // (already-passed) retarget gesture.
+        const [row1, col1] = rowColFor(g, 1, 0); // n0, 1 cell east
+        const distClick1 = g.handleClick(distClick2.move, row1, col1);
+        expect(distClick1.move).eq(`use ${aceOfRods().uid}, m0.3 piece m0.3 1`);
+        g.move(distClick2.move, { trusted: true });
+        expect(g.board.get(0, 0)!.pieces.length).eq(0);
+        expect(g.board.get(2, 0)!.pieces[0]).to.deep.include({ owner: 1, orientation: "E" });
+    });
+
+    it("Swords (piece): pips is offered as a button set, not click-cycled, bolding the current value", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfSwords());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the facing cell
+        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // up to 2 pips
+        g.board.get(1, 0)!.pieces = [new Piece(2, 2, "W")]; // survives a 1-pip hit
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
+        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 1`); // pips defaults to 1
+        // partial-applying a Swords step is genuinely destructive (see
+        // "does not collapse..." above) - render the bar here, but don't
+        // build further click-based moves against a ref this mutation may
+        // have invalidated (n0's own piece is about to shrink to 1 pip).
+        g.move(modeClick.move, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("pips_1");
+        expect(values).to.include("pips_2");
+        const pips1Btn = bar!.buttons!.find(b => b.value === "pips_1");
+        expect(pips1Btn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
+    });
+
+    it("Swords (piece): clicking a pips button sets pips directly, replacing the mode button's own default", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfSwords());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the facing cell
+        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // up to 2 pips
+        g.board.get(1, 0)!.pieces = [new Piece(2, 2, "W")];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
+        expect(modeClick.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 1`);
+        const pips2Click = g.handleClick(modeClick.move, -1, -1, "_btn_pips_2");
+        expect(pips2Click.move).eq(`use ${aceOfSwords().uid}, m0.2 piece n0.2 2`);
+        g.move(pips2Click.move, { trusted: true });
+        expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // destroyed by the full 2 pips
+    });
+
+    it("Rods (piece): a click near the destination cell reorients the minion once distance is set, hard-rejecting a same-facing click", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing east
+        g.move("place l0", { trusted: true }); // player 2
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}, m0.1 piece m0.1 1`);
+        // Effective (post-move) position is n0 - clicking o0 (east of n0)
+        // sets the moved piece's new facing to E... which is already its
+        // current facing, so this must hard-reject as a no-op.
+        const [rowSame, colSame] = rowColFor(g, 2, 0); // o0
+        const noOp = g.handleClick(modeClick.move, rowSame, colSame);
+        expect(noOp.valid).to.be.false;
+        expect(noOp.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        // Clicking m0 (west of n0, the vacated origin) sets it to face back W.
+        const [rowW, colW] = rowColFor(g, 0, 0); // m0
+        const faceW = g.handleClick(modeClick.move, rowW, colW);
+        expect(faceW.move).eq(`use ${aceOfRods().uid}, m0.1 piece m0.1 1 W`);
+        g.move(faceW.move, { trusted: true });
+        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, orientation: "W" });
+    });
+
+    it("Discs (piece): a click near a target that isn't the acting player's own has no orientation effect", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfDiscs());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the facing cell
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_D_piece");
+        expect(modeClick.move).eq(`use ${aceOfDiscs().uid}, m0.1 piece m0.1`); // defaults to self
+        const [rowFace, colFace] = rowColFor(g, 1, 0); // n0, the facing cell
+        const switchToFace = g.handleClick(modeClick.move, rowFace, colFace);
+        expect(switchToFace.move).eq(`use ${aceOfDiscs().uid}, m0.1 piece n0.1`); // retargets to the enemy at n0
+        // n0 belongs to player 2 - no trailing orientation is offered for
+        // an enemy's own piece (movePiece/growPiece/attackPiece's own
+        // owner===currplayer gate in powers.ts), so a further click there
+        // no-ops instead of appending a facing.
+        const clickOnTarget = g.handleClick(switchToFace.move, rowFace, colFace);
+        expect(clickOnTarget.move).eq(switchToFace.move); // unchanged - no facing appended
+        expect(clickOnTarget.valid).to.be.false;
     });
 });
 

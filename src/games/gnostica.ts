@@ -2344,6 +2344,21 @@ export class GnosticaGame extends GameBaseSequenced {
             if (suitUid === "C" && pendingMinor.mode === "new" && pendingMinor.opts.allowRandomDraw === true) {
                 buttons.push({ label: "Random Card", value: "random" });
             }
+            // Swords pips is pure damage, no destination cell to click
+            // (unlike Rods' own distance - see
+            // handlePendingStepBoardClick's own docs), so it's a button
+            // set instead, offered once a target is chosen.
+            if (suitUid === "S" && pendingMinor.mode === "piece" && pendingMinor.rest.length >= 1) {
+                const minionPiece = pendingMinor.minion.piece ?? this.board.get(pendingMinor.minion.x, pendingMinor.minion.y)!.pieces[pendingMinor.minion.index];
+                const current = pendingMinor.rest[1];
+                for (let n = minionPiece.size; n >= 1; n--) {
+                    const button: ButtonBarButton = { label: `Attack for ${n}`, value: `pips_${n}` };
+                    if (current === String(n)) {
+                        button.attributes = [{ name: "font-weight", value: "bold" }];
+                    }
+                    buttons.push(button);
+                }
+            }
         }
         if (declareBtn !== undefined) {
             buttons.push(declareBtn);
@@ -3145,17 +3160,33 @@ export class GnosticaGame extends GameBaseSequenced {
             const [faceX, faceY] = this.minorTargetCell(pending.minion);
             const isSelfClick = x === pending.minion.x && y === pending.minion.y;
             const isFaceClick = x === faceX && y === faceY;
-            if (!isSelfClick && !isFaceClick) {
-                return undefined;
-            }
             const currentIsSelf = pending.rest[0] === selfRef;
             const needsNumeric = !(suitUid === "D" && mode === "piece");
-            const switchingToSelf = isSelfClick && !currentIsSelf;
-            const switchingToFace = isFaceClick && !(faceX === pending.minion.x && faceY === pending.minion.y) && currentIsSelf;
-            if (switchingToSelf) {
+            const targetResolution = pending.rest.length > 0 ? this.resolvePieceRef(pending.rest[0]) : undefined;
+            const target = targetResolution?.kind === "ok" ? targetResolution.ref : undefined;
+
+            // Rods' distance (including a non-upright minion pushing
+            // itself just 1 cell) is a real destination cell, along the
+            // ACTING minion's own facing (matches movePiece's own
+            // computation). Only distance 1 FROM SELF AT THE JUST-SEEDED
+            // DEFAULT coincides with the face cell used to retarget below -
+            // once distance has actually been adjusted away from that
+            // default, the same cell means "back to 1", not "retarget".
+            if (suitUid === "R" && target !== undefined) {
+                const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
+                const isFreshFaceRetarget = currentIsSelf && pending.rest[1] === "1"
+                    && x === target.x + dx && y === target.y + dy;
+                for (let n = isFreshFaceRetarget ? 2 : 1; n <= minionPiece.size; n++) {
+                    if (x === target.x + dx * n && y === target.y + dy * n) {
+                        return rebuild([pending.rest[0], String(n)]);
+                    }
+                }
+            }
+
+            if (isSelfClick && !currentIsSelf) {
                 return rebuild(needsNumeric ? [selfRef, "1"] : [selfRef]);
             }
-            if (switchingToFace) {
+            if (isFaceClick && !(faceX === pending.minion.x && faceY === pending.minion.y) && currentIsSelf) {
                 const t = this.board.get(faceX, faceY);
                 if (t === undefined || t.pieces.length === 0) {
                     return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
@@ -3163,14 +3194,33 @@ export class GnosticaGame extends GameBaseSequenced {
                 const ref = this.pieceRefStr(faceX, faceY, 0);
                 return rebuild(needsNumeric ? [ref, "1"] : [ref]);
             }
-            // Same cell as the current target - cycle the numeric arg, if any.
-            if (!needsNumeric) {
-                return rebuild(pending.rest);
+
+            // Once the suit action is otherwise complete, a further click
+            // on or adjacent to the target's own EFFECTIVE position
+            // (Rods: where it will land; Discs/Swords: unchanged) sets
+            // its facing - but only for the player's own piece, matching
+            // movePiece/growPiece/attackPiece's own "owner===currplayer"
+            // gate in powers.ts.
+            if (target === undefined || pending.rest.length < config.minArgs) {
+                return undefined;
             }
-            const maxArg = minionPiece.size;
-            const current = parseInt(pending.rest[1] ?? "1", 10);
-            const next = (current % maxArg) + 1;
-            return rebuild([pending.rest[0], String(next)]);
+            const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+            if (targetPiece.owner !== this.currplayer) {
+                return undefined;
+            }
+            let effX = target.x;
+            let effY = target.y;
+            if (suitUid === "R") {
+                const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
+                const dist = parseInt(pending.rest[1], 10);
+                effX = target.x + dx * dist;
+                effY = target.y + dy * dist;
+            }
+            const dir = this.orientationTowardClick(effX, effY, x, y);
+            if (dir === undefined) {
+                return undefined;
+            }
+            return rebuild([...pending.rest.slice(0, config.minArgs), dir]);
         }
 
         // "none" shape (Rods' "tile" mode) - only the minion's own cell is
@@ -3644,6 +3694,20 @@ export class GnosticaGame extends GameBaseSequenced {
                         this.buildStepModeMove(pending, mode),
                         seedsAdjustableDirection ? "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE" : undefined,
                     );
+                }
+                if (value.startsWith("pips_")) {
+                    // Swords "piece" (attack) pips - see getActionButtons'
+                    // own docs on why this is a button set rather than a
+                    // click-cycled arg. Always rebuilt against the
+                    // CURRENT target (pending.rest[0]) - the button set
+                    // itself is only ever offered once one is chosen.
+                    const n = value.slice("pips_".length);
+                    const pending = this.parsePendingStep(move);
+                    if (pending === undefined || pending.suitUid !== "S" || pending.mode !== "piece" || pending.rest.length === 0) {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
+                    return this.provisionalResult(this.assembleStepMove(pending, [minionRef, ...pending.prefix, "piece", pending.rest[0], n]));
                 }
                 if (value.startsWith("magician_")) {
                     // Stage 1 of magicianChoice - picks the suit letter.
@@ -6197,8 +6261,22 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (Number.isNaN(dist)) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: distStr }) };
                 }
-                if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                if (orientationStr !== undefined) {
+                    const orientation = this.tryParseOrientation(orientationStr);
+                    if (orientation === undefined) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                    }
+                    // Same "never reorient an existing minion for free"
+                    // principle as validateOrient/validateOrientMinion/
+                    // validateOrientAny - an explicit facing matching the
+                    // piece's own current one achieves nothing (movePiece
+                    // only ever applies it to the player's own piece
+                    // anyway - see its own docs), so it's rejected the
+                    // same hard way, not silently accepted.
+                    const currentPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+                    if (currentPiece.owner === this.currplayer && orientation === currentPiece.orientation) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+                    }
                 }
                 const failure = checkMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, opts);
                 if (failure) {
@@ -6286,8 +6364,16 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                if (orientationStr !== undefined) {
+                    const orientation = this.tryParseOrientation(orientationStr);
+                    if (orientation === undefined) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                    }
+                    // See validateRods' own matching docs.
+                    const currentPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+                    if (currentPiece.owner === this.currplayer && orientation === currentPiece.orientation) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+                    }
                 }
                 const failure = checkGrowPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index);
                 if (failure) {
@@ -6387,8 +6473,16 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (Number.isNaN(pips)) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: pipsStr }) };
                 }
-                if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                if (orientationStr !== undefined) {
+                    const orientation = this.tryParseOrientation(orientationStr);
+                    if (orientation === undefined) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                    }
+                    // See validateRods' own matching docs.
+                    const currentPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+                    if (currentPiece.owner === this.currplayer && orientation === currentPiece.orientation) {
+                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+                    }
                 }
                 const failure = checkAttackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, opts);
                 if (failure) {
