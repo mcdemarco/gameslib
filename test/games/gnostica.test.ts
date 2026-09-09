@@ -3388,26 +3388,68 @@ describe("Gnostica: choose-step click messaging", () => {
 
     // Every click-driven special with no button of its own (orientMinion/
     // orientAny/hierophantReplace/tradeHands/judgementDraw - see
-    // computeActionButtons' own docs) gets CHOOSE_STEP_BOARD instead of
-    // CHOOSE_STEP: CHOOSE_STEP's "using the buttons next to the game
-    // board" wording is actively wrong for them, same reasoning as
-    // World's own dedicated message just below. A primitive-first step
-    // (a real mode button) or hermitTeleport/magicianChoice (their own
-    // dedicated button sets) still get plain CHOOSE_STEP, since it's
+    // computeActionButtons' own docs) names its actual targeting rule
+    // instead of CHOOSE_STEP's "using the buttons next to the game
+    // board" wording, which is actively wrong for them (same reasoning
+    // as World's own dedicated message just below). A primitive-first
+    // step (a real mode button) or hermitTeleport/magicianChoice (their
+    // own dedicated button sets) still get plain CHOOSE_STEP, since it's
     // accurate for them.
-    it("activate: a special step with no button of its own (orientMinion/orientAny/hierophantReplace/tradeHands/judgementDraw) gets board-click wording, not the generic CHOOSE_STEP", () => {
+    it("activate: orientMinion names any-own-minion targeting, not the generic CHOOSE_STEP", () => {
         const g = new GnosticaGame(2);
         g.move("place m0", { trusted: true });
         g.move("place l0", { trusted: true });
-        const boardMsg = (cardName: string) => i18next.t("apgames:validation.gnostica.CHOOSE_STEP_BOARD", { card: cardName });
-        for (const seq of [3, 5, 11, 15, 20]) { // Empress, Hierophant, Justice, Devil, Judgement
+        forceCardAt(g, 0, 0, () => major(3)); // Empress
+        const [row, col] = rowColFor(g, 0, 0);
+        const result = g.handleClick("use", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_ORIENT_MINION", { card: major(3).name, cell: "m0" }));
+        expect(result.message).to.not.eq(chooseStepMsg(major(3).name));
+    });
+
+    it("activate: orientAny/tradeHands/hierophantReplace name the shared self-or-facing-cell targeting rule, not the generic CHOOSE_STEP", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        for (const seq of [5, 11, 15]) { // Hierophant, Justice, Devil
             forceCardAt(g, 0, 0, () => major(seq));
             const [row, col] = rowColFor(g, 0, 0);
             const result = g.handleClick("use", row, col);
             expect(result.valid, `seq ${seq}`).to.be.true;
-            expect(result.message, `seq ${seq}`).eq(boardMsg(major(seq).name));
+            expect(result.message, `seq ${seq}`).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_FACING", { card: major(seq).name, cell: "m0" }));
             expect(result.message, `seq ${seq}`).to.not.eq(chooseStepMsg(major(seq).name));
         }
+    });
+
+    it("activate: judgementDraw names the discard pile, not the game board, not the generic CHOOSE_STEP", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        forceCardAt(g, 0, 0, () => major(20)); // Judgement
+        const [row, col] = rowColFor(g, 0, 0);
+        const result = g.handleClick("use", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_DISCARD", { card: major(20).name }));
+        expect(result.message).to.not.eq(chooseStepMsg(major(20).name));
+    });
+
+    // With 2+ distinguishable minions eligible at the activated cell, the
+    // acting minion is genuinely ambiguous and a minion-picker button set
+    // appears (see resolveStepMinion's/computeActionButtons' own docs) -
+    // CHOOSE_STEP's own "using the buttons" wording is accurate here,
+    // unlike the single-eligible-minion case above.
+    it("activate: with an ambiguous acting minion, falls back to the generic CHOOSE_STEP (buttons genuinely apply) instead of naming a cell", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(3)); // Empress
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 2, "U")]; // two distinguishable own minions
+        const [row, col] = rowColFor(g, 0, 0);
+        const result = g.handleClick("use", row, col);
+        expect(result.valid).to.be.true;
+        expect(result.message).eq(chooseStepMsg(major(3).name));
+        g.move(result.move, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        expect(bar!.buttons!.some(b => b.value?.startsWith("minion_"))).to.be.true;
     });
 
     it("activate: a primitive-first step, or a special with its own button set (hermitTeleport/magicianChoice), keeps the generic CHOOSE_STEP wording", () => {
@@ -3426,9 +3468,9 @@ describe("Gnostica: choose-step click messaging", () => {
     // World's own target is unbounded ("any major arcana card currently on
     // the board"), unlike every other click-driven special above, whose
     // target is always just the acting minion's own obvious self-or-
-    // facing cell - naming the card alone (CHOOSE_STEP_BOARD) wouldn't be
-    // enough of a hint, so it gets its own real instructions instead, the
-    // same way Fool/High Priestess already do.
+    // facing cell (or "any of your own minions", or the discard pile) -
+    // none of those fixed rules fit World, so it gets its own real
+    // instructions instead, the same way Fool/High Priestess already do.
     it("activate: World gets its own real instructions, not the generic CHOOSE_STEP wording", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());

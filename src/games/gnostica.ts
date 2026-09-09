@@ -834,7 +834,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // real instructions (Fool, High Priestess, World) needs
                 // them here just as much as anywhere else this key is read.
                 const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
-                const { key, params } = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex);
+                const { key, params } = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
                 result.message = i18next.t(key, params);
             } else {
                 result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
@@ -1700,7 +1700,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // ordinary discard/draw action doesn't (a SECOND round follows the
     // first) - so it gets the same wording as the ordinary discard action
     // itself, plus a clause about that.
-    private powerStepMessageKey(headArg: string, priorStepsCount: number): { key: string; params?: Record<string, unknown> } {
+    private powerStepMessageKey(headArg: string, priorStepsCount: number, minions: IMinionRef[]): { key: string; params?: Record<string, unknown> } {
         if (headArg === "02") {
             return { key: priorStepsCount > 0
                 ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"
@@ -1739,18 +1739,42 @@ export class GnosticaGame extends GameBaseSequenced {
         // choosing steps for.
         const cardName = allCards().find(c => c.uid === headArg)?.name ?? headArg;
         // CHOOSE_STEP's own "using the buttons" wording is only true for
-        // a primitive step (a mode button) or hermitTeleport/
-        // magicianChoice (their own dedicated button sets) - orientMinion/
-        // orientAny/hierophantReplace/tradeHands/judgementDraw have no
-        // button of their own at all (see computeActionButtons' own
-        // docs), so a fresh first step of one of those needs the board-
-        // click wording instead, same reasoning as World's own dedicated
-        // message above.
-        if (priorStepsCount === 0) {
-            const step = this.resolveFrameDef(headArg).powers[0];
-            const clickDrivenNoButton: SpecialPower[] = ["orientMinion", "orientAny", "hierophantReplace", "tradeHands", "judgementDraw"];
-            if ("special" in step && clickDrivenNoButton.includes(step.special)) {
-                return { key: "apgames:validation.gnostica.CHOOSE_STEP_BOARD", params: { card: cardName } };
+        // a primitive step (a mode button), hermitTeleport/magicianChoice
+        // (their own dedicated button sets), or a genuinely AMBIGUOUS
+        // acting minion for any special (2+ eligible pieces sharing one
+        // cell DO get a minion-picker button set - see computeActionButtons'
+        // own docs). Once the acting minion is resolved (the overwhelmingly
+        // common case: "use" is always single-cell by construction, and
+        // "play"'s own cross-cell ambiguity is caught separately, before
+        // this is ever reached - see its own "needsCellClick" docs),
+        // orientMinion/orientAny/hierophantReplace/tradeHands/judgementDraw
+        // have no button of their own at all for what comes next (see
+        // computeActionButtons' own docs) - so a fresh first step of one
+        // of those names the ACTUAL next click instead, split by rule
+        // since they don't all share one: orientMinion is reoriented via
+        // a click on or around its own cell (see handleOrientMinionClick's
+        // own docs) - no separate target to pick, unlike orientAny/
+        // tradeHands/hierophantReplace's shared self-or-facing-cell TARGET
+        // rule (a different piece than the acting minion itself); judgementDraw
+        // isn't a board click at all - it's driven by discard-pile clicks
+        // (see computeActionButtons' own docs on AreaPieces clicks).
+        if (priorStepsCount === 0 && minions.length > 0) {
+            const { minion, ambiguous } = this.resolveStepMinion(undefined, minions);
+            if (!ambiguous) {
+                const step = this.resolveFrameDef(headArg).powers[0];
+                if ("special" in step) {
+                    const cell = GnosticaBoard.coords2algebraic(minion.x, minion.y);
+                    switch (step.special) {
+                        case "orientMinion":
+                            return { key: "apgames:validation.gnostica.CHOOSE_STEP_ORIENT_MINION", params: { card: cardName, cell } };
+                        case "orientAny":
+                        case "tradeHands":
+                        case "hierophantReplace":
+                            return { key: "apgames:validation.gnostica.CHOOSE_STEP_FACING", params: { card: cardName, cell } };
+                        case "judgementDraw":
+                            return { key: "apgames:validation.gnostica.CHOOSE_STEP_DISCARD", params: { card: cardName } };
+                    }
+                }
             }
         }
         return {
@@ -3691,7 +3715,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         // incomplete resume (e.g. High Priestess round 2)
                         // still reports complete:-1 on its own, unaffected.
                         const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
-                        const activeMsg = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex);
+                        const activeMsg = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
                         return this.provisionalResult(seeded, activeMsg.key, activeMsg.params);
                     }
                     case "decline_power": {
@@ -3806,7 +3830,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     const freshPending = this.parsePendingStep(`play ${uid}`);
                     const needsCellClick = freshPending?.minionAmbiguous === true
                         && new Set(freshPending.minionCandidates.map(m => `${m.x},${m.y}`)).size > 1;
-                    const playMsg = this.powerStepMessageKey(uid, 0);
+                    const playMsg = this.powerStepMessageKey(uid, 0, freshPending?.minions ?? []);
                     return this.provisionalResult(
                         `play ${uid}`,
                         needsCellClick ? "apgames:validation.gnostica.PICK_MINION_CELL" : playMsg.key,
@@ -4065,7 +4089,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     if (atCell.length === 1) {
                         const ref = this.pieceRefStr(atCell[0].x, atCell[0].y, atCell[0].index, candidate.minions);
-                        const narrowMsg = this.powerStepMessageKey(candidate.headArg, candidate.priorSteps.length);
+                        const narrowMsg = this.powerStepMessageKey(candidate.headArg, candidate.priorSteps.length, atCell);
                         return this.provisionalResult(
                             this.assembleStepMove(candidate, [ref]),
                             narrowMsg.key,
@@ -4124,7 +4148,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 newmove = `use ${t.card.uid}`;
                 {
-                    const useMsg = this.powerStepMessageKey(t.card.uid, 0);
+                    const useMsg = this.powerStepMessageKey(t.card.uid, 0, this.eligibleMinionsForActivate(x, y));
                     resultMessageKey = useMsg.key;
                     resultMessageParams = useMsg.params;
                 }
