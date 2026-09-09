@@ -2153,7 +2153,7 @@ describe("Gnostica: handleClick", () => {
         const uid = g.hands[0][0];
         const result = g.handleClick("", -1, -1, `hand_${uid}`);
         expect(result.valid).to.be.false;
-        expect(result.message).to.eq(i18next.t("apgames:validation.gnostica.NO_ACTION_SELECTED"));
+        expect(result.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
     });
 
     it("discard: rejects a hand-card click for a card not in the acting player's hand", () => {
@@ -3386,14 +3386,49 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.message).eq(chooseStepMsg(major(10).name));
     });
 
+    // Every click-driven special with no button of its own (orientMinion/
+    // orientAny/hierophantReplace/tradeHands/judgementDraw - see
+    // computeActionButtons' own docs) gets CHOOSE_STEP_BOARD instead of
+    // CHOOSE_STEP: CHOOSE_STEP's "using the buttons next to the game
+    // board" wording is actively wrong for them, same reasoning as
+    // World's own dedicated message just below. A primitive-first step
+    // (a real mode button) or hermitTeleport/magicianChoice (their own
+    // dedicated button sets) still get plain CHOOSE_STEP, since it's
+    // accurate for them.
+    it("activate: a special step with no button of its own (orientMinion/orientAny/hierophantReplace/tradeHands/judgementDraw) gets board-click wording, not the generic CHOOSE_STEP", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        const boardMsg = (cardName: string) => i18next.t("apgames:validation.gnostica.CHOOSE_STEP_BOARD", { card: cardName });
+        for (const seq of [3, 5, 11, 15, 20]) { // Empress, Hierophant, Justice, Devil, Judgement
+            forceCardAt(g, 0, 0, () => major(seq));
+            const [row, col] = rowColFor(g, 0, 0);
+            const result = g.handleClick("use", row, col);
+            expect(result.valid, `seq ${seq}`).to.be.true;
+            expect(result.message, `seq ${seq}`).eq(boardMsg(major(seq).name));
+            expect(result.message, `seq ${seq}`).to.not.eq(chooseStepMsg(major(seq).name));
+        }
+    });
+
+    it("activate: a primitive-first step, or a special with its own button set (hermitTeleport/magicianChoice), keeps the generic CHOOSE_STEP wording", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0", { trusted: true });
+        g.move("place l0", { trusted: true });
+        for (const seq of [1, 6, 9]) { // Magician, Lovers, Hermit
+            forceCardAt(g, 0, 0, () => major(seq));
+            const [row, col] = rowColFor(g, 0, 0);
+            const result = g.handleClick("use", row, col);
+            expect(result.valid, `seq ${seq}`).to.be.true;
+            expect(result.message, `seq ${seq}`).eq(chooseStepMsg(major(seq).name));
+        }
+    });
+
     // World's own target is unbounded ("any major arcana card currently on
-    // the board"), unlike every other click-driven special (tradeHands/
-    // orientAny/hierophantReplace/orientMinion), whose target is always
-    // just the acting minion's own obvious self-or-facing cell - CHOOSE_
-    // STEP's generic "use the buttons next to the game board" wording is
-    // actively wrong for it (there ARE no such buttons - see
-    // computeActionButtons' own docs), so it gets real instructions
-    // instead, the same way Fool/High Priestess already do.
+    // the board"), unlike every other click-driven special above, whose
+    // target is always just the acting minion's own obvious self-or-
+    // facing cell - naming the card alone (CHOOSE_STEP_BOARD) wouldn't be
+    // enough of a hint, so it gets its own real instructions instead, the
+    // same way Fool/High Priestess already do.
     it("activate: World gets its own real instructions, not the generic CHOOSE_STEP wording", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());

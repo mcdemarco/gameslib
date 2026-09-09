@@ -1738,6 +1738,21 @@ export class GnosticaGame extends GameBaseSequenced {
         // be looking at) tells them which card's power they're now
         // choosing steps for.
         const cardName = allCards().find(c => c.uid === headArg)?.name ?? headArg;
+        // CHOOSE_STEP's own "using the buttons" wording is only true for
+        // a primitive step (a mode button) or hermitTeleport/
+        // magicianChoice (their own dedicated button sets) - orientMinion/
+        // orientAny/hierophantReplace/tradeHands/judgementDraw have no
+        // button of their own at all (see computeActionButtons' own
+        // docs), so a fresh first step of one of those needs the board-
+        // click wording instead, same reasoning as World's own dedicated
+        // message above.
+        if (priorStepsCount === 0) {
+            const step = this.resolveFrameDef(headArg).powers[0];
+            const clickDrivenNoButton: SpecialPower[] = ["orientMinion", "orientAny", "hierophantReplace", "tradeHands", "judgementDraw"];
+            if ("special" in step && clickDrivenNoButton.includes(step.special)) {
+                return { key: "apgames:validation.gnostica.CHOOSE_STEP_BOARD", params: { card: cardName } };
+            }
+        }
         return {
             key: priorStepsCount > 0
                 ? "apgames:validation.gnostica.POWER_STILL_OPTIONAL"
@@ -3817,8 +3832,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // No action selected yet (or one that a hand-card click
                 // makes no sense for) - require a button click first
-                // rather than guessing what the player meant.
-                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_ACTION_SELECTED") };
+                // rather than guessing what the player meant, same as an
+                // ambiguous board click below.
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
             }
 
             // Discard-pile clicks (from the AreaPieces built by
