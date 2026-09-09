@@ -4257,7 +4257,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:DESTROY.gnostica_piece", { player: "Alice", what: "1", target: "Bob" }));
     });
 
-    it("convert, not destroy (Swords piece): a minion that survives an attack, merely shrunk, is not logged as destroyed", () => {
+    it("convert, not destroy (Swords piece): an enemy minion that survives an attack, merely shrunk, is not logged as destroyed - and names whose it is", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfSwords());
@@ -4269,7 +4269,45 @@ describe("Gnostica: chatLog() other-player naming", () => {
         const log = g.chatLog(["Alice", "Bob"]);
         expect(log.flat().some(l => l.includes("destroyed"))).to.be.false;
         const line = log.flat().find(l => l.includes("shrank"));
-        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_piece_shrink", { player: "Alice", into: "size 1", where: "n0" }));
+        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_piece_shrink", { player: "Alice", into: "size 1", where: "n0", target: "Bob" }));
+    });
+
+    it("convert (Swords piece): no target named when the acting player shrinks their own minion", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfSwords());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, elsewhere
+        g.board.get(0, 0)!.pieces[0] = new Piece(1, 2, "E"); // grow the acting minion itself to 2 pips
+        g.move(`use ${aceOfSwords().uid}, m0.2 piece m0.2 1`, { trusted: true });
+        expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1 }); // survived, shrunk
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("shrank"));
+        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_piece_shrink_own", { player: "Alice", into: "size 1", where: "m0" }));
+    });
+
+    it("convert (Discs piece): names whose piece was grown, when it isn't the acting player's own", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfDiscs());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the targeted cell
+        g.move(`use ${aceOfDiscs().uid}, m0.1 piece n0.1 W`, { trusted: true });
+        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 2 });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("grew"));
+        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_piece", { player: "Alice", into: "size 2", where: "n0", target: "Bob" }));
+    });
+
+    it("convert (Discs piece): no target named for the acting player's own minion", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfDiscs());
+        g.move("place m0", { trusted: true }); // player 1
+        g.move("place l0", { trusted: true }); // player 2
+        g.move(`use ${aceOfDiscs().uid}, m0.1 piece m0.1 N`, { trusted: true });
+        const log = g.chatLog(["Alice", "Bob"]);
+        const line = log.flat().find(l => l.includes("grew"));
+        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_piece_own", { player: "Alice", into: "size 2", where: "m0" }));
     });
 
     it("destroy (Swords tile): names the destroyed card, not a raw uid", () => {

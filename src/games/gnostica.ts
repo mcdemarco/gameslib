@@ -6078,7 +6078,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 growPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, newOrientation);
-                this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y) });
+                this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: owner });
                 if (owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
                     return { newMinion: { x: target.x, y: target.y, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
@@ -6164,7 +6164,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (resultSize === 0) {
                     this.results.push({ type: "destroy", where, what: this.getPipsFromRef(targetRef), who: owner });
                 } else {
-                    this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${resultSize}`, where });
+                    this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${resultSize}`, where, who: owner });
                 }
                 if (resultSize > 0 && owner === this.currplayer) {
                     const newIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
@@ -8717,8 +8717,21 @@ export class GnosticaGame extends GameBaseSequenced {
                                 // what/into shape) - the numbers themselves
                                 // say which direction actually happened.
                                 const grew = parseInt(r.into.slice(5), 10) > parseInt(r.what.slice(5), 10);
-                                const key = grew ? "apresults:CONVERT.gnostica_piece" : "apresults:CONVERT.gnostica_piece_shrink";
-                                node.push(i18next.t(key, { player, what: r.what, into: r.into, where: r.where }));
+                                // Both growth (Discs) and shrinking
+                                // (Swords) can target an enemy's piece,
+                                // not just the acting player's own - name
+                                // whose, same _own/target split as
+                                // DESTROY's.
+                                const target = this.otherPlayerName(r.who, player, players);
+                                if (grew) {
+                                    node.push(target === undefined
+                                        ? i18next.t("apresults:CONVERT.gnostica_piece_own", { player, into: r.into, where: r.where })
+                                        : i18next.t("apresults:CONVERT.gnostica_piece", { player, into: r.into, where: r.where, target }));
+                                } else {
+                                    node.push(target === undefined
+                                        ? i18next.t("apresults:CONVERT.gnostica_piece_shrink_own", { player, into: r.into, where: r.where })
+                                        : i18next.t("apresults:CONVERT.gnostica_piece_shrink", { player, into: r.into, where: r.where, target }));
+                                }
                             } else if (r.into.startsWith("owner-")) {
                                 const target = this.otherPlayerName(r.who, player, players);
                                 node.push(target === undefined

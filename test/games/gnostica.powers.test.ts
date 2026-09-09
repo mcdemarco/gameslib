@@ -327,6 +327,23 @@ describe("Gnostica powers: Discs (grow)", () => {
         expect(() => growPiece(ctx2, 0, 0, 0, 0, 0, 0, undefined)).to.throw();
     });
 
+    it("grows an enemy's piece from THEIR stash, not the acting player's own", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 1, "N")]));
+        const ctx = makeCtx(b, { stashes: new Map([[1, [5, 0, 5] as Stash], [2, fullStash()]]) });
+        growPiece(ctx, 0, 0, 0, 0, 0, 1, undefined); // acting minion (index 0, owner 1) grows the enemy piece (index 1, owner 2)
+        expect(b.get(0, 0)!.pieces[1]).to.deep.include({ owner: 2, size: 2 });
+        expect(ctx.stashes.get(2)!).to.deep.equal([6, 4, 5]); // the enemy's own stash was charged (old size-1 returned, new size-2 taken)
+        expect(ctx.stashes.get(1)!).to.deep.equal([5, 0, 5]); // the acting player's stash is untouched
+    });
+
+    it("refuses to grow an enemy's piece when THEIR stash lacks the next size, even with the acting player's own stash full", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 1, "N")]));
+        const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, [5, 0, 5] as Stash]]) });
+        expect(() => growPiece(ctx, 0, 0, 0, 0, 0, 1, undefined)).to.throw();
+    });
+
     it("grows a territory by exactly one point, discarding the old card", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
