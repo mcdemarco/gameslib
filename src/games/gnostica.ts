@@ -35,6 +35,14 @@ import i18next from "i18next";
 
 export type playerid = 1|2|3|4|5|6;
 
+// One button-bar choice, before its value gets a `<prefix>_` prepended -
+// see buildChoiceButtons' own docs.
+interface ChoiceOption {
+    value: string;
+    label: string;
+    disabledReason?: { key: string; params?: Record<string, unknown> };
+}
+
 // A minion's board location - shorthand used while resolving use/play.
 // `piece` is set only for a newMinion predicted by a non-mutating validate*
 // step (see validateCups/validateRods/validateHermitStep's "own"/"piece"
@@ -200,7 +208,7 @@ function handHasCardOfValue(pile: string[], value: number): boolean {
 // Exactly one of `suitUid` or `special` is ever set for a given pending
 // object (never both, never neither) - a discriminated union would let
 // TypeScript enforce that, but every existing suit-mode helper
-// (legalMinorModes, buildStepModeMove, handlePendingStepBoardClick,
+// (minorModeAvailability, buildStepModeMove, handlePendingStepBoardClick,
 // supplyStepCardUid) already assumes `suitUid` unconditionally, and a
 // union would force touching all of them just to re-narrow. Kept as plain
 // optional fields instead - each of those functions asserts `suitUid!`
@@ -283,7 +291,7 @@ interface IPendingStep {
     // computeShortcutOpts's own result for the CURRENT step - always {}
     // for a minor card (which never has shortcut opts at all) or a
     // special step (which never has PrimitiveOpts at all). Exists so
-    // legalMinorModes' best-effort button pre-filter can account for a
+    // minorModeAvailability's best-effort button pre-filter can account for a
     // same-target-shortcut/Moon card's relaxed capacity, the one place
     // that filter's own logic needs to know about opts.
     opts: Record<string, unknown>;
@@ -1981,6 +1989,48 @@ export class GnosticaGame extends GameBaseSequenced {
         return [...bar, declineBtn] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
+    // The recurring shape behind most of computeActionButtons' own button
+    // sets: pick one value from a small labeled set. `disabledReason`
+    // (when set) is the SAME reason object minorModeAvailability and
+    // similar checks already produce - reused here for the strikethrough,
+    // and by the matching _btn_ dispatch for the actual rejection
+    // message, so the two can't drift apart the way separately-computed
+    // copies used to.
+    private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
+        return options.map(({ value, label, disabledReason }) => {
+            const button: ButtonBarButton = { label, value: `${prefix}_${value}` };
+            const attrs: { name: string; value: string }[] = [];
+            if (value === current) {
+                attrs.push({ name: "font-weight", value: "bold" });
+            }
+            if (disabledReason !== undefined) {
+                attrs.push({ name: "text-decoration", value: "line-through" });
+                button.fill = MUTED_FILL;
+            }
+            if (attrs.length > 0) {
+                button.attributes = attrs as [{ name: string; value: string }, ...{ name: string; value: string }[]];
+            }
+            return button;
+        });
+    }
+
+    // Shared by the minion-ambiguity button set and its own "minion_"
+    // click dispatch - a Rod can never act while upright, so an upright
+    // candidate is always a doomed choice (see checkCanUseRod, powers.ts).
+    private rodNeedsFacingReason(suitUid: string | undefined, piece: Piece): { key: string } | undefined {
+        return suitUid === "R" && piece.orientation === "U" ? { key: "ROD_NEEDS_FACING" } : undefined;
+    }
+
+    // Shared by the ordinary end-of-turn discard/draw count-picker and
+    // High Priestess's own identical-shaped one.
+    private drawCountOptions(maxDraw: number): ChoiceOption[] {
+        const options: ChoiceOption[] = [];
+        for (let n = maxDraw; n >= 0; n--) {
+            options.push({ value: String(n), label: `Draw ${n}` });
+        }
+        return options;
+    }
+
     private computeActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         if (this.gameover) {
             return undefined;
@@ -2048,11 +2098,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (this.liveMove.head?.toLowerCase() === "discard" && !this.liveMove.rest.includes("draw")) {
                 const hand = this.hands[this.currplayer - 1] ?? [];
                 const maxDraw = Math.max(0, 6 - hand.length);
-                const countButtons: ButtonBarButton[] = [];
-                for (let n = maxDraw; n >= 0; n--) {
-                    countButtons.push({ label: `Draw ${n}`, value: `drawcount_${n}` });
-                }
-                return countButtons as [ButtonBarButton, ...ButtonBarButton[]];
+                return this.buildChoiceButtons("drawcount", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
             }
             // Orient: a bare cell (not yet a full piece ref - see
             // handleClickCore's own "orient" docs) means 2+ of the
@@ -2068,17 +2114,20 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (coords !== undefined) {
                     const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1]));
                     if (ambiguous) {
-                        const buttons: ButtonBarButton[] = [{ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] }];
                         const seenRefs = new Set<string>();
+                        const options: ChoiceOption[] = [];
                         for (const m of candidates) {
                             const ref = this.pieceRefStr(m.x, m.y, m.index, candidates);
                             if (seenRefs.has(ref)) {
                                 continue;
                             }
                             seenRefs.add(ref);
-                            buttons.push({ label: this.textFormat(this.board.get(m.x, m.y)!.pieces[m.index]), value: `orientpick_${ref}` });
+                            options.push({ value: ref, label: this.textFormat(this.board.get(m.x, m.y)!.pieces[m.index]) });
                         }
-                        return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+                        return [
+                            { label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] },
+                            ...this.buildChoiceButtons("orientpick", options, undefined),
+                        ] as [ButtonBarButton, ...ButtonBarButton[]];
                     }
                 }
             }
@@ -2174,6 +2223,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
             buttons.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
             const seenRefs = new Set<string>();
+            const options: ChoiceOption[] = [];
             for (const m of pendingMinor.minionCandidates) {
                 const ref = this.pieceRefStr(m.x, m.y, m.index, pendingMinor.minions);
                 // Two genuinely identical pieces (same owner/size/orientation
@@ -2186,18 +2236,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 seenRefs.add(ref);
                 const piece = this.board.get(m.x, m.y)!.pieces[m.index];
-                const button: ButtonBarButton = { label: this.textFormat(piece), value: `minion_${ref}` };
-                // Rods rejects any upright minion for every mode
-                // (checkCanUseRod, powers.ts) - keep it in the list rather
-                // than omitting it (see tree-pruning docs), but mark it
-                // struck through; the minion_ dispatch below rejects an
-                // actual click on it immediately with the same message.
-                if (pendingMinor.suitUid === "R" && piece.orientation === "U") {
-                    button.attributes = [{ name: "text-decoration", value: "line-through" }];
-                    button.fill = MUTED_FILL;
-                }
-                buttons.push(button);
+                options.push({ value: ref, label: this.textFormat(piece), disabledReason: this.rodNeedsFacingReason(pendingMinor.suitUid, piece) });
             }
+            buttons.push(...this.buildChoiceButtons("minion", options, undefined));
             if (declareBtn !== undefined) {
                 buttons.push(declareBtn);
             }
@@ -2227,11 +2268,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pendingMinor.special === "highPriestess" && !pendingMinor.rest.includes("draw")) {
             const hand = this.hands[this.currplayer - 1] ?? [];
             const maxDraw = Math.max(0, 6 - hand.length);
-            const countButtons: ButtonBarButton[] = [];
-            for (let n = maxDraw; n >= 0; n--) {
-                countButtons.push({ label: `Draw ${n}`, value: `hpdraw_${n}` });
-            }
-            return countButtons as [ButtonBarButton, ...ButtonBarButton[]];
+            return this.buildChoiceButtons("hpdraw", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
         }
         // orientMinion/tradeHands/orientAny/hierophantReplace/
         // judgementDraw/worldUseAny are pure click-driven (board or
@@ -2287,42 +2324,21 @@ export class GnosticaGame extends GameBaseSequenced {
         buttons.push({ label: spacerLabel, value: "_spacer",  attributes: [{ name: "font-style", value: "italic" }] });
 
         if (pendingMinor.special === "hermitTeleport") {
-            const chosen = pendingMinor.rest[0];
-            for (const [mode, config] of Object.entries(HERMIT_MODES)) {
-                const button: ButtonBarButton = { label: config.label, value: `hermit_${mode}` };
-                if (chosen === mode) {
-                    button.attributes = [{ name: "font-weight", value: "bold" }];
-                }
-                buttons.push(button);
-            }
+            const options = Object.entries(HERMIT_MODES).map(([mode, config]) => ({ value: mode, label: config.label }));
+            buttons.push(...this.buildChoiceButtons("hermit", options, pendingMinor.rest[0]));
         } else if (pendingMinor.special === "magicianChoice") {
-            for (const suit of ALL_SUITS) {
-                buttons.push({ label: suit.label, value: `magician_${suit.uid}` });
-            }
+            const options = ALL_SUITS.map(suit => ({ value: suit.uid, label: suit.label }));
+            buttons.push(...this.buildChoiceButtons("magician", options, undefined));
         } else {
             const suitUid = pendingMinor.suitUid!;
-            const feasible = new Set(this.legalMinorModes(pendingMinor));
-            for (const mode of Object.keys(MINOR_MODES[suitUid])) {
-                const config = MINOR_MODES[suitUid][mode];
-                const button: ButtonBarButton = { label: config.label, value: `mode_${suitUid}_${mode}` };
-                const attrs: { name: string; value: string }[] = [];
-                if (pendingMinor.mode === mode) {
-                    attrs.push({ name: "font-weight", value: "bold" });
-                }
-                // A mode that can never be completed right now (see
-                // minorModeAvailability's own tree-pruning docs) is still
-                // offered - not omitted - but struck through; the mode_
-                // dispatch below rejects an actual click on it immediately
-                // with the specific reason.
-                if (!feasible.has(mode)) {
-                    attrs.push({ name: "text-decoration", value: "line-through" });
-                    button.fill = MUTED_FILL;
-                }
-                if (attrs.length > 0) {
-                    button.attributes = attrs as [{ name: string; value: string }, ...{ name: string; value: string }[]];
-                }
-                buttons.push(button);
-            }
+            const availability = this.minorModeAvailability(pendingMinor);
+            const options = Object.keys(MINOR_MODES[suitUid]).map(mode => ({
+                value: `${suitUid}_${mode}`,
+                label: MINOR_MODES[suitUid][mode].label,
+                disabledReason: availability.get(mode),
+            }));
+            const currentMode = pendingMinor.mode !== undefined ? `${suitUid}_${pendingMinor.mode}` : undefined;
+            buttons.push(...this.buildChoiceButtons("mode", options, currentMode));
             // "new" mode's own required card arg is otherwise only ever
             // suppliable by clicking a hand card (see supplyStepCardUid's
             // own docs) - Wheel of Fortune's own step (the only card with
@@ -2344,12 +2360,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = this.minorTargetCell(pendingMinor.minion);
                 const verb = MINOR_MODES[suitUid].piece.label.replace(" Piece", "");
                 const selfRef = this.pieceRefStr(pendingMinor.minion.x, pendingMinor.minion.y, pendingMinor.minion.index);
-                buttons.push({ label: `${verb} self`, value: `target_${selfRef}` });
+                const targetOptions: ChoiceOption[] = [{ value: selfRef, label: `${verb} self` }];
                 const facingCell = this.board.get(tx, ty);
                 if ((tx !== pendingMinor.minion.x || ty !== pendingMinor.minion.y) && (facingCell?.pieces.length ?? 0) > 0) {
-                    const faceRef = this.pieceRefStr(tx, ty, 0);
-                    buttons.push({ label: `${verb} ${this.textFormat(facingCell!.pieces[0])}`, value: `target_${faceRef}` });
+                    targetOptions.push({ value: this.pieceRefStr(tx, ty, 0), label: `${verb} ${this.textFormat(facingCell!.pieces[0])}` });
                 }
+                buttons.push(...this.buildChoiceButtons("target", targetOptions, undefined));
             }
             // Swords pips is pure damage, no destination cell to click
             // (unlike Rods' own distance - see
@@ -2357,14 +2373,11 @@ export class GnosticaGame extends GameBaseSequenced {
             // set instead, offered once a target is chosen.
             if (suitUid === "S" && pendingMinor.mode === "piece" && pendingMinor.rest.length >= 1) {
                 const minionPiece = pendingMinor.minion.piece ?? this.board.get(pendingMinor.minion.x, pendingMinor.minion.y)!.pieces[pendingMinor.minion.index];
-                const current = pendingMinor.rest[1];
+                const pipsOptions: ChoiceOption[] = [];
                 for (let n = minionPiece.size; n >= 1; n--) {
-                    const button: ButtonBarButton = { label: `Attack for ${n}`, value: `pips_${n}` };
-                    if (current === String(n)) {
-                        button.attributes = [{ name: "font-weight", value: "bold" }];
-                    }
-                    buttons.push(button);
+                    pipsOptions.push({ value: String(n), label: `Attack for ${n}` });
                 }
+                buttons.push(...this.buildChoiceButtons("pips", pipsOptions, pendingMinor.rest[1]));
             }
         }
         if (declareBtn !== undefined) {
@@ -2665,7 +2678,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // magicianChoice is the one exception: once a suit letter is chosen
     // (tokens[1]), the rest of its own grammar (<mode> <args...>) is
     // identical to that suit's own primitive step - rather than building a
-    // second, parallel implementation of legalMinorModes/buildStepModeMove/
+    // second, parallel implementation of minorModeAvailability/buildStepModeMove/
     // handlePendingStepBoardClick/supplyStepCardUid for it, this returns
     // an ordinary SUIT-shaped pending instead (suitUid = the chosen
     // letter, prefix = [letter] so the letter gets spliced back into every
@@ -2897,7 +2910,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     break;
                 case "R.piece":
                 case "R.tile":
-                    result.set(mode, minion.orientation !== "U" ? undefined : { key: "ROD_NEEDS_FACING" });
+                    result.set(mode, this.rodNeedsFacingReason("R", minion));
                     break;
                 case "D.tile": {
                     const current = targetT?.pointValue() ?? 0;
@@ -2944,9 +2957,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return result;
     }
 
-    private legalMinorModes(pending: IPendingStep): string[] {
-        return [...this.minorModeAvailability(pending).entries()].filter(([, reason]) => reason === undefined).map(([mode]) => mode);
-    }
 
     // Builds the move string for choosing a suit-power mode via button -
     // the minion is always the first eligible one (see
@@ -3657,8 +3667,9 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
                     const clickedPiece = this.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
-                    if (pending.suitUid === "R" && clickedPiece.orientation === "U") {
-                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.ROD_NEEDS_FACING") };
+                    const rodReason = this.rodNeedsFacingReason(pending.suitUid, clickedPiece);
+                    if (rodReason !== undefined) {
+                        return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${rodReason.key}`) };
                     }
                     const minionRef = this.pieceRefStr(resolved.ref.x, resolved.ref.y, resolved.ref.index, pending.minions);
                     return this.provisionalResult(this.assembleStepMove(pending, [minionRef]));

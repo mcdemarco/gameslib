@@ -404,7 +404,7 @@ function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IMinionRef): { ref
 // than an IPendingStep (reconstructed from a move string, not
 // convenient here) - a thin, deliberately-looser wrapper over the
 // exact same per-mode legality rules, not a second copy of them.
-// Best-effort pre-filter only, same as legalMinorModes itself -
+// Best-effort pre-filter only, same as minorModeAvailability itself -
 // buildRandomModeArgCandidates + validateSuitPrimitive remain the real
 // gate.
 function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: string, opts: Record<string, unknown>): string[] {
