@@ -858,7 +858,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // any head dispatch. The click UI never produces one; this is a
         // hand-edit or a broken client.
         if (parsed.malformedStep !== undefined) {
-            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") });
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" });
         }
 
         const head = parsed.head;
@@ -873,14 +873,11 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.continued.length > 0) {
             const activeUid = this.getContinuedUid();
             if (parsed.viaUid !== activeUid)
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE");
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_VIA_STRING"});
             const allowed = activeUid === "02" ? ["decline", "discard"] : ["decline", "play"];
             if (! allowed.includes(parsed.head!))
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE");
-            // This was part of validateResumeHead but doesn't seem to involve the head.
-            //  (activeUid !== "00" || parsed.rest[0] === undefined || parsed.rest[0] === this.discardPile[this.discardPile.length - 1]);
-            
-            const failure = this.validateResumePendingPower(this.resumeStepSegments(parsed));
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "ACTION_NOT_ALLOWED"});
+            const failure = this.validateResumePendingPower(parsed);
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
         // "decline" as a head word only ever means something paired with
@@ -1370,12 +1367,12 @@ export class GnosticaGame extends GameBaseSequenced {
     // resolvePieceRefOrThrow's own notFoundKey param on the apply* side).
     private invalidPieceRef(kind: "malformed" | "not_found" | "ambiguous", ref: string | undefined, notFoundKey = "NO_SUCH_PIECE"): IValidationResult {
         switch (kind) {
-            case "malformed": return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_PIECE_REF", ref });
+            case "malformed": return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_PIECE_REF" });
             // notFoundKey is sometimes overridden to a key with its own
             // real text (e.g. NOT_AN_ELIGIBLE_MINION) - only the shared
             // default collapses into INVALID_MOVE.
             case "not_found": return notFoundKey === "NO_SUCH_PIECE"
-                ? this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE", ref })
+                ? this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE" })
                 : this.invalid(`apgames:validation.gnostica.${notFoundKey}`, { ref });
             case "ambiguous": return this.invalid("apgames:validation.gnostica.AMBIGUOUS_PIECE_REF", { ref });
         }
@@ -1490,7 +1487,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return result.ref;
         }
         if (result.kind === "malformed" || (result.kind === "not_found" && notFoundKey === "NO_SUCH_PIECE")) {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: result.kind === "malformed" ? "BAD_PIECE_REF" : "NO_SUCH_PIECE", ref }));
+            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: result.kind === "malformed" ? "BAD_PIECE_REF" : "NO_SUCH_PIECE" }));
         }
         const key = result.kind === "ambiguous" ? "AMBIGUOUS_PIECE_REF" : notFoundKey;
         throw new UserFacingError("VALIDATION_GENERAL", i18next.t(`apgames:validation.gnostica.${key}`, { ref }));
@@ -2926,7 +2923,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (result.kind === "ambiguous") {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.AMBIGUOUS_PIECE_REF", { ref: suffix }));
         }
-        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: result.kind === "malformed" ? "BAD_PIECE_REF" : "NO_SUCH_PIECE", ref: suffix }));
+        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: result.kind === "malformed" ? "BAD_PIECE_REF" : "NO_SUCH_PIECE" }));
     }
 
     // Spells a pending step's own head, shared by assembleStepMove (mid-
@@ -4025,7 +4022,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const candidates = this.discardPile.filter(uid => matchesBucket(uid) && !selected.includes(uid));
                 if (candidates.length === 0) {
-                    return { move: this.pendingMoveString(pendingForDiscard), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD", uid: key }) };
+                    return { move: this.pendingMoveString(pendingForDiscard), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
                 }
                 const picked = candidates[Math.floor(Math.random() * candidates.length)];
                 return rebuildDiscard([...selected, picked]);
@@ -4151,7 +4148,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // existing minion's.
                     const pool = this.eligibleMinionsForOrient(x, y);
                     if (pool.length === 0) {
-                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE", ref: cell }) };
+                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE" }) };
                     }
                     const { minion, ambiguous } = this.resolveStepMinion(undefined, pool);
                     if (ambiguous) {
@@ -4569,7 +4566,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const seen = new Set<string>();
         for (const uid of uids) {
             if (seen.has(uid)) {
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid });
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD" });
             }
             seen.add(uid);
             if (!this.biddingPool!.includes(uid)) {
@@ -4856,7 +4853,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const seen = new Set<string>();
         for (const uid of discardUids) {
             if (seen.has(uid)) {
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid });
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD" });
             }
             seen.add(uid);
             if (!hand.includes(uid)) {
@@ -5705,7 +5702,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // An earlier segment being incomplete means a later one
                 // couldn't legitimately exist - defensive, shouldn't fire.
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: tokens.join(" ") });
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" });
             }
             if (stepResult.outcome?.forcePause === true) {
                 // A forced-pause step can never legally be followed by more
@@ -5779,20 +5776,20 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.validateFrameStack(stack, stepSegments, def.uid);
     }
 
-    // Mirrors resumePendingPower's own dispatch, read-only. Head and
-    // "(via <root>)" anchor have already been checked by validateMove
-    // (called just before this in validateMove's gate); this only walks
-    // the step segments for legality.
-    // A resume submission must carry the "(via <uid>)" anchor of the
-    // innermost pending obligation ("00" or "02"), spell the head that
-    // fits it ("decline"/"discard" for a High Priestess round; "decline"/
-    // "play <revealed card>" for a Fool reveal), and - for a Fool reveal -
-    // name the card actually on top of the discard pile. The click UI
-    // always gets all of this right, so a failure is only ever a
-    // hand-edit; point the player back at the buttons rather than
-    // explaining the exact malformation.
-    private validateResumePendingPower(stepSegments: string[][]): IValidationResult | undefined {
+    // Mirrors resumePendingPower's own dispatch, read-only. The "(via
+    // <uid>)" anchor and head word have already been checked by
+    // validateMove's own resume gate; this checks the card a "play"
+    // resume names (it must be the one the last flip left on top of the
+    // discard pile - see buildPendingFromContinued, which rebuilds the
+    // stack's top frame from exactly that), then walks the step segments
+    // for legality. The click UI always names it right, so a mismatch is
+    // only ever a hand-edit.
+    private validateResumePendingPower(parsed: IParsedMove): IValidationResult | undefined {
         const stack = this.resumeStack()!;
+        if (parsed.head === "play" && parsed.rest[0] !== undefined && parsed.rest[0] !== stack[stack.length - 1].cardUid) {
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_CARD"});
+        }
+        const stepSegments = this.resumeStepSegments(parsed);
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
@@ -5924,7 +5921,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { pushFrame: { cardUid: chosenDef.uid, minions: [minion] } };
             }
             default:
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_YET_SUPPORTED", special: step.special }));
+                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_FOUND" }));
         }
     }
 
@@ -6030,7 +6027,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { failed: false, outcome: { pushFrame: { cardUid: chosenUid, minions: [minion] } } };
             }
             default:
-                return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_YET_SUPPORTED", special: step.special }) };
+                return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_FOUND" }) };
         }
     }
 
@@ -6311,7 +6308,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const target = targetResult.ref;
                 const dist = parseInt(distStr, 10);
                 if (Number.isNaN(dist)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: distStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
                 if (orientationStr !== undefined) {
                     const orientation = this.tryParseOrientation(orientationStr);
@@ -6359,7 +6356,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [distStr] = rest;
                 const dist = parseInt(distStr, 10);
                 if (Number.isNaN(dist)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: distStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
                 const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, dist);
                 if (failure) {
@@ -6523,7 +6520,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const target = targetResult.ref;
                 const pips = parseInt(pipsStr, 10);
                 if (Number.isNaN(pips)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: pipsStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
                 if (orientationStr !== undefined) {
                     const orientation = this.tryParseOrientation(orientationStr);
@@ -6560,7 +6557,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = coords;
                 const pips = parseInt(pipsStr, 10);
                 if (Number.isNaN(pips)) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER", value: pipsStr }) };
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
                 const failure = checkAttackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
                 if (failure) {
