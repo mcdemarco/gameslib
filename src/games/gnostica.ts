@@ -770,10 +770,6 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    public clone(): GnosticaGame {
-        return new GnosticaGame(this.serialize());
-    }
-
     // Unlike clone() (via serialize(), which reads only this.stack - the
     // last REAL commit), this reflects this.board/this.hands/etc. exactly
     // as they currently stand live - including a partial preview's own
@@ -869,7 +865,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
         if (!parsed.headRecognized) {
-            return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: [parsed.head, ...parsed.rest].join(" ") });
+            return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: m });
         }
         // A step segment whose token grammar is broken (see parseMove's own
         // docs on malformedStep) - rejected the moment it's known, ahead of
@@ -948,7 +944,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // Unreachable: head was confirmed recognized above, and bid/redraw/
         // pass/resume are all handled before here.
-        return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: [head, ...parsed.rest].join(" ") });
+        return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: m });
     }
     
     // ============================================================
@@ -8278,4 +8274,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         return result;
     }
+
+    public clone(): GnosticaGame {
+        return new GnosticaGame(this.serialize());
+    }
 }
+
