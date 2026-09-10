@@ -161,7 +161,7 @@ describe("Gnostica: randomMove()", () => {
         for (let i = 0; i < 400; i++) {
             const attempt = richGame();
             const move = attempt.randomMove();
-            if (/^(use|play)\b/.test(move) && move.includes(",")) {
+            if (/^(use|play)\b/.test(move) && move.includes("/")) {
                 sawMultiTokenUseOrPlay = true;
                 break;
             }

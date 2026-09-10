@@ -940,15 +940,14 @@ export class GnosticaGame extends GameBaseSequenced {
     // ============================================================
     // Move parsing
     //
-    // Grammar: a comma/semicolon/slash-delimited list of segments naming
-    // the turn's action (plus, for "use"/"play", 0+ further segments
-    // chaining suit/major-arcana power steps). A trailing "(last)" suffix
-    // on the WHOLE move string - not a segment of its own, always at the
-    // very end - announces the player's final turn. It's deliberately a
-    // distinct, unmistakable suffix rather than just another
-    // comma-segment, so it's one flag on parseMove's own result
-    // rather than something every consumer has to notice and skip past
-    // on its own.
+    // Grammar: a "/"-delimited list of segments - the first naming the
+    // turn's action, and (for "use"/"play") 0+ further ones chaining
+    // suit/major-arcana power steps. A trailing "(last)" suffix on the
+    // WHOLE move string - not a segment of its own, always at the very
+    // end - announces the player's final turn. It's deliberately a
+    // distinct, unmistakable suffix rather than just another segment, so
+    // it's one flag on parseMove's own result rather than something every
+    // consumer has to notice and skip past on its own.
     //
     // parseMove/pickleMove (below) are this grammar's single
     // structural parser/serializer pair - every reader (validateMove,
@@ -1238,10 +1237,15 @@ export class GnosticaGame extends GameBaseSequenced {
             bare = bare.slice(0, viaMatch.index).trim();
         }
         const viaUid = viaMatch ? viaMatch[1] : undefined;
-        const segments = bare.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
-        if (segments.length === 0) {
+        if (bare.length === 0) {
             return { announceLast, head: undefined, headRecognized: true, rest: [], stepSegments: [], malformedStep: undefined, viaUid };
         }
+        // "/" (or a newline) separates every segment - the head from its
+        // first power step, and steps from each other. NOT filtered: a
+        // leading/trailing/doubled "/" leaves an empty segment that then
+        // fails the head or step-shape check, rather than being silently
+        // swallowed.
+        const segments = bare.split(/\s*[\n/]\s*/);
         const [rawHead, ...rawRest] = segments[0].split(/\s+/);
         const head = rawHead.toLowerCase();
         // The "(via <uid>)" anchor stays in `viaUid` alone - `rest` is
@@ -1260,18 +1264,16 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    // "/" between step segments (mirroring frogger.ts's own sub-move
-    // delimiter) once there's genuinely more than one - the separator
-    // between the head/card-uid and its first step stays "," (that
-    // pairing isn't chaining at all; a single-step "use <uid>, <step>"
-    // is unaffected either way).
+    // "/" separates every segment - the head/card-uid from its first
+    // power step, and steps from each other (see parseMove). So a
+    // single-step move is "use <uid>/<step>", a chain "use <uid>/<s1>/<s2>".
     public pickleMove(p: IParsedMove): string {
         if (p.head === undefined) {
             return p.announceLast ? "(last)" : "";
         }
         const headPart = [p.head, ...p.rest].join(" ");
         const stepsPart = p.stepSegments.map(s => s.join(" ")).join("/");
-        let base = stepsPart.length === 0 ? headPart : `${headPart}, ${stepsPart}`;
+        let base = stepsPart.length === 0 ? headPart : `${headPart}/${stepsPart}`;
         if (p.viaUid !== undefined) {
             base = `${base} (via ${p.viaUid})`;
         }

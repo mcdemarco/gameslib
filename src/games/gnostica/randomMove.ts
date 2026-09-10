@@ -335,7 +335,7 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
         const card = allCards().find(c => c.uid === uid)!;
         const chain = buildRandomChain(game, card, eligible);
         const steps = chain.map(tokens => tokens.join(" "));
-        return steps.length === 0 ? `use ${uid}` : `use ${uid}, ${steps.join("/")}`;
+        return steps.length === 0 ? `use ${uid}` : `use ${uid}/${steps.join("/")}`;
     }
     const hand = game.hands[game.currplayer - 1];
     if (hand.length === 0) {
@@ -357,7 +357,7 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
     try {
         const chain = buildRandomChain(game, card, eligible);
         const steps = chain.map(tokens => tokens.join(" "));
-        return steps.length === 0 ? `play ${uid}` : `play ${uid}, ${steps.join("/")}`;
+        return steps.length === 0 ? `play ${uid}` : `play ${uid}/${steps.join("/")}`;
     } finally {
         hand.splice(handIdx, 0, uid);
     }
