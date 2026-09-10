@@ -12,7 +12,7 @@ import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { CellContents, ICellContents, cardPointValue } from "./gnostica/cell";
 import { Piece, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece";
 import {
-    Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
+    Stash, PowerContext, PowerFailure, takeFromStash, returnToStash,
     createOwn, createEnemy, createTerritory,
     movePiece, moveTerritory,
     growPiece, growTerritory,
@@ -925,6 +925,9 @@ export class GnosticaGame extends GameBaseSequenced {
             //This does not yet cover the Fool suicide corner case.
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
         }
+        if (head === "place" && hasPieces) {
+            return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
+        }
         if ((head === "place" || head === "orient" || head === "discard") && parsed.stepSegments.length > 0) {
             return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
         }
@@ -1786,8 +1789,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.liveMove === undefined) {
             return false;
         }
-        // cmdPlace/validatePlace unconditionally reject "place" once the
-        // acting player already has ANY board presence (ALREADY_ON_BOARD)
+        // validateMove unconditionally rejects "place" once the acting
+        // player already has ANY board presence (ALREADY_ON_BOARD)
         // - so a live "place" preview can only ever be that player's
         // first piece ever, with no other case to distinguish. Reading
         // this off this.liveMove directly (same approach as the
@@ -4305,8 +4308,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // this. Also true again the instant a wipeout leaves a player with
     // none - no separate tracking needed for that case, since this always
     // recomputes fresh from current board state. See move()'s and
-    // validateMove()'s own single top-level gate, cmdPlace/validatePlace's
-    // own (inverse) check, getActionButtons(), and randomMove().
+    // validateMove()'s own single top-level gate (both directions - "place"
+    // needs zero, every other head needs some), getActionButtons(), and
+    // randomMove().
     public hasPiecesOnBoard(player: playerid): boolean {
         for (const [, , t] of this.board.entries()) {
             if (t.pieces.some(p => p.owner === player)) {
@@ -4640,9 +4644,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (cellStr === undefined) {
             return this.invalid("apgames:validation.gnostica.PLACE_CELL_REQUIRED");
         }
-        if (this.hasPiecesOnBoard(this.currplayer)) {
-            return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
-        }
         const coords = this.tryAlgebraic2coords(cellStr);
         if (coords === undefined) {
             return this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr });
@@ -4655,17 +4656,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (territory !== undefined && territory.pieces.length > 0) {
             return this.invalid("apgames:validation.gnostica.PLACE_OCCUPIED", { cell: cellStr });
         }
-        if (!hasStashAvailable(this.buildPowerContext(), this.currplayer, 1)) {
-            return this.invalid("apgames:validation.gnostica.STASH_EMPTY", { player: this.currplayer, size: 1 });
-        }
-        // A brand-new minion can't reasonably go unoriented - "U" is a
-        // perfectly real, always-legal choice, but it must be an actual
-        // typed/clicked fact, not silently assumed (same mandatory-token
-        // rule as Cups "own"'s own creation step). The cell itself is
-        // already known-good at this point, so a still-missing facing
-        // just means the click flow hasn't supplied one yet.
+        // A default orientation is provided in the click flow,
+        // but may be missing from a hand-typed move.
         if (orientationStr === undefined) {
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE") };
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_DIRECTION_REQUIRED") };
         }
         const orientation = this.tryParseOrientation(orientationStr);
         if (orientation === undefined) {

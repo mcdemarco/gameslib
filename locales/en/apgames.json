@@ -5850,6 +5850,7 @@
             "PICK_MINION_CELL": "Click on the cell containing the minion you want to use.",
             "PICK_PIECE_TO_ORIENT": "Choose the cell containing the piece you want to orient.",
             "PLACE_CELL_REQUIRED": "You must choose a board cell to place your first minion.",
+            "PLACE_DIRECTION_REQUIRED": "Choose which way the new minion faces (N, E, S, W, or U).",
             "PLACE_OCCUPIED": "Initial placements must be on an unoccupied territory or wasteland space.",
             "PLACE_VOID": "You may not make an initial placement in the void.",
             "PLAY_UID_REQUIRED": "A hand card is required for this action.",
