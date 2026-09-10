@@ -587,8 +587,9 @@ describe("Gnostica: announce last turn / win / elimination", () => {
             t.pieces = [new Piece(1, 1, "U")];
         }
         g.move("discard (last)", { trusted: true }); // player 1 announces
-        expect(g.lastTurnAnnouncedBy).eq(1);
+        expect(g.lastTurner).eq(1);
         g.move("discard", { trusted: true }); // player 2's turn
+        expect(g.lastTurner).eq(1);
         g.move("discard", { trusted: true }); // player 1's resolving turn
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([1]);

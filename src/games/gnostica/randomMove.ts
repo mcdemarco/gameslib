@@ -90,7 +90,7 @@ export function generateRandomMove(game: GnosticaGame): string {
     // even once eligible - a real player might wait for a wider safety
     // margin first, same as this file's own "prefer, don't require"
     // weighting elsewhere.
-    const canAnnounce = (game.lastTurnAnnouncedBy === undefined || game.lastTurnAnnouncedBy === game.currplayer)
+    const canAnnounce = (game.lastTurner === undefined || game.lastTurner === game.currplayer)
         && game.scoreFor(game.currplayer) >= game.targetScore();
     const announce = canAnnounce && Math.random() < 0.25;
     // "discard" is always unconditionally legal once the player has

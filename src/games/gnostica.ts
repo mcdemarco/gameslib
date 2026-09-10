@@ -389,7 +389,7 @@ interface IMoveState extends IIndividualState {
     discardPile: string[];
     stashes: Map<playerid, Stash>;
     eliminated: playerid[];
-    lastTurnAnnouncedBy: playerid | undefined;
+    lastTurner: playerid | undefined;
     lastmove?: string;
     // Present only for a move that chained 2+ major-arcana steps - see
     // FrameState's own docs. Optional so stack entries predating this
@@ -497,7 +497,7 @@ export class GnosticaGame extends GameBaseSequenced {
     public discardPile: string[] = [];
     public stashes!: Map<playerid, Stash>;
     public eliminated: playerid[] = [];
-    public lastTurnAnnouncedBy: playerid | undefined;
+    public lastTurner: playerid | undefined;
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
@@ -671,7 +671,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 discardPile: [],
                 stashes,
                 eliminated: [],
-                lastTurnAnnouncedBy: undefined,
+                lastTurner: undefined,
                 phase: this.variants.includes("bidding") ? "bidding" : "main",
                 bidPositions: this.variants.includes("bidding") ? new Array(this.numplayers).fill(null) as (number | null)[] : undefined,
                 biddingPool: this.variants.includes("bidding") ? [] : undefined,
@@ -724,7 +724,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.discardPile = [...state.discardPile];
         this.stashes = new Map([...state.stashes.entries()].map(([k, v]) => [k, [...v] as Stash]));
         this.eliminated = [...state.eliminated];
-        this.lastTurnAnnouncedBy = state.lastTurnAnnouncedBy;
+        this.lastTurner = state.lastTurner;
         this.lastmove = state.lastmove;
         this.phase = state.phase;
         this.bidPositions = state.bidPositions !== undefined ? [...state.bidPositions] : undefined;
@@ -748,7 +748,7 @@ export class GnosticaGame extends GameBaseSequenced {
             discardPile: [...this.discardPile],
             stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
             eliminated: [...this.eliminated],
-            lastTurnAnnouncedBy: this.lastTurnAnnouncedBy,
+            lastTurner: this.lastTurner,
             lastmove: this.lastmove,
             phase: this.phase,
             bidPositions: this.bidPositions !== undefined ? [...this.bidPositions] : undefined,
@@ -921,9 +921,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if ((head === "place" || head === "orient" || head === "discard") && parsed.stepSegments.length > 0) {
             return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
         }
-        // Head-agnostic (another player already declared), so it runs
-        // ahead of the head dispatch rather than after it.
-        if (parsed.announceLast && this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
+        // No concurrent lastTurners can happen, so there's no need to check who it is.
+        if (parsed.announceLast && this.lastTurner !== undefined) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
         switch (head) {
@@ -981,7 +980,11 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results = [];
         this.frames = [];
         this.cardsDrawn[this.currplayer - 1] = 0;
-        let head, newLast;
+        let head;
+        let newLast = this.lastTurner;
+        // The frame stack walkFrameStack hands back, serialized into
+        // this.continued once past the partial boundary below.
+        let residualFrames: IPowerFrame[] | undefined;
 
         if (m.toLowerCase() === "pass") {
             // validateMove() (above) is the actual gate on WHO may say
@@ -1023,7 +1026,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // job alone now; a trusted caller passing garbage is a caller
             // bug, not something this dispatch re-checks.
             if (this.continued.length > 0) {
-                this.resumePendingPower(this.resumeStepSegments(parsed), partial);
+                residualFrames = this.resumePendingPower(this.resumeStepSegments(parsed), partial);
             } else if (head === "bid") {
 
             // The "bidding" variant's own opening procedure - see cmdBid's/
@@ -1065,10 +1068,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         this.cmdDiscard(parsed.rest, partial);
                         break;
                     case "use":
-                        this.cmdActivate(parsed.viaUid ?? parsed.rest[0], parsed.stepSegments, partial);
+                        residualFrames = this.cmdActivate(parsed.viaUid ?? parsed.rest[0], parsed.stepSegments, partial);
                         break;
                     case "play":
-                        this.cmdPlay(parsed.viaUid ?? parsed.rest[0], parsed.stepSegments, partial);
+                        residualFrames = this.cmdPlay(parsed.viaUid ?? parsed.rest[0], parsed.stepSegments, partial);
                         break;
                     default:
                         // "decline" with nothing pending (the resume gate
@@ -1107,6 +1110,14 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         this.lastmove = m;
+        // The walk this turn (if any) resolved some frames and left
+        // others still owing - record that now, past the partial
+        // boundary, so a preview never touches this.continued. undefined
+        // means no walk ran, or it stopped on an incomplete step (see
+        // walkFrameStack) - either way, leave the obligation as it was.
+        if (residualFrames !== undefined) {
+            this.persistContinued(residualFrames);
+        }
         // `head` is only ever assigned inside the parsed-dispatch branch
         // above (never for the bare "pass" shortcut, which returns early
         // in its own branch and leaves `head` undefined) - so a literal
@@ -1128,16 +1139,17 @@ export class GnosticaGame extends GameBaseSequenced {
             // step could have changed.
         } else {
             // Only on a real end-of-turn do we check the last turn announcement.
-            if (this.lastTurnAnnouncedBy === this.currplayer) {
+            if (this.lastTurner === this.currplayer) {
                 if (this.scoreFor(this.currplayer) >= this.targetScore()) {
                     this.gameover = true;
                     this.winner = [this.currplayer];
                 } else {
                     this.eliminatePlayer(this.currplayer);
+                    newLast = undefined;
                 }
             }
 
-            this.lastTurnAnnouncedBy = newLast;
+            this.lastTurner = newLast;
             this.nextPlayer();
             this.checkEOG();
         }
@@ -1962,7 +1974,7 @@ export class GnosticaGame extends GameBaseSequenced {
             { label: "Discard/Draw", value: "discard" },
             { label: "Pass", value: "pass" },
         ];
-        if (this.lastTurnAnnouncedBy === undefined || this.lastTurnAnnouncedBy === this.currplayer) {
+        if (this.lastTurner === undefined || this.lastTurner === this.currplayer) {
             topLevel.push({ label: "(Declare)", value: "declare" });
         }
         const highlighted = this.highlightedButtonValues();
@@ -4928,12 +4940,12 @@ export class GnosticaGame extends GameBaseSequenced {
     // "(via <uid>)" docs).
     // Legality (uid given, a real card, on the board, with an eligible
     // minion there) is validateActivate's own job, not this one's.
-    private cmdActivate(cardUid: string, stepSegments: string[][], partial: boolean): void {
+    private cmdActivate(cardUid: string, stepSegments: string[][], partial: boolean): IPowerFrame[] | undefined {
         const { x, y } = this.findCardCell(cardUid)!;
         const t = this.board.get(x, y)!;
         const eligible = this.eligibleMinionsForActivate(x, y);
         this.results.push({ type: "use", what: t.card!.uid });
-        this.applyCardPower(t.card!, eligible, stepSegments, partial);
+        return this.applyCardPower(t.card!, eligible, stepSegments, partial);
     }
 
     private validateActivate(parsed: IParsedMove): IValidationResult {
@@ -4965,7 +4977,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Same "fresh activation only" note as cmdActivate's own docs.
     // Legality (uid given, in hand, a real card) is validatePlay's own
     // job, not this one's.
-    private cmdPlay(uid: string, stepSegments: string[][], partial: boolean): void {
+    private cmdPlay(uid: string, stepSegments: string[][], partial: boolean): IPowerFrame[] | undefined {
         const hand = this.hands[this.currplayer - 1];
         const handIdx = hand.indexOf(uid);
         const card = allCards().find(c => c.uid === uid)!;
@@ -4975,7 +4987,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({ type: "deckDraw", what: uid, from: "hand" });
 
         const eligible = this.eligibleMinionsForPlay();
-        this.applyCardPower(card, eligible, stepSegments, partial);
+        return this.applyCardPower(card, eligible, stepSegments, partial);
     }
 
 
@@ -5030,13 +5042,16 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], partial: boolean): void {
+    // Returns walkFrameStack's residual stack for move() to persist (see
+    // its docs), or undefined for a minor card - which is always a single
+    // step and never pauses, so it leaves this.continued alone.
+    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], partial: boolean): IPowerFrame[] | undefined {
         if (card.major) {
             const def = getMajorArcanaDef(card);
-            this.applyMajorPower(def, eligible, stepSegments, partial);
-        } else {
-            this.applyMinorPower(card.suit.uid, eligible, stepSegments);
+            return this.applyMajorPower(def, eligible, stepSegments, partial);
         }
+        this.applyMinorPower(card.suit.uid, eligible, stepSegments);
+        return undefined;
     }
 
     private validateCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
@@ -5259,14 +5274,11 @@ export class GnosticaGame extends GameBaseSequenced {
     // decline consumes its own given segment and pops that frame, then
     // the loop immediately re-checks the newly-exposed top - if that's
     // Fool's own remaining flip, it fires right then, in the same call.
-    // The only place this.continued is written. A real (non-partial)
-    // commit distils walkFrameStack's just-resolved frame stack down to
-    // the entries that still owe a step; a partial preview, and the
-    // incomplete-step exit, write nothing.
-    private persistContinued(partial: boolean, stack: readonly IPowerFrame[]): void {
-        if (partial) {
-            return;
-        }
+    // The only place this.continued is written - called once by move(),
+    // past the partial boundary, with the residual frame stack
+    // walkFrameStack handed back. Distils it down to the entries that
+    // still owe a step.
+    private persistContinued(stack: readonly IPowerFrame[]): void {
         // Only the genuine cross-submission obligations: a Fool or High
         // Priestess frame that has already taken at least one of its own
         // steps (nextStepIndex >= 1) and so owes a follow-up submission -
@@ -5315,7 +5327,11 @@ export class GnosticaGame extends GameBaseSequenced {
         return { rootCardUid: stack[0].cardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
     }
 
-    private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], partial: boolean): void {
+    // Returns the residual frame stack (what this seat still owes) for
+    // move() to serialize into this.continued past the partial boundary,
+    // or undefined when nothing should be persisted (a partial preview, or
+    // an incomplete step - see the individual exits).
+    private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], partial: boolean): IPowerFrame[] | undefined {
         const chained = stepSegments.length > 1;
         let i = 0;
         let stepsProcessed = 0;
@@ -5339,9 +5355,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     // spent and pop it, as if the whole activation had
                     // resolved (it hasn't - a real commit would push a
                     // newly revealed card's own frame on top instead,
-                    // keeping this one buried). A partial call persists
-                    // nothing (see persistContinued's own docs).
-                    return;
+                    // keeping this one buried).
+                    return undefined;
                 }
                 // The flip consumes no segment - it's the only possible
                 // action for this step, so there is nothing to type.
@@ -5408,12 +5423,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Nothing is persisted: a real submission is always
                 // complete (validateMove gates the untrusted path; a
                 // trusted caller is trusted to have done the same), so
-                // this exit only fires under a partial preview, which
-                // persists nothing anyway.
+                // this exit only fires under a partial preview.
                 if (stepsProcessed > 0) {
                     this.frames.pop();
                 }
-                return;
+                return undefined;
             }
             stepsProcessed++;
             top.minions = GnosticaGame.chainMinion(top.minions, outcome);
@@ -5431,8 +5445,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             GnosticaGame.popExhaustedFrames(this, stack);
             if (outcome.forcePause === true) {
-                this.persistContinued(partial, stack);
-                return;
+                return stack;
             }
         }
         // Only reachable via the top-of-loop `top === undefined` check now -
@@ -5440,8 +5453,9 @@ export class GnosticaGame extends GameBaseSequenced {
         // fool-step partial preview) returns directly, and an exhausted/
         // declined non-fool frame loops back via `continue` above instead
         // of breaking out here. So the stack is already fully resolved by
-        // this point; nothing left to pop or cascade.
-        this.persistContinued(partial, stack);
+        // this point (empty) - move() serializes it into this.continued,
+        // clearing the obligation.
+        return stack;
     }
 
     // Walks a major arcana card's power-step list from a fresh use/play
@@ -5451,9 +5465,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // computeShortcutOpts()'s own docs for why that derivation is safe to
     // apply unconditionally rather than requiring genuine same-target
     // detection between steps.
-    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], partial: boolean): void {
+    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], partial: boolean): IPowerFrame[] | undefined {
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
-        this.walkFrameStack(stack, stepSegments, partial);
+        return this.walkFrameStack(stack, stepSegments, partial);
     }
 
     // True when `stack`'s own top frame's NEXT step is special:"fool" -
@@ -5512,10 +5526,10 @@ export class GnosticaGame extends GameBaseSequenced {
         return parsed.stepSegments;
     }
 
-    private resumePendingPower(stepSegments: string[][], partial: boolean): void {
+    private resumePendingPower(stepSegments: string[][], partial: boolean): IPowerFrame[] | undefined {
         const stack = this.resumeStack();
         if (stack === undefined) {
-            return;
+            return undefined;
         }
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             // A bare resume seed, no step typed yet - the client always
@@ -5524,9 +5538,9 @@ export class GnosticaGame extends GameBaseSequenced {
             // process yet. Fool's own step is exempt - it auto-resolves
             // regardless of segment count (see walkFrameStack's own docs),
             // so a bare seed against it should go ahead and take the flip.
-            return;
+            return undefined;
         }
-        this.walkFrameStack(stack, stepSegments, partial);
+        return this.walkFrameStack(stack, stepSegments, partial);
     }
 
     // Read-only counterpart to walkFrameStack, mirroring its own inline
@@ -7109,7 +7123,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 areas.push({
                     type: "pieces",
                     pieces: handKeys as [string, ...string[]],
-                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurnAnnouncedBy && this.lastTurnAnnouncedBy === p ? "(declarer)" : "" }),
+                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurner && this.lastTurner === p ? "(declarer)" : "" }),
                     // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter
                     // than the default auto-wrap-at-board-width spacing, and a
                     // fixed width (hands are always <=6 cards) rather than
@@ -7146,7 +7160,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         // The declaration round banner.
-        if (this.lastTurnAnnouncedBy !== undefined) {
+        if (this.lastTurner !== undefined) {
             if (!("Warning" in legend)) {
                 legend.Warning = [
                     { name: "piece-borderless", colour: "_context_background" },
