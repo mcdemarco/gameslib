@@ -874,18 +874,16 @@ export class GnosticaGame extends GameBaseSequenced {
             const activeUid = this.getContinuedUid();
             if (parsed.viaUid !== activeUid)
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_VIA_STRING"});
-            const allowed = activeUid === "02" ? ["decline", "discard"] : ["decline", "play"];
+            const allowed = activeUid === "02" ? ["discard"] : ["decline", "play"];
             if (! allowed.includes(parsed.head!))
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "ACTION_NOT_ALLOWED"});
-            const failure = this.validateResumePendingPower(parsed);
-            return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+            return this.validateResumePendingPower(parsed);
         }
-        // "decline" as a head word only ever means something paired with
-        // "(via <uid>)" (see parseMove's own docs) - reachable here, with
-        // nothing genuinely pending, only via stale UI state or a
-        // hand-typed guess. Rejected explicitly rather than falling
-        // through switch(head) below (no "decline" case there) and
-        // silently validating as a no-op complete move.
+        // "decline" only ever means something while an obligation is
+        // pending (handled by the gate just above). Reaching here means
+        // nothing is - stale UI state or a hand-typed guess - so reject
+        // with a message about that rather than the generic malformed one
+        // the switch's default would give.
         if (head === "decline") {
             return this.invalid("apgames:validation.gnostica.NOTHING_TO_DECLINE");
         }
@@ -1072,6 +1070,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     case "play":
                         this.cmdPlay(parsed.viaUid ?? parsed.rest[0], parsed.stepSegments, partial);
                         break;
+                    default:
+                        // "decline" with nothing pending (the resume gate
+                        // above didn't catch it), or any other recognized
+                        // head that has no business here - a caller bug.
+                        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
                 }
 
                 if (parsed.announceLast) {
@@ -1191,12 +1194,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (tokens.length === 0 || tokens.length > GnosticaGame.MAX_STEP_TOKENS) {
             return false;
         }
-        // resumePendingPower's own sentinel (skip the remaining High
-        // Priestess step entirely) - neither a piece ref nor a card uid,
-        // so it needs its own shape allowance.
-        if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-            return true;
-        }
         // High Priestess with zero discards but an explicit draw count
         // ("draw <n>" as the WHOLE step) - "draw" is neither a piece ref
         // nor a card uid, so it needs the same allowance. A discard list
@@ -1212,7 +1209,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private parseMove(m: string): IParsedMove {
-        const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "bid", "redraw", "pass"];
+        const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
         const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
         // "(via <uid>)" names the card whose power a resumed step was
         // reached through - stripped exactly like "(last)" and stashed in
@@ -1243,21 +1240,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // always just the front tokens as typed (for a resume: the
         // revealed card being resolved, if named).
         const rest = rawRest;
-        let stepSegments = segments.slice(1).map(s => s.split(/\s+/));
-        // "decline" carries real meaning as a head now, not just a
-        // printed label - the leading "decline" segment walkFrameStack/
-        // validateFrameStack already look for is synthesized here rather
-        // than printed twice; see pickleMove's own matching omission.
-        // Only ever legitimate paired with a via-marker (see
-        // headRecognized below) - a bare "decline" alone stays
-        // unrecognized, same as any other made-up head.
-        if (head === "decline") {
-            stepSegments = [["decline"], ...stepSegments];
-        }
+        const stepSegments = segments.slice(1).map(s => s.split(/\s+/));
         return {
             announceLast,
             head,
-            headRecognized: viaMatch !== null ? true : RECOGNIZED_HEADS.includes(head),
+            headRecognized: RECOGNIZED_HEADS.includes(head),
             rest,
             stepSegments,
             malformedStep: stepSegments.find(tokens => !this.isStepShapeValid(tokens)),
@@ -1275,17 +1262,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return p.announceLast ? "(last)" : "";
         }
         const headPart = [p.head, ...p.rest].join(" ");
-        // The leading "decline" segment (implied by head === "decline" -
-        // see parseMove's own synthesis) is never printed a second time.
-        // Declining never legitimately has anything real after it in
-        // this engine - it either empties the whole stack (turn ends) or
-        // auto-cascades straight into Fool's own mandatory next flip,
-        // which resolves without needing a typed segment. `stepSegments`
-        // still carries the real, functional "decline" entry for
-        // walkFrameStack/validateFrameStack to read - this only affects
-        // what gets printed, never what gets parsed back out.
-        const visibleSteps = p.head === "decline" ? p.stepSegments.slice(1) : p.stepSegments;
-        const stepsPart = visibleSteps.map(s => s.join(" ")).join("/");
+        const stepsPart = p.stepSegments.map(s => s.join(" ")).join("/");
         let base = stepsPart.length === 0 ? headPart : `${headPart}, ${stepsPart}`;
         if (p.viaUid !== undefined) {
             base = `${base} (via ${p.viaUid})`;
@@ -1326,8 +1303,11 @@ export class GnosticaGame extends GameBaseSequenced {
     public buildViaMove(stepSegments: string[][]): IParsedMove {
         const activeUid = this.getContinuedUid()!;
         const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
+        // "decline" is a bare head - it carries no step segments (unlike a
+        // mid-chain "/decline", it IS the whole submission).
+        const steps = declining ? [] : stepSegments;
         if (activeUid === "02") {
-            return { announceLast: false, head: declining ? "decline" : "discard", headRecognized: true, rest: [], viaUid: "02", stepSegments, malformedStep: undefined };
+            return { announceLast: false, head: declining ? "decline" : "discard", headRecognized: true, rest: [], viaUid: "02", stepSegments: steps, malformedStep: undefined };
         }
         const revealed = this.activeCardUid();
         return {
@@ -1336,7 +1316,7 @@ export class GnosticaGame extends GameBaseSequenced {
             headRecognized: true,
             rest: revealed !== undefined ? [revealed] : [],
             viaUid: "00",
-            stepSegments,
+            stepSegments: steps,
             malformedStep: undefined,
         };
     }
@@ -1348,7 +1328,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // the reconstruction always starts fresh from this.continued, so the
     // whole of liveMove's segments is unreflected by construction.
     private continuedSeedMoveString(): string {
-        const segments = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid() ? this.liveMove.stepSegments : [];
+        const segments = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid()
+            ? this.resumeStepSegments(this.liveMove)
+            : [];
         return this.pickleMove(this.buildViaMove(segments));
     }
 
@@ -1870,8 +1852,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // steps to completion and exposed Fool's mandatory next flip
         // underneath.
         const advanced = this.parsePendingStep(this.continuedSeedMoveString());
-        const lastSeg = this.liveMove?.stepSegments[this.liveMove.stepSegments.length - 1];
-        const justDeclined = lastSeg !== undefined && lastSeg.length === 1 && lastSeg[0].toLowerCase() === "decline";
+        const justDeclined = this.liveMove?.head === "decline";
         if (advanced?.special === "fool" && !justDeclined) {
             // Fool's own flip is never optional (see walkFrameStack's own
             // docs) - there's nothing to decline once a revealed card's
@@ -2348,11 +2329,11 @@ export class GnosticaGame extends GameBaseSequenced {
         if (headArg === undefined) {
             return undefined;
         }
-        // A bare "decline" is already a complete choice - there's no step
-        // for a button set to configure, so the bar falls back to the
-        // plain top-level context (getActionButtons then folds a persisting
+        // "decline" is already a complete choice - there's no step for a
+        // button set to configure, so the bar falls back to the plain
+        // top-level context (getActionButtons then folds a persisting
         // Decline back in).
-        if (parsed.head === "decline" && parsed.stepSegments.length === 1) {
+        if (parsed.head === "decline") {
             return undefined;
         }
         // A genuine resume is detected from the "(via <root>)" anchor
@@ -5530,12 +5511,18 @@ export class GnosticaGame extends GameBaseSequenced {
         return pending?.stack.map(f => ({ ...f, minions: [...f.minions] }));
     }
 
-    // High Priestess resumes as a bare "discard <uids> draw <n> (via 02)"
-    // (see buildViaMove/describePendingMove) - its own step tokens sit
-    // right after the head, like the ordinary discard action's, rather
-    // than as a "/"-separated segment. Fold them back into a step segment
-    // so the shared resume machinery (which reads stepSegments) sees them.
+    // The step segments the frame-walk should see for a resume submission,
+    // derived from the head:
+    //  - "decline"  -> a lone ["decline"] segment (the walk pops the top
+    //    frame on that token; the head itself carries no segments)
+    //  - "discard"  -> the High Priestess round's own tokens, which sit
+    //    right after the head like the ordinary discard action's rather
+    //    than as a "/"-separated segment - folded back into one segment
+    //  - anything else -> the segments as typed
     private resumeStepSegments(parsed: IParsedMove): string[][] {
+        if (parsed.head === "decline") {
+            return [["decline"]];
+        }
         if (parsed.head === "discard" && parsed.viaUid !== undefined) {
             return parsed.rest.length > 0 ? [parsed.rest] : [];
         }
@@ -5652,23 +5639,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens = stepSegments[i];
                 i++;
                 if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                    // A frame reached via World's own push can't be
-                    // declined - see IPowerFrame's own "viaFool" docs. The
-                    // button bar never offers this (computeActionButtons'/
-                    // getActionButtons' own "viaFool" checks), so reaching
-                    // here means a hand-typed "decline" - reject it
-                    // outright rather than silently popping the frame.
-                    // The ROOT frame (stack.length===1) is unaffected -
-                    // this only guards a PUSHED, non-Fool frame.
-                    if (stack.length > 1 && top.viaFool !== true) {
-                        const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
-                        return this.invalid("apgames:validation.gnostica.CANNOT_DECLINE_BORROWED_POWER", { card: cardName });
-                    }
+                    // Only ever the "decline" head, translated to this token
+                    // by resumeStepSegments - so it always addresses a
+                    // Fool/HP obligation frame, never a World borrow (which
+                    // isn't declinable and can't reach here anyway, since a
+                    // bare "decline" segment is no longer a valid shape).
                     GnosticaGame.popFrame(stack);
-                    // Mirrors walkFrameStack's own decline branch - popping can
-                    // expose an already-exhausted buried frame (e.g. World's
-                    // own spent 1-step frame), which a later segment (if any)
-                    // must not be validated against.
+                    // Popping can expose an already-exhausted buried frame
+                    // (e.g. World's own spent 1-step frame), which a later
+                    // segment (if any) must not be validated against.
                     GnosticaGame.popExhaustedFrames(this, stack);
                     if (i < stepSegments.length) {
                         clone ??= this.cloneLive();
@@ -5784,7 +5763,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // stack's top frame from exactly that), then walks the step segments
     // for legality. The click UI always names it right, so a mismatch is
     // only ever a hand-edit.
-    private validateResumePendingPower(parsed: IParsedMove): IValidationResult | undefined {
+    private validateResumePendingPower(parsed: IParsedMove): IValidationResult {
         const stack = this.resumeStack()!;
         if (parsed.head === "play" && parsed.rest[0] !== undefined && parsed.rest[0] !== stack[stack.length - 1].cardUid) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_CARD"});
@@ -5808,7 +5787,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
         }
-        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!);
+        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!) || { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as

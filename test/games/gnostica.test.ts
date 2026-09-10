@@ -4882,13 +4882,15 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         // High Priestess round actually pending) / missing anchor.
         expect(g.validateMove("decline 00 (via 00)").valid).to.be.false;
         expect(g.validateMove("use 00, decline").valid).to.be.false;
-        // Right anchor, wrong head ("play"/"use" for a High Priestess step
-        // that should be "discard", or a bare uid with no anchor) -> rejected.
+        // Right anchor, wrong head ("play"/"use", or "decline" - a High
+        // Priestess round is always a "discard", never declined; to do
+        // nothing you discard and draw 0) -> rejected.
         expect(g.validateMove(`play ${major(2).uid}, AR (via ${major(2).uid})`).valid).to.be.false;
         expect(g.validateMove(`use ${major(2).uid}, decline`).valid).to.be.false;
+        expect(g.validateMove(`decline (via ${major(2).uid})`).valid).to.be.false;
         // The canonical spellings work.
-        expect(g.validateMove(`decline (via ${major(2).uid})`).valid).to.be.true;
         expect(g.validateMove(`discard AR (via ${major(2).uid})`).valid).to.be.true;
+        expect(g.validateMove(`discard draw 0 (via ${major(2).uid})`).valid).to.be.true;
         // None of the rejected attempts cleared the obligation.
         expect(g.continued).to.not.be.empty;
         expect(g.currplayer).eq(1);
@@ -5465,8 +5467,8 @@ describe("Gnostica: Fool and World", () => {
         // "(via 00)" names the buried Fool, not the active round 2 -> rejected.
         expect(g.validateMove("decline 00 (via 00)").valid).to.be.false;
         expect(g.continued).to.deep.equal(["00.1", "02.1"]);
-        // The correct anchor works.
-        expect(g.validateMove("decline (via 02)").valid).to.be.true;
+        // The correct anchor works (a High Priestess round is a "discard").
+        expect(g.validateMove("discard draw 0 (via 02)").valid).to.be.true;
     });
 
     it("Fool's own root activation needs no button - selecting it already produces a complete, submittable move", () => {
