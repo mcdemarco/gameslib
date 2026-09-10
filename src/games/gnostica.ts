@@ -871,19 +871,14 @@ export class GnosticaGame extends GameBaseSequenced {
         if (!parsed.headRecognized) {
             return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: [parsed.head, ...parsed.rest].join(" ") });
         }
+        // A step segment whose token grammar is broken (see parseMove's own
+        // docs on malformedStep) - rejected the moment it's known, ahead of
+        // any head dispatch. The click UI never produces one; this is a
+        // hand-edit or a broken client.
+        if (parsed.malformedStep !== undefined) {
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") });
+        }
 
-        const requireNoSteps = (): IValidationResult | undefined => {
-            if (parsed.stepSegments.length > 0) {
-                return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head });
-            }
-            return undefined;
-        };
-        const requireValidStepShapes = (): IValidationResult | undefined => {
-            if (parsed.malformedStep !== undefined) {
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") });
-            }
-            return undefined;
-        };
         const head = parsed.head;
 
         // A genuine cross-turn pause (Fool's second flip, a revealed/
@@ -896,7 +891,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // docs), so no separate check is needed here. Short-circuits ahead
         // of the other gates below since they don't apply to a resume.
         if (this.continued.length > 0) {
-            const failure = requireValidStepShapes() ?? this.validateResumePendingPower(parsed.rest[0], this.resumeStepSegments(parsed));
+            const failure = this.validateResumePendingPower(parsed.rest[0], this.resumeStepSegments(parsed));
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
         // "decline" as a head word only ever means something paired with
@@ -936,33 +931,24 @@ export class GnosticaGame extends GameBaseSequenced {
             //This does not yet cover the Fool suicide corner case.
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
         }
-        let failure: IValidationResult | undefined;
-        switch (head) {
-            case "place":
-                failure = requireNoSteps() ?? this.validatePlace(parsed.rest);
-                break;
-            case "orient":
-                failure = requireNoSteps() ?? this.validateOrient(parsed.rest);
-                break;
-            case "discard":
-                failure = requireNoSteps() ?? this.validateDiscard(parsed.rest);
-                break;
-            case "use":
-                failure = requireValidStepShapes() ?? this.validateActivate(parsed.rest, parsed.stepSegments);
-                break;
-            case "play":
-                failure = requireValidStepShapes() ?? this.validatePlay(parsed.rest, parsed.stepSegments);
-                break;
+        if ((head === "place" || head === "orient" || head === "discard") && parsed.stepSegments.length > 0) {
+            return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
         }
-        if (failure !== undefined) {
-            return failure;
-        }
-
+        // Head-agnostic (another player already declared), so it runs
+        // ahead of the head dispatch rather than after it.
         if (parsed.announceLast && this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
-
-        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        switch (head) {
+            case "place": return this.validatePlace(parsed.rest);
+            case "orient": return this.validateOrient(parsed.rest);
+            case "discard": return this.validateDiscard(parsed.rest);
+            case "use": return this.validateActivate(parsed.rest, parsed.stepSegments);
+            case "play": return this.validatePlay(parsed.rest, parsed.stepSegments);
+        }
+        // Unreachable: head was confirmed recognized above, and bid/redraw/
+        // pass/resume are all handled before here.
+        return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: [head, ...parsed.rest].join(" ") });
     }
     
     // ============================================================
@@ -1038,21 +1024,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
             }
 
-            // Remembered before acting: if this player announced their last
-            // turn on a PREVIOUS turn, this is the turn that resolves it - win
-            // or elimination is decided after their action, below.
-            const wasAnnounced = this.lastTurnAnnouncedBy === this.currplayer;
-
-            const requireNoSteps = () => {
-                if (parsed.stepSegments.length > 0) {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: parsed.head }));
-                }
-            };
-            const requireValidStepShapes = () => {
-                if (parsed.malformedStep !== undefined) {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP", step: parsed.malformedStep.join(" ") }));
-                }
-            };
             head = parsed.head;
 
             // A genuine cross-turn pause means every legal move right now
@@ -1060,12 +1031,11 @@ export class GnosticaGame extends GameBaseSequenced {
             // identically-placed gate (see its docs on why this runs
             // ahead of bid/redraw/pass below - a resume was already
             // validated as legal regardless of what phase/placement state
-            // would otherwise require). Phase/placement legality itself is
-            // validateMove's job alone now - see its own docs; a trusted
-            // caller passing an illegal head here is a caller bug, not
-            // something this dispatch re-checks.
+            // would otherwise require). Legality of any kind - phase,
+            // placement, step shapes, "no steps here" - is validateMove's
+            // job alone now; a trusted caller passing garbage is a caller
+            // bug, not something this dispatch re-checks.
             if (this.continued.length > 0) {
-                requireValidStepShapes();
                 this.resumePendingPower(this.resumeStepSegments(parsed), partial);
             } else if (head === "bid") {
 
@@ -1099,23 +1069,18 @@ export class GnosticaGame extends GameBaseSequenced {
             } else {
                 switch (head) {
                     case "place":
-                        requireNoSteps();
                         this.cmdPlace(parsed.rest);
                         break;
                     case "orient":
-                        requireNoSteps();
                         this.cmdOrient(parsed.rest);
                         break;
                     case "discard":
-                        requireNoSteps();
                         this.cmdDiscard(parsed.rest, partial);
                         break;
                     case "use":
-                        requireValidStepShapes();
-                    this.cmdActivate(parsed.rest, parsed.stepSegments, partial);
-                    break;
-                case "play":
-                    requireValidStepShapes();
+                        this.cmdActivate(parsed.rest, parsed.stepSegments, partial);
+                        break;
+                    case "play":
                         this.cmdPlay(parsed.rest, parsed.stepSegments, partial);
                         break;
                 }
@@ -1124,12 +1089,20 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
                         throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
                     }
-                    this.lastTurnAnnouncedBy = this.currplayer;
                     this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
                 }
-                
-                if (wasAnnounced) {
+
+                // End of turn: if this player announced on a PREVIOUS turn,
+                // this is the turn that resolves it into a win or an
+                // elimination. lastTurnAnnouncedBy is still that prior
+                // value here - a fresh announcement above only records its
+                // "declare" result; the field itself isn't set until after
+                // this, so no pre-move snapshot is needed.
+                if (this.lastTurnAnnouncedBy === this.currplayer) {
                     this.resolveAnnouncedTurn();
+                }
+                if (parsed.announceLast) {
+                    this.lastTurnAnnouncedBy = this.currplayer;
                 }
 
             }
@@ -4671,7 +4644,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({ type: "place", where: cellStr, how: "initial" });
     }
 
-    private validatePlace(args: string[]): IValidationResult | undefined {
+    private validatePlace(args: string[]): IValidationResult {
         const [cellStr, orientationStr] = args;
         if (cellStr === undefined) {
             return this.invalid("apgames:validation.gnostica.PLACE_CELL_REQUIRED");
@@ -4707,7 +4680,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (orientation === undefined) {
             return this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr });
         }
-        return undefined;
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "orient <pieceRef> <facing>" - only your own piece. Legality (args
@@ -4772,7 +4745,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private validateOrient(args: string[]): IValidationResult | undefined {
+    private validateOrient(args: string[]): IValidationResult {
         const [ref, orientationStr] = args;
         if (ref === undefined) {
             return this.invalid("apgames:validation.gnostica.ORIENT_ARGS_REQUIRED");
@@ -4819,7 +4792,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (orientation === piece.orientation) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
-        return undefined;
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "discard [uid...] [draw <n>]" - discard the named hand cards, then
@@ -4887,7 +4860,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // mutates the hand as it goes, so a repeated uid already fails there
     // (found once, then genuinely gone from hand on the second lookup);
     // this reproduces that without actually mutating anything.
-    private validateDiscard(args: string[]): IValidationResult | undefined {
+    private validateDiscard(args: string[]): IValidationResult {
         const hand = this.hands[this.currplayer - 1];
         const drawIdx = args.indexOf("draw");
         const discardUids = drawIdx === -1 ? args : args.slice(0, drawIdx);
@@ -4909,7 +4882,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw });
             }
         }
-        return undefined;
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // ============================================================
@@ -5014,7 +4987,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.applyCardPower(t.card!, eligible, stepSegments, partial);
     }
 
-    private validateActivate(args: string[], stepSegments: string[][]): IValidationResult | undefined {
+    private validateActivate(args: string[], stepSegments: string[][]): IValidationResult {
         const [cardUid] = args;
         if (cardUid === undefined) {
             return this.invalid("apgames:validation.gnostica.ACTIVATE_UID_REQUIRED");
@@ -5032,7 +5005,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (eligible.length === 0) {
             return this.invalid("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid });
         }
-        return this.validateCardPower(t.card!, eligible, stepSegments);
+        return this.validateCardPower(t.card!, eligible, stepSegments) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "Play a card from your hand to the discard pile. All your pieces on
@@ -5055,7 +5028,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
 
-    private validatePlay(args: string[], stepSegments: string[][]): IValidationResult | undefined {
+    private validatePlay(args: string[], stepSegments: string[][]): IValidationResult {
         const [uid] = args;
         if (uid === undefined) {
             return this.invalid("apgames:validation.gnostica.PLAY_UID_REQUIRED");
@@ -5099,7 +5072,7 @@ export class GnosticaGame extends GameBaseSequenced {
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         try {
-            return this.validateCardPower(card, eligible, stepSegments);
+            return this.validateCardPower(card, eligible, stepSegments) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         } finally {
             hand.splice(handIdx, 0, uid);
             this.discardPile.pop();
