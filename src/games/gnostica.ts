@@ -871,7 +871,16 @@ export class GnosticaGame extends GameBaseSequenced {
         // obligation (see its own docs). Short-circuits ahead of the other
         // gates below since they don't apply to a resume.
         if (this.continued.length > 0) {
-            const failure = this.validateResumeHead(parsed) ?? this.validateResumePendingPower(this.resumeStepSegments(parsed));
+            const activeUid = this.getContinuedUid();
+            if (parsed.viaUid !== activeUid)
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE");
+            const allowed = activeUid === "02" ? ["decline", "discard"] : ["decline", "play"];
+            if (! allowed.includes(parsed.head!))
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE");
+            // This was part of validateResumeHead but doesn't seem to involve the head.
+            //  (activeUid !== "00" || parsed.rest[0] === undefined || parsed.rest[0] === this.discardPile[this.discardPile.length - 1]);
+            
+            const failure = this.validateResumePendingPower(this.resumeStepSegments(parsed));
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
         // "decline" as a head word only ever means something paired with
@@ -1212,7 +1221,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // reached through - stripped exactly like "(last)" and stashed in
         // `viaUid` alone (never in `rest`). Dispatch detects a resume from
         // this.continued's own state, never from the head - but
-        // validateResumeHead still requires the head to be the one that
+        // validateMove still requires the head to be the one that
         // fits the step ("decline"/"discard"/"play"). The uid can only
         // ever be one of the three cards whose power pauses across
         // submissions - the Fool (00), the High Priestess (02), or the
@@ -1816,8 +1825,7 @@ export class GnosticaGame extends GameBaseSequenced {
             found.add("pass");
         } else if (this.continued.length > 0) {
             // The top-level button matching how the active card resumes -
-            // "Discard/Draw" for a High Priestess round, "Play Card"
-            // otherwise (see validateResumeHead).
+            // "Discard/Draw" for the High Priestess, "Play Card" otherwise.
             found.add(this.continued[this.continued.length - 1].split(".")[0] === "02" ? "discard" : "play");
         } else if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
@@ -2352,7 +2360,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A genuine resume is detected from the "(via <root>)" anchor
         // matching this.continued, not from the front head - so this is a
-        // runtime-state check. (validateResumeHead separately requires the
+        // runtime-state check. (validateMove separately requires the
         // head itself to fit; here we only need to know it IS a resume.)
         // For button-building, a resumed continuation always plays
         // whatever revealed card is active, so `head` is "play".
@@ -5772,7 +5780,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Mirrors resumePendingPower's own dispatch, read-only. Head and
-    // "(via <root>)" anchor have already been checked by validateResumeHead
+    // "(via <root>)" anchor have already been checked by validateMove
     // (called just before this in validateMove's gate); this only walks
     // the step segments for legality.
     // A resume submission must carry the "(via <uid>)" anchor of the
@@ -5783,15 +5791,6 @@ export class GnosticaGame extends GameBaseSequenced {
     // always gets all of this right, so a failure is only ever a
     // hand-edit; point the player back at the buttons rather than
     // explaining the exact malformation.
-    private validateResumeHead(parsed: IParsedMove): IValidationResult | undefined {
-        const activeUid = this.getContinuedUid();
-        const allowed = activeUid === "02" ? ["decline", "discard"] : ["decline", "play"];
-        const ok = parsed.viaUid === activeUid
-            && allowed.includes(parsed.head!)
-            && (activeUid !== "00" || parsed.rest[0] === undefined || parsed.rest[0] === this.discardPile[this.discardPile.length - 1]);
-        return ok ? undefined : this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "continue with the on-screen buttons" });
-    }
-
     private validateResumePendingPower(stepSegments: string[][]): IValidationResult | undefined {
         const stack = this.resumeStack()!;
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
