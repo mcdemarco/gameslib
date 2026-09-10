@@ -913,8 +913,8 @@ export class GnosticaGame extends GameBaseSequenced {
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
                 return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
             }
-            const failure = head === "bid" ? this.validateBid(parsed.rest)
-                : head === "redraw" ? this.validateRedraw(parsed.rest)
+            const failure = head === "bid" ? this.validateBid(parsed)
+                : head === "redraw" ? this.validateRedraw(parsed)
                 : this.validatePass();
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
@@ -937,11 +937,11 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
         switch (head) {
-            case "place": return this.validatePlace(parsed.rest);
-            case "orient": return this.validateOrient(parsed.rest);
-            case "discard": return this.validateDiscard(parsed.rest);
-            case "use": return this.validateActivate(parsed.rest, parsed.stepSegments);
-            case "play": return this.validatePlay(parsed.rest, parsed.stepSegments);
+            case "place": return this.validatePlace(parsed);
+            case "orient": return this.validateOrient(parsed);
+            case "discard": return this.validateDiscard(parsed);
+            case "use": return this.validateActivate(parsed);
+            case "play": return this.validatePlay(parsed);
         }
         // Unreachable: head was confirmed recognized above, and bid/redraw/
         // pass/resume are all handled before here.
@@ -2757,6 +2757,20 @@ export class GnosticaGame extends GameBaseSequenced {
         return idx === -1 ? ref : ref.split(".")[1];
     }
 
+    // The one place an "orient" result is built - standalone "orient",
+    // orientMinion, and the Devil's orientAny all funnel through here, so
+    // the log always records whose piece was turned. Call after the facing
+    // is set (ownership is unaffected by it).
+    private pushOrientResult(x: number, y: number, index: number, ref: string, facing: Orientation): void {
+        this.results.push({
+            type: "orient",
+            where: GnosticaBoard.coords2algebraic(x, y),
+            what: this.getPipsFromRef(ref),
+            facing,
+            who: this.board.get(x, y)!.pieces[index].owner,
+        });
+    }
+
     // Reads size/orientation straight off the piece itself, rather than
     // trying to parse them back out of a minion ref string - a ref only
     // carries orientation when it was actually NEEDED to disambiguate
@@ -4370,8 +4384,8 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private validateBid(args: string[]): IValidationResult | undefined {
-        const [nStr] = args;
+    private validateBid(parsed: IParsedMove): IValidationResult | undefined {
+        const [nStr] = parsed.rest;
         if (nStr === undefined) {
             return this.invalid("apgames:validation.gnostica.BID_POSITION_REQUIRED");
         }
@@ -4557,14 +4571,15 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private validateRedraw(args: string[]): IValidationResult | undefined {
+    private validateRedraw(parsed: IParsedMove): IValidationResult | undefined {
+        const uids = parsed.rest;
         const hand = this.hands[this.currplayer - 1];
         const needed = 6 - hand.length;
-        if (args.length !== needed) {
-            return this.invalid("apgames:validation.gnostica.REDRAW_COUNT_MISMATCH", { requested: args.length, needed });
+        if (uids.length !== needed) {
+            return this.invalid("apgames:validation.gnostica.REDRAW_COUNT_MISMATCH", { requested: uids.length, needed });
         }
         const seen = new Set<string>();
-        for (const uid of args) {
+        for (const uid of uids) {
             if (seen.has(uid)) {
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid });
             }
@@ -4639,8 +4654,8 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({ type: "place", where: cellStr, how: "initial" });
     }
 
-    private validatePlace(args: string[]): IValidationResult {
-        const [cellStr, orientationStr] = args;
+    private validatePlace(parsed: IParsedMove): IValidationResult {
+        const [cellStr, orientationStr] = parsed.rest;
         if (cellStr === undefined) {
             return this.invalid("apgames:validation.gnostica.PLACE_CELL_REQUIRED");
         }
@@ -4652,8 +4667,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.board.classify(x, y) === "void") {
             return this.invalid("apgames:validation.gnostica.PLACE_VOID", { cell: cellStr });
         }
-        const territory = this.board.get(x, y);
-        if (territory !== undefined && territory.pieces.length > 0) {
+        const contents = this.board.get(x, y);
+        if (contents !== undefined && contents.pieces.length > 0) {
             return this.invalid("apgames:validation.gnostica.PLACE_OCCUPIED", { cell: cellStr });
         }
         // A default orientation is provided in the click flow,
@@ -4688,7 +4703,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // rather than mutating .orientation inline, the same primitive
         // the Empress/Emperor/Tower/Star's own first step goes through.
         orientMinion(this.buildPowerContext(), x, y, index, orientation);
-        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(x, y), what: this.getPipsFromRef(ref), facing: orientation });
+        this.pushOrientResult(x, y, index, ref, orientation);
     }
 
     // Any board cell whose facing might get set/adjusted by a click -
@@ -4730,8 +4745,8 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private validateOrient(args: string[]): IValidationResult {
-        const [ref, orientationStr] = args;
+    private validateOrient(parsed: IParsedMove): IValidationResult {
+        const [ref, orientationStr] = parsed.rest;
         if (ref === undefined) {
             return this.invalid("apgames:validation.gnostica.ORIENT_ARGS_REQUIRED");
         }
@@ -4845,10 +4860,11 @@ export class GnosticaGame extends GameBaseSequenced {
     // mutates the hand as it goes, so a repeated uid already fails there
     // (found once, then genuinely gone from hand on the second lookup);
     // this reproduces that without actually mutating anything.
-    private validateDiscard(args: string[]): IValidationResult {
+    private validateDiscard(parsed: IParsedMove): IValidationResult {
+        const tokens = parsed.rest;
         const hand = this.hands[this.currplayer - 1];
-        const drawIdx = args.indexOf("draw");
-        const discardUids = drawIdx === -1 ? args : args.slice(0, drawIdx);
+        const drawIdx = tokens.indexOf("draw");
+        const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
         const seen = new Set<string>();
         for (const uid of discardUids) {
             if (seen.has(uid)) {
@@ -4861,7 +4877,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (drawIdx !== -1) {
             const maxDraw = Math.max(0, 6 - (hand.length - discardUids.length));
-            const countStr = args[drawIdx + 1];
+            const countStr = tokens[drawIdx + 1];
             const count = countStr === undefined ? NaN : Number(countStr);
             if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
                 return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw });
@@ -4972,8 +4988,8 @@ export class GnosticaGame extends GameBaseSequenced {
         this.applyCardPower(t.card!, eligible, stepSegments, partial);
     }
 
-    private validateActivate(args: string[], stepSegments: string[][]): IValidationResult {
-        const [cardUid] = args;
+    private validateActivate(parsed: IParsedMove): IValidationResult {
+        const [cardUid] = parsed.rest;
         if (cardUid === undefined) {
             return this.invalid("apgames:validation.gnostica.ACTIVATE_UID_REQUIRED");
         }
@@ -4990,7 +5006,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (eligible.length === 0) {
             return this.invalid("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid });
         }
-        return this.validateCardPower(t.card!, eligible, stepSegments) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        return this.validateCardPower(t.card!, eligible, parsed.stepSegments) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "Play a card from your hand to the discard pile. All your pieces on
@@ -5013,8 +5029,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
 
-    private validatePlay(args: string[], stepSegments: string[][]): IValidationResult {
-        const [uid] = args;
+    private validatePlay(parsed: IParsedMove): IValidationResult {
+        const [uid] = parsed.rest;
         if (uid === undefined) {
             return this.invalid("apgames:validation.gnostica.PLAY_UID_REQUIRED");
         }
@@ -5057,7 +5073,7 @@ export class GnosticaGame extends GameBaseSequenced {
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         try {
-            return this.validateCardPower(card, eligible, stepSegments) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+            return this.validateCardPower(card, eligible, parsed.stepSegments) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         } finally {
             hand.splice(handIdx, 0, uid);
             this.discardPile.pop();
@@ -6586,12 +6602,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const orientation = this.parseOrientation(orientationStr);
         orientMinion(this.buildPowerContext(), minion.x, minion.y, minion.index, orientation);
         this.addBufferIfWasteland(minion.x, minion.y);
-        this.results.push({
-            type: "orient",
-            where: GnosticaBoard.coords2algebraic(minion.x, minion.y),
-            what: this.getPipsFromRef(this.pieceRefStr(minion.x, minion.y, minion.index)),
-            facing: orientation,
-        });
+        this.pushOrientResult(minion.x, minion.y, minion.index, this.pieceRefStr(minion.x, minion.y, minion.index), orientation);
         return { newMinion: minion, replacesMinion: minion };
     }
 
@@ -6630,7 +6641,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const orientation = this.parseOrientation(orientationStr);
         orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
-        this.results.push({ type: "orient", where: GnosticaBoard.coords2algebraic(target.x, target.y), what: this.getPipsFromRef(targetRef), facing: orientation, who: owner });
+        this.pushOrientResult(target.x, target.y, target.index, targetRef, orientation);
         return owner === this.currplayer ? { newMinion: target, replacesMinion: target } : {};
     }
 
@@ -8097,12 +8108,12 @@ export class GnosticaGame extends GameBaseSequenced {
                             node.push(i18next.t("apresults:DECLARE.gnostica", { player, count: r.count }));
                             break;
                         case "orient": {
-                            // The Devil's orientAny can reorient ANY
-                            // player's piece, not just the player's own.
-                            // The regular "orient" action doesn't set `who`.
+                            // The Devil's orientAny can reorient any player's
+                            // piece; every other orient path only ever turns
+                            // the acting player's own.
                             const target = this.otherPlayerName(r.who, player, players);
                             node.push(target === undefined
-                                ? i18next.t("apresults:ORIENT.gnostica", { player, where: r.where, what: r.what, facing: r.facing })
+                                ? i18next.t("apresults:ORIENT.gnostica_own", { player, where: r.where, what: r.what, facing: r.facing })
                                 : i18next.t("apresults:ORIENT.gnostica_target", { player, where: r.where, what: r.what, facing: r.facing, target }));
                             break;
                         }

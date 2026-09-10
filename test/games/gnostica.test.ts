@@ -4752,7 +4752,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.move("orient m0.1 N", { trusted: true });
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("oriented"));
-        expect(line).eq(i18next.t("apresults:ORIENT.gnostica", { player: "Alice", where: "m0", what: "1", facing: "N" }));
+        expect(line).eq(i18next.t("apresults:ORIENT.gnostica_own", { player: "Alice", where: "m0", what: "1", facing: "N" }));
     });
 
     it("use (activating a card already on the board): names the card, not a raw uid", () => {

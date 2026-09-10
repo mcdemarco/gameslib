@@ -412,7 +412,7 @@
     "NULLIFY_CLAIM": "Towers may not be claimed on the last turn of the game. The claim at {{where}} was nullified.",
     "ORIENT": {
         "crosshairs": "{{player}} turned a plane at {{where}} to face {{facing}}.",
-        "gnostica": "{{player}} oriented a {{what}}-pip minion at {{where}} {{facing}}-ward.",
+        "gnostica_own": "{{player}} oriented their {{what}}-pip minion at {{where}} {{facing}}-ward.",
         "gnostica_target": "{{player}} oriented {{target}}'s {{what}}-pip minion at {{where}} {{facing}}-ward.",
         "nowhat": "{{player}} turned a piece at {{where}} to face {{facing}}."
     },
