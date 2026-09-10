@@ -4871,17 +4871,17 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     // trusted to have validated already, per feedback_no_trusted_path_defense)
     // must carry a matching "(via <root>)" anchor AND spell the head that
     // fits what it's doing: "decline" to give the active card up, "discard"
-    // for a High Priestess round. A wrong/missing anchor is
-    // PENDING_POWER_MISMATCH; a wrong head is INVALID_MOVE.
+    // for a High Priestess round. The click UI never gets any of this
+    // wrong, so every rejection is a malformed hand-edit -> INVALID_MOVE.
     it("resume-mismatch guards reject a wrong card uid or a wrong head word", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
         g.move(`use ${major(2).uid}, 5C`, { trusted: true });
         expect(g.continued).to.not.be.empty;
         // Wrong anchor (the Fool, a real continuing card, but not the
-        // High Priestess round actually pending) / missing anchor -> mismatch.
-        expect(g.validateMove("decline 00 (via 00)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
-        expect(g.validateMove("use 00, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        // High Priestess round actually pending) / missing anchor.
+        expect(g.validateMove("decline 00 (via 00)").valid).to.be.false;
+        expect(g.validateMove("use 00, decline").valid).to.be.false;
         // Right anchor, wrong head ("play"/"use" for a High Priestess step
         // that should be "discard", or a bare uid with no anchor) -> rejected.
         expect(g.validateMove(`play ${major(2).uid}, AR (via ${major(2).uid})`).valid).to.be.false;
@@ -5462,8 +5462,8 @@ describe("Gnostica: Fool and World", () => {
         g.move("discard 5C (via 00)", { trusted: true }); // High Priestess round 1
         expect(g.continued).to.deep.equal(["00.1", "02.1"]);
 
-        // "(via 00)" names the buried Fool, not the active round 2 -> mismatch.
-        expect(g.validateMove("decline 00 (via 00)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        // "(via 00)" names the buried Fool, not the active round 2 -> rejected.
+        expect(g.validateMove("decline 00 (via 00)").valid).to.be.false;
         expect(g.continued).to.deep.equal(["00.1", "02.1"]);
         // The correct anchor works.
         expect(g.validateMove("decline (via 02)").valid).to.be.true;

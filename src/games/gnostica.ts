@@ -5780,19 +5780,21 @@ export class GnosticaGame extends GameBaseSequenced {
     // fits it ("decline"/"discard" for a High Priestess round; "decline"/
     // "play <revealed card>" for a Fool reveal), and - for a Fool reveal -
     // name the card actually on top of the discard pile, where the flip
-    // left it. The click UI only ever produces the right one; anything
-    // else is a hand-edit.
+    // left it. The click UI always produces the right one, so every
+    // rejection here is a malformed hand-edit (INVALID_MOVE, terse
+    // reason - no translation-key mimicry, per #69).
     private validateResumeHead(parsed: IParsedMove): IValidationResult | undefined {
         const activeUid = this.continuedActiveUid();
+        const bad = (reason: string) => this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason });
         if (parsed.viaUid !== activeUid) {
-            return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
+            return bad(`resume via ${activeUid}`);
         }
         const allowed = activeUid === "02" ? ["decline", "discard"] : ["decline", "play"];
         if (!allowed.includes(parsed.head!)) {
-            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: `resume with "${allowed.join('" or "')}"` });
+            return bad(`resume with "${allowed.join('" or "')}"`);
         }
         if (activeUid === "00" && parsed.rest[0] !== undefined && parsed.rest[0] !== this.discardPile[this.discardPile.length - 1]) {
-            return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
+            return bad("wrong revealed card");
         }
         return undefined;
     }
