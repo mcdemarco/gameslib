@@ -896,7 +896,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // docs), so no separate check is needed here. Short-circuits ahead
         // of the other gates below since they don't apply to a resume.
         if (this.continued.length > 0) {
-            const failure = requireValidStepShapes() ?? this.validateResumePendingPower(parsed.rest[0], parsed.stepSegments);
+            const failure = requireValidStepShapes() ?? this.validateResumePendingPower(parsed.rest[0], this.resumeStepSegments(parsed));
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
         // "decline" as a head word only ever means something paired with
@@ -1066,7 +1066,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // something this dispatch re-checks.
             if (this.continued.length > 0) {
                 requireValidStepShapes();
-                this.resumePendingPower(parsed.stepSegments, partial);
+                this.resumePendingPower(this.resumeStepSegments(parsed), partial);
             } else if (head === "bid") {
 
             // The "bidding" variant's own opening procedure - see cmdBid's/
@@ -1321,7 +1321,11 @@ export class GnosticaGame extends GameBaseSequenced {
         if (p.head === undefined) {
             return p.announceLast ? "(last)" : "";
         }
-        const headPart = [p.head, ...p.rest].join(" ");
+        // parseMove folds a "(via <uid>)" anchor into rest[0] (see its own
+        // docs); the anchor is printed only via the parenthetical below, so
+        // drop that leading copy here to keep pickle(parse(x)) stable.
+        const printedRest = p.viaUid !== undefined && p.rest[0] === p.viaUid ? p.rest.slice(1) : p.rest;
+        const headPart = [p.head, ...printedRest].join(" ");
         // The leading "decline" segment (implied by head === "decline" -
         // see parseMove's own synthesis) is never printed a second time.
         // Declining never legitimately has anything real after it in
@@ -1353,16 +1357,21 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The one place that assembles a resumed move's descriptive front -
     // every "resume seed" call site below shares this instead of hand-
-    // rolling the verb/active-uid/parenthetical itself. "play"/"decline"
-    // against the ACTIVE card, with the real root demoted into
-    // "(via <rootUid>)".
+    // rolling the verb/active-uid/parenthetical itself. "decline" against
+    // the active card; "discard" for a High Priestess round (its step IS a
+    // discard/draw - see describePendingMove); "play" for everything else -
+    // with the real root demoted into "(via <rootUid>)".
     public buildViaMove(rootUid: string, stepSegments: string[][]): IParsedMove {
+        const activeUid = this.activeCardUid(rootUid);
         const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
+        if (!declining && activeUid === "02") {
+            return { announceLast: false, head: "discard", headRecognized: true, rest: [], viaUid: rootUid, stepSegments, malformedStep: undefined };
+        }
         return {
             announceLast: false,
             head: declining ? "decline" : "play",
             headRecognized: true,
-            rest: [this.activeCardUid(rootUid)],
+            rest: [activeUid],
             viaUid: rootUid,
             stepSegments,
             malformedStep: undefined,
@@ -2401,10 +2410,15 @@ export class GnosticaGame extends GameBaseSequenced {
         // anchor, not the front head. A resumed continuation always plays
         // whatever revealed card is active, so `head` is "play" there.
         const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.continued[0].split(".")[0];
+        // High Priestess resumes with its own tokens right after a
+        // "discard" head, not as a "/"-separated segment - fold them back
+        // (see resumeStepSegments) so the walk below sees them.
+        const stepSegments = isGenuineResume ? this.resumeStepSegments(parsed) : parsed.stepSegments;
         if (isGenuineResume) {
             // The revealed card being resolved (rest[1] once the front card
-            // is typed), else the root itself (a bare High Priestess round 2).
-            headArg = parsed.rest[1] ?? parsed.rest[0];
+            // is typed), else the root itself (a bare High Priestess round
+            // 2, whose "discard" head carries no front card at all).
+            headArg = parsed.head === "discard" ? parsed.rest[0] : (parsed.rest[1] ?? parsed.rest[0]);
         }
         // A "(via <uid>)" marker with no matching genuine obligation means a
         // same-string push that never crossed a submission boundary
@@ -2440,7 +2454,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (!card.major) {
             const suitUid = card.suit.uid;
-            const segment = parsed.stepSegments[0] ?? []; // segment[0] is the minionRef, if typed yet - see resolveStepMinion
+            const segment = stepSegments[0] ?? []; // segment[0] is the minionRef, if typed yet - see resolveStepMinion
             const [, mode, ...rest] = segment;
             const { minion, ambiguous, candidates } = this.resolveStepMinion(segment, eligible);
             return { head, headArg, activeCardUid: headArg, suitUid, prefix: [], eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, mode, rest };
@@ -2464,7 +2478,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
         const priorSteps: string[] = [];
         let clone: GnosticaGame | undefined;
-        for (let segIdx = 0; segIdx < parsed.stepSegments.length; segIdx++) {
+        for (let segIdx = 0; segIdx < stepSegments.length; segIdx++) {
             const top = stack[stack.length - 1];
             if (top === undefined) {
                 return undefined; // too many steps already typed - validateMove/move report this properly on submit
@@ -2485,8 +2499,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 // whatever segment (if any) the player typed next.
                 return undefined;
             }
-            const tokens = parsed.stepSegments[segIdx];
-            const isLastSegment = segIdx === parsed.stepSegments.length - 1;
+            const tokens = stepSegments[segIdx];
+            const isLastSegment = segIdx === stepSegments.length - 1;
             if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
                 // Mirrors validateFrameStack's own decline branch - a
                 // declined pushed frame (e.g. Fool's reveal) needs to keep
@@ -2959,10 +2973,17 @@ export class GnosticaGame extends GameBaseSequenced {
     private describePendingMove(pending: IPendingStep, stepSegments: string[][]): string {
         const base: IParsedMove = { announceLast: false, head: pending.head, headRecognized: true, rest: [pending.headArg], stepSegments, malformedStep: undefined };
         // A genuine resume always carries a "(via <root>)" anchor for
-        // validateResumePendingPower's own mismatch check - even when the
-        // active card IS the root (a bare High Priestess round 2), where
-        // there's no distinct front card to demote.
+        // validateResumePendingPower's own mismatch check.
         if (this.continued.length > 0) {
+            // High Priestess's own step IS a discard/draw - "play 02" would
+            // be a lie (there's no card being played), so it resumes as a
+            // bare "discard <uids> draw <n> (via 02)", its tokens sitting
+            // directly after the head the way the ordinary end-of-turn
+            // discard action's own do.
+            if (pending.special === "highPriestess") {
+                const tokens = stepSegments[stepSegments.length - 1] ?? [];
+                return this.pickleMove({ ...base, head: "discard", rest: tokens, stepSegments: [], viaUid: this.continuedRootUid() });
+            }
             return this.pickleMove({ ...base, rest: [pending.activeCardUid], viaUid: this.continuedRootUid() });
         }
         if (pending.activeCardUid === pending.headArg) {
@@ -5538,6 +5559,19 @@ export class GnosticaGame extends GameBaseSequenced {
     private resumeStack(): IPowerFrame[] | undefined {
         const pending = this.buildPendingFromContinued();
         return pending?.stack.map(f => ({ ...f, minions: [...f.minions] }));
+    }
+
+    // High Priestess resumes as a bare "discard <uids> draw <n> (via 02)"
+    // (see buildViaMove/describePendingMove) - its own step tokens sit
+    // right after the head, like the ordinary discard action's, rather
+    // than as a "/"-separated segment. Fold them back into a step segment
+    // so the shared resume machinery (which reads stepSegments) sees them.
+    private resumeStepSegments(parsed: IParsedMove): string[][] {
+        if (parsed.head === "discard" && parsed.viaUid !== undefined) {
+            const tokens = parsed.rest.slice(1);
+            return tokens.length > 0 ? [tokens] : [];
+        }
+        return parsed.stepSegments;
     }
 
     private resumePendingPower(stepSegments: string[][], partial: boolean): void {

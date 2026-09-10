@@ -3728,7 +3728,9 @@ describe("Gnostica: choose-step click messaging", () => {
         g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true }); // step 1: a real discard, pauses on step 2
         expect(g.continued).to.not.be.empty;
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
-        expect(resumed.move).eq(`play ${major(2).uid} (via ${major(2).uid})`);
+        // High Priestess round 2 resumes as a bare "discard (via 02)" -
+        // its own step IS a discard/draw, so "play 02" would be a lie.
+        expect(resumed.move).eq(`discard (via ${major(2).uid})`);
         expect(resumed.message).eq(round2Msg);
     });
 
