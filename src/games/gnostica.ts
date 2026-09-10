@@ -2434,19 +2434,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             const tokens = stepSegments[segIdx];
             const isLastSegment = segIdx === stepSegments.length - 1;
-            if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                // Mirrors validateFrameStack's own decline branch - a
-                // declined pushed frame (e.g. Fool's reveal) needs to keep
-                // walking into whatever frame the decline exposes
-                // underneath (which may itself need its own Use/Decline-
-                // style choice, or - if already exhausted - nothing
-                // further at all), not fall back to the generic top-level
-                // bar.
-                priorSteps.push(tokens.join(" "));
-                GnosticaGame.popFrame(stack);
-                GnosticaGame.popExhaustedFrames(this, stack);
-                continue;
-            }
             if ("primitive" in step) {
                 const suitUidForStep = this.primitiveToSuit(step.primitive);
                 const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
