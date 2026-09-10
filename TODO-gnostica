@@ -68,3 +68,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #98 - walkFrameStack's incomplete-step exit no longer persists this.continued. It only fired on a non-partial call, which a valid submission never is - so it just let a contract-violating trusted caller (an incomplete power chain) persist an arbitrary root uid. continued[0] is now provably 00/02/21. @done(26-09-10)
 ✔ #99 - this.continued now holds ONLY 00.1/00.2/02.1. @done(26-09-10)
 ✔ #100 - parseMove no longer folds viaUid into rest[0]; the "(via <uid>)" anchor lives in viaUid alone. @done(26-09-10)
+✔ #101 - A resume whose active step is a click-driven special now shows a "Use Card X" button (resume_power) alongside Decline, so validateMove("") no longer prepopulates powerStepMessageKey - it's plain INITIAL_INSTRUCTIONS (or _PLACE). @done(26-09-10)

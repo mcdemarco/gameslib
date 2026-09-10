@@ -835,28 +835,14 @@ export class GnosticaGame extends GameBaseSequenced {
             // The real client calls validateMove("") right after every
             // real commit, purely to populate the status line for the
             // FRESH render that follows (see playground.js's own moveBtn
-            // handler) - INITIAL_INSTRUCTIONS ("click a top-level button")
-            // is wrong here whenever that fresh render is actually the
-            // forced Use/Decline screen (getActionButtons()'s own
-            // pendingPower gate), not the ordinary 6-button bar, or
-            // whenever this player hasn't placed a piece yet at all.
-            const continued = this.buildPendingFromContinued();
-            if (continued !== undefined) {
-                // Routed through powerStepMessageKey (the SAME lookup
-                // resume_power's own click handler and computeActionButtons
-                // already use) rather than a separate, generic "just name
-                // the card" copy - this is the only chance the status line
-                // itself (as opposed to the chat log) gets to tell the
-                // player which card's power they're being asked about
-                // before they've clicked anything at all.
-                const activeTop = continued.stack[continued.stack.length - 1];
-                const { key, params } = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
-                result.message = i18next.t(key, params);
-            } else if (!hasPieces) {
-                result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE");
-            } else {
-                result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
-            }
+            // handler). Every state now has a real button to click - the
+            // ordinary 6-button bar, or a resume's own Use/Decline pair
+            // (getActionButtons) - so "click a button" fits; the one
+            // exception is a player with no piece down yet, who must place.
+            result.message = i18next.t(
+                this.continued.length === 0 && !hasPieces
+                    ? "apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE"
+                    : "apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
             return result;
         }
 
@@ -2207,33 +2193,21 @@ export class GnosticaGame extends GameBaseSequenced {
                 return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
             }
             // Once genuinely paused, though, NONE of the ordinary 6
-            // buttons are legal here - every one of them would be
-            // rejected outright by validateMove's own PENDING_POWER_NEEDS_
-            // CONTINUE gate while this obligation is open. Showing them
-            // anyway (the bar's old behaviour) is actively misleading -
-            // there's nothing on it the player can actually use, and
-            // worse for World specifically (its own legal target is any
-            // major arcana card anywhere on the board, not a self-evident
-            // cell - see powerStepMessageKey's own WORLD_CHOOSE_TARGET
-            // docs). The one thing that's usually always legal here
-            // regardless of card (see getActionButtons()'s own docs) is
-            // declining outright, so show ONLY that - matching the
-            // Fool-special pair's own self-contained shape just above,
-            // and letting getActionButtons()'s own persisting-Decline
-            // wrapper recognize a decline_power value is already present
-            // and leave it alone. EXCEPT a frame reached via World's own
-            // worldUseAny push (as opposed to World's OWN root step here,
-            // still fully declinable like any other root) - see
-            // IPowerFrame's own "viaFool" docs on why naming a target
-            // forecloses Decline. Nothing legal to offer as a button at
-            // all in that case; the board click itself is the only way
-            // forward.
+            // buttons are legal - every one would be rejected outright by
+            // validateMove's own PENDING_POWER_NEEDS_CONTINUE gate while
+            // this obligation is open. A click-driven special (orientAny,
+            // World's target, etc.) also has no button of its own for
+            // what comes NEXT. So offer the same self-contained Use/
+            // Decline pair the Fool-special branch above does: clicking
+            // "Use Card X" seeds "play X (via ..)" (resume_power), which
+            // then produces that step's own real click-target message -
+            // so the empty-move status line here needs no special-casing.
             const resumeStack = this.resumeStack()!;
-            const activeFrame = resumeStack[resumeStack.length - 1];
-            if (resumeStack.length > 1 && activeFrame.viaFool !== true) {
-                return undefined;
-            }
-            return [{ label: `Decline ${activeFrame.cardUid}`, value: "decline_power" }];
+            const activeUid = resumeStack[resumeStack.length - 1].cardUid;
+            return [
+                { label: `Use Card ${activeUid}`, value: "resume_power" },
+                { label: `Decline ${activeUid}`, value: "decline_power" },
+            ];
         }
 
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];

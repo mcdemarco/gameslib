@@ -3793,16 +3793,14 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(declineBtn.label).eq("Decline 02");
     });
 
-    // The real client calls validateMove("") right after every real
-    // commit, purely to populate the status line for the render that
-    // follows (see playground.js's own moveBtn handler) - INITIAL_
-    // INSTRUCTIONS ("click a top-level button") is wrong the moment that
-    // render is actually the forced Continue/Decline screen, not the
-    // ordinary button bar. Routed through powerStepMessageKey (the SAME
-    // lookup resume_power's own click handler uses), so a card with real
-    // instructions (High Priestess round 2, here) gets them right at
-    // "beginning of turn" too, not just once the player clicks something.
-    it("validateMove(\"\") reports the pending-power's own real instructions, not the generic top-level-button wording or a bare card name, once a card's power is paused", () => {
+    // validateMove("") only populates the status line for the render
+    // right after a commit (see playground.js's moveBtn handler). Every
+    // state now has a real button to click - the ordinary bar, or a
+    // resume's own Use/Decline pair - so "click a button" always fits;
+    // the card's own real instructions come from the resume_power click,
+    // not prepopulated here. The one exception is a player with no piece
+    // down yet, who must place.
+    it("validateMove(\"\") is the generic click-a-button wording, or place instructions when no piece is down", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -3812,14 +3810,11 @@ describe("Gnostica: choose-step click messaging", () => {
 
         g.move(`use ${major(2).uid}, ${discardUid}`, { trusted: true }); // pauses, awaiting round 2
         expect(g.continued).to.not.be.empty;
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"));
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
 
         g.move(`decline ${major(2).uid} (via ${major(2).uid})`, { trusted: true }); // clears the obligation
         expect(g.continued).to.be.empty;
-        // Turn has passed to player 2, who has no pieces on the board yet -
-        // INITIAL_INSTRUCTIONS_PLACE, not the generic top-level-button
-        // wording (which would be actively wrong: no top-level button is
-        // legal for them yet either).
+        // Turn has passed to player 2, who has no pieces on the board yet.
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE"));
     });
 });
@@ -5570,21 +5565,19 @@ describe("Gnostica: Fool and World", () => {
         expect(declineBtn.attributes).to.deep.equal([{ name: "font-weight", value: "bold" }]);
     });
 
-    // A real flip's own message (validateMove("") right after commit, the
-    // Continue/Decline screen) and the message shown once Continue is
-    // clicked must both name the revealed card explicitly, not force the
+    // Right after a real flip the status line is the generic "click a
+    // button" wording (a Use/Decline pair is on the bar); clicking "Use
+    // Card X" (resume_power) is what surfaces the revealed card's own
+    // real instructions, naming it explicitly rather than forcing the
     // player to check the chat log.
-    it("Fool's real flip and its Continue click both name the revealed card in the message, not just the chat log", () => {
+    it("Fool's real flip: the Use Card click names the revealed card in the message", () => {
         const g = setupFool();
         pluckCard(g, "AC");
         g.drawPile.unshift("AC");
         g.move(`use ${major(0).uid}`); // real, non-partial commit - actually flips
         expect(g.continued).to.not.be.empty;
         const acName = minorCards.find(c => c.uid === "AC")!.name;
-        // Routed through powerStepMessageKey now (see its own docs) - a
-        // minor card's own synthesized step is step 0, so CHOOSE_STEP is
-        // the right key, same as the resume_power click just below gets.
-        expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
+        expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
 
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
         expect(resumed.move).eq(`play AC (via ${major(0).uid})`);
@@ -5674,14 +5667,13 @@ describe("Gnostica: Fool and World", () => {
         expect(real.continued).to.deep.equal(["00.1"]);
     });
 
-    // World's own target is any major arcana card on the board - unlike
-    // every other click-driven special, there's no single obvious cell to
-    // guess, so once genuinely paused (Fool's own reveal, here) the bar
-    // must drop the ordinary 6 buttons entirely (none of them are legal -
-    // validateMove would reject every one with PENDING_POWER_NEEDS_
-    // CONTINUE) and the status line must give real instructions, not just
-    // name the card.
-    it("Fool reveals World: the button bar drops to just Decline, and the message gives real instructions instead of naming the card alone", () => {
+    // Once genuinely paused (Fool's own reveal of a click-driven special,
+    // here the World), the bar drops the ordinary 6 buttons entirely
+    // (none legal - validateMove would reject every one with PENDING_
+    // POWER_NEEDS_CONTINUE) and shows a self-contained Use/Decline pair
+    // instead. Clicking "Use Card" surfaces the World's own real target
+    // instructions; a direct board click still works too.
+    it("Fool reveals World: the bar drops to a Use/Decline pair, and clicking Use gives real target instructions", () => {
         const g = setupFool();
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         forceCardAt(g, 1, 0, () => major(1)); // a real target for World to use
@@ -5690,10 +5682,11 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use ${major(0).uid}`, { trusted: true });
         expect(g.continued).to.deep.equal(["00.1"]);
 
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
-        expect(buttonValues(g)).to.deep.equal(["decline_power"]);
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power"]);
+        expect(g.handleClick("", -1, -1, "_btn_resume_power").message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
 
-        // The click itself still works - only the bar/message were wrong.
+        // A direct board click on the target still works too.
         const [rowN, colN] = rowColFor(g, 1, 0);
         const targetClick = g.handleClick("", rowN, colN);
         expect(targetClick.valid).to.be.true;
