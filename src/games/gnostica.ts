@@ -981,7 +981,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results = [];
         this.frames = [];
         this.cardsDrawn[this.currplayer - 1] = 0;
-        let head;
+        let head, newLast;
 
         if (m.toLowerCase() === "pass") {
             // validateMove() (above) is the actual gate on WHO may say
@@ -1078,23 +1078,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
 
                 if (parsed.announceLast) {
-                    if (this.lastTurnAnnouncedBy !== undefined && this.lastTurnAnnouncedBy !== this.currplayer) {
-                        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
-                    }
+                    newLast = this.currplayer;
                     this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
-                }
-
-                // End of turn: if this player announced on a PREVIOUS turn,
-                // this is the turn that resolves it into a win or an
-                // elimination. lastTurnAnnouncedBy is still that prior
-                // value here - a fresh announcement above only records its
-                // "declare" result; the field itself isn't set until after
-                // this, so no pre-move snapshot is needed.
-                if (this.lastTurnAnnouncedBy === this.currplayer) {
-                    this.resolveAnnouncedTurn();
-                }
-                if (parsed.announceLast) {
-                    this.lastTurnAnnouncedBy = this.currplayer;
                 }
 
             }
@@ -1142,6 +1127,17 @@ export class GnosticaGame extends GameBaseSequenced {
             // reads only eliminated/gameover/winner, none of which this
             // step could have changed.
         } else {
+            // Only on a real end-of-turn do we check the last turn announcement.
+            if (this.lastTurnAnnouncedBy === this.currplayer) {
+                if (this.scoreFor(this.currplayer) >= this.targetScore()) {
+                    this.gameover = true;
+                    this.winner = [this.currplayer];
+                } else {
+                    this.eliminatePlayer(this.currplayer);
+                }
+            }
+
+            this.lastTurnAnnouncedBy = newLast;
             this.nextPlayer();
             this.checkEOG();
         }
@@ -6926,20 +6922,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return [
             { name: i18next.t("apgames:status.SCORES"), scores },
         ];
-    }
-
-    // Called (after the player's action for the turn has already been
-    // applied) when this is the turn following that player's own
-    // "announce last turn" - decides win or elimination.
-    private resolveAnnouncedTurn(): void {
-        const player = this.currplayer;
-        this.lastTurnAnnouncedBy = undefined;
-        if (this.scoreFor(player) >= this.targetScore()) {
-            this.gameover = true;
-            this.winner = [player];
-        } else {
-            this.eliminatePlayer(player);
-        }
     }
 
     // Rules text: an eliminated player discards their hand. Their board
