@@ -5805,6 +5805,7 @@
             "HIGH_PRIESTESS_ROUND2": "Click hand cards to discard, if desired, then choose a number of cards to draw and/or submit.  If no number is chosen, you will draw back up to the hand limit. This is the second and final round of the High Priestess (II).",
             "HIGH_PRIESTESS_ROUND2_READY": "Submit to complete this second and final round of the High Priestess (II).",
             "INITIAL_INSTRUCTIONS": "Click one of the buttons to select your top-level action.",
+            "INITIAL_INSTRUCTIONS_PLACE": "Place one 1-pip pyramid onto the board on any unoccupied territory or wasteland space.",
             "INVALID_MOVE": "The move was malformed. {{reason}}",
             "LABEL_BIDDING_POOL": "Bidding pool",
             "LABEL_DECK": "Cards in deck",

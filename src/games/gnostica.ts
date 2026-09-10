@@ -810,31 +810,11 @@ export class GnosticaGame extends GameBaseSequenced {
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
-        if (m.length === 0) {
-            result.valid = true;
-            result.complete = -1;
-            // The real client calls validateMove("") right after every
-            // real commit, purely to populate the status line for the
-            // FRESH render that follows (see playground.js's own moveBtn
-            // handler) - INITIAL_INSTRUCTIONS ("click a top-level button")
-            // is wrong here whenever that fresh render is actually the
-            // forced Use/Decline screen (getActionButtons()'s own
-            // pendingPower gate), not the ordinary 6-button bar.
-            if (this.pendingPower !== undefined) {
-                // Routed through powerStepMessageKey (the SAME lookup
-                // resume_power's own click handler and computeActionButtons
-                // already use) rather than a separate, generic "just name
-                // the card" copy - this is the only chance the status line
-                // itself (as opposed to the chat log) gets to tell the
-                // player which card's power they're being asked about
-                // before they've clicked anything at all, so a card with
-                // real instructions (Fool, High Priestess, World) needs
-                // them here just as much as anywhere else this key is read.
-                const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
-                const { key, params } = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
-                result.message = i18next.t(key, params);
+        if (this.gameover) {
+            if (m.length === 0) {
+                result.message = "";
             } else {
-                result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
+                result.message = i18next.t("apgames:MOVES_GAMEOVER");
             }
             return result;
         }
@@ -862,7 +842,45 @@ export class GnosticaGame extends GameBaseSequenced {
                 return result;
             }
         }
-        
+
+        // Computed once, here, and reused below (the later head !== "place"
+        // gate) rather than called twice - this player's own board presence
+        // can't change between the two reads within a single validateMove
+        // call.
+        const hasPieces = this.hasPiecesOnBoard(this.currplayer);
+
+        if (m.length === 0) {
+            result.valid = true;
+            result.complete = -1;
+            // The real client calls validateMove("") right after every
+            // real commit, purely to populate the status line for the
+            // FRESH render that follows (see playground.js's own moveBtn
+            // handler) - INITIAL_INSTRUCTIONS ("click a top-level button")
+            // is wrong here whenever that fresh render is actually the
+            // forced Use/Decline screen (getActionButtons()'s own
+            // pendingPower gate), not the ordinary 6-button bar, or
+            // whenever this player hasn't placed a piece yet at all.
+            if (this.pendingPower !== undefined) {
+                // Routed through powerStepMessageKey (the SAME lookup
+                // resume_power's own click handler and computeActionButtons
+                // already use) rather than a separate, generic "just name
+                // the card" copy - this is the only chance the status line
+                // itself (as opposed to the chat log) gets to tell the
+                // player which card's power they're being asked about
+                // before they've clicked anything at all, so a card with
+                // real instructions (Fool, High Priestess, World) needs
+                // them here just as much as anywhere else this key is read.
+                const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
+                const { key, params } = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
+                result.message = i18next.t(key, params);
+            } else if (!hasPieces) {
+                result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE");
+            } else {
+                result.message = i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
+            }
+            return result;
+        }
+
         const parsed = this.parseMove(m);
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
@@ -883,8 +901,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return undefined;
         };
-// PASSING HERE
-        // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
         const head = parsed.head;
 
         // A genuine cross-turn pause (Fool's second flip, a revealed/
@@ -912,13 +928,16 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.NOTHING_TO_DECLINE");
         }
 
+        // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
         if (head === "bid" || head === "redraw" || head === "pass") {
             if (head === "bid" && this.phase !== "bidding") {
                 return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
             }
-            // Mirrors move()'s own eliminatedPass exemption - see its docs.
-            const eliminatedPass = head === "pass" && this.eliminated.includes(this.currplayer);
-            if (!eliminatedPass && (head === "redraw" || head === "pass") && this.phase !== "redraw") {
+            // An eliminated player's own "pass" is already fully handled
+            // above (isEliminated gate, before parseMove even runs), so
+            // this.eliminated can't be true for currplayer here - no
+            // exemption needed for either head.
+            if ((head === "redraw" || head === "pass") && this.phase !== "redraw") {
                 return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
             }
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
@@ -932,7 +951,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.phase !== "main") {
             return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
         }
-        if (head !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
+        if (head !== "place" && !hasPieces) {
+            //This does not yet cover the Fool suicide corner case.
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
         }
         let failure: IValidationResult | undefined;
@@ -1064,9 +1084,12 @@ export class GnosticaGame extends GameBaseSequenced {
             // A genuine cross-turn pause means every legal move right now
             // has to be resuming it - mirrors validateMove's own,
             // identically-placed gate (see its docs on why this runs
-            // ahead of bid/redraw/pass and the phase/placement checks
-            // below - a resume was already validated as legal regardless
-            // of what phase/placement state would otherwise require).
+            // ahead of bid/redraw/pass below - a resume was already
+            // validated as legal regardless of what phase/placement state
+            // would otherwise require). Phase/placement legality itself is
+            // validateMove's job alone now - see its own docs; a trusted
+            // caller passing an illegal head here is a caller bug, not
+            // something this dispatch re-checks.
             if (this.pendingPower !== undefined && this.pendingPowerIsGenuine) {
                 requireValidStepShapes();
                 this.resumePendingPower(parsed.stepSegments, partial);
@@ -1085,24 +1108,12 @@ export class GnosticaGame extends GameBaseSequenced {
             // it via moves() the instant it's the only legal option, so a
             // human player should never actually see or click a "pass"
             // prompt themselves.
-                if (this.phase !== "bidding") {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
-                }
                 if (parsed.stepSegments.length > 0 || parsed.announceLast) {
                     throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
                 }
                 this.cmdBid(parsed.rest, partial);
                 
             } else if (head === "redraw" || head === "pass") {
-                // An eliminated player's "pass" is phase-independent - they
-                // sit out the rest of the game regardless of what phase
-                // everyone else is in (see validatePass()'s own docs) -
-                // "redraw" itself is never legal for them (they have no
-                // hand to redraw into), so only "pass" gets the exemption.
-                const eliminatedPass = head === "pass" && this.eliminated.includes(this.currplayer);
-                if (!eliminatedPass && this.phase !== "redraw") {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
-                }
                 if (parsed.stepSegments.length > 0 || parsed.announceLast) {
                     throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
                 }
@@ -1112,24 +1123,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     this.cmdPass(partial);
                 }
             } else {
-                // Every other head is illegal until the bidding variant's opening
-                // procedure has fully resolved into "main".
-                if (this.phase !== "main") {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }));
-                }
-                
-                // Place is always a player's ENTIRE turn - one gate here, ahead of
-                // the switch, replaces a separate check inside every other command:
-                // with no board presence, place is the only legal head this turn,
-                // full stop; with board presence, place is illegal instead (caught
-                // by cmdPlace's own ALREADY_ON_BOARD check) and every other command
-                // is free to assume board presence without asking again. Evaluated
-                // fresh every call, so this covers a mid-game wipeout's forced
-                // re-placement identically to the very first turn - no separate
-                // tracked state needed for either case.
-                if (head !== "place" && !this.hasPiecesOnBoard(this.currplayer)) {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST"));
-                }
                 switch (head) {
                     case "place":
                         requireNoSteps();

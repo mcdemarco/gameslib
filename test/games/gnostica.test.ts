@@ -3812,7 +3812,11 @@ describe("Gnostica: choose-step click messaging", () => {
 
         g.move(`decline ${major(2).uid} (via ${major(2).uid})`, { trusted: true }); // clears the obligation
         expect(g.pendingPower).to.be.undefined;
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+        // Turn has passed to player 2, who has no pieces on the board yet -
+        // INITIAL_INSTRUCTIONS_PLACE, not the generic top-level-button
+        // wording (which would be actively wrong: no top-level button is
+        // legal for them yet either).
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE"));
     });
 });
 
