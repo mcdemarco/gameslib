@@ -98,11 +98,9 @@ export const SPECIAL_MIN_TOKENS: Record<SpecialPower, number> = {
     judgementDraw: Infinity,
     highPriestess: Infinity,
     fool: Infinity,
-    // <minionRef> <cardUid> - World's own push is informationally free
-    // (no forced pause), so a fully-typed segment can legitimately be
-    // followed by the pushed frame's own first step in the same move
-    // string.
-    worldUseAny: 2,
+    // The borrowed card is named "as <uid>" in the head - worldUseAny's
+    // own step segment carries nothing, so it never consults this.
+    worldUseAny: Infinity,
 };
 
 // The result of asking "is this step's own token grammar complete
@@ -172,7 +170,13 @@ export const SPECIAL_STEP_SHAPES: Record<SpecialPower, (rest: string[]) => StepS
         // suit's ordinary primitive grammar.
         return primitiveStepShape(suitLetter, moreRest);
     },
-    worldUseAny: (rest) => rest.length === 0 ? { status: "incomplete" } : { status: "complete" },
+    // worldUseAny takes no segment of its own now (the borrowed card is
+    // "as <uid>" in the head), so apply/validate handle it before this
+    // table is ever consulted. Kept for Record<SpecialPower> exhaustiveness
+    // and the one dead path that still reaches it: parsePendingStep
+    // walking a hand-typed pre-"as" string, where "complete" just lets the
+    // walk step cleanly past it (the submit is rejected anyway).
+    worldUseAny: () => ({ status: "complete" }),
     // Any token count (including zero) is legal to ATTEMPT - the real
     // semantics live entirely in checkJudgementDraw - but that's an
     // apply/validate-only question (this function IS consulted there

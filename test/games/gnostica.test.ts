@@ -4207,10 +4207,10 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const suitClick = g.handleClick(cellClick.move, -1, -1, "_btn_magician_R");
-        expect(suitClick.move).eq(`use ${major(1).uid}/m0.1 R`);
+        expect(suitClick.move).eq(`use ${major(1).uid} as R`);
         expect(suitClick.valid).to.be.true; // suit chosen, mode not yet - still declined
         const modeClick = g.handleClick(suitClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${major(1).uid}/m0.1 R piece m0.1 1`);
+        expect(modeClick.move).eq(`use ${major(1).uid} as R/m0.1 piece m0.1 1`);
         expect(modeClick.valid).to.be.true;
         g.move(modeClick.move, { trusted: true });
         expect(g.board.get(0, 0)!.pieces.length).eq(0);
@@ -4999,7 +4999,7 @@ describe("Gnostica: Fool and World", () => {
 
     it("World -> Lovers fully resolves both of Lovers' own steps in one call, no pause (hand-typed)", () => {
         const g = setupWorldLovers();
-        g.move(`use ${theWorld().uid}/m0.1 ${major(6).uid}/m0.1 piece n0.1 1 U/o0.1 own o0 U`, { trusted: true });
+        g.move(`use ${theWorld().uid} as ${major(6).uid}/m0.1 piece n0.1 1 U/o0.1 own o0 U`, { trusted: true });
         expect(g.continued).to.be.empty; // World's push is informationally free - no pause at all
         expect(g.currplayer).eq(2);
         const dest = g.board.get(2, 0)!; // o0
@@ -5022,7 +5022,7 @@ describe("Gnostica: Fool and World", () => {
         // make the whole move a no-op in every way that matters, exactly
         // what #49 forbids for anything but Fool's own reveal.
         const g = setupWorldLovers();
-        const result = g.validateMove(`use ${theWorld().uid}/m0.1 ${major(6).uid}`);
+        const result = g.validateMove(`use ${theWorld().uid} as ${major(6).uid}`);
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         // CHOOSE_STEP, not PENDING_POWER_CHOICE - naming Lovers via World
@@ -5044,9 +5044,9 @@ describe("Gnostica: Fool and World", () => {
         // Lovers' own cell supplies the target directly.
         const [rowP, colP] = rowColFor(g, 3, 0);
         const targetClick = g.handleClick(cellClick.move, rowP, colP);
-        // The moment the target is picked, the string relabels around the
-        // borrowed card (Lovers, not World), World demoted to "(via 21)".
-        expect(targetClick.move).eq(`use ${major(6).uid}/m0.1 ${major(6).uid} (via ${theWorld().uid})`);
+        // The moment the target is picked, it lands in the head as
+        // "as <borrowed card>" - the head arg (The World) never moves.
+        expect(targetClick.move).eq(`use ${theWorld().uid} as ${major(6).uid}`);
         expect(targetClick.valid).to.be.true;
 
         // Lovers' own step 1 (Rods) buttons are now on offer, proving
@@ -5057,10 +5057,10 @@ describe("Gnostica: Fool and World", () => {
         expect(buttonValues(preview1)).to.include("mode_R_piece");
 
         const modeClick = g.handleClick(targetClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${major(6).uid}/m0.1 ${major(6).uid}/m0.1 piece (via ${theWorld().uid})`);
+        expect(modeClick.move).eq(`use ${theWorld().uid} as ${major(6).uid}/m0.1 piece`);
 
         const redirected = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
-        expect(redirected.move).eq(`use ${major(6).uid}/m0.1 ${major(6).uid}/m0.1 piece n0.1 1 (via ${theWorld().uid})`);
+        expect(redirected.move).eq(`use ${theWorld().uid} as ${major(6).uid}/m0.1 piece n0.1 1`);
         expect(redirected.valid).to.be.true;
 
         const preview2 = setup();
@@ -5122,7 +5122,7 @@ describe("Gnostica: Fool and World", () => {
         const selfRef = new GnosticaGame(2);
         forceCardAt(selfRef, 0, 0, () => theWorld());
         selfRef.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        expect(() => selfRef.move(`use ${theWorld().uid}/m0.1 ${theWorld().uid}`, { trusted: true })).to.throw();
+        expect(() => selfRef.move(`use ${theWorld().uid} as ${theWorld().uid}`, { trusted: true })).to.throw();
 
         const offBoard = new GnosticaGame(2);
         forceCardAt(offBoard, 0, 0, () => theWorld());
@@ -5134,7 +5134,7 @@ describe("Gnostica: Fool and World", () => {
                 t.card = undefined;
             }
         }
-        expect(() => offBoard.move(`use ${theWorld().uid}/m0.1 ${major(6).uid}`, { trusted: true })).to.throw(); // Lovers isn't on the board
+        expect(() => offBoard.move(`use ${theWorld().uid} as ${major(6).uid}`, { trusted: true })).to.throw(); // Lovers isn't on the board
 
         const decline = new GnosticaGame(2);
         forceCardAt(decline, 0, 0, () => theWorld());
@@ -5224,7 +5224,7 @@ describe("Gnostica: Fool and World", () => {
 
         const suitClick = g.handleClick("", -1, -1, "_btn_magician_C");
         expect(suitClick.valid).to.be.true;
-        expect(suitClick.move).eq(`play ${major(1).uid}/m0.1 C (via ${major(0).uid})`);
+        expect(suitClick.move).eq(`play ${major(1).uid} as C (via ${major(0).uid})`);
 
         // Syncing the engine to this still-incomplete segment (suit
         // chosen, mode not yet - same as the playground's own preview flow
@@ -5422,7 +5422,7 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift("AC");
         pluckCard(g, "AS");
 
-        g.move(`use ${theWorld().uid}/m0.1 00`, { trusted: true });
+        g.move(`use ${theWorld().uid} as 00`, { trusted: true });
         expect(g.continued).to.not.be.empty;
         // World's own spent frame is buried but not yet popped - the
         // forced pause fires before any cascade could reach it (same
@@ -5436,7 +5436,7 @@ describe("Gnostica: Fool and World", () => {
         // automatically, in this SAME submission, revealing a new card
         // and pausing on IT instead.
         g.drawPile.unshift("AS");
-        g.move(`decline AC (via ${theWorld().uid})`, { trusted: true }); // decline the reveal (AC's own step)
+        g.move(`decline AC (via 00)`, { trusted: true }); // decline the reveal (AC's own step)
         expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.currplayer).eq(1);
     });
@@ -5643,7 +5643,7 @@ describe("Gnostica: Fool and World", () => {
 
         const [rowN, colN] = rowColFor(g, 1, 0);
         const targetClick = g.handleClick(cellClick.move, rowN, colN);
-        expect(targetClick.move).eq(`use 00/m0.1 00 (via ${theWorld().uid})`); // relabelled around the borrowed Fool
+        expect(targetClick.move).eq(`use ${theWorld().uid} as 00`); // the borrowed Fool named as "as", head arg unchanged
         expect(targetClick.valid).to.be.true;
         expect(targetClick.complete).to.eq(0); // already complete via World's own free push + Fool's auto-flip
 
@@ -5692,7 +5692,7 @@ describe("Gnostica: Fool and World", () => {
         const [rowN, colN] = rowColFor(g, 1, 0);
         const targetClick = g.handleClick("", rowN, colN);
         expect(targetClick.valid).to.be.true;
-        expect(targetClick.move).eq(`play ${theWorld().uid}/m0.1 ${major(1).uid} (via ${major(0).uid})`);
+        expect(targetClick.move).eq(`play ${theWorld().uid} as ${major(1).uid} (via ${major(0).uid})`);
     });
 
     // Regression: Fool -> Hanged Man -> (Rods "piece" mode relocates the
@@ -5728,7 +5728,7 @@ describe("Gnostica: Fool and World", () => {
         expect(() => g.handleClick("", rowN, colN)).to.not.throw();
         const targetClick = g.handleClick("", rowN, colN);
         expect(targetClick.valid).to.be.true;
-        expect(targetClick.move).eq(`play ${theWorld().uid}/n0.1 ${major(5).uid} (via ${major(0).uid})`);
+        expect(targetClick.move).eq(`play ${theWorld().uid} as ${major(5).uid} (via ${major(0).uid})`);
     });
 
     it("chatLog() renders revealFlip/borrowPower lines, naming the actual card, not a bare uid", () => {
@@ -5742,7 +5742,7 @@ describe("Gnostica: Fool and World", () => {
         expect(foolRows[foolRows.length - 1].some(line => line.includes(acName))).to.be.true;
 
         const worldGame = setupWorldLovers();
-        worldGame.move(`use ${theWorld().uid}/m0.1 ${major(6).uid}/m0.1 piece n0.1 1 U/o0.1 own o0 U`, { trusted: true });
+        worldGame.move(`use ${theWorld().uid} as ${major(6).uid}/m0.1 piece n0.1 1 U/o0.1 own o0 U`, { trusted: true });
         const worldRows = worldGame.chatLog(["Alice", "Bob"]);
         // cardDisplayName() adds the major-arcana numeral to the card's
         // own stored name as-is (e.g. "The Lovers (VI)").

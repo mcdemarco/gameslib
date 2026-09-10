@@ -43,9 +43,8 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
         expect(SPECIAL_STEP_SHAPES.magicianChoice(["C", "own", "m0", "U"])).to.deep.equal({ status: "complete" });
     });
 
-    it("SPECIAL_STEP_SHAPES.worldUseAny: complete as soon as a target uid is given", () => {
-        expect(SPECIAL_STEP_SHAPES.worldUseAny([])).to.deep.equal({ status: "incomplete" });
-        expect(SPECIAL_STEP_SHAPES.worldUseAny(["06"])).to.deep.equal({ status: "complete" });
+    it("SPECIAL_STEP_SHAPES.worldUseAny: vestigial - the borrowed card is now 'as <uid>' in the head, so this is never consulted", () => {
+        expect(SPECIAL_STEP_SHAPES.worldUseAny([])).to.deep.equal({ status: "complete" });
     });
 
     it("SPECIAL_STEP_SHAPES.judgementDraw: always complete, any token count including zero", () => {
