@@ -5044,7 +5044,9 @@ describe("Gnostica: Fool and World", () => {
         // Lovers' own cell supplies the target directly.
         const [rowP, colP] = rowColFor(g, 3, 0);
         const targetClick = g.handleClick(cellClick.move, rowP, colP);
-        expect(targetClick.move).eq(`use ${theWorld().uid}/m0.1 ${major(6).uid}`);
+        // The moment the target is picked, the string relabels around the
+        // borrowed card (Lovers, not World), World demoted to "(via 21)".
+        expect(targetClick.move).eq(`use ${major(6).uid}/m0.1 ${major(6).uid} (via ${theWorld().uid})`);
         expect(targetClick.valid).to.be.true;
 
         // Lovers' own step 1 (Rods) buttons are now on offer, proving
@@ -5054,9 +5056,6 @@ describe("Gnostica: Fool and World", () => {
         preview1.move(targetClick.move, { partial: true });
         expect(buttonValues(preview1)).to.include("mode_R_piece");
 
-        // From here on, the move string relabels itself around the ACTIVE
-        // card (Lovers, not World) the moment a later click re-walks a
-        // string that's already pushed - #74's own same-call extension.
         const modeClick = g.handleClick(targetClick.move, -1, -1, "_btn_mode_R_piece");
         expect(modeClick.move).eq(`use ${major(6).uid}/m0.1 ${major(6).uid}/m0.1 piece (via ${theWorld().uid})`);
 
@@ -5644,7 +5643,7 @@ describe("Gnostica: Fool and World", () => {
 
         const [rowN, colN] = rowColFor(g, 1, 0);
         const targetClick = g.handleClick(cellClick.move, rowN, colN);
-        expect(targetClick.move).eq(`use ${theWorld().uid}/m0.1 00`);
+        expect(targetClick.move).eq(`use 00/m0.1 00 (via ${theWorld().uid})`); // relabelled around the borrowed Fool
         expect(targetClick.valid).to.be.true;
         expect(targetClick.complete).to.eq(0); // already complete via World's own free push + Fool's auto-flip
 

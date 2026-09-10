@@ -2944,7 +2944,21 @@ export class GnosticaGame extends GameBaseSequenced {
     // always []) this reduces to exactly what these helpers built before
     // major-arcana chaining existed.
     private assembleStepMove(pending: IPendingStep, currentTokens: string[]): string {
-        return this.describePendingMove(pending, [...pending.priorSteps.map(s => s.split(/\s+/)), currentTokens]);
+        const raw = this.describePendingMove(pending, [...pending.priorSteps.map(s => s.split(/\s+/)), currentTokens]);
+        // worldUseAny's target pick is the one step that hands the chain
+        // off to a different card. For a fresh same-turn borrow, re-walk
+        // the string we just built and re-describe from there, so it
+        // relabels around the borrowed card ("use 06/... (via 21)") the
+        // instant the target is chosen, not on the next click. A genuine
+        // resume stays anchored to what this.continued says (its "(via
+        // <root>)" and head arg are fixed) - see describePendingMove.
+        if (pending.special !== "worldUseAny" || this.continued.length > 0) {
+            return raw;
+        }
+        const advanced = this.parsePendingStep(raw);
+        return advanced === undefined
+            ? raw
+            : this.describePendingMove(advanced, advanced.priorSteps.map(s => s.split(/\s+/)));
     }
 
     private buildStepModeMove(pending: IPendingStep, mode: string): string {

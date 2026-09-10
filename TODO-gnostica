@@ -64,3 +64,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #94 - Remove one-liner wrappers like invalid().
 - #95 - Investigate cloneLive().
 - #96 - The World still mentions Declining in its instructions, but there is no such option in the design or on the button bar
+- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
