@@ -4872,34 +4872,27 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         expect(g.hands[0].length).eq(6); // redrawn back up again
     });
 
-    // There's no dedicated "resume" head word anymore (#74) - whenever a
-    // genuine obligation is open, EVERY move is dispatched as resuming
-    // it, regardless of what verb the (purely decorative) front spells -
-    // "use"/"play"/"decline" all work identically as long as the real
-    // uid (a "(via <uid>)" marker, or the bare root when nothing's been
-    // pushed) matches the obligation. What's still guarded, but only for
-    // an untrusted caller (validateMove): a wrong uid gets
-    // PENDING_POWER_MISMATCH. A trusted caller submitting more step
-    // segments than the resume actually needs isn't rejected at all -
-    // apply just consumes what it needs and silently drops the rest (see
-    // feedback_no_trusted_path_defense - there's nothing to guard against
-    // once the caller is trusted).
-    it("resume-mismatch guards reject a wrong card uid regardless of head word", () => {
+    // A resume submission (validateMove only - a {trusted: true} caller is
+    // trusted to have validated already, per feedback_no_trusted_path_defense)
+    // must carry a matching "(via <root>)" anchor AND spell the head that
+    // fits what it's doing: "decline" to give the active card up, "discard"
+    // for a High Priestess round. A wrong/missing anchor is
+    // PENDING_POWER_MISMATCH; a wrong head is INVALID_MOVE.
+    it("resume-mismatch guards reject a wrong card uid or a wrong head word", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
         g.move(`use ${major(2).uid}, 5C`, { trusted: true });
         expect(g.continued).to.not.be.empty;
-        // Wrong uid: caught by validation only (validateResumePendingPower)
-        // - apply trusts that a {trusted: true} caller already validated
-        // (see resumePendingPower's own docs). Checked via both spellings -
-        // a "(via <wrong>)" marker, and a bare wrong uid with no marker at
-        // all - neither is special-cased over the other.
+        // Wrong / missing anchor -> mismatch.
         expect(g.validateMove("decline 07 (via 07)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
         expect(g.validateMove("use 07, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
-        // The CORRECT uid works regardless of which verb fronts it - there's
-        // no dedicated resume word to get wrong anymore.
-        expect(g.validateMove(`play ${major(2).uid}, decline (via ${major(2).uid})`).valid).to.be.true;
-        expect(g.validateMove(`use ${major(2).uid}, decline`).valid).to.be.true;
+        // Right anchor, wrong head ("play"/"use" for a High Priestess step
+        // that should be "discard", or a bare uid with no anchor) -> rejected.
+        expect(g.validateMove(`play ${major(2).uid}, AR (via ${major(2).uid})`).valid).to.be.false;
+        expect(g.validateMove(`use ${major(2).uid}, decline`).valid).to.be.false;
+        // The canonical spellings work.
+        expect(g.validateMove(`decline (via ${major(2).uid})`).valid).to.be.true;
+        expect(g.validateMove(`discard AR (via ${major(2).uid})`).valid).to.be.true;
         // None of the rejected attempts cleared the obligation.
         expect(g.continued).to.not.be.empty;
         expect(g.currplayer).eq(1);

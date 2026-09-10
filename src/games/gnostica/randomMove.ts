@@ -265,8 +265,8 @@ function randomPlaceMove(game: GnosticaGame): string {
     if (candidates.length === 0) {
         return "";
     }
-    // Landing on an existing card is weighted 4x over a bare wasteland cell.
-    const [x, y] = weightedPick(candidates, ([cx, cy]) => game.board.classify(cx, cy) === "territory" ? 4 : 1);
+    // Landing on an existing card is weighted 8x over a bare wasteland cell.
+    const [x, y] = weightedPick(candidates, ([cx, cy]) => game.board.classify(cx, cy) === "territory" ? 8 : 1);
     const orientation = weightedRandomOrientation(game, x, y);
     return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
 }

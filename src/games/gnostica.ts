@@ -216,10 +216,10 @@ function handHasCardOfValue(pile: string[], value: number): boolean {
 // optional fields instead - each of those functions asserts `suitUid!`
 // once at its own top, documented there, rather than scattering asserts.
 interface IPendingStep {
-    // The verb the front of the move string spells - always "play" for a
-    // genuine resume (a resumed move's own head is purely decorative, see
-    // parseMove's own "(via <uid>)" docs), else the literal typed head for
-    // a fresh "use"/"play". describePendingMove/assembleStepMove use this
+    // The verb the front of the move string spells - "play" for a genuine
+    // resume (describePendingMove swaps in "discard" for a High Priestess
+    // step; "decline" is handled by its own path), else the literal typed
+    // head for a fresh "use"/"play". describePendingMove/assembleStepMove use this
     // for the front of the move string.
     head: "use" | "play";
     // The ROOT card - the one originally used/played/resumed. NOT
@@ -881,13 +881,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // targeted card's own subactions, High Priestess round 2) means
         // EVERY legal move right now has to be resuming it - so route on
         // that runtime fact directly, not on whatever verb the move
-        // string happens to spell (there's no dedicated "resume" head
-        // anymore - see parseMove's own docs on "(via <uid>)").
-        // this.continued always names a genuine obligation (see its own
-        // docs), so no separate check is needed here. Short-circuits ahead
-        // of the other gates below since they don't apply to a resume.
+        // string happens to spell. this.continued always names a genuine
+        // obligation (see its own docs). Short-circuits ahead of the other
+        // gates below since they don't apply to a resume.
         if (this.continued.length > 0) {
-            const failure = this.validateResumePendingPower(parsed.rest[0], this.resumeStepSegments(parsed));
+            const failure = this.validateResumeHead(parsed) ?? this.validateResumePendingPower(this.resumeStepSegments(parsed));
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
         // "decline" as a head word only ever means something paired with
@@ -1228,15 +1226,13 @@ export class GnosticaGame extends GameBaseSequenced {
         const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
         // "(via <uid>)" names the real root card a resumed step's power
         // was reached through (World's target, Fool's reveal) - stripped
-        // exactly like "(last)", and overrides `rest` outright rather
-        // than folding in alongside whatever segments[0] itself said:
-        // `rest`'s only job is naming the ROOT for
-        // validateResumePendingPower's own mismatch check, never the
-        // (decorative) card printed in front of it - see pickleMove's own
-        // docs on the write side of this. The head word itself
-        // ("use"/"play"/"decline") is purely decorative whenever this is
-        // present - dispatch detects a resume from this.continued's
-        // own state, never from the head (see validateMove's own docs).
+        // exactly like "(last)" and stashed as viaUid; it's also prepended
+        // to `rest` so rest[0] is the ROOT anchor and rest[1..] the front
+        // tokens as typed (see the `rest` field's own docs; pickleMove
+        // drops that leading copy on the write side). Dispatch detects a
+        // resume from this.continued's own state, never from the head -
+        // but validateResumeHead still requires the head to be the one
+        // that fits the step ("decline"/"discard"/"play").
         const VIA_FLAG_RE = /\s*\(via\s+([A-Za-z0-9]+)\)\s*$/i;
 
         const trimmed = m.trim();
@@ -1828,11 +1824,10 @@ export class GnosticaGame extends GameBaseSequenced {
             // move (0 discards, explicit draw 0).
             found.add("pass");
         } else if (this.continued.length > 0) {
-            // A genuine resume's own head is purely decorative (see
-            // parseMove's own docs) - a resumed continuation always plays
-            // whatever revealed card is active, so "play" is what stays
-            // highlighted throughout.
-            found.add("play");
+            // The top-level button matching how the active card resumes -
+            // "Discard/Draw" for a High Priestess round, "Play Card"
+            // otherwise (see validateResumeHead).
+            found.add(this.continued[this.continued.length - 1].split(".")[0] === "02" ? "discard" : "play");
         } else if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
         }
@@ -2372,12 +2367,12 @@ export class GnosticaGame extends GameBaseSequenced {
         if (parsed.head === "decline" && parsed.stepSegments.length === 1) {
             return undefined;
         }
-        // A genuine resume means every legal move is resuming
-        // this.continued regardless of what verb its (purely decorative)
-        // head spells - see parseMove's own docs on "(via <uid>)" - so
-        // this is a runtime-state check, keyed on the "(via <root>)"
-        // anchor, not the front head. A resumed continuation always plays
-        // whatever revealed card is active, so `head` is "play" there.
+        // A genuine resume is detected from the "(via <root>)" anchor
+        // matching this.continued, not from the front head - so this is a
+        // runtime-state check. (validateResumeHead separately requires the
+        // head itself to fit; here we only need to know it IS a resume.)
+        // For button-building, a resumed continuation always plays
+        // whatever revealed card is active, so `head` is "play".
         const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.continued[0].split(".")[0];
         // High Priestess resumes with its own tokens right after a
         // "discard" head, not as a "/"-separated segment - fold them back
@@ -5781,16 +5776,29 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.validateFrameStack(stack, stepSegments, def.uid);
     }
 
-    // Mirrors resumePendingPower's own dispatch, read-only. There's no
-    // verb to mismatch anymore - the head word is purely decorative once
-    // "(via <uid>)" is present (see parseMove's own docs), and
-    // validateMove's own gate already confirmed pendingPower is
-    // genuinely open before this ever runs - a wrong root uid is the one
-    // thing left to catch here.
-    private validateResumePendingPower(resumeRootUid: string | undefined, stepSegments: string[][]): IValidationResult | undefined {
-        if (resumeRootUid !== this.continuedRootUid()) {
+    // Mirrors resumePendingPower's own dispatch, read-only. Head and
+    // "(via <root>)" anchor have already been checked by validateResumeHead
+    // (called just before this in validateMove's gate); this only walks
+    // the step segments for legality.
+    // A resume submission must spell the head that matches what it's
+    // doing: "decline" to give the active card up, "discard" for a High
+    // Priestess round (its own step IS a discard/draw), "play" for any
+    // other revealed card's power - and always carry the "(via <root>)"
+    // anchor. The click UI only ever produces the right one; a wrong head
+    // or a wrong/missing anchor is a hand-edit.
+    private validateResumeHead(parsed: IParsedMove): IValidationResult | undefined {
+        if (parsed.viaUid !== this.continuedRootUid()) {
             return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
         }
+        const activeUid = this.continued[this.continued.length - 1].split(".")[0];
+        const allowed = activeUid === "02" ? ["decline", "discard"] : ["decline", "play"];
+        if (!allowed.includes(parsed.head!)) {
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: `resume with "${allowed.join('" or "')}"` });
+        }
+        return undefined;
+    }
+
+    private validateResumePendingPower(stepSegments: string[][]): IValidationResult | undefined {
         const stack = this.resumeStack()!;
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             // Same bare seed as resumePendingPower - valid but incomplete,
