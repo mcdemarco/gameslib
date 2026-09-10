@@ -69,4 +69,4 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 ✔ #99 - this.continued now holds ONLY 00.1/00.2/02.1. @done(26-09-10)
 ✔ #100 - parseMove no longer folds viaUid into rest[0]; the "(via <uid>)" anchor lives in viaUid alone. @done(26-09-10)
 ✔ #101 - A resume whose active step is a click-driven special now shows a "Use Card X" button (resume_power) alongside Decline, so validateMove("") no longer prepopulates powerStepMessageKey - it's plain INITIAL_INSTRUCTIONS (or _PLACE). @done(26-09-10)
-✔ #102 - validateResumeHead's three rejections all use INVALID_MOVE now (terse reason) - the click UI never generates a mismatched anchor/head/revealed-card, so every failure is a malformed hand-edit. Dropped the PENDING_POWER_MISMATCH key. @done(26-09-10)
+✔ #102 - validateResumeHead is one boolean check returning INVALID_MOVE ("...continue with the on-screen buttons") - the click UI never generates a bad anchor/head/revealed-card, so a failure is only ever a hand-edit and doesn't need to explain which part. Dropped the PENDING_POWER_MISMATCH message and the three debug reasons. @done(26-09-10)

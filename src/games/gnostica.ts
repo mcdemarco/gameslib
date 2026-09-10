@@ -1289,7 +1289,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The innermost continued obligation's own uid ("00" or "02") - the
     // one a resume submission addresses and demotes into "(via <uid>)".
-    private continuedActiveUid(): string | undefined {
+    private getContinuedUid(): string | undefined {
         return this.continued[this.continued.length - 1]?.split(".")[0];
     }
 
@@ -1300,7 +1300,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Priestess resume (its own round IS the pending action, no revealed
     // card). undefined when nothing is pending.
     private activeCardUid(): string | undefined {
-        const active = this.continuedActiveUid();
+        const active = this.getContinuedUid();
         if (active !== "00") {
             return active;
         }
@@ -1318,7 +1318,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Fool reveal - the revealed card named as the head arg, the Fool
     // itself demoted into "(via 00)".
     public buildViaMove(stepSegments: string[][]): IParsedMove {
-        const activeUid = this.continuedActiveUid()!;
+        const activeUid = this.getContinuedUid()!;
         const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
         if (activeUid === "02") {
             return { announceLast: false, head: declining ? "decline" : "discard", headRecognized: true, rest: [], viaUid: "02", stepSegments, malformedStep: undefined };
@@ -1342,7 +1342,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // the reconstruction always starts fresh from this.continued, so the
     // whole of liveMove's segments is unreflected by construction.
     private continuedSeedMoveString(): string {
-        const segments = this.liveMove !== undefined && this.liveMove.viaUid === this.continuedActiveUid() ? this.liveMove.stepSegments : [];
+        const segments = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid() ? this.liveMove.stepSegments : [];
         return this.pickleMove(this.buildViaMove(segments));
     }
 
@@ -2194,8 +2194,8 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // Once genuinely paused, though, NONE of the ordinary 6
             // buttons are legal - every one would be rejected outright by
-            // validateMove's own PENDING_POWER_NEEDS_CONTINUE gate while
-            // this obligation is open. A click-driven special (orientAny,
+            // validateMove's own resume gate while this obligation is
+            // open. A click-driven special (orientAny,
             // World's target, etc.) also has no button of its own for
             // what comes NEXT. So offer the same self-contained Use/
             // Decline pair the Fool-special branch above does: clicking
@@ -2356,7 +2356,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // head itself to fit; here we only need to know it IS a resume.)
         // For button-building, a resumed continuation always plays
         // whatever revealed card is active, so `head` is "play".
-        const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.continuedActiveUid();
+        const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.getContinuedUid();
         // High Priestess resumes with its own tokens right after a
         // "discard" head, not as a "/"-separated segment - fold them back
         // (see resumeStepSegments) so the walk below sees them.
@@ -2943,9 +2943,9 @@ export class GnosticaGame extends GameBaseSequenced {
             // discard action's own do.
             if (pending.special === "highPriestess") {
                 const tokens = stepSegments[stepSegments.length - 1] ?? [];
-                return this.pickleMove({ ...base, head: "discard", rest: tokens, stepSegments: [], viaUid: this.continuedActiveUid() });
+                return this.pickleMove({ ...base, head: "discard", rest: tokens, stepSegments: [], viaUid: this.getContinuedUid() });
             }
-            return this.pickleMove({ ...base, rest: [pending.activeCardUid], viaUid: this.continuedActiveUid() });
+            return this.pickleMove({ ...base, rest: [pending.activeCardUid], viaUid: this.getContinuedUid() });
         }
         if (pending.activeCardUid === pending.headArg) {
             return this.pickleMove(base);
@@ -5779,24 +5779,17 @@ export class GnosticaGame extends GameBaseSequenced {
     // innermost pending obligation ("00" or "02"), spell the head that
     // fits it ("decline"/"discard" for a High Priestess round; "decline"/
     // "play <revealed card>" for a Fool reveal), and - for a Fool reveal -
-    // name the card actually on top of the discard pile, where the flip
-    // left it. The click UI always produces the right one, so every
-    // rejection here is a malformed hand-edit (INVALID_MOVE, terse
-    // reason - no translation-key mimicry, per #69).
+    // name the card actually on top of the discard pile. The click UI
+    // always gets all of this right, so a failure is only ever a
+    // hand-edit; point the player back at the buttons rather than
+    // explaining the exact malformation.
     private validateResumeHead(parsed: IParsedMove): IValidationResult | undefined {
-        const activeUid = this.continuedActiveUid();
-        const bad = (reason: string) => this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason });
-        if (parsed.viaUid !== activeUid) {
-            return bad(`resume via ${activeUid}`);
-        }
+        const activeUid = this.getContinuedUid();
         const allowed = activeUid === "02" ? ["decline", "discard"] : ["decline", "play"];
-        if (!allowed.includes(parsed.head!)) {
-            return bad(`resume with "${allowed.join('" or "')}"`);
-        }
-        if (activeUid === "00" && parsed.rest[0] !== undefined && parsed.rest[0] !== this.discardPile[this.discardPile.length - 1]) {
-            return bad("wrong revealed card");
-        }
-        return undefined;
+        const ok = parsed.viaUid === activeUid
+            && allowed.includes(parsed.head!)
+            && (activeUid !== "00" || parsed.rest[0] === undefined || parsed.rest[0] === this.discardPile[this.discardPile.length - 1]);
+        return ok ? undefined : this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "continue with the on-screen buttons" });
     }
 
     private validateResumePendingPower(stepSegments: string[][]): IValidationResult | undefined {
@@ -5819,7 +5812,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
         }
-        return this.validateFrameStack(stack, stepSegments, this.continuedActiveUid()!);
+        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!);
     }
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as
