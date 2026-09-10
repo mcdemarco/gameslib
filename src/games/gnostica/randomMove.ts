@@ -65,8 +65,7 @@ export function generateRandomMove(game: GnosticaGame): string {
     // coverage of Fool/World's own decision points (see this file's own
     // class-level docs on why that's out of scope).
     if (game.continued.length > 0) {
-        const rootUid = game.continued[0].split(".")[0];
-        return game.pickleMove(game.buildViaMove(rootUid, [["decline"]]));
+        return game.pickleMove(game.buildViaMove([["decline"]]));
     }
     if (game.phase === "bidding") {
         const hand = game.hands[game.currplayer - 1];

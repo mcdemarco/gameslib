@@ -3778,10 +3778,10 @@ describe("Gnostica: choose-step click messaging", () => {
         if (drawIdx !== -1) g.drawPile.splice(drawIdx, 1);
         g.drawPile.unshift("02");
 
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
         // Fool owes its 2nd flip ("00.1"); the revealed High Priestess is
         // itself a continuing card, so it's tracked too ("02.0", round 1).
-        expect(g.continued).to.deep.equal(["00.1", "02.0"]);
+        expect(g.continued).to.deep.equal(["00.1"]);
 
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
@@ -4883,9 +4883,10 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         g.hands[0] = ["2C", "5C", "AR"];
         g.move(`use ${major(2).uid}, 5C`, { trusted: true });
         expect(g.continued).to.not.be.empty;
-        // Wrong / missing anchor -> mismatch.
-        expect(g.validateMove("decline 07 (via 07)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
-        expect(g.validateMove("use 07, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        // Wrong anchor (the Fool, a real continuing card, but not the
+        // High Priestess round actually pending) / missing anchor -> mismatch.
+        expect(g.validateMove("decline 00 (via 00)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        expect(g.validateMove("use 00, decline").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
         // Right anchor, wrong head ("play"/"use" for a High Priestess step
         // that should be "discard", or a bare uid with no anchor) -> rejected.
         expect(g.validateMove(`play ${major(2).uid}, AR (via ${major(2).uid})`).valid).to.be.false;
@@ -4963,10 +4964,10 @@ describe("Gnostica: Fool and World", () => {
         const g = setupFool();
         pluckCard(g, "2R");
         g.drawPile.unshift("2R"); // force the flip to reveal 2 of Rods
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
         // Only Fool's own remaining flip persists; the revealed 2R is
         // re-derived from the resume submission's own head arg.
-        expect(g.continued).to.deep.equal(["00.1", "2R.0"]);
+        expect(g.continued).to.deep.equal(["00.1"]);
 
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
@@ -5156,12 +5157,12 @@ describe("Gnostica: Fool and World", () => {
         g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, facing n0
 
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
         expect(g.currplayer).eq(1);
         expect(g.continued).to.not.be.empty;
         // Fool's own frame stays (it still owes its own 2nd flip - only
         // 1 of its own 2 steps is done), with the revealed card pushed on top.
-        expect(g.continued).to.deep.equal(["00.1", "06.0"]);
+        expect(g.continued).to.deep.equal(["00.1"]);
         expect(g.discardPile).to.include("06"); // flipped straight to discard, per fool()'s own docs
 
         // Resume: Lovers' own two steps, both in the same submission -
@@ -5175,7 +5176,7 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift("AS"); // force what that automatic second flip reveals
         g.move(`play 06, m0.1 piece n0.1 1 U, o0.1 own o0 U (via ${major(0).uid})`, { trusted: true });
         expect(g.continued).to.not.be.empty;
-        expect(g.continued).to.deep.equal(["00.2", "AS.0"]);
+        expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.currplayer).eq(1); // still paused - the turn hasn't passed yet
         expect(g.board.get(2, 0)!.pieces.length).eq(2); // Lovers' own steps DID take effect
 
@@ -5197,12 +5198,12 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift("AC"); // Ace of Cups - synthesized into a one-step "create" frame
         pluckCard(g, "AS");
 
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        expect(g.continued).to.deep.equal(["00.1", "AC.0"]);
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
         g.drawPile.unshift("AS"); // force what Fool's own automatic second flip reveals
         g.move(`play AC, m0.1 own m0 U (via ${major(0).uid})`, { trusted: true });
         expect(g.continued).to.not.be.empty; // Fool's own second flip auto-fired, in the same submission
-        expect(g.continued).to.deep.equal(["00.2", "AS.0"]);
+        expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.currplayer).eq(1);
         expect(g.board.get(0, 0)!.pieces.length).eq(2); // Fool's own minion, plus the new Cups piece
 
@@ -5221,8 +5222,8 @@ describe("Gnostica: Fool and World", () => {
         pluckCard(g, major(1).uid);
         pluckCard(g, "AS");
         g.drawPile.unshift(major(1).uid); // force the flip to reveal The Magician
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        expect(g.continued).to.deep.equal(["00.1", major(1).uid + ".0"]);
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
 
         const suitClick = g.handleClick("", -1, -1, "_btn_magician_C");
         expect(suitClick.valid).to.be.true;
@@ -5254,7 +5255,7 @@ describe("Gnostica: Fool and World", () => {
 
         g.drawPile.unshift("AS"); // force what Fool's own automatic second flip reveals
         g.move(modeClick.move, { trusted: true });
-        expect(g.continued).to.deep.equal(["00.2", "AS.0"]);
+        expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.currplayer).eq(1);
     });
 
@@ -5269,8 +5270,8 @@ describe("Gnostica: Fool and World", () => {
         pluckCard(g, "AD");
         g.drawPile.unshift("AC");
 
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        expect(g.continued).to.deep.equal(["00.1", "AC.0"]);
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
 
         g.drawPile.unshift("AD");
         g.move(`decline AC (via ${major(0).uid})`, { trusted: true }); // decline AC's own step
@@ -5280,7 +5281,7 @@ describe("Gnostica: Fool and World", () => {
         // any cascade could pop it - so it's still sitting there, buried,
         // exactly like World's own spent frame does in the nested tests
         // below.
-        expect(g.continued).to.deep.equal(["00.2", "AD.0"]);
+        expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.discardPile).to.include.members(["AC", "AD"]); // both flips actually happened
         expect(g.currplayer).eq(1); // still paused on AD's own choice
     });
@@ -5300,8 +5301,8 @@ describe("Gnostica: Fool and World", () => {
         forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - the territory Hanged Man's own move step pushes
         pluckCard(g, major(12).uid);
         g.drawPile.unshift(major(12).uid); // force the flip to reveal The Hanged Man
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        expect(g.continued).to.deep.equal(["00.1", major(12).uid + ".0"]);
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
 
         g.drawPile.unshift("AS"); // whatever Fool's own second flip reveals next
         // Only step 1 (the push) is typed - no enemy exists anywhere to
@@ -5313,7 +5314,7 @@ describe("Gnostica: Fool and World", () => {
         // tradeHands never even shows up on the stack - it's popped by
         // the same implicit-decline branch that walked straight into
         // Fool's own next mandatory flip within this SAME submission.
-        expect(g.continued).to.deep.equal(["00.2", "AS.0"]);
+        expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.discardPile).to.include.members([major(12).uid, "AS"]);
         expect(g.currplayer).eq(1);
     });
@@ -5346,7 +5347,7 @@ describe("Gnostica: Fool and World", () => {
             forceCardAt(g, 1, 0, () => aceOfDiscs());
             pluckCard(g, major(12).uid);
             g.drawPile.unshift(major(12).uid);
-            g.move(`use ${major(0).uid}, fool`, { trusted: true });
+            g.move(`use ${major(0).uid}`, { trusted: true });
             const result = g.validateMove(`play ${major(12).uid}, m0.1 tile 1 (via ${major(0).uid})`);
             expect(result.valid).to.be.true;
             expect(result.complete).eq(1);
@@ -5367,7 +5368,7 @@ describe("Gnostica: Fool and World", () => {
             forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - where the piece relocates to
             pluckCard(g, major(12).uid);
             g.drawPile.unshift(major(12).uid);
-            g.move(`use ${major(0).uid}, fool`, { trusted: true });
+            g.move(`use ${major(0).uid}`, { trusted: true });
             const result = g.validateMove(`play ${major(12).uid}, m0.1 piece m0.1 1 (via ${major(0).uid})`);
             expect(result.valid).to.be.true;
             expect(result.complete).eq(1);
@@ -5409,10 +5410,10 @@ describe("Gnostica: Fool and World", () => {
         g.discardPile.length = 0;
         g.discardPile.push("00");
 
-        g.move("play 00, fool", { trusted: true });
+        g.move("play 00", { trusted: true });
         // Outer Fool still owes its 2nd flip ("00.1"); the inner
         // self-revealed Fool owes both of its own ("00.0" on top).
-        expect(g.continued).to.deep.equal(["00.1", "00.0"]);
+        expect(g.continued).to.deep.equal(["00.1"]);
     });
 
     it("World targets Fool: a nested pause, and declining the reveal auto-continues into Fool's own mandatory second flip", () => {
@@ -5424,13 +5425,13 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift("AC");
         pluckCard(g, "AS");
 
-        g.move(`use ${theWorld().uid}, m0.1 00, fool`, { trusted: true });
+        g.move(`use ${theWorld().uid}, m0.1 00`, { trusted: true });
         expect(g.continued).to.not.be.empty;
         // World's own spent frame is buried but not yet popped - the
         // forced pause fires before any cascade could reach it (same
         // "buried, not yet cleaned up" situation as Fool's own frame
         // above).
-        expect(g.continued).to.deep.equal(["21.1", "00.1", "AC.0"]);
+        expect(g.continued).to.deep.equal(["00.1"]);
         expect(g.currplayer).eq(1);
 
         // Declining AC's own power exposes Fool's own remaining flip -
@@ -5439,38 +5440,38 @@ describe("Gnostica: Fool and World", () => {
         // and pausing on IT instead.
         g.drawPile.unshift("AS");
         g.move(`decline AC (via ${theWorld().uid})`, { trusted: true }); // decline the reveal (AC's own step)
-        expect(g.continued).to.deep.equal(["21.1", "00.2", "AS.0"]);
+        expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.currplayer).eq(1);
     });
 
-    it("resume-mismatch guards are keyed on rootCardUid, not the current top frame's own cardUid", () => {
-        const g = setupWorldLovers();
-        g.move(`use ${theWorld().uid}, m0.1 ${major(6).uid}`, { trusted: true }); // World's own step only - pauses on Lovers, no forcePause though
-        // World's own push never forces a pause, so this single-segment
-        // submission actually completes the WHOLE activation (Lovers' own
-        // steps get implicitly declined) rather than leaving anything
-        // pending - confirms this before the real point of the test below.
-        expect(g.continued).to.be.empty;
+    it("resume-mismatch guards are keyed on the innermost obligation, not an outer one still on the stack", () => {
+        // Fool reveals the High Priestess; resuming its round 1 leaves
+        // continued = ["00.1", "02.1"] - the Fool still owes its own second
+        // flip, but the High Priestess's round 2 is what's active now. The
+        // anchor must be "02" (the innermost obligation), not "00" (the
+        // Fool buried under it).
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(0)); // The Fool
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        for (const hand of g.hands) {
+            const idx = hand.indexOf("02");
+            if (idx !== -1) hand.splice(idx, 1);
+        }
+        const drawIdx = g.drawPile.indexOf("02");
+        if (drawIdx !== -1) g.drawPile.splice(drawIdx, 1);
+        g.drawPile.unshift("02");
 
-        // Rebuild with a card that DOES force a pause once targeted, so a
-        // genuine continuation exists to probe. The persisted stack keeps
-        // World's own (spent) frame at the bottom, so the resume anchor is
-        // "21" - the original root.
-        const g2 = new GnosticaGame(2);
-        forceCardAt(g2, 0, 0, () => theWorld());
-        forceCardAt(g2, 1, 0, () => major(0)); // The Fool
-        g2.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        pluckCard(g2, "AC");
-        g2.drawPile.unshift("AC");
-        g2.move(`use ${theWorld().uid}, m0.1 00, fool`, { trusted: true });
-        expect(g2.continued).to.deep.equal(["21.1", "00.1", "AC.0"]);
-        // A resume keyed on the revealed card's own cardUid ("AC") rather
-        // than the root anchor ("21") must be rejected - caught by
-        // validation only; a {trusted: true} apply-side call has no uid
-        // check left to catch this itself.
-        expect(g2.validateMove("decline AC (via AC)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
-        expect(g2.continued).to.not.be.empty;
-        expect(() => g2.move(`decline AC (via ${theWorld().uid})`, { trusted: true })).to.not.throw();
+        g.move(`use ${major(0).uid}`, { trusted: true }); // flip reveals the High Priestess
+        expect(g.continued).to.deep.equal(["00.1"]);
+        g.hands[0] = ["2C", "5C", "AR"];
+        g.move("discard 5C (via 00)", { trusted: true }); // High Priestess round 1
+        expect(g.continued).to.deep.equal(["00.1", "02.1"]);
+
+        // "(via 00)" names the buried Fool, not the active round 2 -> mismatch.
+        expect(g.validateMove("decline 00 (via 00)").message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_MISMATCH"));
+        expect(g.continued).to.deep.equal(["00.1", "02.1"]);
+        // The correct anchor works.
+        expect(g.validateMove("decline (via 02)").valid).to.be.true;
     });
 
     it("Fool's own root activation needs no button - selecting it already produces a complete, submittable move", () => {
@@ -5541,7 +5542,7 @@ describe("Gnostica: Fool and World", () => {
         const g = setupFool();
         pluckCard(g, "AC");
         g.drawPile.unshift("AC");
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
         expect(g.continued).to.not.be.empty;
 
         const declined = g.handleClick("", -1, -1, "_btn_decline_power");
@@ -5553,7 +5554,7 @@ describe("Gnostica: Fool and World", () => {
         const preview = setupFool();
         pluckCard(preview, "AC");
         preview.drawPile.unshift("AC");
-        preview.move(`use ${major(0).uid}, fool`, { trusted: true });
+        preview.move(`use ${major(0).uid}`, { trusted: true });
         preview.move(declined.move, { partial: true });
         // No button for Fool's own (automatic) flip - the bar falls back
         // to the plain top-level set (nothing left to click for Fool's
@@ -5601,7 +5602,7 @@ describe("Gnostica: Fool and World", () => {
         const g = setupFool();
         pluckCard(g, major(1).uid); // Magician
         g.drawPile.unshift(major(1).uid);
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
 
         const bare = g.validateMove(`play ${major(1).uid} (via ${major(0).uid})`);
         expect(bare.valid).to.be.true;
@@ -5620,7 +5621,7 @@ describe("Gnostica: Fool and World", () => {
         const g = setupFool();
         pluckCard(g, major(1).uid); // Magician
         g.drawPile.unshift(major(1).uid);
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
 
         const suitChosen = g.validateMove(`play ${major(1).uid}, m0.1 C (via ${major(0).uid})`); // suit picked, no mode yet
         expect(suitChosen.valid).to.be.true;
@@ -5667,10 +5668,10 @@ describe("Gnostica: Fool and World", () => {
         forceCardAt(real, 1, 0, () => major(0));
         real.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         real.move(targetClick.move); // real, non-partial commit
-        // World targeted the Fool and its flip fired; the persisted stack
-        // is [World(spent), Fool, <revealed>], so the root anchor is "21".
-        expect(real.continued[0].split(".")[0]).eq("21");
-        expect(real.continued[1].split(".")[0]).eq("00");
+        // World targeted the Fool and its flip fired; only the Fool's own
+        // remaining obligation persists (the spent World and the revealed
+        // card are not - see this.continued's docs).
+        expect(real.continued).to.deep.equal(["00.1"]);
     });
 
     // World's own target is any major arcana card on the board - unlike
@@ -5686,8 +5687,8 @@ describe("Gnostica: Fool and World", () => {
         forceCardAt(g, 1, 0, () => major(1)); // a real target for World to use
         pluckCard(g, theWorld().uid);
         g.drawPile.unshift(theWorld().uid);
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        expect(g.continued).to.deep.equal(["00.1", theWorld().uid + ".0"]);
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
 
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
         expect(buttonValues(g)).to.deep.equal(["decline_power"]);
@@ -5718,11 +5719,11 @@ describe("Gnostica: Fool and World", () => {
         forceCardAt(g, 1, 0, () => major(5)); // Hierophant - the piece relocates onto n0, and it's also a real World target
         pluckCard(g, major(12).uid);
         g.drawPile.unshift(major(12).uid); // Fool's 1st flip reveals Hanged Man
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
 
         g.drawPile.unshift(theWorld().uid); // Fool's mandatory 2nd flip reveals World
         g.move(`play ${major(12).uid}, m0.1 piece m0.1 1 (via ${major(0).uid})`, { trusted: true }); // moves to n0; tradeHands auto-declines (no enemy)
-        expect(g.continued).to.deep.equal(["00.2", theWorld().uid + ".0"]);
+        expect(g.continued).to.deep.equal(["00.2"]);
         // The staleness bug this guards is now structurally impossible:
         // buildPendingFromContinued recomputes minions fresh from the
         // board every time (see this.continued's own docs), so a resume
@@ -5740,7 +5741,7 @@ describe("Gnostica: Fool and World", () => {
         const foolGame = setupFool();
         pluckCard(foolGame, "AC");
         foolGame.drawPile.unshift("AC");
-        foolGame.move(`use ${major(0).uid}, fool`, { trusted: true });
+        foolGame.move(`use ${major(0).uid}`, { trusted: true });
         const foolRows = foolGame.chatLog(["Alice", "Bob"]);
         const acName = minorCards.find(c => c.uid === "AC")!.name;
         expect(foolRows[foolRows.length - 1].some(line => line.includes(acName))).to.be.true;
@@ -5758,7 +5759,7 @@ describe("Gnostica: Fool and World", () => {
         const g = setupFool();
         pluckCard(g, "AC");
         g.drawPile.unshift("AC");
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
+        g.move(`use ${major(0).uid}`, { trusted: true });
         expect(g.continued).to.not.be.empty;
         const move = g.randomMove();
         expect(move).eq(`decline AC (via ${major(0).uid})`);
@@ -5817,8 +5818,8 @@ describe("Gnostica: Fool and World", () => {
         const judgementUid = major(20).uid;
         g.drawPile = [];
         g.discardPile = [judgementUid]; // the only card anywhere in the game
-        g.move(`use ${major(0).uid}, fool`, { trusted: true });
-        expect(g.continued).to.deep.equal(["00.1", judgementUid + ".0"]);
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
         g.hands[0].pop(); // make room for Judgement's own draw
 
         const move = `play ${judgementUid}, m0.1 ${judgementUid} (via ${major(0).uid})`;
