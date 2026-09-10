@@ -156,20 +156,22 @@ interface IParsedMove {
     // false is a real structural failure (UNRECOGNIZED_MOVE), not
     // something left for a switch statement's default arm to rediscover.
     headRecognized: boolean;
+    // For a plain move: the front tokens as typed (a fresh "use"/"play
+    // <uid>", the discard uids for an ordinary discard). For a resume
+    // (a "(via <uid>)" marker present): rest[0] is that root-card anchor
+    // and rest[1..] the front tokens (the revealed card being resolved).
     rest: string[];
     stepSegments: string[][];
     // The first step segment that fails isStepShapeValid, if any - see
     // its own docs on what "shape" means here and why it can't go any
     // deeper without already knowing which suit/power is involved.
     malformedStep: string[] | undefined;
-    // Write-only: set by a caller who wants pickleMove to append
-    // "(via <uid>)" - the real root card whose power this step was
-    // reached through (World's target, Fool's reveal), demoted to a
-    // parenthetical anchor the same way announceLast demotes "(last)".
-    // Never produced by parseMove and never read back out of an
-    // already-parsed move - dispatch only ever needs `rest[0]` (see
-    // parseMove's own docs on why "via" overrides it outright), not this
-    // field. Purely a hint for the WRITE side.
+    // The "(via <uid>)" anchor: the real root card whose power a resumed
+    // step was reached through (Fool's reveal, World's target), demoted to
+    // a parenthetical the same way announceLast demotes "(last)".
+    // Populated by parseMove when the marker is present, and consumed by
+    // pickleMove on the write side. The head word itself is purely
+    // decorative whenever this is set (see parseMove's own docs).
     viaUid?: string;
 }
 
@@ -214,13 +216,11 @@ function handHasCardOfValue(pile: string[], value: number): boolean {
 // optional fields instead - each of those functions asserts `suitUid!`
 // once at its own top, documented there, rather than scattering asserts.
 interface IPendingStep {
-    // The verb that originated this activation - this.pendingPower's own
-    // `source` for a genuine resume (a resumed move's own head is purely
-    // decorative - see parseMove's own "(via <uid>)" docs), or the
-    // literal typed head for a fresh "use"/"play". describePendingMove/
-    // assembleStepMove use this directly for the front of the move
-    // string, adding "(via <headArg>)" purely when activeCardUid differs
-    // from headArg.
+    // The verb the front of the move string spells - always "play" for a
+    // genuine resume (a resumed move's own head is purely decorative, see
+    // parseMove's own "(via <uid>)" docs), else the literal typed head for
+    // a fresh "use"/"play". describePendingMove/assembleStepMove use this
+    // for the front of the move string.
     head: "use" | "play";
     // The ROOT card - the one originally used/played/resumed. NOT
     // necessarily the card whose own steps are currently being resolved -
@@ -228,9 +228,8 @@ interface IPendingStep {
     headArg: string;
     // The card whose own steps THIS pending step actually belongs to -
     // equal to headArg for an unpushed activation or a minor card;
-    // differs once a push has happened (World's target chosen, this same
-    // turn or a prior one) - the local walk below's own current top of
-    // stack, or this.pendingPower's own top for a genuine resume. This is
+    // differs once a push has happened (World's target chosen, Fool's
+    // reveal) - the local walk below's own current top of stack. This is
     // the "via"-worthy fact both #74 (assembleStepMove) and #67
     // (computeActionButtons' button label) need.
     activeCardUid: string;
@@ -376,7 +375,6 @@ interface IPowerFrame {
 // stack[stack.length-1] is the innermost/current frame - the one an
 // incoming resume submission's single step segment actually applies to.
 interface IPendingMajorPower {
-    source: "use" | "play";
     rootCardUid: string;
     stack: [IPowerFrame, ...IPowerFrame[]];
 }
@@ -398,12 +396,12 @@ interface IMoveState extends IIndividualState {
     // FrameState's own docs. Optional so stack entries predating this
     // feature still deserialize fine.
     frames?: FrameState[];
-    // Set when a High Priestess activation paused after a supplied step,
-    // awaiting a follow-up move() submission on the same seat before the
-    // turn can advance - see move()'s tail and applyMajorPower's own docs.
+    // Which card(s) still owe a follow-up move() submission on the same
+    // seat before the turn can advance (Fool's own two flips, High
+    // Priestess's own second round) - see this.continued's own docs.
     // Optional so stack entries predating this feature still deserialize
     // fine.
-    pendingPower?: IPendingMajorPower;
+    continued?: string[];
     // The "bidding" variant's opening procedure - see cmdBid's own docs.
     // Every other variant/game stays in "main" for its entire lifetime, so
     // none of the fields below are ever touched outside that variant.
@@ -512,9 +510,32 @@ export class GnosticaGame extends GameBaseSequenced {
     // player page through their own in-progress chain mid-turn, not just
     // review a fully-committed one later.
     public frames: FrameState[] = [];
-    // Set when a High Priestess activation is mid-pause - see
-    // IPendingMajorPower's own docs.
-    public pendingPower: IPendingMajorPower | undefined;
+    // Which continuing card(s) still owe a follow-up move() submission on
+    // the same seat before the turn can advance - Fool's own two flips
+    // (see walkFrameStack's own docs: "every flip forces a pause,
+    // regardless of whether Fool has another flip left") and High
+    // Priestess's own second round are the only cards a genuine cross-
+    // submission obligation is ever rooted on, or nested on top of another
+    // one of the same kind (Fool can reveal a second Fool - see the
+    // "Fool -> Fool" test). Everything else that gets pushed while
+    // resolving a chain (an ordinary revealed minor/major, World's own
+    // borrow) resolves within the move-string/click machinery of whichever
+    // submission handles the entry below it; it never needs its own
+    // persisted fact, since a resume submission already names what it's
+    // continuing.
+    //
+    // Each entry is "<cardUid>.<step>", `step` being the same step index
+    // MajorArcanaDef.powers is indexed by - e.g. "00.1" means Fool still
+    // owes its own step 1 (the second flip); "02.1" means High Priestess
+    // still owes its own step 1 (round 2). Ordered outermost-first, like
+    // walkFrameStack's own local IPowerFrame[] stack. Only ever written on
+    // a real (non-partial) commit (see walkFrameStack's own docs) - so
+    // unlike this.liveMove, reading this field never needs a separate "is
+    // this actually genuine" check. buildPendingFromContinued() is what
+    // turns this back into the richer, throwaway shape the rest of the
+    // resume machinery already expects (minions recomputed fresh, never
+    // stored - see its own docs on why that's safe).
+    public continued: string[] = [];
     // The "bidding" variant's own state - see IMoveState's own docs on
     // each field.
     public phase!: "bidding" | "redraw" | "main";
@@ -577,36 +598,6 @@ export class GnosticaGame extends GameBaseSequenced {
     private liveMove: IParsedMove | undefined;
     private buffers: Direction[] = [];
     private discarded: string[] = [];
-    // Transient click-UI hint, not part of persisted game state. A REAL
-    // (non-partial) commit's own this.pendingPower is always genuine,
-    // whether it already existed or was just created (e.g. High Priestess
-    // round 1 -> round 2). But a card's own first step can ALSO
-    // force-pause during a merely PARTIAL preview of its own
-    // still-being-typed root activation (Fool's flip, say - see
-    // walkFrameStack's own docs), setting this.pendingPower as a side
-    // effect of the CURRENT click alone, with nothing genuinely committed
-    // - #49 makes that root step mandatory in the first place, so there's
-    // nothing to decline yet regardless. A partial call only counts as
-    // genuine when it's simply CONTINUING an obligation that already
-    // existed before it ran (e.g. building High Priestess's own discard
-    // list via repeated hand-card clicks). Reading this flag (rather than
-    // this.pendingPower directly) is how getActionButtons() tells those
-    // two apart.
-    private pendingPowerIsGenuine = false;
-    // How many of THIS move()'s own liveMove.stepSegments are already
-    // reflected in this.pendingPower.stack's current nextStepIndex/frame
-    // shape, set alongside every this.pendingPower assignment inside
-    // walkFrameStack. Every segment EXCEPT a still-incomplete final one
-    // (a mode chosen but no args yet, a suit chosen but no mode yet, etc -
-    // see walkFrameStack's own "declined so far" precheck) ends up fully
-    // reflected, so this is usually just liveMove.stepSegments.length -
-    // it's the one case where it's one less that this field exists for.
-    // computeActionButtons()'s own pendingMinor needs it to replay only
-    // the genuinely-unreflected TAIL of liveMove against pendingPower's
-    // stack, rather than either re-walking a segment the stack has
-    // already moved past (double-applying it) or discarding a
-    // still-open one entirely (losing whatever was already typed for it).
-    private pendingPowerConsumedSegments = 0;
 
     public targetScore(): number {
         if (this.variants.includes("target-8")) {
@@ -740,14 +731,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.biddingPool = state.biddingPool !== undefined ? [...state.biddingPool] : undefined;
         this.turnOrder = state.turnOrder !== undefined ? [...state.turnOrder] : undefined;
         this.frames = state.frames ? [...state.frames] : [];
-        this.pendingPower = state.pendingPower;
-        // A freshly loaded state's own pendingPower (if any) is, by
-        // definition, from a genuine prior REAL commit - see
-        // pendingPowerIsGenuine's own docs.
-        this.pendingPowerIsGenuine = this.pendingPower !== undefined;
-        // No liveMove yet either (nothing's been clicked this turn) - see
-        // pendingPowerConsumedSegments's own docs.
-        this.pendingPowerConsumedSegments = 0;
+        this.continued = state.continued ? [...state.continued] : [];
         return this;
     }
 
@@ -771,7 +755,7 @@ export class GnosticaGame extends GameBaseSequenced {
             biddingPool: this.biddingPool !== undefined ? [...this.biddingPool] : undefined,
             turnOrder: this.turnOrder !== undefined ? [...this.turnOrder] : undefined,
             frames: this.frames.length > 0 ? [...this.frames] : [],
-            pendingPower: this.pendingPower,
+            continued: this.continued.length > 0 ? [...this.continued] : undefined,
         };
     }
 
@@ -860,17 +844,16 @@ export class GnosticaGame extends GameBaseSequenced {
             // forced Use/Decline screen (getActionButtons()'s own
             // pendingPower gate), not the ordinary 6-button bar, or
             // whenever this player hasn't placed a piece yet at all.
-            if (this.pendingPower !== undefined) {
+            const continued = this.buildPendingFromContinued();
+            if (continued !== undefined) {
                 // Routed through powerStepMessageKey (the SAME lookup
                 // resume_power's own click handler and computeActionButtons
                 // already use) rather than a separate, generic "just name
                 // the card" copy - this is the only chance the status line
                 // itself (as opposed to the chat log) gets to tell the
                 // player which card's power they're being asked about
-                // before they've clicked anything at all, so a card with
-                // real instructions (Fool, High Priestess, World) needs
-                // them here just as much as anywhere else this key is read.
-                const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
+                // before they've clicked anything at all.
+                const activeTop = continued.stack[continued.stack.length - 1];
                 const { key, params } = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
                 result.message = i18next.t(key, params);
             } else if (!hasPieces) {
@@ -908,13 +891,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // EVERY legal move right now has to be resuming it - so route on
         // that runtime fact directly, not on whatever verb the move
         // string happens to spell (there's no dedicated "resume" head
-        // anymore - see parseMove's own docs on "(via <uid>)"). Gated on
-        // pendingPowerIsGenuine, not just this.pendingPower - a still-
-        // incomplete FRESH "use"/"play" also sets pendingPower
-        // (walkFrameStack), and isn't a genuine obligation yet.
-        // Short-circuits ahead of the other gates below since they don't
-        // apply to a resume.
-        if (this.pendingPower !== undefined && this.pendingPowerIsGenuine) {
+        // anymore - see parseMove's own docs on "(via <uid>)").
+        // this.continued always names a genuine obligation (see its own
+        // docs), so no separate check is needed here. Short-circuits ahead
+        // of the other gates below since they don't apply to a resume.
+        if (this.continued.length > 0) {
             const failure = requireValidStepShapes() ?? this.validateResumePendingPower(parsed.rest[0], parsed.stepSegments);
             return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
         }
@@ -1016,13 +997,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
-        // A real (non-partial) commit's own resulting pendingPower is
-        // always genuine, whether it already existed or is being created
-        // fresh right now - only a MERELY PARTIAL call needs the "did it
-        // already exist BEFORE this call" check, captured here before
-        // anything below can mutate it - see pendingPowerIsGenuine's own
-        // docs.
-        this.pendingPowerIsGenuine = !partial || this.pendingPower !== undefined;
         m = m.trim();
         if (!trusted) {
             const result = this.validateMove(m);
@@ -1090,7 +1064,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // validateMove's job alone now - see its own docs; a trusted
             // caller passing an illegal head here is a caller bug, not
             // something this dispatch re-checks.
-            if (this.pendingPower !== undefined && this.pendingPowerIsGenuine) {
+            if (this.continued.length > 0) {
                 requireValidStepShapes();
                 this.resumePendingPower(parsed.stepSegments, partial);
             } else if (head === "bid") {
@@ -1196,9 +1170,10 @@ export class GnosticaGame extends GameBaseSequenced {
         // set to a matching string.
         if (head === "bid" || head === "redraw" || head === "pass") {
             //Need to rewrite these to remove this exception.
-        } else if (this.pendingPower !== undefined) {
-            // Same seat still owes a follow-up High Priestess submission -
-            // stay put. checkEOG() doesn't need to run here either: it
+        } else if (this.continued.length > 0) {
+            // Same seat still owes a follow-up submission (Fool's flip,
+            // High Priestess round 2) - stay put. checkEOG() doesn't need
+            // to run here either: it
             // reads only eliminated/gameover/winner, none of which this
             // step could have changed.
         } else {
@@ -1291,7 +1266,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // (decorative) card printed in front of it - see pickleMove's own
         // docs on the write side of this. The head word itself
         // ("use"/"play"/"decline") is purely decorative whenever this is
-        // present - dispatch detects a resume from this.pendingPower's
+        // present - dispatch detects a resume from this.continued's
         // own state, never from the head (see validateMove's own docs).
         const VIA_FLAG_RE = /\s*\(via\s+([A-Za-z0-9]+)\)\s*$/i;
 
@@ -1302,13 +1277,19 @@ export class GnosticaGame extends GameBaseSequenced {
         if (viaMatch) {
             bare = bare.slice(0, viaMatch.index).trim();
         }
+        const viaUid = viaMatch ? viaMatch[1] : undefined;
         const segments = bare.split(/\s*[\n,;/\\]\s*/).filter(s => s.length > 0);
         if (segments.length === 0) {
-            return { announceLast, head: undefined, headRecognized: true, rest: viaMatch ? [viaMatch[1]] : [], stepSegments: [], malformedStep: undefined };
+            return { announceLast, head: undefined, headRecognized: true, rest: viaUid !== undefined ? [viaUid] : [], stepSegments: [], malformedStep: undefined, viaUid };
         }
         const [rawHead, ...rawRest] = segments[0].split(/\s+/);
         const head = rawHead.toLowerCase();
-        const rest = viaMatch ? [viaMatch[1]] : rawRest;
+        // When a "(via <uid>)" marker is present, rest[0] is that ROOT-card
+        // anchor (what dispatch and validateResumePendingPower's mismatch
+        // check key on), and rest[1..] are the front tokens as typed (the
+        // revealed card being resolved). Without a marker, rest is just the
+        // front tokens. viaUid mirrors rest[0] when the marker is present.
+        const rest = viaUid !== undefined ? [viaUid, ...rawRest] : rawRest;
         let stepSegments = segments.slice(1).map(s => s.split(/\s+/));
         // "decline" carries real meaning as a head now, not just a
         // printed label - the leading "decline" segment walkFrameStack/
@@ -1327,6 +1308,7 @@ export class GnosticaGame extends GameBaseSequenced {
             rest,
             stepSegments,
             malformedStep: stepSegments.find(tokens => !this.isStepShapeValid(tokens)),
+            viaUid,
         };
     }
 
@@ -1358,32 +1340,27 @@ export class GnosticaGame extends GameBaseSequenced {
         return p.announceLast ? (base.length === 0 ? "(last)" : `${base} (last)`) : base;
     }
 
-    // The top of the resume stack (Fool's reveal, World's target) - NOT
-    // necessarily rootUid itself, which only names the ORIGINAL
-    // activation. Falls back to rootUid defensively (pendingPower already
-    // cleared) - every real caller only invokes this while a resume is
-    // genuinely in progress.
+    // The card a resume submission currently addresses: the revealed card
+    // the player has clicked into (this.liveMove's own front token, once a
+    // resume is genuinely in progress), else the top of the persisted
+    // this.continued stack (the innermost still-open card), else rootUid.
     private activeCardUid(rootUid: string): string {
-        return this.pendingPower?.stack[this.pendingPower.stack.length - 1].cardUid ?? rootUid;
+        if (this.liveMove?.viaUid === rootUid) {
+            return this.liveMove.rest[1] ?? this.liveMove.rest[0];
+        }
+        return this.continued[this.continued.length - 1]?.split(".")[0] ?? rootUid;
     }
 
     // The one place that assembles a resumed move's descriptive front -
     // every "resume seed" call site below shares this instead of hand-
     // rolling the verb/active-uid/parenthetical itself. "play"/"decline"
-    // (matching stepSegments' own shape, not stored separately) against
-    // the ACTIVE card, with the real root demoted into "(via <rootUid>)" -
-    // see pickleMove's own docs on why the front is purely decorative and
-    // dispatch never reads it back.
+    // against the ACTIVE card, with the real root demoted into
+    // "(via <rootUid>)".
     public buildViaMove(rootUid: string, stepSegments: string[][]): IParsedMove {
         const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
-        // The TRUE originating verb (matches describePendingMove's own
-        // "never a fake placeholder" rule) - falls back to "play" only
-        // when pendingPower is already gone (defensive; every real caller
-        // invokes this while a resume is genuinely in progress).
-        const verb = declining ? "decline" : this.pendingPower?.source ?? "play";
         return {
             announceLast: false,
-            head: verb,
+            head: declining ? "decline" : "play",
             headRecognized: true,
             rest: [this.activeCardUid(rootUid)],
             viaUid: rootUid,
@@ -1393,26 +1370,15 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Builds the move string computeActionButtons()'s own pendingMinor
-    // seeding replays against this.pendingPower.stack - see
-    // pendingPowerConsumedSegments's own docs on why it's the bare root
-    // seed PLUS whatever tail of this.liveMove's segments the stack
-    // doesn't already reflect, rather than either the bare seed alone or
-    // the whole of liveMove.
-    private pendingPowerSeedMoveString(): string {
-        const pending = this.pendingPower!;
-        // this.liveMove's own rest[0] is always the ROOT uid regardless of
-        // spelling - a genuine resume's own "(via <root>)" overrides it
-        // that way (see parseMove's own docs), and a fresh activation
-        // whose own first step just hasn't finished typing yet (see
-        // walkFrameStack's own docs on why that ALSO sets this.pendingPower,
-        // even though it isn't a genuine cross-turn obligation) already
-        // has the root there directly. Only a genuinely unrelated
-        // liveMove (some other card entirely) fails this match.
-        if (this.liveMove === undefined || this.liveMove.rest[0] !== pending.rootCardUid) {
-            return this.pickleMove(this.buildViaMove(pending.rootCardUid, []));
-        }
-        const unreflected = this.liveMove.stepSegments.slice(this.pendingPowerConsumedSegments);
-        return this.pickleMove(this.buildViaMove(pending.rootCardUid, unreflected));
+    // seeding replays: the bare root seed plus whatever step segments the
+    // current in-progress preview (this.liveMove) has typed against this
+    // same obligation. No "already reflected" reconciliation needed - the
+    // reconstruction always starts fresh from this.continued, so the whole
+    // of liveMove's segments is unreflected by construction.
+    private continuedSeedMoveString(): string {
+        const pending = this.buildPendingFromContinued()!;
+        const segments = this.liveMove?.viaUid === pending.rootCardUid ? this.liveMove.stepSegments : [];
+        return this.pickleMove(this.buildViaMove(pending.rootCardUid, segments));
     }
 
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
@@ -1883,13 +1849,12 @@ export class GnosticaGame extends GameBaseSequenced {
             // clicking Pass or by hand-building an equivalent Discard/Draw
             // move (0 discards, explicit draw 0).
             found.add("pass");
-        } else if (this.pendingPower !== undefined && this.pendingPowerIsGenuine) {
-            // A genuine resume's own head is purely decorative ("play"/
-            // "decline", whatever the front happened to spell - see
-            // parseMove's own docs) and has no top-level button of its
-            // own to bold regardless; the ORIGINAL activation's verb is
-            // what stays highlighted throughout.
-            found.add(this.pendingPower.source);
+        } else if (this.continued.length > 0) {
+            // A genuine resume's own head is purely decorative (see
+            // parseMove's own docs) - a resumed continuation always plays
+            // whatever revealed card is active, so "play" is what stays
+            // highlighted throughout.
+            found.add("play");
         } else if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
         }
@@ -1918,48 +1883,34 @@ export class GnosticaGame extends GameBaseSequenced {
     // every minion is upright) would otherwise have no way out at all.
     private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         const bar = this.computeActionButtons();
-        if (bar === undefined || this.pendingPower === undefined) {
+        if (bar === undefined || this.continued.length === 0) {
             return bar;
         }
-        // A card's own first step can force-pause even during a PARTIAL
-        // preview of its own still-being-typed root activation (Fool's
-        // flip, say - see walkFrameStack's own docs), setting
-        // this.pendingPower as a side effect of THIS CLICK alone, not
-        // because anything was genuinely, already committed - #49 makes
-        // that root step mandatory in the first place, so there's
-        // nothing to decline yet regardless. pendingPowerIsGenuine is
-        // what actually distinguishes that from a real, pre-existing (or
-        // freshly, REALLY committed) obligation worth a persisting
-        // Decline button - see its own docs.
-        if (!this.pendingPowerIsGenuine) {
-            return bar;
-        }
+        // this.continued always names a genuine obligation (see its own
+        // docs), so there's nothing further to distinguish here.
         if (bar.some(b => b.value === "decline_power")) {
             // Fool's own step has nothing else to offer, so
             // computeActionButtons() already returns its own explicit
             // Use/Decline pair directly for it - nothing to add here.
             return bar;
         }
-        const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
-        if (this.pendingPower.stack.length > 1 && activeTop.viaFool !== true) {
-            // World's own borrowed power can't be declined - see
-            // IPowerFrame's own "viaFool" docs. Nothing to add here; the
-            // base bar (whatever computeActionButtons() already produced)
-            // stands as-is.
-            return bar;
-        }
+        // The state as ADVANCED by whatever's been clicked so far this
+        // render (this.liveMove) - parsePendingStep replays those segments
+        // against the reconstructed stack, so `.special === "fool"` here
+        // means the player's clicks have already run a revealed card's own
+        // steps to completion and exposed Fool's mandatory next flip
+        // underneath.
+        const advanced = this.parsePendingStep(this.continuedSeedMoveString());
         const lastSeg = this.liveMove?.stepSegments[this.liveMove.stepSegments.length - 1];
         const justDeclined = lastSeg !== undefined && lastSeg.length === 1 && lastSeg[0].toLowerCase() === "decline";
-        if (this.topStepIsFool(this.pendingPower.stack) && !justDeclined) {
+        if (advanced?.special === "fool" && !justDeclined) {
             // Fool's own flip is never optional (see walkFrameStack's own
             // docs) - there's nothing to decline once a revealed card's
-            // own steps have simply run their course (via clicks) and
-            // exposed Fool's own mandatory next flip underneath. An
-            // explicit decline the player just typed is different
-            // (justDeclined, below) - that persisting button names
-            // whatever was ACTUALLY declined, not Fool's own step.
+            // own steps have simply run their course. An explicit decline
+            // the player just typed is different (justDeclined, below).
             return bar;
         }
+        const activeTop = { cardUid: advanced?.activeCardUid ?? this.activeCardUid(this.continuedRootUid()!) };
         // Fool's own remaining flip auto-continues past ANY decline that
         // exposes it (see walkFrameStack's own docs) rather than sitting
         // as its own separate choice - so if a decline just happened and
@@ -2048,7 +1999,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // the acting player's own last minion) as a sign a fresh
         // placement turn is needed, even though the in-progress move (or
         // pending obligation) is still perfectly valid and submittable.
-        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play" || this.pendingPower !== undefined;
+        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play" || this.continued.length > 0;
         if ((!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement()) {
             // Only one action is legal here regardless of which case this
             // is - place is a full turn on its own with zero real board
@@ -2126,30 +2077,23 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
 
-        // this.liveMove was populated by THIS SAME instance's own preceding
-        // move(..., {partial: true}) call (see move()'s own docs). Most of
-        // ITS OWN segments are already fully reflected in
-        // pendingPower.stack's current nextStepIndex/frame shape by now -
-        // re-walking those from scratch would double-apply whatever just
-        // forced the pause (e.g. Fool's "fool" token misread as a stray
-        // leading token of whatever got pushed) - EXCEPT a still-open
-        // final segment (a suit chosen but no mode yet, say), which
-        // pendingPower.stack deliberately does NOT reflect (see
-        // walkFrameStack's own "declined so far" precheck) and so must
-        // still be replayed for the bar to show anything past it.
-        // pendingPowerConsumedSegments (also set by walkFrameStack) is how
-        // many of liveMove's segments fall in the first, already-reflected
-        // group - pendingPowerSeedMoveString() below replays only the
-        // rest, on top of pendingPower's own current stack. Seeded this
+        // For a genuine resume, continuedSeedMoveString() rebuilds a
+        // move string from this.continued's own root anchor plus whatever
+        // segments this render's own in-progress preview (this.liveMove)
+        // has typed against it; parsePendingStep replays those against the
+        // reconstructed stack (buildPendingFromContinued) from scratch. No
+        // "already reflected" bookkeeping is needed - the reconstruction
+        // always starts fresh from this.continued, so the whole of
+        // liveMove's segments is unreflected by construction. Seeded this
         // way REGARDLESS of whether anything's been clicked yet this turn
-        // (liveMove may still be undefined, consumedSegments then moot) -
-        // so a revealed/targeted card's own real buttons (mode buttons,
-        // High Priestess's own count picker, etc.) can be offered
-        // immediately, without a separate "Use Card X" click first (see
-        // getActionButtons()'s own docs on how a persisting Decline
-        // button composes with whatever this produces).
-        const pendingMinor = this.pendingPower !== undefined
-            ? this.parsePendingStep(this.pendingPowerSeedMoveString())
+        // (liveMove may still be undefined) - so a revealed/targeted card's
+        // own real buttons (mode buttons, High Priestess's own count
+        // picker, etc.) can be offered immediately, without a separate
+        // "Use Card X" click first (see getActionButtons()'s own docs on
+        // how a persisting Decline button composes with whatever this
+        // produces).
+        const pendingMinor = this.continued.length > 0
+            ? this.parsePendingStep(this.continuedSeedMoveString())
             : this.liveMove === undefined
                 ? undefined
                 : this.parsePendingStep(this.pickleMove(this.liveMove));
@@ -2188,7 +2132,8 @@ export class GnosticaGame extends GameBaseSequenced {
         // is what actually keeps a real choice visible there.
         if (pendingMinor.special === "fool") {
             if (this.liveMove === undefined) {
-                const activeUid = this.pendingPower!.stack[this.pendingPower!.stack.length - 1].cardUid;
+                const resumeStack = this.resumeStack()!;
+                const activeUid = resumeStack[resumeStack.length - 1].cardUid;
                 return [
                     { label: `Use Card ${activeUid}`, value: "resume_power" },
                     { label: `Decline ${activeUid}`, value: "decline_power" },
@@ -2274,12 +2219,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // (special undefined, suitUid set), so it falls straight through
         // to that same existing loop unmodified.
         if (pendingMinor.special !== undefined && pendingMinor.special !== "hermitTeleport" && pendingMinor.special !== "magicianChoice") {
-            // While still building a FRESH root activation (not yet a
-            // genuine, persisted obligation - see pendingPowerIsGenuine's
-            // own docs), the ordinary top-level bar is still the right
-            // thing to show (matches every other "still typing" preview,
-            // and #49 may still reject this activation outright anyway).
-            if (!this.pendingPowerIsGenuine) {
+            // While still building a FRESH root activation (this.continued
+            // always names a genuine obligation - see its own docs - so
+            // empty here means exactly that), the ordinary top-level bar
+            // is still the right thing to show (matches every other "still
+            // typing" preview, and #49 may still reject this activation
+            // outright anyway).
+            if (this.continued.length === 0) {
                 return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
             }
             // Once genuinely paused, though, NONE of the ordinary 6
@@ -2304,8 +2250,9 @@ export class GnosticaGame extends GameBaseSequenced {
             // forecloses Decline. Nothing legal to offer as a button at
             // all in that case; the board click itself is the only way
             // forward.
-            const activeFrame = this.pendingPower!.stack[this.pendingPower!.stack.length - 1];
-            if (this.pendingPower!.stack.length > 1 && activeFrame.viaFool !== true) {
+            const resumeStack = this.resumeStack()!;
+            const activeFrame = resumeStack[resumeStack.length - 1];
+            if (resumeStack.length > 1 && activeFrame.viaFool !== true) {
                 return undefined;
             }
             return [{ label: `Decline ${activeFrame.cardUid}`, value: "decline_power" }];
@@ -2436,41 +2383,46 @@ export class GnosticaGame extends GameBaseSequenced {
     // default alone happens to satisfy minArgs.
     private parsePendingStep(moveStr: string, callOpts: { preferCurrent?: boolean } = {}): IPendingStep | undefined {
         const parsed = this.parseMove(moveStr);
-        const headArg = parsed.rest[0];
-        if (headArg === undefined) {
+        let headArg = parsed.rest[0];
+        if (headArg === undefined && parsed.viaUid === undefined) {
+            return undefined;
+        }
+        // A bare "decline" is already a complete choice - there's no step
+        // for a button set to configure, so the bar falls back to the
+        // plain top-level context (getActionButtons then folds a persisting
+        // Decline back in).
+        if (parsed.head === "decline" && parsed.stepSegments.length === 1) {
             return undefined;
         }
         // A genuine resume means every legal move is resuming
-        // this.pendingPower regardless of what verb its (purely
-        // decorative) head spells - see parseMove's own docs on
-        // "(via <uid>)" - so this is a runtime-state check, not a string
-        // check. `head` is always the true originating verb either way -
-        // `this.pendingPower.source` for a genuine resume (its own move
-        // string's head is never trustworthy for this - see above), or
-        // the literal typed head for a fresh activation.
-        const isGenuineResume = this.pendingPower !== undefined && this.pendingPowerIsGenuine && this.pendingPower.rootCardUid === headArg;
+        // this.continued regardless of what verb its (purely decorative)
+        // head spells - see parseMove's own docs on "(via <uid>)" - so
+        // this is a runtime-state check, keyed on the "(via <root>)"
+        // anchor, not the front head. A resumed continuation always plays
+        // whatever revealed card is active, so `head` is "play" there.
+        const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.continued[0].split(".")[0];
+        if (isGenuineResume) {
+            // The revealed card being resolved (rest[1] once the front card
+            // is typed), else the root itself (a bare High Priestess round 2).
+            headArg = parsed.rest[1] ?? parsed.rest[0];
+        }
+        // A "(via <uid>)" marker with no matching genuine obligation means a
+        // same-string push that never crossed a submission boundary
+        // (World's own borrow) - headArg stays the root (rest[0] == viaUid),
+        // and the walk below replays every segment (World's target step,
+        // then whatever it pushed).
         if (!isGenuineResume && parsed.head !== "use" && parsed.head !== "play") {
             return undefined;
         }
-        const head: "use" | "play" = isGenuineResume ? this.pendingPower!.source : parsed.head as "use" | "play";
+        const head: "use" | "play" = isGenuineResume ? "play" : parsed.head as "use" | "play";
         let card: Card | undefined;
         let eligible: IMinionRef[];
-        // A genuine resume's real minions live in this.pendingPower's own
-        // stack (kept current across nested child frames - see popFrame's
-        // own docs), NOT wherever the ROOT card's own cell happens to be -
-        // that cell goes stale the instant the acting piece moves on to a
-        // different one via a nested child frame (Rods' own "move" mode,
-        // say), possibly leaving nothing standing there at all by the
-        // time a resume is previewed. rootCardUid is always a
-        // major (Fool/World/High Priestess are the only cards a genuine
-        // cross-turn obligation is ever rooted on - see
-        // resumePendingPower's own docs), so `card` only needs to be
-        // truthy and major here; its own identity is irrelevant beyond
-        // that, since the major branch below immediately replaces `stack`
-        // with this.pendingPower's own (already correct) one regardless.
+        // A card revealed by Fool (headArg names it directly for a resume)
+        // is always play-pool eligible regardless - see this.continued's
+        // own docs.
         if (isGenuineResume) {
             card = allCards().find(c => c.uid === headArg);
-            eligible = this.pendingPower!.stack[this.pendingPower!.stack.length - 1].minions;
+            eligible = this.eligibleMinionsForPlay();
         } else if (head === "use") {
             const loc = this.findCardCell(headArg);
             if (loc === undefined) {
@@ -2501,13 +2453,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // frame's own push/activation time) needs to stay tracked
         // separately from `minions` (which keeps accreting via newMinion
         // chaining), exactly like the outer eligible/minions split above
-        // already does for a minor card. Seeded from this.pendingPower for
+        // already does for a minor card. Seeded from this.continued for
         // a genuine resume (matched against rootCardUid, not the top
         // frame's own cardUid, per IPendingMajorPower's own docs on why),
         // otherwise fresh from the root card just resolved.
         const stack: { cardUid: string; nextStepIndex: number; eligible: IMinionRef[]; minions: IMinionRef[] }[] =
             isGenuineResume
-                ? this.pendingPower!.stack.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }))
+                ? this.resumeStack()!.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }))
                 : [{ cardUid: def.uid, nextStepIndex: 0, eligible: [...eligible], minions: [...eligible] }];
 
         const priorSteps: string[] = [];
@@ -3006,6 +2958,13 @@ export class GnosticaGame extends GameBaseSequenced {
     // target), regardless of which one this is.
     private describePendingMove(pending: IPendingStep, stepSegments: string[][]): string {
         const base: IParsedMove = { announceLast: false, head: pending.head, headRecognized: true, rest: [pending.headArg], stepSegments, malformedStep: undefined };
+        // A genuine resume always carries a "(via <root>)" anchor for
+        // validateResumePendingPower's own mismatch check - even when the
+        // active card IS the root (a bare High Priestess round 2), where
+        // there's no distinct front card to demote.
+        if (this.continued.length > 0) {
+            return this.pickleMove({ ...base, rest: [pending.activeCardUid], viaUid: this.continuedRootUid() });
+        }
         if (pending.activeCardUid === pending.headArg) {
             return this.pickleMove(base);
         }
@@ -3631,8 +3590,8 @@ export class GnosticaGame extends GameBaseSequenced {
             // clicked yet this turn - mirrors resume_power's own identical,
             // one-off seeding further down, just applied uniformly here so
             // every OTHER handler doesn't have to duplicate it.
-            if (this.pendingPower !== undefined && this.pendingPowerIsGenuine && this.parseMove(move).head === undefined) {
-                move = this.pickleMove(this.buildViaMove(this.pendingPower.rootCardUid, []));
+            if (this.continued.length > 0 && this.parseMove(move).head === undefined) {
+                move = this.pickleMove(this.buildViaMove(this.continuedRootUid()!, []));
             }
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
@@ -3811,8 +3770,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     // stays correct even for a High Priestess reached via a
                     // push (Fool's reveal, World's borrow), not just a
                     // direct "use"/"play".
-                    const stepIndex = this.pendingPower !== undefined
-                        ? this.pendingPower.stack[this.pendingPower.stack.length - 1].nextStepIndex
+                    const resumeStack = this.resumeStack();
+                    const stepIndex = resumeStack !== undefined
+                        ? resumeStack[resumeStack.length - 1].nextStepIndex
                         : 0;
                     const messageKey = stepIndex > 0
                         ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"
@@ -3851,10 +3811,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         // pendingPower already names the exact card) - the
                         // existing hand-card-click toggle then builds the
                         // discard list from here unmodified.
-                        if (this.pendingPower === undefined) {
+                        if (this.continued.length === 0) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        const seeded = this.pickleMove(this.buildViaMove(this.pendingPower.rootCardUid, []));
+                        const seeded = this.pickleMove(this.buildViaMove(this.continuedRootUid()!, []));
                         // The message is about whichever frame is actually
                         // active right now (the top of the stack - e.g. a
                         // card Fool revealed, not necessarily rootCardUid
@@ -3867,22 +3827,23 @@ export class GnosticaGame extends GameBaseSequenced {
                         // building" state; every other card's genuinely
                         // incomplete resume (e.g. High Priestess round 2)
                         // still reports complete:-1 on its own, unaffected.
-                        const activeTop = this.pendingPower.stack[this.pendingPower.stack.length - 1];
+                        const resumeStack = this.resumeStack()!;
+                        const activeTop = resumeStack[resumeStack.length - 1];
                         const activeMsg = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
                         return this.provisionalResult(seeded, activeMsg.key, activeMsg.params);
                     }
                     case "decline_power": {
-                        if (this.pendingPower === undefined) {
+                        if (this.continued.length === 0) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        const declined = this.pickleMove(this.buildViaMove(this.pendingPower.rootCardUid, [["decline"]]));
+                        const declined = this.pickleMove(this.buildViaMove(this.continuedRootUid()!, [["decline"]]));
                         // Declining pops the CURRENT top frame. The only
                         // thing that can be left underneath - Fool's own
                         // remaining flip - auto-resolves on this same real
                         // commit instead of pausing (see walkFrameStack's
                         // own docs), so name that outcome plainly rather
                         // than a card that isn't known yet.
-                        const remaining = this.pendingPower.stack.slice(0, -1);
+                        const remaining = this.resumeStack()!.slice(0, -1);
                         return this.provisionalResult(
                             declined,
                             this.topStepIsFool(remaining) ? "apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW" : undefined,
@@ -4209,7 +4170,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     newmove = `orient ${this.pieceRefStr(minion.x, minion.y, minion.index)}`;
                     resultMessageKey = undefined; // let validateOrient's own PICK_DIRECTION_TO_ORIENT show through
                 }
-            } else if (head === "use" || head === "play" || (this.pendingPower !== undefined && this.pendingPowerIsGenuine)) {
+            } else if (head === "use" || head === "play" || this.continued.length > 0) {
                 // Once a minor-arcana power step's mode is already chosen,
                 // a board click is target/arg cycling for that step first -
                 // see handlePendingStepBoardClick's own docs. Falls
@@ -4306,12 +4267,12 @@ export class GnosticaGame extends GameBaseSequenced {
                         return result;
                     }
                 }
-                if (head === "play" || (this.pendingPower !== undefined && this.pendingPowerIsGenuine && this.pendingPower.source === "play")) {
+                if (head === "play" || this.continued.length > 0) {
                     // "play" has no cell of its own to re-pick the way
                     // "use" does below - a board click here only ever
                     // means pending-step cycling (handled above); anything
-                    // else is ambiguous. A genuine resume of a
-                    // "play"-sourced activation is the same situation -
+                    // else is ambiguous. A genuine resume always plays a
+                    // revealed card, so it's the same situation -
                     // there's still no cell of its own to fall back to.
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
                 }
@@ -5016,7 +4977,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Only ever reached for a FRESH activation - move()'s own dispatch
-    // resumes this.pendingPower directly instead, before this switch is
+    // resumes this.continued directly instead, before this switch is
     // ever reached, whenever it's genuinely open (see its own docs) -
     // regardless of which verb the move string happens to spell, since
     // there's no dedicated "resume" head anymore (see parseMove's own
@@ -5029,7 +4990,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const t = this.board.get(x, y)!;
         const eligible = this.eligibleMinionsForActivate(x, y);
         this.results.push({ type: "use", what: t.card!.uid });
-        this.applyCardPower(t.card!, eligible, stepSegments, "use", partial);
+        this.applyCardPower(t.card!, eligible, stepSegments, partial);
     }
 
     private validateActivate(args: string[], stepSegments: string[][]): IValidationResult | undefined {
@@ -5069,7 +5030,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({ type: "deckDraw", what: uid, from: "hand" });
 
         const eligible = this.eligibleMinionsForPlay();
-        this.applyCardPower(card, eligible, stepSegments, "play", partial);
+        this.applyCardPower(card, eligible, stepSegments, partial);
     }
 
 
@@ -5124,10 +5085,10 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
+    private applyCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], partial: boolean): void {
         if (card.major) {
             const def = getMajorArcanaDef(card);
-            this.applyMajorPower(def, eligible, stepSegments, source, partial);
+            this.applyMajorPower(def, eligible, stepSegments, partial);
         } else {
             this.applyMinorPower(card.suit.uid, eligible, stepSegments);
         }
@@ -5321,7 +5282,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // persisted pendingPower.stack) - both reduce to "keep consuming
     // segments against whatever's on top of the stack until segments run
     // out or a step forces a pause". Mutates `stack` in place and sets/
-    // clears this.pendingPower as a side effect; the caller never needs
+    // clears this.continued as a side effect; the caller never needs
     // its own copy of the resulting stack.
     //
     // Two ways this can end:
@@ -5356,7 +5317,51 @@ export class GnosticaGame extends GameBaseSequenced {
     // decline consumes its own given segment and pops that frame, then
     // the loop immediately re-checks the newly-exposed top - if that's
     // Fool's own remaining flip, it fires right then, in the same call.
-    private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], source: "use" | "play", rootCardUid: string, partial: boolean): void {
+    // The only place this.continued is ever written. A real (non-partial)
+    // commit distils walkFrameStack's own just-resolved frame stack down
+    // to the Fool/High-Priestess entries that still owe a step (see
+    // this.continued's own docs); a partial preview writes nothing - it
+    // never resolves a genuine cross-submission obligation, so there's
+    // nothing for it to persist.
+    // The outermost continuing card's uid (Fool's or High Priestess's),
+    // or undefined when nothing is pending.
+    private continuedRootUid(): string | undefined {
+        return this.continued[0]?.split(".")[0];
+    }
+
+    private persistContinued(partial: boolean, stack: readonly IPowerFrame[]): void {
+        if (partial) {
+            return;
+        }
+        // The whole (already-cascaded) frame stack, one "<cardUid>.<step>"
+        // token per frame - popExhaustedFrames has already dropped anything
+        // genuinely done, so a frame still here always still matters. Only
+        // cardUid + step index are kept; minions and viaFool are re-derived
+        // by buildPendingFromContinued (see this.continued's own docs).
+        this.continued = stack.map(f => `${f.cardUid}.${f.nextStepIndex}`);
+    }
+
+    // Rebuilds the throwaway IPendingMajorPower-shaped view the resume
+    // machinery still expects, from the minimal persisted this.continued.
+    // One frame per token, outermost first; minions are recomputed fresh
+    // (eligibleMinionsForPlay() - see this.continued's own docs on why a
+    // frozen pool is never needed), and every non-root frame is marked
+    // viaFool: true (the only continuing card that nests anything is Fool -
+    // High Priestess never pushes - so anything on top of the root got
+    // there via a Fool reveal, and stays declinable).
+    private buildPendingFromContinued(): IPendingMajorPower | undefined {
+        if (this.continued.length === 0) {
+            return undefined;
+        }
+        const pool = this.eligibleMinionsForPlay();
+        const stack = this.continued.map((token, idx) => {
+            const [cardUid, step] = token.split(".");
+            return { cardUid, nextStepIndex: Number(step), minions: [...pool], viaFool: idx > 0 } as IPowerFrame;
+        });
+        return { rootCardUid: stack[0].cardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
+    }
+
+    private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], partial: boolean): void {
         const chained = stepSegments.length > 1;
         let i = 0;
         let stepsProcessed = 0;
@@ -5381,15 +5386,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     // (see applyPowerStep's own fool-branch docs) - not
                     // even nextStepIndex should advance, or popExhaustedFrames
                     // right below would wrongly treat Fool's OWN frame as
-                    // spent and pop it, clearing pendingPower entirely as
-                    // if the whole activation had resolved (it hasn't -
-                    // a real commit would push a newly revealed card's
-                    // own frame on top instead, keeping this one buried).
-                    // Leaving the stack untouched and pausing on it as-is
-                    // is the least misleading approximation available
-                    // without actually knowing what a real flip reveals.
-                    this.pendingPower = { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
-                    this.pendingPowerConsumedSegments = i;
+                    // spent and pop it, as if the whole activation had
+                    // resolved (it hasn't - a real commit would push a
+                    // newly revealed card's own frame on top instead,
+                    // keeping this one buried). A partial call persists
+                    // nothing (see persistContinued's own docs).
                     return;
                 }
                 tokens = ["fool"];
@@ -5455,13 +5456,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (stepsProcessed > 0) {
                     this.frames.pop();
                 }
-                this.pendingPower = { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
-                // `i` was already advanced past THIS segment above (the
-                // cursor's own bookkeeping, needed regardless of outcome),
-                // but the segment itself never actually got applied - so
-                // it's excluded here, unlike every other pendingPower
-                // assignment in this function.
-                this.pendingPowerConsumedSegments = i - 1;
+                this.persistContinued(partial, stack);
                 return;
             }
             stepsProcessed++;
@@ -5480,8 +5475,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             GnosticaGame.popExhaustedFrames(this, stack);
             if (outcome.forcePause === true) {
-                this.pendingPower = stack.length > 0 ? { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] } : undefined;
-                this.pendingPowerConsumedSegments = i;
+                this.persistContinued(partial, stack);
                 return;
             }
         }
@@ -5491,8 +5485,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // declined non-fool frame loops back via `continue` above instead
         // of breaking out here. So the stack is already fully resolved by
         // this point; nothing left to pop or cascade.
-        this.pendingPowerConsumedSegments = i;
-        this.pendingPower = stack.length > 0 ? { source, rootCardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] } : undefined;
+        this.persistContinued(partial, stack);
     }
 
     // Walks a major arcana card's power-step list from a fresh use/play
@@ -5502,9 +5495,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // computeShortcutOpts()'s own docs for why that derivation is safe to
     // apply unconditionally rather than requiring genuine same-target
     // detection between steps.
-    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], source: "use" | "play", partial: boolean): void {
+    private applyMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], partial: boolean): void {
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
-        this.walkFrameStack(stack, stepSegments, source, def.uid, partial);
+        this.walkFrameStack(stack, stepSegments, partial);
     }
 
     // True when `stack`'s own top frame's NEXT step is special:"fool" -
@@ -5535,26 +5528,33 @@ export class GnosticaGame extends GameBaseSequenced {
     // uniformly, re-pausing again if anything genuinely optional and
     // still needing real input remains once segments run out.
     //
-    // No uid/verb to check here at all - the move string's own head is
-    // purely decorative once resuming (see parseMove's own "(via <uid>)"
-    // docs), so there's nothing left to mismatch against other than
-    // this.pendingPower itself. validateResumePendingPower is where a
-    // wrong uid is still caught, for a real (untrusted) submission - this
-    // is the apply side, which trusts that already happened.
+    // The frame stack a resume submission walks: buildPendingFromContinued's
+    // own persisted obligation, plus - when `headArg` names something other
+    // than the outermost continuing card itself - a fresh frame for the
+    // ordinary card that got revealed on top of it. Nothing about that
+    // revealed card is ever persisted (see this.continued's own docs); it's
+    // re-pushed here from the head arg the resume submission itself carries,
+    // its minions recomputed fresh. Undefined when nothing is pending.
+    private resumeStack(): IPowerFrame[] | undefined {
+        const pending = this.buildPendingFromContinued();
+        return pending?.stack.map(f => ({ ...f, minions: [...f.minions] }));
+    }
+
     private resumePendingPower(stepSegments: string[][], partial: boolean): void {
-        const pending = this.pendingPower!;
-        const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
+        const stack = this.resumeStack();
+        if (stack === undefined) {
+            return;
+        }
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             // A bare resume seed, no step typed yet - the client always
             // sends this to populate a partial preview before any step is
             // typed (see boardClick()'s own convention). Nothing to
-            // process yet; pendingPower stays exactly as it was. Fool's
-            // own step is exempt from this - it auto-resolves regardless
-            // of segment count (see walkFrameStack's own docs), so a bare
-            // seed against it should go ahead and take the flip.
+            // process yet. Fool's own step is exempt - it auto-resolves
+            // regardless of segment count (see walkFrameStack's own docs),
+            // so a bare seed against it should go ahead and take the flip.
             return;
         }
-        this.walkFrameStack(stack, stepSegments, pending.source, pending.rootCardUid, partial);
+        this.walkFrameStack(stack, stepSegments, partial);
     }
 
     // Read-only counterpart to walkFrameStack, mirroring its own inline
@@ -5684,25 +5684,19 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (stepResult.complete === false) {
                 if (i >= stepSegments.length) {
-                    // this.pendingPower (the REAL, persisted field - never
-                    // touched by any validate*() method, so it still
-                    // reflects whatever it was before this whole
-                    // validateMove() call started) is exactly
-                    // pendingPowerIsGenuine's own "was there already a
-                    // real, resumable obligation" signal, checked here
-                    // read-only: set means this walk was entered via
-                    // validateResumePendingPower (a genuine cross-turn
-                    // resume - Fool's reveal, World's target, HP round 2 -
-                    // where a persisting Decline button really is offered,
-                    // so #49's ROOT-only "must be used... discard draw 0"
-                    // wording is wrong regardless of which frame is
-                    // active); undefined means a fresh validateMajorPower
+                    // this.continued (never touched by any validate*()
+                    // method, always names a genuine obligation - see its
+                    // own docs) is checked here read-only: non-empty means
+                    // this walk was entered via validateResumePendingPower
+                    // (a genuine cross-submission resume - Fool's reveal, HP
+                    // round 2 - where a persisting Decline button really is
+                    // offered, so #49's ROOT-only "must be used... discard
+                    // draw 0" wording is wrong regardless of which frame is
+                    // active); empty means a fresh validateMajorPower
                     // activation, where #49's wording still applies even
                     // once it pushes into a nominally-optional later frame
-                    // (e.g. World->Lovers typed as one hand-typed chain) -
-                    // matching move()'s own pendingPowerIsGenuine, which
-                    // likewise never treats a same-call chain as genuine.
-                    if (this.pendingPower === undefined) {
+                    // (e.g. World->Lovers typed as one hand-typed chain).
+                    if (this.continued.length === 0) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
                     }
                     const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
@@ -5790,12 +5784,11 @@ export class GnosticaGame extends GameBaseSequenced {
     // validateMove's own gate already confirmed pendingPower is
     // genuinely open before this ever runs - a wrong root uid is the one
     // thing left to catch here.
-    private validateResumePendingPower(resumeRootUid: string, stepSegments: string[][]): IValidationResult | undefined {
-        const pending = this.pendingPower!;
-        if (resumeRootUid !== pending.rootCardUid) {
+    private validateResumePendingPower(resumeRootUid: string | undefined, stepSegments: string[][]): IValidationResult | undefined {
+        if (resumeRootUid !== this.continuedRootUid()) {
             return this.invalid("apgames:validation.gnostica.PENDING_POWER_MISMATCH");
         }
-        const stack = pending.stack.map(f => ({ ...f, minions: [...f.minions] }));
+        const stack = this.resumeStack()!;
         if (stepSegments.length === 0 && !this.topStepIsFool(stack)) {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
@@ -5814,7 +5807,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
         }
-        return this.validateFrameStack(stack, stepSegments, pending.rootCardUid);
+        return this.validateFrameStack(stack, stepSegments, this.continuedRootUid()!);
     }
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as
@@ -6914,12 +6907,13 @@ export class GnosticaGame extends GameBaseSequenced {
         this.currplayer = order[next];
     }
 
-    // Stay open while a High Priestess obligation is pending, even if
-    // currplayer has cycled back to the round opener - otherwise the
-    // inherited (elimination-safe) close check would false-positive-close
-    // the round after the seat's first ply, before the obligation resolves.
+    // Stay open while a continuation (Fool's flip, High Priestess round 2)
+    // is still owed, even if currplayer has cycled back to the round
+    // opener - otherwise the inherited (elimination-safe) close check would
+    // false-positive-close the round after the seat's first ply, before
+    // the obligation resolves.
     protected shouldCloseRound(roundPlies: IGamePly[], stackIndex: number): boolean {
-        if (this.stack[stackIndex].pendingPower !== undefined) {
+        if ((this.stack[stackIndex].continued ?? []).length > 0) {
             return false;
         }
         return super.shouldCloseRound(roundPlies, stackIndex);

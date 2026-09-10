@@ -64,8 +64,9 @@ export function generateRandomMove(game: GnosticaGame): string {
     // right now" gate) - always-legal decline, not real fuzzer-quality
     // coverage of Fool/World's own decision points (see this file's own
     // class-level docs on why that's out of scope).
-    if (game.pendingPower !== undefined) {
-        return game.pickleMove(game.buildViaMove(game.pendingPower.rootCardUid, [["decline"]]));
+    if (game.continued.length > 0) {
+        const rootUid = game.continued[0].split(".")[0];
+        return game.pickleMove(game.buildViaMove(rootUid, [["decline"]]));
     }
     if (game.phase === "bidding") {
         const hand = game.hands[game.currplayer - 1];
