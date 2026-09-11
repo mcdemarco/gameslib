@@ -1678,7 +1678,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // itself (as opposed to the chat log, which the player may not
         // be looking at) tells them which card's power they're now
         // choosing steps for.
-        const cardName = allCards().find(c => c.uid === headArg)?.name ?? headArg;
+        const cardName = this.cardNameOrUid(headArg);
         // CHOOSE_STEP's own "using the buttons" wording is only true for
         // a primitive step (a mode button), hermitTeleport/magicianChoice
         // (their own dedicated button sets), or a genuinely AMBIGUOUS
@@ -1947,6 +1947,22 @@ export class GnosticaGame extends GameBaseSequenced {
         return suitUid === "R" && piece.orientation === "U" ? { key: "ROD_NEEDS_FACING" } : undefined;
     }
 
+    // The self-contained Use/Decline pair offered whenever a paused power
+    // has no button set of its own to show for what comes next - Fool's
+    // own step (nothing to configure at all) and every other click-driven
+    // special (orientAny, World's target, etc., once genuinely paused
+    // rather than mid-fresh-activation). Reads the active card straight
+    // off the resume stack's own top frame - the same uid both call sites
+    // used to independently re-derive.
+    private pausedPowerButtons(): [ButtonBarButton, ButtonBarButton] {
+        const resumeStack = this.resumeStack()!;
+        const activeUid = resumeStack[resumeStack.length - 1].cardUid;
+        return [
+            { label: `Use Card ${activeUid}`, value: "resume_power" },
+            { label: `Decline ${activeUid}`, value: "decline_power" },
+        ];
+    }
+
     // Shared by the ordinary end-of-turn discard/draw count-picker and
     // High Priestess's own identical-shaped one.
     private drawCountOptions(maxDraw: number): ChoiceOption[] {
@@ -1957,6 +1973,16 @@ export class GnosticaGame extends GameBaseSequenced {
         return options;
     }
 
+    // #87/#88: each state below is its own named primitive - gameover/
+    // setup, the top-level bar, discard's count-picker, orient's minion-
+    // picker, pendingMinor's own several states (fool, minion ambiguity,
+    // High Priestess count, click-driven-no-buttons, suit/hermit/magician
+    // mode buttons) - tried in this fixed order because two of them are
+    // genuinely order-dependent (minion disambiguation must precede
+    // dispatch by special kind; hermitTeleport/magicianChoice must escape
+    // the "no button set" special branch to reach their own further down)
+    // - see #87's own investigation. `undefined` from a primitive always
+    // means "doesn't apply here, keep going" - never "empty bar".
     private computeActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         if (this.gameover) {
             return undefined;
@@ -1972,17 +1998,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.phase === "redraw") {
             return [{ label: "Redraw", value: "redraw", attributes: [{ name: "font-weight", value: "bold" }] }];
         }
-        // A live preview of "use"/"play" - or a genuine pendingPower
-        // obligation, which always implies the acting player already had
-        // board presence when the obligation was created - can never
-        // legitimately collapse down to "Place" mid-preview. Without
-        // this, hasPiecesOnBoard() below could misread a transient
-        // zero-piece moment (e.g. a Sword attack that ends up destroying
-        // the acting player's own last minion) as a sign a fresh
-        // placement turn is needed, even though the in-progress move (or
-        // pending obligation) is still perfectly valid and submittable.
-        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play" || this.continued.length > 0;
-        if ((!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement()) {
+        if (this.isPlaceOnlyState()) {
             // Only one action is legal here regardless of which case this
             // is - place is a full turn on its own with zero real board
             // presence, so nothing else should be offered mid-placement
@@ -1991,94 +2007,17 @@ export class GnosticaGame extends GameBaseSequenced {
             // analogous "only one thing possible right now" situation.
             return [{ label: "Place", value: "place", attributes: [{ name: "font-weight", value: "bold" }] }];
         }
-        const topLevel: ButtonBarButton[] = [
-            { label: "Use Territory", value: "use" },
-            { label: "Play Card", value: "play" },
-            { label: "Orient", value: "orient" },
-            { label: "Discard/Draw", value: "discard" },
-            { label: "Pass", value: "pass" },
-        ];
-        if (this.lastTurner === undefined || this.lastTurner === this.currplayer) {
-            topLevel.push({ label: "(Declare)", value: "declare" });
+        const topLevel = this.buildTopLevelBar();
+        const discardCount = this.discardCountBar();
+        if (discardCount !== undefined) {
+            return discardCount;
         }
-        const highlighted = this.highlightedButtonValues();
-        for (const b of topLevel) {
-            if (b.value !== undefined && highlighted.has(b.value)) {
-                b.attributes = [{ name: "font-weight", value: "bold" }];
-            }
+        const orientPicker = this.orientAmbiguityBar();
+        if (orientPicker !== undefined) {
+            return orientPicker;
         }
 
-        // Discard's own count is optional (an omitted "draw <n>" defaults
-        // to the max at commit time - see cmdDiscard's docs), but the bar
-        // still actively solicits it: as soon as "discard" is the live
-        // head and no count has been chosen yet, offer every legal count
-        // from 0 up to the room left in a 6-card hand as its own button,
-        // fully replacing the top-level bar (same shape as hermitTeleport/
-        // magicianChoice's own button sets below). this.hands already
-        // reflects the live move's own discard uids by the time this runs
-        // - move(..., {partial: true}) already ran cmdDiscard's own
-        // discard loop to get here (see its docs), it only stopped short
-        // of the redraw - so the room left is just 6 minus the CURRENT
-        // hand length, no separate subtraction of the discard list needed.
-        if (this.liveMove !== undefined) {
-            if (this.liveMove.head?.toLowerCase() === "discard" && !this.liveMove.rest.includes("draw")) {
-                const hand = this.hands[this.currplayer - 1] ?? [];
-                const maxDraw = Math.max(0, 6 - hand.length);
-                return this.buildChoiceButtons("drawcount", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
-            }
-            // Orient: a bare cell (not yet a full piece ref - see
-            // handleClickCore's own "orient" docs) means 2+ of the
-            // player's own distinguishable pieces share it and none has
-            // been picked yet - same minion-picker shape "use"/"play"
-            // already get once THEIR own pool narrows to one ambiguous
-            // cell (see the pendingMinor branch further below), just
-            // reached via orient's own (non-IPendingStep) pool/dispatch
-            // since orient has no card/suit-mode machinery to piggyback
-            // on.
-            if (this.liveMove.head?.toLowerCase() === "orient" && this.liveMove.rest.length === 1 && !this.liveMove.rest[0].includes(".")) {
-                const coords = this.tryAlgebraic2coords(this.liveMove.rest[0]);
-                if (coords !== undefined) {
-                    const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1]));
-                    if (ambiguous) {
-                        const seenRefs = new Set<string>();
-                        const options: ChoiceOption[] = [];
-                        for (const m of candidates) {
-                            const ref = this.pieceRefStr(m.x, m.y, m.index, candidates);
-                            if (seenRefs.has(ref)) {
-                                continue;
-                            }
-                            seenRefs.add(ref);
-                            options.push({ value: ref, label: this.textFormat(this.board.get(m.x, m.y)!.pieces[m.index]) });
-                        }
-                        return [
-                            { label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] },
-                            ...this.buildChoiceButtons("orientpick", options, undefined),
-                        ] as [ButtonBarButton, ...ButtonBarButton[]];
-                    }
-                }
-            }
-        }
-
-        // For a genuine resume, continuedSeedMoveString() rebuilds a
-        // move string from this.continued's own root anchor plus whatever
-        // segments this render's own in-progress preview (this.liveMove)
-        // has typed against it; parsePendingStep replays those against the
-        // reconstructed stack (buildPendingFromContinued) from scratch. No
-        // "already reflected" bookkeeping is needed - the reconstruction
-        // always starts fresh from this.continued, so the whole of
-        // liveMove's segments is unreflected by construction. Seeded this
-        // way REGARDLESS of whether anything's been clicked yet this turn
-        // (liveMove may still be undefined) - so a revealed/targeted card's
-        // own real buttons (mode buttons, High Priestess's own count
-        // picker, etc.) can be offered immediately, without a separate
-        // "Use Card X" click first (see getActionButtons()'s own docs on
-        // how a persisting Decline button composes with whatever this
-        // produces).
-        const pendingMinor = this.continued.length > 0
-            ? this.parsePendingStep(this.continuedSeedMoveString())
-            : this.liveMove === undefined
-                ? undefined
-                : this.parsePendingStep(this.pickleMove(this.liveMove));
+        const pendingMinor = this.computePendingMinor();
         if (pendingMinor === undefined) {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
@@ -2114,55 +2053,14 @@ export class GnosticaGame extends GameBaseSequenced {
         // is what actually keeps a real choice visible there.
         if (pendingMinor.special === "fool") {
             if (this.liveMove === undefined) {
-                const resumeStack = this.resumeStack()!;
-                const activeUid = resumeStack[resumeStack.length - 1].cardUid;
-                return [
-                    { label: `Use Card ${activeUid}`, value: "resume_power" },
-                    { label: `Decline ${activeUid}`, value: "decline_power" },
-                ];
+                return this.pausedPowerButtons();
             }
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        // Every remaining candidate minion for THIS step already sits on
-        // the same cell - either "use"'s own pool, always single-cell by
-        // construction, or "play"'s board-wide pool once a board click has
-        // narrowed it down to one cell (see resolveStepMinion's and
-        // handleClickCore's own docs) - AND there's more than one of them,
-        // so a real choice is still needed. Offer one button per candidate,
-        // pre-empting every other branch below (mode buttons,
-        // hermitTeleport/magicianChoice's own sets, or the uncollapsed bar
-        // a pure click-driven special power would otherwise fall through
-        // to). Clicking one types just that minion's ref as this step's
-        // own leading token (see handleClickCore's "minion_" dispatch) -
-        // nothing else about the step is decided yet, so the very next
-        // getActionButtons() call picks up exactly where the single-minion
-        // case always has, now with `minion` no longer just a placeholder.
-        const candidateCells = new Set(pendingMinor.minionCandidates.map(m => `${m.x},${m.y}`));
-        if (pendingMinor.minionAmbiguous && candidateCells.size === 1) {
-            const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-            buttons.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
-            const seenRefs = new Set<string>();
-            const options: ChoiceOption[] = [];
-            for (const m of pendingMinor.minionCandidates) {
-                const ref = this.pieceRefStr(m.x, m.y, m.index, pendingMinor.minions);
-                // Two genuinely identical pieces (same owner/size/orientation
-                // at the same cell) share the same shortest ref - resolvePieceRef
-                // already treats that as "resolves to the first match, not an
-                // error" (see its own docs), so a second button for the same
-                // ref would just be an inert duplicate, not a real choice.
-                if (seenRefs.has(ref)) {
-                    continue;
-                }
-                seenRefs.add(ref);
-                const piece = this.board.get(m.x, m.y)!.pieces[m.index];
-                options.push({ value: ref, label: this.textFormat(piece), disabledReason: this.rodNeedsFacingReason(pendingMinor.suitUid, piece) });
-            }
-            buttons.push(...this.buildChoiceButtons("minion", options, undefined));
-            if (declareBtn !== undefined) {
-                buttons.push(declareBtn);
-            }
-            return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+        const minionPicker = this.minionPickerBar(pendingMinor, selected, declareBtn);
+        if (minionPicker !== undefined) {
+            return minionPicker;
         }
         // Still ambiguous but spanning more than one cell ("play"'s
         // board-wide pool, not yet narrowed) - no buttons make sense yet,
@@ -2175,20 +2073,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        // High Priestess: the discard list itself is still built via hand-
-        // card clicks (below), but the actual draw count is the player's
-        // own choice, exactly like the ordinary end-of-turn discard/draw
-        // action's own count-picker (see its own docs just above) - same
-        // shape, offered the same way, as soon as this step is live and no
-        // count has been chosen for THIS round yet. pendingMinor.rest
-        // already reflects every discard named so far (see
-        // buildSpecialPending's own highPriestess handling), so the room
-        // left is 6 minus the CURRENT (already-discarded) hand length,
-        // identical to the ordinary action's own calculation.
-        if (pendingMinor.special === "highPriestess" && !pendingMinor.rest.includes("draw")) {
-            const hand = this.hands[this.currplayer - 1] ?? [];
-            const maxDraw = Math.max(0, 6 - hand.length);
-            return this.buildChoiceButtons("hpdraw", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
+        const hpCount = this.highPriestessCountBar(pendingMinor);
+        if (hpCount !== undefined) {
+            return hpCount;
         }
         // orientMinion/tradeHands/orientAny/hierophantReplace/
         // judgementDraw/worldUseAny are pure click-driven (board or
@@ -2220,14 +2107,208 @@ export class GnosticaGame extends GameBaseSequenced {
             // "Use Card X" seeds "play X (via ..)" (resume_power), which
             // then produces that step's own real click-target message -
             // so the empty-move status line here needs no special-casing.
-            const resumeStack = this.resumeStack()!;
-            const activeUid = resumeStack[resumeStack.length - 1].cardUid;
-            return [
-                { label: `Use Card ${activeUid}`, value: "resume_power" },
-                { label: `Decline ${activeUid}`, value: "decline_power" },
-            ];
+            return this.pausedPowerButtons();
         }
 
+        return this.stepModeBar(pendingMinor, selected, declareBtn);
+    }
+
+    // A live preview of "use"/"play" - or a genuine pendingPower
+    // obligation, which always implies the acting player already had
+    // board presence when the obligation was created - can never
+    // legitimately collapse down to "Place" mid-preview. Without this,
+    // hasPiecesOnBoard() below could misread a transient zero-piece
+    // moment (e.g. a Sword attack that ends up destroying the acting
+    // player's own last minion) as a sign a fresh placement turn is
+    // needed, even though the in-progress move (or pending obligation) is
+    // still perfectly valid and submittable.
+    private isPlaceOnlyState(): boolean {
+        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play" || this.continued.length > 0;
+        return (!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement();
+    }
+
+    // The ordinary 6-button top-level choice (use/play/orient/discard/
+    // pass, plus declare once eligible), bolded per highlightedButtonValues'
+    // own suggestion - the fallback bar for every "nothing more specific
+    // applies right now" state below, and the seed every pendingMinor
+    // state further trims/labels rather than rebuilding from scratch.
+    private buildTopLevelBar(): ButtonBarButton[] {
+        const topLevel: ButtonBarButton[] = [
+            { label: "Use Territory", value: "use" },
+            { label: "Play Card", value: "play" },
+            { label: "Orient", value: "orient" },
+            { label: "Discard/Draw", value: "discard" },
+            { label: "Pass", value: "pass" },
+        ];
+        if (this.lastTurner === undefined || this.lastTurner === this.currplayer) {
+            topLevel.push({ label: "(Declare)", value: "declare" });
+        }
+        const highlighted = this.highlightedButtonValues();
+        for (const b of topLevel) {
+            if (b.value !== undefined && highlighted.has(b.value)) {
+                b.attributes = [{ name: "font-weight", value: "bold" }];
+            }
+        }
+        return topLevel;
+    }
+
+    // Discard's own count is optional (an omitted "draw <n>" defaults to
+    // the max at commit time - see cmdDiscard's docs), but the bar still
+    // actively solicits it: as soon as "discard" is the live head and no
+    // count has been chosen yet, offer every legal count from 0 up to the
+    // room left in a 6-card hand as its own button, fully replacing the
+    // top-level bar (same shape as hermitTeleport/magicianChoice's own
+    // button sets further down). this.hands already reflects the live
+    // move's own discard uids by the time this runs - move(..., {partial:
+    // true}) already ran cmdDiscard's own discard loop to get here (see
+    // its docs), it only stopped short of the redraw - so the room left is
+    // just 6 minus the CURRENT hand length, no separate subtraction of the
+    // discard list needed.
+    private discardCountBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "discard" || this.liveMove.rest.includes("draw")) {
+            return undefined;
+        }
+        const hand = this.hands[this.currplayer - 1] ?? [];
+        const maxDraw = Math.max(0, 6 - hand.length);
+        return this.buildChoiceButtons("drawcount", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // Orient: a bare cell (not yet a full piece ref - see handleClickCore's
+    // own "orient" docs) means 2+ of the player's own distinguishable
+    // pieces share it and none has been picked yet - same minion-picker
+    // shape "use"/"play" already get once THEIR own pool narrows to one
+    // ambiguous cell (see minionPickerBar's own docs), just reached via
+    // orient's own (non-IPendingStep) pool/dispatch since orient has no
+    // card/suit-mode machinery to piggyback on.
+    private orientAmbiguityBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "orient"
+            || this.liveMove.rest.length !== 1 || this.liveMove.rest[0].includes(".")) {
+            return undefined;
+        }
+        const coords = this.tryAlgebraic2coords(this.liveMove.rest[0]);
+        if (coords === undefined) {
+            return undefined;
+        }
+        const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1]));
+        if (!ambiguous) {
+            return undefined;
+        }
+        const seenRefs = new Set<string>();
+        const options: ChoiceOption[] = [];
+        for (const m of candidates) {
+            const ref = this.pieceRefStr(m.x, m.y, m.index, candidates);
+            if (seenRefs.has(ref)) {
+                continue;
+            }
+            seenRefs.add(ref);
+            options.push({ value: ref, label: this.textFormat(this.board.get(m.x, m.y)!.pieces[m.index]) });
+        }
+        return [
+            { label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] },
+            ...this.buildChoiceButtons("orientpick", options, undefined),
+        ] as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // For a genuine resume, continuedSeedMoveString() rebuilds a move
+    // string from this.continued's own root anchor plus whatever segments
+    // this render's own in-progress preview (this.liveMove) has typed
+    // against it; parsePendingStep replays those against the reconstructed
+    // stack (buildPendingFromContinued) from scratch. No "already
+    // reflected" bookkeeping is needed - the reconstruction always starts
+    // fresh from this.continued, so the whole of liveMove's segments is
+    // unreflected by construction. Seeded this way REGARDLESS of whether
+    // anything's been clicked yet this turn (liveMove may still be
+    // undefined) - so a revealed/targeted card's own real buttons (mode
+    // buttons, High Priestess's own count picker, etc.) can be offered
+    // immediately, without a separate "Use Card X" click first (see
+    // getActionButtons()'s own docs on how a persisting Decline button
+    // composes with whatever this produces).
+    private computePendingMinor(): IPendingStep | undefined {
+        return this.continued.length > 0
+            ? this.parsePendingStep(this.continuedSeedMoveString())
+            : this.liveMove === undefined
+                ? undefined
+                : this.parsePendingStep(this.pickleMove(this.liveMove));
+    }
+
+    // Every remaining candidate minion for THIS step already sits on the
+    // same cell - either "use"'s own pool, always single-cell by
+    // construction, or "play"'s board-wide pool once a board click has
+    // narrowed it down to one cell (see resolveStepMinion's and
+    // handleClickCore's own docs) - AND there's more than one of them, so
+    // a real choice is still needed. Offer one button per candidate,
+    // pre-empting every other branch below (mode buttons, hermitTeleport/
+    // magicianChoice's own sets, or the uncollapsed bar a pure click-driven
+    // special power would otherwise fall through to). Clicking one types
+    // just that minion's ref as this step's own leading token (see
+    // handleClickCore's "minion_" dispatch) - nothing else about the step
+    // is decided yet, so the very next getActionButtons() call picks up
+    // exactly where the single-minion case always has, now with `minion`
+    // no longer just a placeholder. Returns undefined (not this step's
+    // state) when there's no ambiguity, or the ambiguous pool still spans
+    // more than one cell (computeActionButtons' own caller falls back to
+    // the uncollapsed top-level bar for that second case).
+    private minionPickerBar(
+        pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
+    ): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        const candidateCells = new Set(pendingMinor.minionCandidates.map(m => `${m.x},${m.y}`));
+        if (!pendingMinor.minionAmbiguous || candidateCells.size !== 1) {
+            return undefined;
+        }
+        const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
+        buttons.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
+        const seenRefs = new Set<string>();
+        const options: ChoiceOption[] = [];
+        for (const m of pendingMinor.minionCandidates) {
+            const ref = this.pieceRefStr(m.x, m.y, m.index, pendingMinor.minions);
+            // Two genuinely identical pieces (same owner/size/orientation
+            // at the same cell) share the same shortest ref - resolvePieceRef
+            // already treats that as "resolves to the first match, not an
+            // error" (see its own docs), so a second button for the same
+            // ref would just be an inert duplicate, not a real choice.
+            if (seenRefs.has(ref)) {
+                continue;
+            }
+            seenRefs.add(ref);
+            const piece = this.board.get(m.x, m.y)!.pieces[m.index];
+            options.push({ value: ref, label: this.textFormat(piece), disabledReason: this.rodNeedsFacingReason(pendingMinor.suitUid, piece) });
+        }
+        buttons.push(...this.buildChoiceButtons("minion", options, undefined));
+        if (declareBtn !== undefined) {
+            buttons.push(declareBtn);
+        }
+        return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // High Priestess: the discard list itself is still built via hand-card
+    // clicks (handled by handleClickCore directly), but the actual draw
+    // count is the player's own choice, exactly like the ordinary
+    // end-of-turn discard/draw action's own count-picker (see
+    // discardCountBar's own docs) - same shape, offered the same way, as
+    // soon as this step is live and no count has been chosen for THIS
+    // round yet. pendingMinor.rest already reflects every discard named so
+    // far (see buildSpecialPending's own highPriestess handling), so the
+    // room left is 6 minus the CURRENT (already-discarded) hand length,
+    // identical to the ordinary action's own calculation.
+    private highPriestessCountBar(pendingMinor: IPendingStep): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        if (pendingMinor.special !== "highPriestess" || pendingMinor.rest.includes("draw")) {
+            return undefined;
+        }
+        const hand = this.hands[this.currplayer - 1] ?? [];
+        const maxDraw = Math.max(0, 6 - hand.length);
+        return this.buildChoiceButtons("hpdraw", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // The final fallback once every click-only/no-button state above has
+    // been ruled out: a primitive suit-power step (mode buttons, "piece"'s
+    // own self/facing target, Swords' own pips), or hermitTeleport/
+    // magicianChoice's own dedicated button sets (suit not chosen yet for
+    // the latter - buildSpecialPending redirects `pendingMinor` into an
+    // ordinary suit-shaped one the instant it is, so this same "else"
+    // branch handles that stage too, unmodified).
+    private stepModeBar(
+        pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
+    ): [ButtonBarButton, ...ButtonBarButton[]] {
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
 
         const spacerLabel = pendingMinor.suitUid ? ALL_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
@@ -2622,9 +2703,18 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { head, headArg, activeCardUid, asUid: borrowed, suitUid, prefix: suitFromToken !== undefined ? [suitUid] : [], eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode, rest };
             }
         }
-        // Fool, like highPriestess, has no minionRef at all - its own
-        // click handler (the "Flip" button) never reads pending.minion.
-        const noMinionRef = special === "highPriestess" || special === "fool";
+        // Fool/High Priestess have no minionRef at all. worldUseAny and a
+        // suit-not-yet-chosen magicianChoice ALSO have no minion to pick
+        // HERE: The World defers its own minion choice entirely to the
+        // borrowed card's first step (see applyPowerStep's worldUseAny
+        // docs - the pushed frame gets The World's WHOLE pool, unfiltered);
+        // the Magician's own minion is part of its step's segment, which
+        // doesn't even start until a suit is known (see the "as <suit>"
+        // branch above, which already returns before reaching here once
+        // suitUid resolves). Computing ambiguity against `minions` before
+        // either of those exists would wrongly offer a "Choose Minion"
+        // picker ahead of the real "as <card>"/"as <suit>" choice.
+        const noMinionRef = special === "highPriestess" || special === "fool" || special === "worldUseAny" || special === "magicianChoice";
         const rest = noMinionRef ? tokens : tokens.slice(1);
         const { minion, ambiguous, candidates } = noMinionRef
             ? { minion: minions[0], ambiguous: false, candidates: minions }
@@ -4918,6 +5008,17 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
+    // A card's own display name for a message, falling back to its bare
+    // uid on the rare "not a real/known card" edge (never actually hit in
+    // practice - every caller already has a resolved card in hand - but
+    // keeps a message-building call site from needing its own `?? uid`).
+    // Shared by every place a message names "the card" (powerStepMessageKey,
+    // validateFrameStack's own skipped/CHOOSE_STEP/PENDING_POWER_CHOICE
+    // branches, validateResumePendingPower).
+    private cardNameOrUid(uid: string): string {
+        return allCards().find(c => c.uid === uid)?.name ?? uid;
+    }
+
     // "Activate a card on the board. All your pieces on that card are
     // minions [...]"
     // Every piece the acting player owns on the activated cell - the pool
@@ -5665,7 +5766,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // the acting piece's current, real position/orientation
                     // only exists there once one has run.
                     if (this.specialStepHasNoLegalTarget(clone ?? this, step, top.minions)) {
-                        const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
+                        const cardName = this.cardNameOrUid(top.cardUid);
                         const key = (step as { special: SpecialPower }).special === "tradeHands"
                             ? "apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET"
                             : "apgames:validation.gnostica.HIEROPHANT_SKIPPED_NO_TARGET";
@@ -5699,7 +5800,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // Decline isn't on offer here, so the message shouldn't
                     // invite it either.
                     if (stack.length > 1 && top.nextStepIndex === 0) {
-                        const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
+                        const cardName = this.cardNameOrUid(top.cardUid);
                         const key = top.viaFool === true ? "apgames:validation.gnostica.PENDING_POWER_CHOICE" : "apgames:validation.gnostica.CHOOSE_STEP";
                         return { valid: true, complete: -1, message: i18next.t(key, { card: cardName }) };
                     }
@@ -5753,7 +5854,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (this.continued.length === 0) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
                     }
-                    const cardName = allCards().find(c => c.uid === top.cardUid)?.name ?? top.cardUid;
+                    const cardName = this.cardNameOrUid(top.cardUid);
                     return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
                 }
                 // An earlier segment being incomplete means a later one
@@ -5869,7 +5970,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // for this exact situation by validateMove("")'s own status
             // line right after a real commit.
             const activeTop = stack[stack.length - 1];
-            const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
+            const cardName = this.cardNameOrUid(activeTop.cardUid);
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
         }
         return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!, parsed.asUid);

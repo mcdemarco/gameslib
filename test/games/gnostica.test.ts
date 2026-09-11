@@ -4218,6 +4218,27 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.currplayer).eq(2);
     });
 
+    // Regression: magicianChoice's own minion is part of its step's
+    // segment, which doesn't even start until a suit is known ("as
+    // <suit>") - with 2+ of the player's own minions sharing the
+    // Magician's cell, buildSpecialPending used to eagerly compute
+    // minion-ambiguity anyway, so the bar wrongly offered "Choose Minion"
+    // buttons ahead of the real suit choice (and picking one built a
+    // malformed "use 01/m0.1" move, missing "as" entirely).
+    it("magicianChoice: 2+ minions on its own cell still show the suit buttons first, not a premature minion picker", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(1)); // The Magician
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 2, "W")];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        expect(buttonValues(g)).to.include.members(["magician_C", "magician_R", "magician_D", "magician_S"]);
+        expect(buttonValues(g)).to.not.include.members(["minion_m0.1", "minion_m0.2"]);
+        const suitClick = g.handleClick(cellClick.move, -1, -1, "_btn_magician_R");
+        expect(suitClick.move).eq(`use ${major(1).uid} as R`);
+    });
+
     it("hermitTeleport: mode button seeds self as target; a click redirects it; the destination click is unrestricted", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(9)); // The Hermit
@@ -5075,6 +5096,27 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
         expect(g.board.get(2, 0)!.pieces.length).eq(1); // B, pushed to o0
         expect(g.board.get(1, 0)!.pieces.length).eq(1); // Lovers' own new piece, at n0 (now vacant)
+    });
+
+    // Regression: worldUseAny defers its own minion choice entirely to the
+    // borrowed card's first step (see applyPowerStep's own docs) - with 2+
+    // of the player's own minions sharing The World's cell, buildSpecialPending
+    // used to eagerly compute minion-ambiguity anyway, so the bar wrongly
+    // offered a "Choose Minion" picker before any card was even targeted
+    // (and picking one built a malformed "use 21/m0.1" move, missing "as").
+    it("worldUseAny: 2+ minions on World's own cell don't trigger a premature minion picker", () => {
+        const g = setupWorldLovers();
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 2, "W")];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [rowM, colM] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, rowM, colM);
+        expect(cellClick.move).eq(`use ${theWorld().uid}`);
+        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        expect(buttonValues(g)).to.not.include.members(["minion_m0.1", "minion_m0.2"]);
+        const [rowP, colP] = rowColFor(g, 3, 0);
+        const targetClick = g.handleClick(cellClick.move, rowP, colP);
+        expect(targetClick.move).eq(`use ${theWorld().uid} as ${major(6).uid}`);
+        expect(targetClick.valid).to.be.true;
     });
 
     // #67: the collapsed top-level button names the active card's own
