@@ -1658,18 +1658,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return result;
     }
 
-    // #49/follow-up: which INSTRUCTIONAL message a click-driven use/play
-    // preview should carry - this is UI guidance for a player still
-    // actively navigating the button bar, not a validation complaint, so
-    // it deliberately never uses POWER_STEP_REQUIRED (that's reserved for
-    // validateMinorPower/validateMajorPower's own raw validation message,
-    // surfaced only if a move is actually submitted - e.g. hand-typed -
-    // while still incomplete; a real click-driven Submit is disabled in
-    // this state client-side, so a player navigating by clicking never
-    // reaches that message at all). Before any real step has been taken,
-    // just point at the button bar (CHOOSE_STEP); once at least one step
-    // is in, the move is already submittable and a further step is
-    // genuinely optional (POWER_STILL_OPTIONAL).
+    // #49/follow-up: which message a not-yet-finished use/play step
+    // carries - called directly from validateMinorPower/validateMajorPower/
+    // validateFrameStack/validateResumePendingPower, so hand-typed and
+    // click-driven moves alike get the same instructional wording. Before
+    // any real step has been taken, just point at the button bar
+    // (CHOOSE_STEP); once at least one step is in, the move is already
+    // submittable and a further step is genuinely optional
+    // (POWER_STILL_OPTIONAL).
     //
     // High Priestess is a special case - it isn't button-driven at all
     // (CHOOSE_STEP would be actively wrong, since there IS no button for
@@ -1760,6 +1756,18 @@ export class GnosticaGame extends GameBaseSequenced {
                 : "apgames:validation.gnostica.CHOOSE_STEP",
             params: { card: cardName },
         };
+    }
+
+    // A fresh (no step taken yet) frame's own message: PICK_MINION_CELL
+    // when the eligible pool spans more than one cell (a "play" whose
+    // acting minion hasn't been narrowed down to a cell yet - "use" is
+    // always single-cell already), otherwise powerStepMessageKey's own
+    // step-0 wording.
+    private freshStepMessage(cardUid: string, priorStepsCount: number, minions: IMinionRef[]): { key: string; params?: Record<string, unknown> } {
+        if (priorStepsCount === 0 && new Set(minions.map(m => `${m.x},${m.y}`)).size > 1) {
+            return { key: "apgames:validation.gnostica.PICK_MINION_CELL" };
+        }
+        return this.powerStepMessageKey(cardUid, priorStepsCount, minions);
     }
 
     // The "ready to submit" message for a step whose own outcome forces a
@@ -3952,22 +3960,17 @@ export class GnosticaGame extends GameBaseSequenced {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
                         const seeded = this.pickleMove(this.buildViaMove([]));
-                        // The message is about whichever frame is actually
-                        // active right now (the top of the stack - e.g. a
-                        // card Fool revealed, not necessarily rootCardUid
-                        // itself), at its own real step index - not always
-                        // step 0, unlike a fresh activation. Routed through
-                        // provisionalResult (rather than a hardcoded
-                        // complete:-1) because a resumed Fool flip is
-                        // ALREADY complete via synthesizeFoolStep - the
-                        // player needs Submit enabled, not a false "still
-                        // building" state; every other card's genuinely
-                        // incomplete resume (e.g. High Priestess round 2)
-                        // still reports complete:-1 on its own, unaffected.
-                        const resumeStack = this.resumeStack()!;
-                        const activeTop = resumeStack[resumeStack.length - 1];
-                        const activeMsg = this.powerStepMessageKey(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
-                        return this.provisionalResult(seeded, activeMsg.key, activeMsg.params);
+                        // Routed through provisionalResult (rather than a
+                        // hardcoded complete:-1) because a resumed Fool
+                        // flip is ALREADY complete via synthesizeFoolStep -
+                        // the player needs Submit enabled, not a false
+                        // "still building" state; every other card's
+                        // genuinely incomplete resume (e.g. High Priestess
+                        // round 2) still reports complete:-1 on its own,
+                        // unaffected. validateResumePendingPower's own
+                        // zero-segment message already names the active
+                        // frame correctly.
+                        return this.provisionalResult(seeded);
                     }
                     case "decline_power": {
                         if (this.continued.length === 0) {
@@ -4071,22 +4074,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     return this.provisionalResult(this.assembleStepMove(pendingForCard, discards));
                 }
                 if (head === "play") {
-                    // "play"'s own pool can span the whole board - unlike
-                    // "use" (always single-cell by construction), the
-                    // player needs to click a cell before any minion
-                    // picker makes sense (see resolveStepMinion's/
-                    // getActionButtons()'s own docs) - flagged here so
-                    // that instruction actually reaches them, rather than
-                    // the generic "power still optional" wording.
-                    const freshPending = this.parsePendingStep(`play ${uid}`);
-                    const needsCellClick = freshPending?.minionAmbiguous === true
-                        && new Set(freshPending.minionCandidates.map(m => `${m.x},${m.y}`)).size > 1;
-                    const playMsg = this.powerStepMessageKey(uid, 0, freshPending?.minions ?? []);
-                    return this.provisionalResult(
-                        `play ${uid}`,
-                        needsCellClick ? "apgames:validation.gnostica.PICK_MINION_CELL" : playMsg.key,
-                        needsCellClick ? undefined : playMsg.params,
-                    );
+                    // "play"'s own pool can span the whole board, unlike
+                    // "use" (always single-cell by construction) -
+                    // validateMove's own zero-step message for this state
+                    // already accounts for that (freshStepMessage's own
+                    // PICK_MINION_CELL check).
+                    return this.provisionalResult(`play ${uid}`);
                 }
                 if (head === "discard") {
                     // Any already-chosen "draw <n>" tail is deliberately
@@ -4209,21 +4202,6 @@ export class GnosticaGame extends GameBaseSequenced {
             const cell = GnosticaBoard.coords2algebraic(x, y);
 
             let newmove: string;
-            // Overrides the generic VALID_MOVE message for a board-click
-            // result that's already complete/submittable but still
-            // deliberately soft-pedals that: DIRECTION_STILL_ADJUSTABLE
-            // (place/orient's own facing, defaulted to "U" or set to
-            // whatever neighbour was clicked, never the player's final
-            // word on it - Cups "own"'s new-piece facing sets this too,
-            // separately, in handlePendingStepBoardClick) and
-            // powerStepMessageKey()'s own result (use/play's bare "<uid>"
-            // state right after picking the card, before any suit mode or
-            // power step - not yet submittable per #49, so this nudges
-            // toward picking a step; the "play" half of this is set in the
-            // hand-card click branch below, not here). See
-            // provisionalResult's own messageKey param.
-            let resultMessageKey: string | undefined;
-            let resultMessageParams: Record<string, unknown> | undefined;
 
             if (head === "place") {
                 // Click-to-orient (see orientationTowardClick's own docs):
@@ -4277,17 +4255,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     dir = this.orientationTowardClick(prevLoc.x, prevLoc.y, x, y);
                 }
                 if (prevLoc !== undefined && dir !== undefined) {
-                    const targetPiece = this.board.get(prevLoc.x, prevLoc.y)!.pieces[prevLoc.index];
+                    // validateOrient's own message already distinguishes a
+                    // no-op (ORIENT_NO_OP) from a real reorientation
+                    // (DIRECTION_STILL_ADJUSTABLE) - nothing to override here.
                     newmove = `orient ${prevRef} ${dir}`;
-                    // A click that would leave the piece facing exactly
-                    // where it already does is a no-op (see validateOrient's
-                    // own ORIENT_NO_OP docs) - let that message through
-                    // unmodified rather than stomping it with the generic
-                    // "still adjustable" one, which would otherwise always
-                    // win here.
-                    resultMessageKey = dir === targetPiece.orientation
-                        ? undefined
-                        : "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
                 } else {
                     // Fresh selection - routed through the same minion-
                     // selection primitive "use"/"play" already use
@@ -4308,10 +4279,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     const { minion, ambiguous } = this.resolveStepMinion(undefined, pool);
                     if (ambiguous) {
-                        return this.provisionalResult(`orient ${cell}`, "apgames:validation.gnostica.PICK_MINION_BUTTON");
+                        return this.provisionalResult(`orient ${cell}`);
                     }
                     newmove = `orient ${this.pieceRefStr(minion.x, minion.y, minion.index)}`;
-                    resultMessageKey = undefined; // let validateOrient's own PICK_DIRECTION_TO_ORIENT show through
                 }
             } else if (head === "use" || head === "play" || this.continued.length > 0) {
                 // Once a minor-arcana power step's mode is already chosen,
@@ -4369,17 +4339,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     if (atCell.length === 1) {
                         const ref = this.pieceRefStr(atCell[0].x, atCell[0].y, atCell[0].index, candidate.minions);
-                        const narrowMsg = this.powerStepMessageKey(candidate.activeCardUid, candidate.priorSteps.length, atCell);
-                        return this.provisionalResult(
-                            this.assembleStepMove(candidate, [ref]),
-                            narrowMsg.key,
-                            narrowMsg.params,
-                        );
+                        return this.provisionalResult(this.assembleStepMove(candidate, [ref]));
                     }
-                    return this.provisionalResult(
-                        this.assembleStepMove(candidate, [cell]),
-                        "apgames:validation.gnostica.PICK_MINION_BUTTON",
-                    );
+                    return this.provisionalResult(this.assembleStepMove(candidate, [cell]));
                 };
                 if (advanced !== undefined && advanced.special !== undefined && advanced.rest.length === 0
                     && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1)) {
@@ -4427,11 +4389,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell }) };
                 }
                 newmove = `use ${t.card.uid}`;
-                {
-                    const useMsg = this.powerStepMessageKey(t.card.uid, 0, this.eligibleMinionsForActivate(x, y));
-                    resultMessageKey = useMsg.key;
-                    resultMessageParams = useMsg.params;
-                }
             } else if (!this.hasPiecesOnBoard(this.currplayer)) {
                 // Fresh click, nothing placed yet - place is the only legal
                 // start, and needs no button. The facing is always written
@@ -4449,7 +4406,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
             }
 
-            return this.provisionalResult(newmove, resultMessageKey, resultMessageParams);
+            return this.provisionalResult(newmove);
         } catch {
             return {
                 move,
@@ -4938,16 +4895,15 @@ export class GnosticaGame extends GameBaseSequenced {
         // Same "meaningful action" principle as #49: a no-op reorientation
         // (the piece already faces this way) achieves nothing and should
         // never be the player's actual final move. Still a soft
-        // complete:-1 rather than a hard invalid() here, matching #49's
-        // own POWER_STEP_REQUIRED shape: valid, but not yet a real
-        // answer, so randomMove()/an actual auto-submit can never land on
-        // this as the FINAL move, while normal click navigation
-        // still works.
+        // complete:-1 rather than a hard invalid() here: valid, but not
+        // yet a real answer, so randomMove()/an actual auto-submit can
+        // never land on this as the FINAL move, while normal click
+        // navigation still works.
         if (orientation === piece.orientation) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
         // Facing can always be redirected to a different neighbour, so this is never complete:1.
-        return { valid: true, complete: 0, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE") };
     }
 
     // "discard [uid...] [draw <n>]" - discard the named hand cards, then
@@ -5090,8 +5046,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // practice - every caller already has a resolved card in hand - but
     // keeps a message-building call site from needing its own `?? uid`).
     // Shared by every place a message names "the card" (powerStepMessageKey,
-    // validateFrameStack's own skipped/CHOOSE_STEP/PENDING_POWER_CHOICE
-    // branches, validateResumePendingPower).
+    // validateFrameStack's own skipped-step branch).
     private cardNameOrUid(uid: string): string {
         return allCards().find(c => c.uid === uid)?.name ?? uid;
     }
@@ -5271,7 +5226,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const def = getMajorArcanaDef(card);
             return this.validateMajorPower(def, eligible, stepSegments, borrowedPower);
         }
-        return this.validateMinorPower(card.suit.uid, eligible, stepSegments);
+        return this.validateMinorPower(card.suit.uid, card.uid, eligible, stepSegments);
     }
 
     // Tolerant of an incomplete step (mode chosen but not enough trailing
@@ -5308,7 +5263,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Mirrors applyMinorPower's own tolerance exactly (declining, and an
     // incomplete-so-far step, both still validate as "fine, nothing to
     // report yet") - see its docs.
-    public validateMinorPower(suitUid: string, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult {
+    public validateMinorPower(suitUid: string, cardUid: string, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult {
         if (stepSegments.length === 0) {
             // #49: a use/play must take its one meaningful step, not just
             // decline it outright - a deliberate break from the literal
@@ -5318,7 +5273,8 @@ export class GnosticaGame extends GameBaseSequenced {
             // valid, still "in progress" (complete: -1), not an error -
             // the player just isn't done yet. Giving up a card's power
             // stays available via "discard <uid> draw 0" instead.
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+            const msg = this.freshStepMessage(cardUid, 0, eligible);
+            return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
         if (stepSegments.length > 1) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "MINOR_ONE_STEP_ONLY" });
@@ -5333,7 +5289,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // objection" to validateMove()'s own tail, defaulting to
         // complete:1/valid, a false "looks like a valid move".
         if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
         }
         const result = this.resolvePieceRef(minionRef, eligible);
         if (result.kind !== "ok") {
@@ -5344,7 +5300,8 @@ export class GnosticaGame extends GameBaseSequenced {
         // stepShapes.ts's own docs).
         const shape = primitiveStepShape(suitUid, rest);
         if (shape.status === "incomplete") {
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+            const msg = this.powerStepMessageKey(cardUid, 0, eligible);
+            return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
         if (shape.status === "malformed") {
             return this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params);
@@ -5872,14 +5829,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     // frame can never reach this with i===0 and no
                     // segments - the caller's own upfront check already
                     // turned that away before this loop ever started.
-                    // CHOOSE_STEP, not PENDING_POWER_CHOICE, for a non-Fool
-                    // push - IPowerFrame's own `viaFool` docs cover why
-                    // Decline isn't on offer here, so the message shouldn't
-                    // invite it either.
                     if (stack.length > 1 && top.nextStepIndex === 0) {
-                        const cardName = this.cardNameOrUid(top.cardUid);
-                        const key = top.viaFool === true ? "apgames:validation.gnostica.PENDING_POWER_CHOICE" : "apgames:validation.gnostica.CHOOSE_STEP";
-                        return { valid: true, complete: -1, message: i18next.t(key, { card: cardName }) };
+                        const msg = this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions);
+                        return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                     }
                     // Frame not exhausted: a further step is still optional, so complete:0.
                     return {
@@ -5921,23 +5873,11 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (stepResult.complete === false) {
                 if (i >= stepSegments.length) {
-                    // this.continued (never touched by any validate*()
-                    // method, always names a genuine obligation - see its
-                    // own docs) is checked here read-only: non-empty means
-                    // this walk was entered via validateResumePendingPower
-                    // (a genuine cross-submission resume - Fool's reveal, HP
-                    // round 2 - where a persisting Decline button really is
-                    // offered, so #49's ROOT-only "must be used... discard
-                    // draw 0" wording is wrong regardless of which frame is
-                    // active); empty means a fresh validateMajorPower
-                    // activation, where #49's wording still applies even
-                    // once it pushes into a nominally-optional later frame
-                    // (e.g. World->Lovers typed as one hand-typed chain).
-                    if (this.continued.length === 0) {
-                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+                    if (this.isMinionCellStillNarrowing(tokens[0], top.minions)) {
+                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
                     }
-                    const cardName = this.cardNameOrUid(top.cardUid);
-                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
+                    const msg = this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions);
+                    return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                 }
                 // An earlier segment being incomplete means a later one
                 // couldn't legitimately exist - defensive, shouldn't fire.
@@ -6014,10 +5954,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // so it falls through to the frame walk (which pushes that frame
         // and returns CHOOSE_STEP for it). A Magician borrow ("as <suit>")
         // pushes no frame; its magicianChoice step still needs a mode, so
-        // it wants the generic POWER_STEP_REQUIRED like any bare root.
+        // it wants the same fresh-step wording as any other bare root.
         const worldBorrow = borrowedPower !== undefined && !ALL_SUITS.some(s => s.uid === borrowedPower);
         if (stepSegments.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED") };
+            const msg = this.freshStepMessage(def.uid, 0, eligible);
+            return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
         return this.validateFrameStack(stack, stepSegments, def.uid, borrowedPower);
     }
@@ -6041,19 +5982,10 @@ export class GnosticaGame extends GameBaseSequenced {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
             // everywhere else for an in-progress chain. Fool's own step is
-            // exempt - see topStepIsFool's own docs. POWER_STEP_REQUIRED
-            // (used at every OTHER 0-segment site in this file) is wrong
-            // here specifically - it's worded for the #49 ROOT-only rule
-            // ("must be used, at least in part... or discard draw 0"),
-            // but a RESUMED/pushed frame is never mandatory (see
-            // validateMajorPower's own docs) and "discard draw 0" isn't
-            // even how you'd give it up - Decline is. PENDING_POWER_CHOICE
-            // is the correctly-worded, Decline-aware message already used
-            // for this exact situation by validateMove("")'s own status
-            // line right after a real commit.
+            // exempt - see topStepIsFool's own docs.
             const activeTop = stack[stack.length - 1];
-            const cardName = this.cardNameOrUid(activeTop.cardUid);
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
+            const msg = this.freshStepMessage(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
+            return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
         return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!, parsed.asUid);
     }

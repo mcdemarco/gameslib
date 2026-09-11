@@ -811,7 +811,7 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         const validated = g.validateMove(`use ${aceOfCups().uid}`);
         expect(validated.valid).to.be.true;
         expect(validated.complete).eq(-1);
-        expect(validated.message).eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        expect(validated.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: aceOfCups().name }));
         g.move(`use ${aceOfCups().uid}`, { trusted: true }); // player 1, no power step
         expect(g.board.get(0, 0)!.pieces.length).eq(1); // nothing changed but the turn
         expect(g.currplayer).eq(2);
@@ -1076,7 +1076,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const validated = g.validateMove(`use ${major(6).uid}`);
         expect(validated.valid).to.be.true;
         expect(validated.complete).eq(-1);
-        expect(validated.message).eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        expect(validated.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(6).name }));
         g.move(`use ${major(6).uid}`, { trusted: true }); // no power steps at all
         expect(g.board.get(0, 0)!.pieces.length).eq(1);
         expect(g.currplayer).eq(2);
@@ -2650,7 +2650,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // (still building), but genuinely incomplete.
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(-1);
-        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: aceOfDiscs().name }));
         const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${royaltyUid}`);
         expect(cardClick.move).eq(`use ${aceOfDiscs().uid}/m0.1 tile n0 ${royaltyUid}`);
         g.move(cardClick.move, { trusted: true });
@@ -3585,17 +3585,12 @@ describe("Gnostica: click-to-orient messaging", () => {
 
 // The bare "activate <cell>"/"play <uid>" state, right after picking the
 // card and before any suit mode or major-arcana power step, is still "in
-// progress" (valid:true, complete:-1), per #49. The MESSAGE shown here is
-// a click-driven UI nudge, not a validation complaint - a real Submit is
-// disabled client-side in this state anyway, so there's nothing to warn
-// the player away from; it just points at the button bar (CHOOSE_STEP).
-// The raw POWER_STEP_REQUIRED validation reason still exists (see
-// validateMinorPower/validateMajorPower's own tests, checked directly via
-// validateMove()) - it surfaces only for an actual submit attempt while
-// incomplete (e.g. a hand-typed move), never through this click path.
-// Applies equally to a minor or a major arcana card, and to both activate
-// and play - except Fool/World, which stay complete/optional (neither can
-// ever take a real step - not yet supported).
+// progress" (valid:true, complete:-1), per #49. validateMove() itself
+// computes CHOOSE_STEP's own instructional wording directly, for a
+// hand-typed OR click-driven move alike. Applies equally to a minor or a
+// major arcana card, and to both activate and play - except Fool/World,
+// which stay complete/optional (neither can ever take a real step - not
+// yet supported).
 describe("Gnostica: choose-step click messaging", () => {
     before(() => {
         addResource("en");
@@ -3910,7 +3905,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         const incomplete = g.validateMove(`use ${major(3).uid}/m0.1 E/m0.1 new n0`);
         expect(incomplete.valid).to.be.true;
         expect(incomplete.complete).eq(-1);
-        expect(incomplete.message).eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        expect(incomplete.message).eq(i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: major(3).name }));
         // Supplying the card uid completes it normally.
         g.hands[0].push("2S");
         const complete = g.validateMove(`use ${major(3).uid}/m0.1 E/m0.1 new n0 2S`);
@@ -5125,9 +5120,6 @@ describe("Gnostica: Fool and World", () => {
         const result = g.validateMove(`use ${theWorld().uid} as ${major(6).uid}`);
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
-        // CHOOSE_STEP, not PENDING_POWER_CHOICE - naming Lovers via World
-        // is a commitment, not a reveal, so there's no Decline to invite
-        // here (see IPowerFrame's own "viaFool" docs).
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(6).name }));
     });
 
@@ -5727,11 +5719,9 @@ describe("Gnostica: Fool and World", () => {
     });
 
     // A resumed/pushed frame is never mandatory the way #49's ROOT-only
-    // "must be used, at least in part" rule is, and "discard draw 0" isn't
-    // even how you'd give it up (Decline is) - a bare-but-non-empty resume
-    // string ("use 00" alone, e.g. what "Use Card X" itself builds) must
-    // get the same Decline-aware wording as validateMove("").
-    it("validating a bare resume (no steps typed yet) names Decline, not the #49 root-only 'discard draw 0' wording", () => {
+    // rule is - a bare-but-non-empty resume string must not fall back to
+    // that root-only wording.
+    it("validating a bare resume (no steps typed yet) names the revealed card, not the #49 root-only wording", () => {
         const g = setupFool();
         pluckCard(g, major(1).uid); // Magician
         g.drawPile.unshift(major(1).uid);
@@ -5740,17 +5730,14 @@ describe("Gnostica: Fool and World", () => {
         const bare = g.validateMove(`play ${major(1).uid} (via ${major(0).uid})`);
         expect(bare.valid).to.be.true;
         expect(bare.complete).to.eq(-1);
-        expect(bare.message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(1).name }));
-        expect(bare.message).to.not.eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        expect(bare.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(1).name }));
     });
 
-    // Same Decline-aware wording applies one click later too -
-    // validateFrameStack's own "given segment is still incomplete, nothing
-    // more to check" fallback (shared by every use/play, resumed or not)
-    // must not fall back to the #49 ROOT-only wording either, e.g. once
-    // Fool reveals the Magician and Cups is picked (suit chosen, mode not
-    // yet).
-    it("validating a still-incomplete resumed step (a real segment given, but not enough of one) also names Decline", () => {
+    // Same, one click later - validateFrameStack's own "given segment is
+    // still incomplete" fallback must not fall back to the root-only
+    // wording either, e.g. once Fool reveals the Magician and Cups is
+    // picked (suit chosen, mode not yet).
+    it("validating a still-incomplete resumed step (a real segment given, but not enough of one) also names the card", () => {
         const g = setupFool();
         pluckCard(g, major(1).uid); // Magician
         g.drawPile.unshift(major(1).uid);
@@ -5759,8 +5746,7 @@ describe("Gnostica: Fool and World", () => {
         const suitChosen = g.validateMove(`play ${major(1).uid}/m0.1 C (via ${major(0).uid})`); // suit picked, no mode yet
         expect(suitChosen.valid).to.be.true;
         expect(suitChosen.complete).to.eq(-1);
-        expect(suitChosen.message).to.eq(i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: major(1).name }));
-        expect(suitChosen.message).to.not.eq(i18next.t("apgames:validation.gnostica.POWER_STEP_REQUIRED"));
+        expect(suitChosen.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(1).name }));
     });
 
     // Declining a revealed card's own power exposes Fool's own remaining

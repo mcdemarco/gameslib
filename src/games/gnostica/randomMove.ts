@@ -788,7 +788,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         if (tokens === undefined) {
             return [];
         }
-        const result = game.validateMinorPower(suitUid, eligible, [tokens]);
+        const result = game.validateMinorPower(suitUid, card.uid, eligible, [tokens]);
         return result.valid && result.complete === 1 ? [tokens] : [];
     }
     const def = getMajorArcanaDef(card);
