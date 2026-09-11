@@ -1731,7 +1731,7 @@ describe("Gnostica: handleClick", () => {
         const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
         const east = g.handleClick(first.move, rowE, colE);
         expect(east.valid).to.be.true;
-        expect(east.move).eq("place m0 E");
+        expect(east.move).eq("place m0 U E"); // mandatory "U" stays; E is the optional trailing correction
     });
 
     it("place: clicking a non-adjacent cell restarts placement there instead", () => {
@@ -1760,7 +1760,7 @@ describe("Gnostica: handleClick", () => {
         const [rowVoid, colVoid] = rowColFor(g, 3, 1);
         const east = g.handleClick(first.move, rowVoid, colVoid);
         expect(east.valid).to.be.true;
-        expect(east.move).eq(`place ${placeCell} E`);
+        expect(east.move).eq(`place ${placeCell} U E`);
     });
 
     it("orient: clicking your own piece (with pieces already on the board/and Orient chosen) starts an orient move", () => {
@@ -3376,13 +3376,16 @@ describe("Gnostica: move-string structural validation", () => {
     });
 });
 
-// A complete, valid, submittable move built via click-to-orient (place/
-// orient's own facing, Cups "own"'s new-piece facing) still has a facing
-// the player only clicked their way into by default or by picking one
-// neighbour - another click can still change it before they submit. The
-// generic VALID_MOVE message doesn't convey that, so these click paths
-// get their own DIRECTION_STILL_ADJUSTABLE message instead; every OTHER
-// complete move (no facing left to adjust) keeps the generic one.
+// "orient" (reorienting an EXISTING piece) still rewrites a single
+// facing token in place with each click, so a complete, valid,
+// submittable move built that way still has a facing the player only
+// clicked their way into - another click can still change it before they
+// submit. The generic VALID_MOVE message doesn't convey that, so this
+// click path gets its own DIRECTION_STILL_ADJUSTABLE message instead.
+// "place" no longer needs this - its own facing is now the same
+// mandatory-plus-optional-trailing-correction shape Cups "own" uses (see
+// resolveTrailingOrientation's own docs), genuinely complete as soon as
+// the mandatory "U" is present, generic VALID_MOVE the whole story.
 describe("Gnostica: click-to-orient messaging", () => {
     before(() => {
         addResource("en");
@@ -3400,22 +3403,29 @@ describe("Gnostica: click-to-orient messaging", () => {
     };
     const directionMsg = () => i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE");
 
-    it("place: the very first click already carries the adjustable-direction message", () => {
+    // Place's own facing is now the same mandatory-plus-optional-trailing-
+    // correction shape Cups "own" uses (see resolveTrailingOrientation's
+    // own docs) - the mandatory "U" alone already makes the move
+    // genuinely complete (matching Cups "own"'s own precedent), so
+    // there's no separate "still adjustable" state to soft-pedal here
+    // anymore; validatePlace's own generic VALID_MOVE message is the
+    // whole story, click or hand-typed alike.
+    it("place: the very first click is already a genuinely complete, generically-worded move", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("", row, col);
         expect(result.valid).to.be.true;
         expect(result.move).eq("place m0 U");
-        expect(result.message).eq(directionMsg());
+        expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
     });
 
-    it("place: clicking a neighbour to set a facing keeps the same message", () => {
+    it("place: clicking a neighbour appends the optional trailing correction, same generic message", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 1, 0); // n0, east of m0
         const result = g.handleClick("place m0 U", row, col);
         expect(result.valid).to.be.true;
-        expect(result.move).eq("place m0 E");
-        expect(result.message).eq(directionMsg());
+        expect(result.move).eq("place m0 U E");
+        expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
     });
 
     it("orient: clicking a piece to start reorienting it carries the PICK_DIRECTION_TO_ORIENT message/never a facing", () => {

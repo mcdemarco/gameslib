@@ -1407,6 +1407,37 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
+    // The "mandatory-or-defaulted facing, plus an optional trailing
+    // correction" shape shared by every brand-new-or-freshly-targeted own
+    // piece: place's own new piece and Cups "own"'s own new piece both
+    // reduce to exactly this same question (their own mandatory facing is
+    // resolved elsewhere - by the caller's own "missing" handling, since
+    // that differs between a top-level head and a shape-gated power step
+    // - this only ever runs once `orientationStr` is confirmed present).
+    // The correction, when given, must be a real, meaningful change - a
+    // request matching the piece's own about-to-be facing achieves
+    // nothing and is hard-rejected (ORIENT_NO_OP), same as every other
+    // reorientation context in this file.
+    private resolveTrailingOrientation(
+        orientationStr: string, correctionStr: string | undefined,
+    ): { orientation: Orientation } | { key: string; params?: Record<string, unknown> } {
+        const orientation = this.tryParseOrientation(orientationStr);
+        if (orientation === undefined) {
+            return { key: "BAD_ORIENTATION", params: { orientation: orientationStr } };
+        }
+        if (correctionStr === undefined) {
+            return { orientation };
+        }
+        const correction = this.tryParseOrientation(correctionStr);
+        if (correction === undefined) {
+            return { key: "BAD_ORIENTATION", params: { orientation: correctionStr } };
+        }
+        if (correction === orientation) {
+            return { key: "ORIENT_NO_OP" };
+        }
+        return { orientation: correction };
+    }
+
     private tryAlgebraic2coords(cell: string): [number, number] | undefined {
         try {
             return GnosticaBoard.algebraic2coords(cell);
@@ -4193,10 +4224,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 // "face up", clicking one of its neighbours means "face
                 // that way" - any OTHER cell is a fresh placement there
                 // instead (defaulting to "U" again), same as clicking a
-                // different cell always has. The facing is always written
-                // out explicitly ("U" included) - a brand-new minion can't
-                // reasonably go unoriented (see validatePlace's own docs),
-                // matching Cups "own"'s identical mandatory-token rule.
+                // different cell always has. The mandatory facing is
+                // always "U" (matches Cups "own"'s identical mandatory-
+                // token rule - see resolveTrailingOrientation's own docs);
+                // a further click doesn't rewrite it, it sets the OPTIONAL
+                // trailing correction instead - collapsing back to the
+                // bare 2-token form when the clicked direction IS "U"
+                // (would otherwise be a rejected no-op correction).
                 const [prevCell] = args;
                 let dir: Orientation | undefined;
                 if (prevCell !== undefined) {
@@ -4204,11 +4238,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     dir = this.orientationTowardClick(px, py, x, y);
                 }
                 if (prevCell !== undefined && dir !== undefined) {
-                    newmove = `place ${prevCell} ${dir}`;
+                    newmove = dir === "U" ? `place ${prevCell} U` : `place ${prevCell} U ${dir}`;
                 } else {
                     newmove = `place ${cell} U`;
                 }
-                resultMessageKey = "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
             } else if (head === "orient") {
                 // Same click-to-orient model as "place" above, but relative
                 // to whichever piece is already selected (prevRef) rather
@@ -4392,9 +4425,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Fresh click, nothing placed yet - place is the only legal
                 // start, and needs no button. The facing is always written
                 // out explicitly (see validatePlace's own mandatory-token
-                // docs) - defaults to "U", still click-adjustable from here.
+                // docs), defaulting to "U" - already genuinely complete
+                // (see resolveTrailingOrientation's own docs), so
+                // validatePlace's own generic message is left to show
+                // through rather than overridden here.
                 newmove = `place ${cell} U`;
-                resultMessageKey = "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE";
             } else {
                 // No mode chosen yet (or an unrecognized one) and pieces
                 // already exist - board clicks are genuinely ambiguous
@@ -4719,14 +4754,18 @@ export class GnosticaGame extends GameBaseSequenced {
             return [];
     }
 
-    // "place <cell> <orientation>" - only legal with zero pieces on board.
-    // A real facing is always required (no default here - see
-    // validatePlace's own docs); a trusted caller omitting it has a bug
-    // of its own, not something this function needs to guard against,
-    // same as every other legality check that stays validatePlace's job.
+    // "place <cell> <orientation> [<correction>]" - only legal with zero
+    // pieces on board. A real facing is always required (no default here
+    // - see validatePlace's own docs); the optional 3rd token, when
+    // present, is what actually wins - the exact same mandatory-facing-
+    // plus-optional-trailing-correction shape Cups "own" uses for its own
+    // new piece (see resolveTrailingOrientation's own docs). A trusted
+    // caller omitting the mandatory token has a bug of its own, not
+    // something this function needs to guard against, same as every other
+    // legality check that stays validatePlace's job.
     private cmdPlace(args: string[]): void {
-        const [cellStr, orientationStr] = args;
-        const orientation = this.parseOrientation(orientationStr);
+        const [cellStr, orientationStr, correctionStr] = args;
+        const orientation = this.parseOrientation(correctionStr ?? orientationStr);
         const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
         let territory = this.board.get(x, y);
         if (territory === undefined) {
@@ -4743,7 +4782,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validatePlace(parsed: IParsedMove): IValidationResult {
-        const [cellStr, orientationStr] = parsed.rest;
+        const [cellStr, orientationStr, correctionStr] = parsed.rest;
         if (cellStr === undefined) {
             return this.invalid("apgames:validation.gnostica.PLACE_CELL_REQUIRED");
         }
@@ -4764,9 +4803,9 @@ export class GnosticaGame extends GameBaseSequenced {
         if (orientationStr === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_DIRECTION_REQUIRED") };
         }
-        const orientation = this.tryParseOrientation(orientationStr);
-        if (orientation === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr });
+        const resolved = this.resolveTrailingOrientation(orientationStr, correctionStr);
+        if ("key" in resolved) {
+            return this.invalid(`apgames:validation.gnostica.${resolved.key}`, resolved.params);
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
@@ -6347,21 +6386,14 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
                 }
                 const [tx, ty] = coords;
-                const orientation = this.tryParseOrientation(orientationStr);
-                if (orientation === undefined) {
+                if (orientationStr === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
                 }
-                let finalOrientation = orientation;
-                if (reorientStr !== undefined) {
-                    const reorient = this.tryParseOrientation(reorientStr);
-                    if (reorient === undefined) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: reorientStr }) };
-                    }
-                    if (reorient === orientation) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
-                    }
-                    finalOrientation = reorient;
+                const resolved = this.resolveTrailingOrientation(orientationStr, reorientStr);
+                if ("key" in resolved) {
+                    return { failed: true, result: this.invalid(`apgames:validation.gnostica.${resolved.key}`, resolved.params) };
                 }
+                const finalOrientation = resolved.orientation;
                 const failure = checkCreateOwn(ctx, minion.x, minion.y, minion.index, tx, ty, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
