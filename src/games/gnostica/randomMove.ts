@@ -61,10 +61,17 @@ export function generateRandomMove(game: GnosticaGame): string {
     }
     // A paused activation obligates this seat before anything else is
     // legal (matches getActionButtons()'s own "only one thing possible
-    // right now" gate) - always-legal decline, not real fuzzer-quality
-    // coverage of Fool/World's own decision points (see this file's own
-    // class-level docs on why that's out of scope).
+    // right now" gate) - not real fuzzer-quality coverage of Fool/World's
+    // own decision points (see this file's own class-level docs on why
+    // that's out of scope). High Priestess can't be Declined at all
+    // (NOTHING_TO_DECLINE - its own round is mandatory, not a revealed
+    // card) - "draw 0" is its own always-legal minimal resume instead,
+    // matching Pass's own bare seed (see buildViaMove's own docs).
     if (game.continued.length > 0) {
+        const activeUid = game.continued[game.continued.length - 1].split(".")[0];
+        if (activeUid === "02") {
+            return game.pickleMove(game.buildViaMove([["draw", "0"]]));
+        }
         return game.pickleMove(game.buildViaMove([["decline"]]));
     }
     if (game.phase === "bidding") {

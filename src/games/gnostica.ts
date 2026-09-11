@@ -1933,6 +1933,20 @@ export class GnosticaGame extends GameBaseSequenced {
             // the player just typed is different (justDeclined, below).
             return bar;
         }
+        // Once High Priestess's own round 1 is actually DONE and round 2
+        // is what's persisted (this.continued's own LAST entry, "02.x"),
+        // it's never Declinable (NOTHING_TO_DECLINE - only "discard" is an
+        // allowed resume head for it - see validateMove's own resume-head
+        // gate) - folding a Decline button in here would offer a choice
+        // that's really a validation error waiting to happen. Checked via
+        // getContinuedUid() specifically, NOT activeCardUid() below -
+        // Fool freshly revealing the High Priestess CARD (round 1 not yet
+        // taken, so this.continued still ends in "00.x") stays genuinely
+        // declinable, same as any other freshly-revealed card; only the
+        // persisted "owes round 2" obligation itself is fully committed.
+        if (this.getContinuedUid() === "02") {
+            return bar;
+        }
         const activeTop = { cardUid: advanced?.activeCardUid ?? this.activeCardUid() };
         // Fool's own remaining flip auto-continues past ANY decline that
         // exposes it (see walkFrameStack's own docs) rather than sitting
@@ -4233,8 +4247,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 if (prevLoc !== undefined && dir !== undefined) {
                     // validateOrient's own message already distinguishes a
-                    // no-op (ORIENT_NO_OP) from a real reorientation
-                    // (DIRECTION_STILL_ADJUSTABLE) - nothing to override here.
+                    // no-op (ORIENT_NO_OP) from a real, complete reorientation -
+                    // nothing to override here.
                     newmove = `orient ${prevRef} ${dir}`;
                 } else {
                     // Fresh selection - routed through the same minion-
@@ -4879,8 +4893,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (orientation === piece.orientation) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
-        // Facing can always be redirected to a different neighbour, so this is never complete:1.
-        return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE") };
+        // One real direction click is the whole action - done.
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "discard [uid...] [draw <n>]" - discard the named hand cards, then
@@ -5761,17 +5775,15 @@ export class GnosticaGame extends GameBaseSequenced {
         // that flow's own message takes over instead, same as
         // DECLINE_THEN_AUTO_DRAW's own poppedViaDecline flag.
         let hpFinalRoundReady: { key: string; params?: Record<string, unknown> } | undefined;
-        // Overwritten (not just set) on EVERY successful step completion
-        // below, to whatever that step's own nature says - "last write
-        // wins" is enough here, no separate capture/reset dance like
-        // justDeclined needs, since it's read at the SAME two spots
-        // (both exits below) that a completion always leads into next.
-        // True only right after orientMinion/orientAny/hierophantReplace's
-        // own step succeeds - the facing it just set can always still be
-        // redirected, matching the standalone "orient" command's own
-        // unconditional complete:0/DIRECTION_STILL_ADJUSTABLE (see
-        // validateOrient's own docs).
-        let stillAdjustableFacing = false;
+        // Overwritten on every successful completion, true right after
+        // High Priestess's own step succeeds WITHOUT an explicit
+        // "draw <n>" (defaults to the max at commit time, but that's a
+        // default, not the player's own final word - same distinction
+        // validateDiscard already makes for the ordinary top-level discard
+        // action). Takes priority over hpFinalRoundReady/
+        // forcePauseReadyMessage's own "ready to submit" framing below -
+        // still building beats ready, for the exact same round.
+        let hpDrawNotChosen = false;
         for (;;) {
             const top = stack[stack.length - 1];
             const poppedViaDecline = justDeclined;
@@ -5780,11 +5792,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (i < stepSegments.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
                 }
+                if (hpDrawNotChosen) {
+                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+                }
                 if (hpFinalRoundReady !== undefined) {
                     return { valid: true, complete: 1, message: i18next.t(hpFinalRoundReady.key, hpFinalRoundReady.params) };
-                }
-                if (stillAdjustableFacing) {
-                    return { valid: true, complete: 1, message: i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE") };
                 }
                 return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
             }
@@ -5857,9 +5869,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return {
                         valid: true,
                         complete: 0,
-                        message: stillAdjustableFacing
-                            ? i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE")
-                            : i18next.t("apgames:validation._general.VALID_MOVE"),
+                        message: i18next.t("apgames:validation._general.VALID_MOVE"),
                     };
                 }
                 tokens = stepSegments[i];
@@ -5939,6 +5949,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (poppedViaDecline && top.cardUid === "00") {
                     return { valid: true, complete: 1, message: i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW") };
                 }
+                // High Priestess's own round 1 forces this same pause
+                // (round 2 always follows) - but with no explicit "draw
+                // <n>" given, the round itself is still soft (complete:0),
+                // same as round 2's identical case below - "ready to
+                // submit" would be actively wrong to say here.
+                if ("special" in step && step.special === "highPriestess" && !tokens.includes("draw")) {
+                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+                }
                 const readyMsg = this.forcePauseReadyMessage(top.cardUid, top.nextStepIndex);
                 return { valid: true, complete: 1, message: i18next.t(readyMsg.key, readyMsg.params) };
             }
@@ -5956,8 +5974,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if ("special" in step && step.special === "highPriestess" && top.nextStepIndex >= frameDef.powers.length) {
                 hpFinalRoundReady = this.forcePauseReadyMessage(top.cardUid, stepIndex);
             }
-            stillAdjustableFacing = "special" in step
-                && (step.special === "orientMinion" || step.special === "orientAny" || step.special === "hierophantReplace");
+            hpDrawNotChosen = "special" in step && step.special === "highPriestess" && !tokens.includes("draw");
             if (stepResult.outcome?.pushFrame !== undefined) {
                 stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions, viaFool: stepResult.outcome.pushFrame.viaFool === true });
             }
@@ -7071,7 +7088,17 @@ export class GnosticaGame extends GameBaseSequenced {
         const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
         const drawCountStr = drawIdx === -1 ? undefined : tokens[drawIdx + 1];
         const failure = checkHighPriestess(this.buildPowerContext(), discardUids, drawCountStr);
-        return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        if (failure) {
+            return this.failureResult(failure);
+        }
+        // A missing "draw <n>" is legal to submit as-is (defaults to the
+        // max at commit time), but still soft - same "undecided default"
+        // treatment validateDiscard already gives the ordinary top-level
+        // discard action's own identical shape.
+        if (drawIdx === -1) {
+            return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+        }
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // World: <chosenUid> - the minionRef itself is already stripped/

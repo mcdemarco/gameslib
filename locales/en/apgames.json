@@ -5791,7 +5791,6 @@
             "CHOOSE_STEP_ORIENT_MINION": "Click on or around your minion at {{cell}} to set its new orientation for {{card}}'s power.",
             "DESTINATION_HAS_ENEMY": "This move is not permitted when there are enemies in the target wasteland.",
             "DESTROYED_NEEDS_NO_CARD": "No replacement card is needed when destroying a territory.",
-            "DIRECTION_STILL_ADJUSTABLE": "You may click another cell to change direction, if desired.",
             "DECLINE_THEN_AUTO_DRAW": "Submit to decline this card's power, and the second card for the Fool (00) will be drawn automatically.",
             "DISCARD_CARDS_OPTIONAL": "Click hand cards to discard, if desired, then choose a number of cards to draw and/or submit.  If no number is chosen, you will draw back up to the hand limit.",
             "DRAW_PILE_EMPTY": "There are no cards to draw.",

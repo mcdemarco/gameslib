@@ -3415,16 +3415,12 @@ describe("Gnostica: move-string structural validation", () => {
     });
 });
 
-// "orient" (reorienting an EXISTING piece) still rewrites a single
-// facing token in place with each click, so a complete, valid,
-// submittable move built that way still has a facing the player only
-// clicked their way into - another click can still change it before they
-// submit. The generic VALID_MOVE message doesn't convey that, so this
-// click path gets its own DIRECTION_STILL_ADJUSTABLE message instead.
-// "place" no longer needs this - its own facing is now the same
-// mandatory-plus-optional-trailing-correction shape Cups "own" uses (see
-// resolveTrailingOrientation's own docs), genuinely complete as soon as
-// the mandatory "U" is present, generic VALID_MOVE the whole story.
+// "orient" (reorienting an EXISTING piece) rewrites a single facing token
+// with each click - one real direction click is the whole action, genuinely
+// complete: at most one click for a minion, then done (never re-invites
+// further adjustment). "place" is the same mandatory-plus-optional-
+// trailing-correction shape Cups "own" uses (see resolveTrailingOrientation's
+// own docs), genuinely complete as soon as the mandatory "U" is present.
 describe("Gnostica: click-to-orient messaging", () => {
     before(() => {
         addResource("en");
@@ -3440,7 +3436,6 @@ describe("Gnostica: click-to-orient messaging", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
-    const directionMsg = () => i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE");
 
     // Place's own facing is now the same mandatory-plus-optional-trailing-
     // correction shape Cups "own" uses (see resolveTrailingOrientation's
@@ -3505,13 +3500,10 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.valid).to.be.true; // still building, not a hard error - see the click test above
         expect(result.complete).eq(-1);
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
-        // A genuine change to a DIFFERENT facing stays fully valid and
-        // submittable - complete:0 though, not 1, since the player can
-        // always click a different neighbour to reconsider (matches
-        // Magnate's own "never complete, only submissible" rule - see
-        // validateOrient's own docs), the same for this hand-typed call
-        // as a click result.
-        expect(g.validateMove("orient m0.1 S").complete).eq(0);
+        // A genuine change to a DIFFERENT facing is fully valid AND
+        // complete - one real direction click is the whole action, the
+        // same for this hand-typed call as a click result.
+        expect(g.validateMove("orient m0.1 S").complete).eq(1);
     });
 
     // A wasteland minion facing into the void reads its target from a
@@ -3536,7 +3528,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         const result = g.handleClick(selected.move!, -1, -1, `${colVoid},${rowVoid}`);
         expect(result.valid).to.be.true;
         expect(result.move).eq(`orient ${ref} E`);
-        expect(result.message).eq(directionMsg());
+        expect(result.complete).eq(1);
     });
 
     // Cups "own" always creates its new minion with a real, mandatory
@@ -3557,7 +3549,6 @@ describe("Gnostica: click-to-orient messaging", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_own");
         expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U`);
-        expect(modeClick.message).to.not.eq(directionMsg());
         const [rowN, colN] = rowColFor(g, 1, 0); // n0 itself - "U" again, already the creation default
         const sameFacing = g.handleClick(modeClick.move, rowN, colN);
         expect(sameFacing.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U U`);
@@ -3571,7 +3562,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
     });
 
-    it("does not leak the adjustable-direction message onto a move with no facing left to adjust", () => {
+    it("the Pass button produces the right bare seed and generic message", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U", { trusted: true });
         g.move("place l0 U", { trusted: true });
@@ -3579,7 +3570,6 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.move).eq("discard draw 0");
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
-        expect(result.message).to.not.eq(directionMsg());
     });
 });
 
@@ -3785,15 +3775,15 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(resumed.message).eq(round2Msg);
     });
 
-    // Bold marks a button matching what this.liveMove ALREADY says (see
-    // highlightedButtonValues' own docs) - Continue and Decline are both
-    // genuinely open choices at this point, neither "selected", so neither
-    // should be bold. A genuine pendingPower obligation shows X's own
-    // buttons directly (here, the Draw N count picker) whenever X's own
-    // step (like High Priestess's round 2) has real buttons to offer, with
-    // "Decline X" persisting alongside them so the player always has a way
-    // out.
-    it("a pending obligation's own buttons show directly, with an unbold persisting Decline button - nothing has been chosen yet", () => {
+    // A genuine pendingPower obligation shows X's own buttons directly
+    // (here, the Draw N count picker) whenever X's own step (like High
+    // Priestess's round 2) has real buttons to offer. Unlike every other
+    // obligation, High Priestess's own round 2 is never Declinable
+    // (NOTHING_TO_DECLINE/ACTION_NOT_ALLOWED - only "discard" is an
+    // allowed resume head for it - see validateMove's own resume-head
+    // gate) - so no persisting Decline button here at all; offering one
+    // would be a button whose click is guaranteed to fail.
+    it("a pending High Priestess obligation's own buttons show directly, with no persisting Decline button", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2));
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -3805,9 +3795,8 @@ describe("Gnostica: choose-step click messaging", () => {
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         expect(bar.buttons!.find(b => b.value === "resume_power")).to.be.undefined;
         expect(bar.buttons!.some(b => b.value?.startsWith("hpdraw_"))).to.be.true;
-        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
-        expect(declineBtn.label).eq("Decline 02");
-        expect(declineBtn.attributes).to.be.undefined;
+        expect(bar.buttons!.find(b => b.value === "decline_power")).to.be.undefined;
+        expect(g.validateMove(`decline (via ${major(2).uid})`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "ACTION_NOT_ALLOWED" }));
     });
 
     // The persisting Decline button must be labeled after the ACTIVE
@@ -4130,13 +4119,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const result = g.handleClick(cellClick.move, rowE, colE);
         expect(result.move).eq(`use ${major(3).uid}/m0.1 E`);
         expect(result.valid).to.be.true;
-        // Step 1 (orientMinion) is complete, but its own facing can still
-        // be redirected, AND step 2 (create) is still genuinely optional -
-        // either way, DIRECTION_STILL_ADJUSTABLE, computed directly by
-        // validateMove() now, not just click.
+        // Step 1 (orientMinion) is complete, but step 2 (create) is still
+        // genuinely optional - complete:0, generic message, computed
+        // directly by validateMove() now, not just click.
         expect(result.complete).eq(0);
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
-        expect(g.validateMove(result.move).message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
+        expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
+        expect(g.validateMove(result.move).message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         g.move(result.move, { trusted: true }); // skips step 2 (create)
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("E");
         expect(g.currplayer).eq(2);
@@ -4208,11 +4196,13 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const step2 = g.handleClick(step1.move, rowO, colO);
         expect(step2.move).eq(`use ${major(15).uid}/m0.1 n0.1 E`);
         expect(step2.valid).to.be.true;
-        // Already complete, but the facing can still be redirected - same
-        // wording (and same direct computation) as the standalone "orient"
-        // command's own DIRECTION_STILL_ADJUSTABLE.
-        expect(step2.message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
-        expect(g.validateMove(step2.move).message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
+        // This step is genuinely complete (one real direction click is
+        // the whole action), but steps 2 & 3 are still genuinely optional -
+        // complete:0, generic message, computed directly by validateMove()
+        // now, not just click.
+        expect(step2.complete).eq(0);
+        expect(step2.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
+        expect(g.validateMove(step2.move).message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         g.move(step2.move, { trusted: true }); // skips steps 2 & 3
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1, orientation: "E" });
         expect(g.currplayer).eq(2);
@@ -4392,10 +4382,21 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const click1 = g.handleClick(cellClick.move, -1, -1, "hand_2C");
         expect(click1.move).eq(`use ${major(2).uid}/2C`);
         expect(click1.valid).to.be.true;
+        // Regression: no "draw <n>" chosen yet - still soft (complete:0),
+        // not "ready to submit" (complete:1), even though this ALREADY
+        // forces round 1's own pause into round 2 if actually committed -
+        // a missing draw count is a default, not the player's final word
+        // (see validateHighPriestess's own docs), so a single discard
+        // toggle must never read as done.
+        expect(click1.complete).eq(0);
         const click2 = g.handleClick(click1.move, -1, -1, "hand_5C");
         expect(click2.move).eq(`use ${major(2).uid}/2C 5C`);
+        expect(click2.complete).eq(0);
         const click3 = g.handleClick(click2.move, -1, -1, "hand_2C"); // toggle back off
         expect(click3.move).eq(`use ${major(2).uid}/5C`);
+        expect(click3.complete).eq(0);
+        const click4 = g.handleClick(click3.move, -1, -1, "_btn_hpdraw_1");
+        expect(click4.complete).eq(1); // an explicit draw count IS the player's final word
         g.move(click3.move, { trusted: true }); // step 1 commits and pauses, awaiting step 2
         expect(g.hands[0]).to.not.include("5C");
         expect(g.hands[0].length).eq(6); // redrawn from 2 (3 - 1 discarded) back to 6
@@ -5961,6 +5962,27 @@ describe("Gnostica: Fool and World", () => {
         expect(g.continued).to.not.be.empty;
         const move = g.randomMove();
         expect(move).eq(`decline AC (via ${major(0).uid})`);
+        expect(g.validateMove(move).valid).to.be.true;
+        expect(() => g.move(move, { trusted: true })).to.not.throw();
+    });
+
+    // Regression: randomMove()'s own "paused activation" fallback used to
+    // build "decline" unconditionally for ANY this.continued obligation -
+    // wrong for High Priestess specifically, whose own round 2 rejects
+    // "decline" outright (ACTION_NOT_ALLOWED - see validateMove's own
+    // resume-head gate). "draw 0" is High Priestess's own always-legal
+    // minimal resume instead.
+    it("randomMove() never declines a persisted High Priestess obligation (ACTION_NOT_ALLOWED otherwise)", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const discardUid = g.hands[0][0];
+        g.move(`use ${major(2).uid}/${discardUid}`, { trusted: true }); // round 1
+        expect(g.continued).to.deep.equal(["02.1"]); // round 2 owed
+
+        expect(g.validateMove(`decline (via ${major(2).uid})`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "ACTION_NOT_ALLOWED" }));
+        const move = g.randomMove();
+        expect(move).eq(`discard/draw 0 (via ${major(2).uid})`);
         expect(g.validateMove(move).valid).to.be.true;
         expect(() => g.move(move, { trusted: true })).to.not.throw();
     });
