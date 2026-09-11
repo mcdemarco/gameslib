@@ -887,11 +887,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "ACTION_NOT_ALLOWED"});
             return this.validateResumePendingPower(parsed);
         }
-        // "decline" only ever means something while an obligation is
-        // pending (handled by the gate just above). Reaching here means
-        // nothing is - stale UI state or a hand-typed guess - so reject
-        // with a message about that rather than the generic malformed one
-        // the switch's default would give.
+        
+        // "decline" can only appear when continued is populated.
         if (head === "decline") {
             return this.invalid("apgames:validation.gnostica.NOTHING_TO_DECLINE");
         }
@@ -911,14 +908,23 @@ export class GnosticaGame extends GameBaseSequenced {
             if (parsed.stepSegments.length > 0 || parsed.announceLast) {
                 return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
             }
-            const failure = head === "bid" ? this.validateBid(parsed)
-                : head === "redraw" ? this.validateRedraw(parsed)
-                : this.validatePass();
-            return failure ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+            if (head === "bid")
+                return this.validateBid(parsed);
+            else if (head === "redraw")
+                return this.validateRedraw(parsed);
+            else {//head === "pass"
+                if (this.eliminated.includes(this.currplayer)) {
+                    return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+                } else {
+                    return this.invalid("apgames:validation.gnostica.BAD_PASS");
+                }
+            }
         }
+
         if (this.phase !== "main") {
             return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
         }
+        
         if (head !== "place" && !hasPieces) {
             //This does not yet cover the Fool suicide corner case.
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
@@ -929,7 +935,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if ((head === "place" || head === "orient" || head === "discard") && parsed.stepSegments.length > 0) {
             return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
         }
-        // No concurrent lastTurners can happen, so there's no need to check who it is.
+        // Concurrent lastTurners aren't allowed, so no need to check *who* it is.
         if (parsed.announceLast && this.lastTurner !== undefined) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
@@ -4385,7 +4391,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private validateBid(parsed: IParsedMove): IValidationResult | undefined {
+    private validateBid(parsed: IParsedMove): IValidationResult {
         const [nStr] = parsed.rest;
         if (nStr === undefined) {
             return this.invalid("apgames:validation.gnostica.BID_POSITION_REQUIRED");
@@ -4402,7 +4408,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.bidPositions![this.currplayer - 1] !== null) {
             return this.invalid("apgames:validation.gnostica.ALREADY_BID");
         }
-        return undefined;
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // Every bidPositions slot is filled - reveal them all together
@@ -4572,7 +4578,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private validateRedraw(parsed: IParsedMove): IValidationResult | undefined {
+    private validateRedraw(parsed: IParsedMove): IValidationResult {
         const uids = parsed.rest;
         const hand = this.hands[this.currplayer - 1];
         const needed = 6 - hand.length;
@@ -4589,7 +4595,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.invalid("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid });
             }
         }
-        return undefined;
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "pass" is only used for an eliminated player sitting out the game.
@@ -4603,15 +4609,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({ type: "pass", who: this.currplayer, why: "eliminated" });
         this.nextPlayer();
         this.checkEOG();
-    }
-
-    private validatePass(): IValidationResult | undefined {
-        // An eliminated player must pass;
-        // other players may pass by a different mechanism.
-        if (this.eliminated.includes(this.currplayer)) {
-            return undefined;
-        }
-        return this.invalid("apgames:validation.gnostica.BAD_PASS");
     }
 
     // The "autopass" flag's own signal (see gameinfo's own flags): a real
