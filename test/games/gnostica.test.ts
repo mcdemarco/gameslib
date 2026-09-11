@@ -1933,6 +1933,15 @@ describe("Gnostica: handleClick", () => {
         expect(result.valid).to.be.true;
         expect(result.move).eq("discard");
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL"));
+        // No "draw <n>" yet - the move is already legal (an omitted draw
+        // defaults to the max at commit time), but the string hasn't
+        // recorded an explicit draw decision, so genuinely complete:0,
+        // regardless of hand contents (see validateDiscard's own docs) -
+        // not the -1 an actually-illegal move would get.
+        expect(result.complete).eq(0);
+        const withCount = g.handleClick(result.move, -1, -1, "_btn_drawcount_0");
+        expect(withCount.move).eq("discard draw 0");
+        expect(withCount.complete).eq(1);
     });
 
     it("Declare appends last to an in-progress move, and toggles it back off", () => {

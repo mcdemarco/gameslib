@@ -1648,24 +1648,31 @@ export class GnosticaGame extends GameBaseSequenced {
         return { minion: pool[0], ambiguous: true, candidates: pool };
     }
 
-    // A syntactically-complete move that the click flow itself built up
-    // (as opposed to one the user finished typing) is still provisional -
-    // orient's own facing and discard's uid/count list are all optional
-    // refinements the player may want to keep clicking through, so this
+    // A move the click flow built up may still have more the player
+    // reasonably wants to do before it's truly final - orient's own
+    // facing is the one remaining open-ended refinement, so this
     // deliberately downgrades validateMove()'s natural complete:1 to 0
-    // whenever the move is otherwise valid. Matches Knight Line's own
-    // mm.complete-vs-result.complete distinction: complete:1 tells the
+    // whenever the move is otherwise valid, matching Knight Line's own
+    // mm.complete-vs-result.complete distinction (complete:1 tells the
     // interface it's safe to auto-finalize the move on its own, which is
-    // wrong here - only the player's own explicit "Submit Move" should end
-    // the click sequence. "place" is exempt - its own "?" marker already
-    // tells validatePlace exactly when a facing is still merely
-    // prepopulated (complete:0, genuinely) versus a deliberate choice
-    // (complete:1, whether clicked or hand-typed) - see its own docs -
-    // so this blanket guess would only get in its way.
+    // wrong while more refinement is genuinely on offer). Exempt heads
+    // have no such "more to do" left once valid, so they keep whatever
+    // complete value their own validate function already computed:
+    // "place" (its own "?" marker already tells validatePlace exactly
+    // when a facing is still merely prepopulated versus a deliberate
+    // choice - see its own docs); "bid" (a single number from a fixed
+    // hand - once legal, there's nothing further to refine at all);
+    // "redraw" (validateRedraw's own complete is already exactly -1 below
+    // the needed count, 1 at it - no 0 state exists for it at all); and
+    // "discard" (its own missing-"draw <n>" case is already a genuine
+    // complete:0 from validateDiscard itself, not a guess - see its own
+    // docs).
     private provisionalResult(newmove: string, messageKey?: string, messageParams?: Record<string, unknown>): IClickResult {
         const result = this.validateMove(newmove) as IClickResult;
         result.move = newmove;
-        if (result.valid && result.complete === 1 && this.parseMove(newmove).head !== "place") {
+        const head = this.parseMove(newmove).head;
+        const exempt = head === "place" || head === "bid" || head === "redraw" || head === "discard";
+        if (result.valid && result.complete === 1 && !exempt) {
             result.complete = 0;
         }
         if (messageKey !== undefined && result.valid) {
@@ -3940,7 +3947,9 @@ export class GnosticaGame extends GameBaseSequenced {
                         // actually passing.
                         return this.provisionalResult("discard draw 0");
                     case "discard":
-                        return this.provisionalResult("discard", "apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL");
+                        // validateDiscard's own message already says this
+                        // (see its own docs) - no override needed.
+                        return this.provisionalResult("discard");
                     case "place":
                         // Not strictly necessary (an empty move already
                         // builds "place <cell>" directly from a bare board
@@ -5043,13 +5052,23 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.invalid("apgames:validation.gnostica.NOT_IN_HAND", { uid });
             }
         }
-        if (drawIdx !== -1) {
-            const maxDraw = Math.max(0, 6 - (hand.length - discardUids.length));
-            const countStr = tokens[drawIdx + 1];
-            const count = countStr === undefined ? NaN : Number(countStr);
-            if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
-                return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw });
-            }
+        // A missing "draw <n>" is still perfectly legal to submit as-is
+        // (cmdDiscard defaults it to the max at commit time), but the
+        // move string itself hasn't recorded an explicit draw decision -
+        // same "undecided default" principle as place's own missing
+        // facing (see its own docs), just soft (complete:0, still
+        // submittable) rather than hard, since discard's own grammar
+        // genuinely allows omitting it. Applies uniformly - hand-typed or
+        // click-built alike - since it's a fact about the string, not
+        // about how it was produced.
+        if (drawIdx === -1) {
+            return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+        }
+        const maxDraw = Math.max(0, 6 - (hand.length - discardUids.length));
+        const countStr = tokens[drawIdx + 1];
+        const count = countStr === undefined ? NaN : Number(countStr);
+        if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
+            return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw });
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }

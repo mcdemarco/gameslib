@@ -460,6 +460,10 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         const result = g.handleClick("", -1, -1, `hand_${minor("KS").uid}`);
         expect(result.move).eq("bid 3");
         expect(result.valid).to.be.true;
+        // A bid is a single, one-shot choice - nothing more to refine once
+        // legal, so genuinely complete:1 (not the provisional-downgrade 0
+        // every open-ended click-built move gets).
+        expect(result.complete).eq(1);
     });
 
     it("clicking a different hand card replaces the earlier pick rather than accumulating", () => {
@@ -491,10 +495,16 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         const [uidA, uidB] = g.biddingPool!;
         const click1 = g.handleClick("", -1, -1, `pool_${uidA}`);
         expect(click1.move).eq(`redraw ${uidA}`);
+        // setupRedraw's own currplayer needs exactly 1 back - one pick
+        // already reaches it, and there's no further refinement possible
+        // once the exact count is hit, so genuinely complete:1.
+        expect(click1.complete).eq(1);
         const click2 = g.handleClick(click1.move, -1, -1, `pool_${uidA}`); // toggle back off
         expect(click2.move).eq("redraw");
+        expect(click2.complete).eq(-1); // back to 0 picks, still short of the needed 1
         const click3 = g.handleClick("", -1, -1, `pool_${uidB}`);
         expect(click3.move).eq(`redraw ${uidB}`);
+        expect(click3.complete).eq(1);
     });
 
     it("clicking a uid not currently in the pool during redraw is rejected", () => {
