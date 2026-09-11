@@ -785,7 +785,8 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         if (tokens === undefined) {
             return [];
         }
-        return game.validateMinorPower(suitUid, eligible, [tokens]) === undefined ? [tokens] : [];
+        const result = game.validateMinorPower(suitUid, eligible, [tokens]);
+        return result.valid && result.complete === 1 ? [tokens] : [];
     }
     const def = getMajorArcanaDef(card);
     if (def.uid === "00" || def.uid === "21") {
@@ -832,7 +833,11 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
             clone.applyPowerStep(step, minionsForReplay, tokens, def, i, def.powers.length, true);
         }
     }
-    while (stepSegments.length > 0 && game.validateMajorPower(def, eligible, stepSegments) !== undefined) {
+    const isCleanSuccess = (segs: string[][]): boolean => {
+        const result = game.validateMajorPower(def, eligible, segs);
+        return result.valid && result.complete === 1;
+    };
+    while (stepSegments.length > 0 && !isCleanSuccess(stepSegments)) {
         stepSegments.pop();
     }
     return stepSegments;

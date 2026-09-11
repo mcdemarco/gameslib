@@ -5003,7 +5003,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (eligible.length === 0) {
             return this.invalid("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid });
         }
-        return this.validateCardPower(t.card!, eligible, parsed.stepSegments, parsed.asUid) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        return this.validateCardPower(t.card!, eligible, parsed.stepSegments, parsed.asUid);
     }
 
     // "Play a card from your hand to the discard pile. All your pieces on
@@ -5069,7 +5069,7 @@ export class GnosticaGame extends GameBaseSequenced {
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         try {
-            return this.validateCardPower(card, eligible, parsed.stepSegments, parsed.asUid) ?? { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+            return this.validateCardPower(card, eligible, parsed.stepSegments, parsed.asUid);
         } finally {
             hand.splice(handIdx, 0, uid);
             this.discardPile.pop();
@@ -5088,11 +5088,10 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    private validateCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], borrowedPower?: string): IValidationResult | undefined {
+    private validateCardPower(card: Card, eligible: IMinionRef[], stepSegments: string[][], borrowedPower?: string): IValidationResult {
         if (card.major) {
             const def = getMajorArcanaDef(card);
-            const majorResult = this.validateMajorPower(def, eligible, stepSegments, borrowedPower);
-            return majorResult;
+            return this.validateMajorPower(def, eligible, stepSegments, borrowedPower);
         }
         return this.validateMinorPower(card.suit.uid, eligible, stepSegments);
     }
@@ -5131,7 +5130,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Mirrors applyMinorPower's own tolerance exactly (declining, and an
     // incomplete-so-far step, both still validate as "fine, nothing to
     // report yet") - see its docs.
-    public validateMinorPower(suitUid: string, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult | undefined {
+    public validateMinorPower(suitUid: string, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult {
         if (stepSegments.length === 0) {
             // #49: a use/play must take its one meaningful step, not just
             // decline it outright - a deliberate break from the literal
@@ -5174,7 +5173,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const [mode, ...args] = rest;
         const stepResult = this.validateSuitPrimitive(suitUid, minion, mode, args, {});
-        return stepResult.failed ? stepResult.result : undefined;
+        return stepResult.failed ? stepResult.result : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // Whether `cardUid` names a real major arcana card or a minor arcana
@@ -5622,7 +5621,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // an actual commit happens - unlike walkFrameStack, this loop has no
     // outer segment-count bound to lean on for that, since Fool consumes
     // none, so the stop has to be explicit here.
-    private validateFrameStack(stack: IPowerFrame[], stepSegments: string[][], rootCardUid: string, borrowedPower?: string): IValidationResult | undefined {
+    private validateFrameStack(stack: IPowerFrame[], stepSegments: string[][], rootCardUid: string, borrowedPower?: string): IValidationResult {
         let borrowed = borrowedPower;
         let clone: GnosticaGame | undefined;
         let i = 0;
@@ -5632,7 +5631,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (i < stepSegments.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
                 }
-                return undefined;
+                return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
             }
             const frameDef = this.resolveFrameDef(top.cardUid);
             const stepIndex = top.nextStepIndex;
@@ -5704,7 +5703,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         const key = top.viaFool === true ? "apgames:validation.gnostica.PENDING_POWER_CHOICE" : "apgames:validation.gnostica.CHOOSE_STEP";
                         return { valid: true, complete: -1, message: i18next.t(key, { card: cardName }) };
                     }
-                    return undefined;
+                    return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
                 }
                 tokens = stepSegments[i];
                 i++;
@@ -5805,7 +5804,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    public validateMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], borrowedPower?: string): IValidationResult | undefined {
+    public validateMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], stepSegments: string[][], borrowedPower?: string): IValidationResult {
         // #49: a use/play must take at least one meaningful step - see
         // validateMinorPower's own docs for why this is a deliberate break
         // from a literal "all powers are optional" reading. This zero-
@@ -5873,7 +5872,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const cardName = allCards().find(c => c.uid === activeTop.cardUid)?.name ?? activeTop.cardUid;
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PENDING_POWER_CHOICE", { card: cardName }) };
         }
-        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!, parsed.asUid) || { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!, parsed.asUid);
     }
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as
