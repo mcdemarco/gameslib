@@ -2108,9 +2108,17 @@ export class GnosticaGame extends GameBaseSequenced {
         // the player needs to click the cell holding their desired minion
         // first (see handleClickCore's own "narrow to this cell" handling,
         // and the PICK_MINION_CELL message the click that got here already
-        // carries). Leave the bar uncollapsed, same as every other
-        // click-only stage.
+        // carries). Leave the bar uncollapsed for a FRESH activation, same
+        // as every other click-only stage - but a genuine paused resume
+        // (this.continued - a Fool/HP obligation) can't fall back to the
+        // ordinary top-level bar at all, same reasoning as the "special"
+        // branch below: none of those 6 buttons are legal while the
+        // obligation is open, so it's the same self-contained Use/Decline
+        // pair instead.
         if (pendingMinor.minionAmbiguous) {
+            if (this.continued.length > 0) {
+                return this.pausedPowerButtons();
+            }
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 

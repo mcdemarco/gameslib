@@ -5077,6 +5077,25 @@ describe("Gnostica: Fool and World", () => {
         expect(declineBtn.attributes).to.be.undefined;
     });
 
+    // Regression: a revealed minor card's own eligible pool ("play" draws
+    // from every one of the acting player's minions, not just one cell -
+    // see eligibleMinionsForPlay's own docs) can span more than one cell.
+    // Before this fix, computeActionButtons' own minionAmbiguous branch
+    // fell back to the ordinary top-level bar unconditionally - wrong here,
+    // since none of those 6 buttons are legal mid-resume (same reasoning
+    // as the "special" branch just below it) - clicking "Play Card X"
+    // dispatched into the generic "play" head instead of anything about
+    // the actual pending obligation.
+    it("a revealed minor card whose own eligible pool spans 2+ cells shows the paused Use/Decline pair, not the ordinary top-level bar", () => {
+        const g = setupFool();
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")]; // a second minion for player 1, a different cell than Fool's own
+        pluckCard(g, "10D");
+        g.drawPile.unshift("10D");
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
+        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power"]);
+    });
+
     // m0: The World, minion A facing n0. n0: own piece B (to be pushed).
     // p0: The Lovers, World's own target - kept away from m0/n0/o0 so the
     // push destination (o0) never collides with it.
