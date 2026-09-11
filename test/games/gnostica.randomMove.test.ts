@@ -65,7 +65,14 @@ function assertAlwaysLegal(factory: () => GnosticaGame, iterations: number): str
         }
         const result = attempt.validateMove(move);
         expect(result.valid, `"${move}" should validate: ${result.message}`).to.be.true;
-        expect(result.complete, `"${move}" should be complete: ${result.message}`).to.eq(1);
+        // Genuinely submittable, but not necessarily complete:1 - e.g. a
+        // bare "discard <uids>" (no explicit "draw <n>") is fully legal
+        // (defaults to the max) yet still complete:0, since the string
+        // itself hasn't recorded an explicit draw decision (see
+        // validateDiscard's own docs). complete:-1 alone would mean
+        // "not actually submittable yet," which is what this is really
+        // checking for.
+        expect(result.complete, `"${move}" should be submittable: ${result.message}`).to.not.eq(-1);
         expect(() => attempt.move(move, { trusted: false })).to.not.throw();
         heads.push(move.split(/[\s,]/)[0].toLowerCase());
     }
@@ -218,7 +225,11 @@ describe("Gnostica: randomMove()", () => {
             sawDeclare = true;
             const check = g.validateMove(move);
             expect(check.valid, `"${move}" should validate: ${check.message}`).to.be.true;
-            expect(check.complete).to.eq(1);
+            // Genuinely submittable, not necessarily complete:1 - an
+            // "orient" or a still-extendable chain underneath the "(last)"
+            // is legitimately complete:0 (see generateRandomMove's own
+            // docs).
+            expect(check.complete).to.not.eq(-1);
             expect(() => g.move(move, { trusted: false })).to.not.throw();
         }
         expect(sawDeclare, "expected randomMove() to declare at least once across 200 eligible attempts").to.be.true;

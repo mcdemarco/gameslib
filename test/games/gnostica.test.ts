@@ -2475,7 +2475,12 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_own");
         expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U`);
         expect(modeClick.valid).to.be.true;
-        expect(modeClick.complete).eq(0);
+        // A minor card's power is always exactly one step, already
+        // exhausted here - the mandatory "U" alone makes this genuinely
+        // complete:1 (matches Cups "own"'s own precedent - see
+        // resolveTrailingOrientation's own docs), the optional trailing
+        // correction below being pure bonus.
+        expect(modeClick.complete).eq(1);
         // n0 itself is already "U", the creation's own default - a click
         // there hard-rejects as a no-op (same trailing-orientation rule
         // every other target minion gets), rather than silently
@@ -3500,8 +3505,13 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.valid).to.be.true; // still building, not a hard error - see the click test above
         expect(result.complete).eq(-1);
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
-        // A genuine change to a DIFFERENT facing stays fully valid/complete.
-        expect(g.validateMove("orient m0.1 S").complete).eq(1);
+        // A genuine change to a DIFFERENT facing stays fully valid and
+        // submittable - complete:0 though, not 1, since the player can
+        // always click a different neighbour to reconsider (matches
+        // Magnate's own "never complete, only submissible" rule - see
+        // validateOrient's own docs), the same for this hand-typed call
+        // as a click result.
+        expect(g.validateMove("orient m0.1 S").complete).eq(0);
     });
 
     // A wasteland minion facing into the void reads its target from a
@@ -5082,6 +5092,30 @@ describe("Gnostica: Fool and World", () => {
         expect(flat.some(r => r.type === "use" && (r as { what?: string; count?: number }).what === major(6).uid && (r as { count?: number }).count === 21)).eq(true);
     });
 
+    // Matches Magnate's own "a turn is never complete, only submissible"
+    // rule: whenever a genuinely optional further step remains available
+    // (Lovers' own step 2, once step 1 is done), the move is
+    // unconditionally complete:0 - computed directly from the frame's own
+    // state, the same for a hand-typed move as a click-built one, no
+    // marker needed (the same way an outright incomplete step already
+    // needs none). Only once the chain is fully exhausted (both steps
+    // given, nothing further possible) does it become complete:1.
+    it("a step done with a genuinely optional further one still available is always complete:0, never 1", () => {
+        const g = setupWorldLovers();
+        const oneStep = `use ${theWorld().uid} as ${major(6).uid}/m0.1 piece n0.1 1 U`;
+        const result = g.validateMove(oneStep);
+        expect(result.valid).to.be.true;
+        expect(result.complete).eq(0);
+        const bothSteps = `${oneStep}/o0.1 own o0 U`;
+        const exhausted = g.validateMove(bothSteps);
+        expect(exhausted.valid).to.be.true;
+        expect(exhausted.complete).eq(1);
+        // A trailing "/" is no longer special - just an ordinary empty
+        // step segment, malformed like any other.
+        const trailingSlash = g.validateMove(`${oneStep}/`);
+        expect(trailingSlash.valid).to.be.false;
+    });
+
     it("World -> Lovers, then nothing more: rejected as incomplete, not silently accepted as a no-op move", () => {
         // Regression: naming Lovers as World's target has no board effect
         // of its own (unlike Fool's flip) - completing right there would
@@ -5577,7 +5611,10 @@ describe("Gnostica: Fool and World", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         expect(cellClick.move).eq(`use ${major(0).uid}`);
         expect(cellClick.valid).to.be.true;
-        expect(cellClick.complete).to.eq(0); // already complete, just not yet submitted
+        // The flip is mandatory and one-shot - nothing to reconsider via
+        // a further click, so genuinely complete:1 (forcePauseReadyMessage's
+        // own "ready" state - see validateFrameStack's own docs).
+        expect(cellClick.complete).to.eq(1);
         expect(cellClick.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP_READY"));
 
         // No button offered - the root's flip is mandatory (#49), so
@@ -5644,7 +5681,9 @@ describe("Gnostica: Fool and World", () => {
         const declined = g.handleClick("", -1, -1, "_btn_decline_power");
         expect(declined.move).eq(`decline AC (via ${major(0).uid})`);
         expect(declined.valid).to.be.true;
-        expect(declined.complete).to.eq(0);
+        // Declining exposes Fool's own mandatory, one-shot 2nd flip -
+        // nothing to reconsider, genuinely complete:1.
+        expect(declined.complete).to.eq(1);
         expect(declined.message).to.eq(i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW"));
 
         const preview = setupFool();
@@ -5744,7 +5783,9 @@ describe("Gnostica: Fool and World", () => {
         const targetClick = g.handleClick(cellClick.move, rowN, colN);
         expect(targetClick.move).eq(`use ${theWorld().uid} as 00`); // the borrowed Fool named as "as", head arg unchanged
         expect(targetClick.valid).to.be.true;
-        expect(targetClick.complete).to.eq(0); // already complete via World's own free push + Fool's auto-flip
+        // World's own push is free, then Fool's own flip is next - forced,
+        // one-shot, nothing to reconsider, genuinely complete:1.
+        expect(targetClick.complete).to.eq(1);
 
         const preview = new GnosticaGame(2);
         forceCardAt(preview, 0, 0, () => theWorld());

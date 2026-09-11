@@ -107,7 +107,12 @@ export function generateRandomMove(game: GnosticaGame): string {
             }
             const finalCandidate = announce ? `${candidate} (last)` : candidate;
             const check = game.validateMove(finalCandidate);
-            if (!check.valid || check.complete !== 1) {
+            // Genuinely submittable is complete !== -1, not === 1 -
+            // several heads (orient, a use/play chain with a further
+            // optional step still available) are legitimately final yet
+            // still complete:0, matching Magnate's own "never complete,
+            // only submissible" rule (see provisionalResult's own docs).
+            if (!check.valid || check.complete === -1) {
                 continue;
             }
             // validateMove() never mutates, so a multi-step chain that
@@ -833,7 +838,12 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
     }
     const isCleanSuccess = (segs: string[][]): boolean => {
         const result = game.validateMajorPower(def, eligible, segs);
-        return result.valid && result.complete === 1;
+        // Stopping partway through a chain that still has a genuinely
+        // optional further step left is complete:0, not 1 (see
+        // validateFrameStack's own docs) - .valid alone is what actually
+        // means "no complaint," complete distinguishes "final" from "more
+        // could still be added," which isn't this check's own concern.
+        return result.valid;
     };
     while (stepSegments.length > 0 && !isCleanSuccess(stepSegments)) {
         stepSegments.pop();
