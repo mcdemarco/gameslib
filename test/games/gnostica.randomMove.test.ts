@@ -151,7 +151,7 @@ describe("Gnostica: randomMove()", () => {
         assertAlwaysLegal(factory, 50);
     });
 
-    it("genuinely exercises the chain-building path: a variety of heads appear, and use/play sometimes produce real multi-token steps, not just declines", () => {
+    it("genuinely exercises the chain-building path: a variety of heads appear, and use/play sometimes produce real multi-token steps, not just skips", () => {
         const heads = assertAlwaysLegal(richGame, 400);
         const distinctHeads = new Set(heads);
         // With 3 players sharing turn order in this fixture, currplayer
@@ -173,7 +173,7 @@ describe("Gnostica: randomMove()", () => {
                 break;
             }
         }
-        expect(sawMultiTokenUseOrPlay, "expected at least one use/play to attempt a real power step, not just decline").to.be.true;
+        expect(sawMultiTokenUseOrPlay, "expected at least one use/play to attempt a real power step, not just skip").to.be.true;
     });
 
     it("a chained major arcana move actually mutates state exactly as its own tokens describe when replayed for real", () => {

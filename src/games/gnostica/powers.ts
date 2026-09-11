@@ -841,10 +841,10 @@ export const checkHierophantReplace = (
     }
     // Replacing one of your own pieces with another of your own achieves
     // nothing a real opponent-facing use of the power would - the
-    // "meaningful step" rule (#49) that already forbids declining a
+    // "meaningful step" rule (#49) that already forbids skipping a
     // card's power outright forbids this too, rather than let it stand in
     // as an equivalent no-op. Skipping this step (leaving the chain's own
-    // tail undeclared) stays legal, same as any other power.
+    // tail unaddressed) stays legal, same as any other power.
     if (target.owner === ctx.currplayer) {
         return { key: "HIEROPHANT_MUST_TARGET_ENEMY" };
     }
@@ -972,8 +972,8 @@ export const checkTradeHands = (
     }
     // Swapping hands with yourself is a no-op wearing the shape of a real
     // step - the "meaningful step" rule (#49) forbids it the same way it
-    // forbids declining a card's power outright. Skipping this step
-    // (leaving the chain's own tail undeclared) stays legal, same as any
+    // forbids skipping a card's power outright. Skipping this step
+    // (leaving the chain's own tail unaddressed) stays legal, same as any
     // other power.
     if (target.owner === ctx.currplayer) {
         return { key: "TRADEHANDS_MUST_TARGET_ENEMY" };

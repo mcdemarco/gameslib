@@ -767,7 +767,7 @@ function buildRandomStepForPowerStep(
 // outcome.newMinion into the next step's own minion pool (the "become
 // a minion" rule - see applyMajorPower's own docs, which this mirrors
 // exactly). The first step that can't be built stops the chain there -
-// no attempt to "skip" a declined step and resume later, matching the
+// no attempt to skip a step and resume building later, matching the
 // common real-play pattern.
 //
 // Final correctness pass: truncates from the end while
@@ -781,7 +781,7 @@ function buildRandomStepForPowerStep(
 function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]): string[][] {
     if (!card.major) {
         if (eligible.length === 0 || Math.random() < 0.2) {
-            return []; // decline outright - always legal
+            return []; // skip outright - always legal
         }
         const suitUid = card.suit.uid;
         const tokens = buildRandomStepTokens(game, suitUid, eligible, {});
@@ -794,14 +794,14 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
     const def = getMajorArcanaDef(card);
     if (def.uid === "00" || def.uid === "21") {
         // Fool/World are fully engine-supported now, but this
-        // randomizer only ever declines them - genuinely attempting a
+        // randomizer only ever skips them - genuinely attempting a
         // flip/target here is real additional work not justified by
         // this test-only tool's own scope (see this file's own
         // class-level docs).
         return [];
     }
     if (Math.random() < 0.15) {
-        return []; // decline outright sometimes, same as minor arcana
+        return []; // skip outright sometimes, same as minor arcana
     }
     const stepSegments: string[][] = [];
     let minions = [...eligible];

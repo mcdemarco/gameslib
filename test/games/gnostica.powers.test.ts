@@ -616,7 +616,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess stops redrawing once there is genuinely nothing left in either pile", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: [] });
-        highPriestess(ctx, [], undefined, false); // decline to discard anything
+        highPriestess(ctx, [], undefined, false); // skip discarding anything
         expect(ctx.hand).to.deep.equal(["AC", "2C"]);
         expect(ctx.discardPile).to.deep.equal([]);
         expect(ctx.drawPile).to.deep.equal([]);

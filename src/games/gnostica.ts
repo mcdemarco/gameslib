@@ -1208,7 +1208,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // unaffected by this), but the still-narrowing token a "click the
     // cell your desired minion is on" board click embeds when that cell
     // has more than one eligible minion (see resolveStepMinion's and
-    // handleClickCore's own docs) - tolerated the same "still declined,
+    // handleClickCore's own docs) - tolerated the same "still skipped,
     // not yet resolved" way as an incomplete mode/args elsewhere in this
     // file (see isMinionCellStillNarrowing's own docs).
     private static readonly PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[nesu])?(\.\d+)?)?$/i;
@@ -1855,8 +1855,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Which button(s) to bold, based on this.liveMove (see move()'s own
-    // docs) - unlike this.results, which some actions (e.g. a use
-    // that declines its power) never populate at all, liveMove is set
+    // docs) - unlike this.results, which some actions (e.g. a use that
+    // skips its power) never populate at all, liveMove is set
     // uniformly for every kind of in-progress preview. "Declare" is a
     // modifier, not a top-level choice, so it can be highlighted alongside
     // whatever the base action is, not instead of it. Naturally empty
@@ -2788,10 +2788,10 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Whether `step` is a piece-target special that CANNOT be completed at
-    // all right now - used only to decide whether an implicit decline
+    // all right now - used only to decide whether a skipped step
     // (segments simply ran out - see validateFrameStack's/walkFrameStack's
     // own docs) deserves an explicit "nothing to do here" message instead
-    // of the ordinary silent-decline every other optional step gets.
+    // of the ordinary silent skip every other optional step gets.
     // tradeHands and hierophantReplace are the only two members of
     // pickPieceTargetClick's own shared family that can ever have NO legal
     // candidate: both require an ENEMY specifically, and their only
@@ -3047,7 +3047,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // FEWER tokens than MINOR_MODES' minArgs for modes needing a hand-card
     // uid (Cups "new", Discs/Swords "tile") - applyMinorPower's own
     // tolerance (see its docs) keeps that a harmless, still-provisional
-    // "declined so far" state rather than a thrown error, until
+    // "not given yet" state rather than a thrown error, until
     // supplyStepCardUid fills it in.
     // Cups "enemy"'s victim argument reuses the same <pips>[.<orientation>]
     // [.<player>] qualifier vocabulary as a full piece ref, just without
@@ -3228,8 +3228,8 @@ export class GnosticaGame extends GameBaseSequenced {
         // orientAny/hierophantReplace/hermitTeleport already use.
         const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
         const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
-        const rebuild = (rest: string[], messageKey?: string): IClickResult =>
-            this.provisionalResult(this.assembleStepMove(pending, [minionRef, ...pending.prefix, mode, ...rest]), messageKey);
+        const rebuild = (rest: string[]): IClickResult =>
+            this.provisionalResult(this.assembleStepMove(pending, [minionRef, ...pending.prefix, mode, ...rest]));
 
         if (config.shape === "cell") {
             const [tx, ty] = this.minorTargetCell(pending.minion);
@@ -3603,7 +3603,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Click support for the top-level turn choice (via the button bar from
     // getActionButtons()) plus the simple, single-segment actions - place,
-    // orient, use/play with power declined, and toggling hand cards
+    // orient, use/play with its power skipped, and toggling hand cards
     // into a discard's uid list. use/play's chained power steps are handled
     // further down (parsePendingStep and friends).
     //
@@ -3976,18 +3976,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (this.continued.length === 0) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        const declined = this.pickleMove(this.buildViaMove([["decline"]]));
                         // Declining pops the CURRENT top frame. The only
                         // thing that can be left underneath - Fool's own
                         // remaining flip - auto-resolves on this same real
                         // commit instead of pausing (see walkFrameStack's
-                        // own docs), so name that outcome plainly rather
-                        // than a card that isn't known yet.
-                        const remaining = this.resumeStack()!.slice(0, -1);
-                        return this.provisionalResult(
-                            declined,
-                            this.topStepIsFool(remaining) ? "apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW" : undefined,
-                        );
+                        // own docs); validateFrameStack's own message
+                        // already names that outcome plainly.
+                        return this.provisionalResult(this.pickleMove(this.buildViaMove([["decline"]])));
                     }
                     case "random":
                         // Only ever offered for Wheel of Fortune's own
@@ -5231,7 +5226,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Tolerant of an incomplete step (mode chosen but not enough trailing
     // args yet, or no mode at all) rather than rejecting - treated as still
-    // effectively "declined so far", same trick Magnate's own move parser
+    // effectively "skipped so far", same trick Magnate's own move parser
     // uses to let the click flow build a move up incrementally across
     // several clicks, each producing a fully-parseable (if still
     // provisional) move string. Legality beyond that (single step, minion
@@ -5246,7 +5241,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const [minionRef, ...rest] = stepSegments[0];
         if (this.isMinionCellStillNarrowing(minionRef, eligible)) {
-            return; // cell chosen, which minion there is still undecided - still declined
+            return; // cell chosen, which minion there is still undecided - still skipped
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, eligible, "NOT_AN_ELIGIBLE_MINION");
         // Same shared shape check applyPowerStep uses for a major card's
@@ -5254,19 +5249,19 @@ export class GnosticaGame extends GameBaseSequenced {
         // card's power is that same grammar, just never chained.
         const shape = primitiveStepShape(suitUid, rest);
         if (shape.status === "incomplete") {
-            return; // still declined so far
+            return; // still skipped so far
         }
         const [mode, ...args] = rest;
         this.applySuitPrimitive(suitUid, minion, mode, args, {});
     }
 
-    // Mirrors applyMinorPower's own tolerance exactly (declining, and an
+    // Mirrors applyMinorPower's own tolerance exactly (skipping, and an
     // incomplete-so-far step, both still validate as "fine, nothing to
     // report yet") - see its docs.
     public validateMinorPower(suitUid: string, cardUid: string, eligible: IMinionRef[], stepSegments: string[][]): IValidationResult {
         if (stepSegments.length === 0) {
             // #49: a use/play must take its one meaningful step, not just
-            // decline it outright - a deliberate break from the literal
+            // skip it outright - a deliberate break from the literal
             // "all powers are optional" rules text (that's about not
             // being forced through EVERY power a multi-power card grants,
             // not license to activate/play and do nothing at all). Still
@@ -5335,7 +5330,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Pops the top frame off `stack` (mutates in place) - the ONE place
-    // every decline/exhaustion site in this file removes a frame, rather
+    // every Decline/skip/exhaustion site in this file removes a frame, rather
     // than a raw `stack.pop()`, specifically so this can also carry the
     // popped frame's own CURRENT acting piece (its own `minions` last
     // entry - see IStepOutcome.newMinion's "become a minion" docs) down
@@ -5420,28 +5415,29 @@ export class GnosticaGame extends GameBaseSequenced {
     //   validateFrameStack reject those as malformed before apply is ever
     //   reached for a real, untrusted client).
     // - Segments run out with no forcePause. Whatever the CURRENT (top)
-    //   frame had left of its own power is implicitly declined (popped) -
-    //   exactly like a plain single-frame chain already works today. If
-    //   that pop empties the stack, the whole activation is done and the
-    //   turn advances normally. If it exposes an outer frame, that frame's
-    //   own next step is either Fool's (see below - auto-resolves right
-    //   here, in the SAME call, never reaching this exit at all) or
-    //   something else that genuinely needs input the caller didn't
-    //   supply, which stays pending exactly like any other pushed frame's
-    //   own untaken step.
+    //   frame had left of its own power is skipped (silently, not via an
+    //   explicit Decline) and the frame pops - exactly like a plain
+    //   single-frame chain already works today. If that pop empties the
+    //   stack, the whole activation is done and the turn advances
+    //   normally. If it exposes an outer frame, that frame's own next
+    //   step is either Fool's (see below - auto-resolves right here, in
+    //   the SAME call, never reaching this exit at all) or something else
+    //   that genuinely needs input the caller didn't supply, which stays
+    //   pending exactly like any other pushed frame's own untaken step.
     //
     // Fool's own step is unconditionally auto-taken the moment it's next
     // in line - flipping is the ONLY possible action for it (unlike every
     // other special, even High Priestess, which genuinely lets the player
-    // choose), so there is nothing to decide and nothing to decline: it
-    // consumes no segment, and - since every flip force-pauses to reveal
-    // what came up - it always returns from inside this loop, never
-    // falling through to the "implicitly declined" exit below. This is what makes declining a revealed
-    // card's own power (a real, genuine choice) and Fool drawing its
-    // next card (never a choice) compose into ONE submission: the
-    // decline consumes its own given segment and pops that frame, then
-    // the loop immediately re-checks the newly-exposed top - if that's
-    // Fool's own remaining flip, it fires right then, in the same call.
+    // choose), so there is nothing to decide and no Decline button for it
+    // either: it consumes no segment, and - since every flip force-pauses
+    // to reveal what came up - it always returns from inside this loop,
+    // never falling through to the "silently skipped" exit above. This is
+    // what makes explicitly Declining a revealed card's own power and
+    // Fool drawing its next card (never a choice) compose into ONE
+    // submission: Decline consumes its own given "decline" segment and
+    // pops that frame, then the loop immediately re-checks the newly-
+    // exposed top - if that's Fool's own remaining flip, it fires right
+    // then, in the same call.
     // The only place this.continued is written - called once by move(),
     // past the partial boundary, with the residual frame stack
     // walkFrameStack handed back. Distils it down to the entries that
@@ -5543,18 +5539,19 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens = [];
             } else {
                 if (i >= stepSegments.length) {
-                    // Segments exhausted: implicitly decline whatever's left
-                    // of the CURRENT (top) frame - same pop + cascade as an
-                    // explicit "decline" token just below, so a mandatory
-                    // Fool flip exposed this way (e.g. tradeHands silently
-                    // skipped because no enemy target exists at all) still
-                    // fires in this SAME submission, instead of being left
-                    // as a separate, unprompted resume the player has no
-                    // button for (see powerStepMessageKey's own docs - Fool's
-                    // second flip is only ever supposed to reach that
-                    // dedicated isFoolStep branch above, never sit here
-                    // waiting on a resume the bar never actually offers a
-                    // button for).
+                    // Segments exhausted: silently skip whatever's left of
+                    // the CURRENT (top) frame - same pop + cascade as an
+                    // explicit "decline" token just below (though this
+                    // isn't Declining - nothing was typed for this step at
+                    // all), so a mandatory Fool flip exposed this way (e.g.
+                    // tradeHands itself skipped because no enemy target
+                    // exists at all) still fires in this SAME submission,
+                    // instead of being left as a separate, unprompted
+                    // resume the player has no button for (see
+                    // powerStepMessageKey's own docs - Fool's second flip
+                    // is only ever supposed to reach that dedicated
+                    // isFoolStep branch above, never sit here waiting on a
+                    // resume the bar never actually offers a button for).
                     GnosticaGame.popFrame(stack);
                     GnosticaGame.popExhaustedFrames(this, stack);
                     continue;
@@ -5639,7 +5636,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // Only reachable via the top-of-loop `top === undefined` check now -
         // every other exit (forced pause, a still-being-typed segment, a
-        // fool-step partial preview) returns directly, and an exhausted/
+        // fool-step partial preview) returns directly, and a skipped/
         // declined non-fool frame loops back via `continue` above instead
         // of breaking out here. So the stack is already fully resolved by
         // this point (empty) - move() serializes it into this.continued,
@@ -5760,8 +5757,16 @@ export class GnosticaGame extends GameBaseSequenced {
         let borrowed = borrowedPower;
         let clone: GnosticaGame | undefined;
         let i = 0;
+        // Set right before the explicit-"decline" continue below, read (and
+        // reset) at the top of the very next iteration only - true exactly
+        // when the frame just popped to expose the current top was a real
+        // Decline, not a silently-skipped one (see DECLINE_THEN_AUTO_DRAW's
+        // own use of this, further down).
+        let justDeclined = false;
         for (;;) {
             const top = stack[stack.length - 1];
+            const poppedViaDecline = justDeclined;
+            justDeclined = false;
             if (top === undefined) {
                 if (i < stepSegments.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
@@ -5786,7 +5791,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (i >= stepSegments.length) {
                     // Nothing more given - a step past the frame's own
                     // first one (root or pushed alike, once that frame has
-                    // begun) stays optional and silently declines, UNLESS
+                    // begun) stays optional and is silently skipped, UNLESS
                     // it's provably impossible right now (no legal target
                     // at all - see specialStepHasNoLegalTarget's own docs),
                     // in which case that deserves an explicit heads-up
@@ -5856,6 +5861,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (i < stepSegments.length) {
                         clone ??= this.cloneLive();
                     }
+                    justDeclined = true;
                     continue;
                 }
                 if ("special" in step && step.special === "magicianChoice" && borrowed !== undefined) {
@@ -5901,7 +5907,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 // its own docs on why powerStepMessageKey itself would be
                 // wrong here) instead of falling through to the generic
                 // VALID_MOVE fallback, which says nothing about what
-                // submitting will actually do next.
+                // submitting will actually do next. Fool's own flip
+                // reached via an explicit Decline of its sibling gets its
+                // own wording instead (this move ALSO performs that
+                // Decline, not just the flip).
+                if (poppedViaDecline && top.cardUid === "00") {
+                    return { valid: true, complete: 1, message: i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW") };
+                }
                 const readyMsg = this.forcePauseReadyMessage(top.cardUid, top.nextStepIndex);
                 return { valid: true, complete: 1, message: i18next.t(readyMsg.key, readyMsg.params) };
             }
@@ -6063,7 +6075,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // job, not this one's.
         const [minionRef, ...rest] = tokens;
         if (this.isMinionCellStillNarrowing(minionRef, minions)) {
-            return undefined; // cell chosen, which minion there is still undecided - still declined
+            return undefined; // cell chosen, which minion there is still undecided - still skipped
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
         if ("primitive" in step) {
@@ -6075,7 +6087,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // the three calls each other for it.
             const shape = primitiveStepShape(suitUid, rest);
             if (shape.status === "incomplete") {
-                return undefined; // still declined so far
+                return undefined; // still skipped so far
             }
             const [mode, ...modeArgs] = rest;
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
@@ -6083,7 +6095,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const shape = SPECIAL_STEP_SHAPES[step.special](rest);
         if (shape.status === "incomplete") {
-            return undefined; // still declined so far
+            return undefined; // still skipped so far
         }
         // Every apply* method below can now assume complete, well-formed
         // input - the shape check above already ruled out anything else.
@@ -6111,7 +6123,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // Mirrors applyPowerStep's own "incomplete step, still declined"
+    // Mirrors applyPowerStep's own "incomplete step, still skipped"
     // tolerance (same rationale as validateMinorPower's) - see the inline
     // comments below and applyPowerStep's own docs.
     public validatePowerStep(
@@ -6164,7 +6176,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }) };
         }
         if (this.isMinionCellStillNarrowing(minionRef, minions)) {
-            return { failed: false, complete: false }; // cell chosen, which minion there is still undecided - still declined
+            return { failed: false, complete: false }; // cell chosen, which minion there is still undecided - still skipped
         }
         const result = this.resolvePieceRef(minionRef, minions);
         if (result.kind !== "ok") {

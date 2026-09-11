@@ -803,7 +803,7 @@ describe("Gnostica: sidebarScores", () => {
 });
 
 describe("Gnostica: activate/play - minor arcana suit powers", () => {
-    it("#49: a bare use with no power step is not yet submittable, but a trusted caller may still apply it (test setup, click-preview 'still declined so far' states)", () => {
+    it("#49: a bare use with no power step is not yet submittable, but a trusted caller may still apply it (test setup, click-preview 'still skipped so far' states)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 U", { trusted: true }); // player 1
@@ -1053,10 +1053,10 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
     });
 
     // World is subject to #49 like every other major now (see the Fool/
-    // World test suite below for full coverage) - declining its power
+    // World test suite below for full coverage) - skipping its power
     // entirely still needs a trusted caller to bypass #49, exactly like
     // every other major arcana card.
-    it("declining World's power outright is legal for a trusted caller, but not yet submittable untrusted (#49)", () => {
+    it("skipping World's power outright is legal for a trusted caller, but not yet submittable untrusted (#49)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         g.move("place m0 U", { trusted: true });
@@ -1069,7 +1069,7 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
 });
 
 describe("Gnostica: activate/play - major arcana chaining", () => {
-    it("#49: declining every power step is not yet submittable, but a trusted caller may still apply it (test setup, click-preview 'still declined so far' states)", () => {
+    it("#49: skipping every power step is not yet submittable, but a trusted caller may still apply it (test setup, click-preview 'still skipped so far' states)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(6)); // The Lovers
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
@@ -1199,7 +1199,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         });
         expect(afterCreate).to.deep.equal([{ x: 0, y: 0, index: 0 }, { x: 2, y: 0, index: 0 }]);
 
-        // No outcome at all (judgementDraw, a declined step, etc.) - the
+        // No outcome at all (judgementDraw, a skipped step, etc.) - the
         // pool is returned completely unchanged.
         expect(chainMinion(original, {})).to.deep.equal(original);
     });
@@ -1394,7 +1394,7 @@ describe("Gnostica: frame-stepping render() contract", () => {
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 U", { trusted: true });
         g.move("place l0 U", { trusted: true });
-        g.move(`use ${aceOfCups().uid}`, { trusted: true }); // 0 steps - fully declined
+        g.move(`use ${aceOfCups().uid}`, { trusted: true }); // 0 steps - fully skipped
         expect(Array.isArray(g.render())).eq(false);
         expect(g.results.some(r => r.type === "_group")).eq(false);
     });
@@ -1403,7 +1403,7 @@ describe("Gnostica: frame-stepping render() contract", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(6)); // The Lovers - could take up to 2 steps
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.move(`use ${major(6).uid}/m0.1 piece m0.1 1 E`, { trusted: true }); // only step 1, step 2 declined
+        g.move(`use ${major(6).uid}/m0.1 piece m0.1 1 E`, { trusted: true }); // only step 1, step 2 skipped
         expect(Array.isArray(g.render())).eq(false);
         expect(g.results.some(r => r.type === "_group")).eq(false);
     });
@@ -2136,7 +2136,7 @@ describe("Gnostica: handleClick", () => {
         expect(g.hands[0].length).eq(5); // 4 left after discarding 2, +1 drawn back
     });
 
-    it("still highlights Use Territory during a live activate-declining-power preview (no results pushed)", () => {
+    it("still highlights Use Territory during a live activate-skipping-power preview (no results pushed)", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U", { trusted: true });
         g.move("place l0 U", { trusted: true });
@@ -2151,7 +2151,7 @@ describe("Gnostica: handleClick", () => {
         const uid0 = g.board.get(0, 0)!.card!.uid;
         const clicked = g.handleClick(seed.move, row, col);
         expect(clicked.move).eq(`use ${uid0}`);
-        g.move(clicked.move, { partial: true }); // live preview, power still declined - pushes zero results
+        g.move(clicked.move, { partial: true }); // live preview, power still skipped - pushes zero results
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const activateBtn = bar!.buttons!.find(b => b.value === "use");
@@ -2803,7 +2803,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // tokens (mode+cell+pips) to attempt the primitive outright - and a
         // pips-1 attack on a worth-2 territory leaves a nonzero remainder,
         // which genuinely requires a replacement card. This is a real rules
-        // error, not applyMinorPower's "still declined" tolerance - fixed
+        // error, not applyMinorPower's "still skipped" tolerance - fixed
         // up below by the hand-card click regardless.
         expect(modeClick.valid).to.be.false;
         const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
@@ -3241,7 +3241,7 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
         const result = g.handleClick(picked.move, rowE, colE);
         expect(result.move).eq(`use ${major(3).uid}/m0.2 E`);
-        g.move(result.move, { trusted: true }); // declines step 2 (create)
+        g.move(result.move, { trusted: true }); // skips step 2 (create)
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("U"); // the size-1 minion, untouched
         expect(g.board.get(0, 0)!.pieces[1].orientation).eq("E"); // the size-2 minion actually picked
     });
@@ -4007,7 +4007,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(g.currplayer).eq(2);
     });
 
-    it("Lovers: submitting after just step 1 (declining step 2) is still legal via clicks", () => {
+    it("Lovers: submitting after just step 1 (skipping step 2) is still legal via clicks", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(6)); // The Lovers
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, pointing at n0
@@ -4016,7 +4016,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${major(6).uid}/m0.1 piece m0.1 1`); // defaults to self, declines step 2
+        expect(modeClick.move).eq(`use ${major(6).uid}/m0.1 piece m0.1 1`); // defaults to self, skips step 2
         g.move(modeClick.move, { trusted: true });
         expect(g.currplayer).eq(2);
     });
@@ -4130,7 +4130,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const result = g.handleClick(cellClick.move, rowE, colE);
         expect(result.move).eq(`use ${major(3).uid}/m0.1 E`);
         expect(result.valid).to.be.true;
-        g.move(result.move, { trusted: true }); // declines step 2 (create)
+        g.move(result.move, { trusted: true }); // skips step 2 (create)
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("E");
         expect(g.currplayer).eq(2);
     });
@@ -4148,7 +4148,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const result = g.handleClick(cellClick.move, rowN, colN);
         expect(result.move).eq(`use ${major(11).uid}/m0.1 n0.1`);
         expect(result.valid).to.be.true;
-        g.move(result.move, { trusted: true }); // declines step 2 (attack)
+        g.move(result.move, { trusted: true }); // skips step 2 (attack)
         expect(g.hands[0]).to.deep.equal(handsBefore[1]);
         expect(g.hands[1]).to.deep.equal(handsBefore[0]);
         expect(g.currplayer).eq(2);
@@ -4195,7 +4195,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const step2 = g.handleClick(step1.move, rowO, colO);
         expect(step2.move).eq(`use ${major(15).uid}/m0.1 n0.1 E`);
         expect(step2.valid).to.be.true;
-        g.move(step2.move, { trusted: true }); // declines steps 2 & 3
+        g.move(step2.move, { trusted: true }); // skips steps 2 & 3
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1, orientation: "E" });
         expect(g.currplayer).eq(2);
     });
@@ -4258,7 +4258,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const suitClick = g.handleClick(cellClick.move, -1, -1, "_btn_magician_R");
         expect(suitClick.move).eq(`use ${major(1).uid} as R`);
-        expect(suitClick.valid).to.be.true; // suit chosen, mode not yet - still declined
+        expect(suitClick.valid).to.be.true; // suit chosen, mode not yet - still skipped
         const modeClick = g.handleClick(suitClick.move, -1, -1, "_btn_mode_R_piece");
         expect(modeClick.move).eq(`use ${major(1).uid} as R/m0.1 piece m0.1 1`);
         expect(modeClick.valid).to.be.true;
@@ -4555,7 +4555,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(step2.move).eq(step1.move);
         expect(step2.valid).to.be.false;
         expect(step2.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
-        // Declining tradeHands (the chain's own tail) stays legal, so
+        // Skipping tradeHands (the chain's own tail) stays legal, so
         // step 1's own push still completes correctly on its own.
         g.move(step1.move, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
@@ -4651,7 +4651,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         forceCardAt(g, 0, 0, () => major(11)); // Justice
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
         g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, player 2
-        g.move(`use ${major(11).uid}/m0.1 n0.1`, { trusted: true }); // declines step 2 (attack)
+        g.move(`use ${major(11).uid}/m0.1 n0.1`, { trusted: true }); // skips step 2 (attack)
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("traded hands"));
         expect(line).eq(i18next.t("apresults:SWAP.gnostica", { player: "Alice", target: "Bob" }));
@@ -4806,7 +4806,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         forceCardAt(g, 0, 0, () => major(15)); // The Devil
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
         g.board.get(1, 0)!.pieces = [new Piece(2, 1, "S")]; // enemy B, player 2, facing S
-        g.move(`use ${major(15).uid}/m0.1 n0.1 U`, { trusted: true }); // declines steps 2 & 3
+        g.move(`use ${major(15).uid}/m0.1 n0.1 U`, { trusted: true }); // skips steps 2 & 3
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("oriented"));
         expect(line).eq(i18next.t("apresults:ORIENT.gnostica_target", { player: "Alice", where: "n0", what: "1", facing: "U", target: "Bob" }));
@@ -5243,7 +5243,7 @@ describe("Gnostica: Fool and World", () => {
         expect(minorClick.move).eq(cellClick.move); // move string unchanged - no silent switch to "use AR"
     });
 
-    it("World rejects a self-reference and an off-board target; declining its own power outright needs a trusted caller (#49, same as any other major)", () => {
+    it("World rejects a self-reference and an off-board target; skipping its own power outright needs a trusted caller (#49, same as any other major)", () => {
         const selfRef = new GnosticaGame(2);
         forceCardAt(selfRef, 0, 0, () => theWorld());
         selfRef.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -5261,13 +5261,13 @@ describe("Gnostica: Fool and World", () => {
         }
         expect(() => offBoard.move(`use ${theWorld().uid} as ${major(6).uid}`, { trusted: true })).to.throw(); // Lovers isn't on the board
 
-        const decline = new GnosticaGame(2);
-        forceCardAt(decline, 0, 0, () => theWorld());
-        decline.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        const validated = decline.validateMove(`use ${theWorld().uid}`);
+        const skip = new GnosticaGame(2);
+        forceCardAt(skip, 0, 0, () => theWorld());
+        skip.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const validated = skip.validateMove(`use ${theWorld().uid}`);
         expect(validated.valid).to.be.true;
         expect(validated.complete).eq(-1); // #49 applies to the root the same as every other major now
-        expect(() => decline.move(`use ${theWorld().uid}`, { trusted: true })).to.not.throw();
+        expect(() => skip.move(`use ${theWorld().uid}`, { trusted: true })).to.not.throw();
     });
 
     it("Fool flips a forced major -> pauses; resuming Lovers' own two steps also auto-continues Fool's own second (mandatory) flip", () => {
@@ -5411,13 +5411,13 @@ describe("Gnostica: Fool and World", () => {
     // Same cascade as above, but the revealed card's own tail step is
     // skipped by OMISSION (no legal tradeHands target exists at all, so
     // there's nothing to type) rather than an explicit "decline" token.
-    // walkFrameStack's own "segments exhausted" implicit-decline branch
-    // used to just pop that one frame and stop, leaving Fool's own
-    // mandatory second flip sitting unexecuted with no button anywhere
-    // to trigger it (the bar only ever offers "Use Card X"/"Decline X"
-    // for a flip still at its own nextStepIndex 0 - see
-    // powerStepMessageKey's own docs) - a real dead end for the player.
-    it("an implicitly-declined tail step (no legal tradeHands target) also auto-continues Fool's own mandatory second flip", () => {
+    // walkFrameStack's own "segments exhausted" skip branch used to just
+    // pop that one frame and stop, leaving Fool's own mandatory second
+    // flip sitting unexecuted with no button anywhere to trigger it (the
+    // bar only ever offers "Use Card X"/"Decline X" for a flip still at
+    // its own nextStepIndex 0 - see powerStepMessageKey's own docs) - a
+    // real dead end for the player.
+    it("an implicitly-skipped tail step (no legal tradeHands target) also auto-continues Fool's own mandatory second flip", () => {
         const g = setupFool();
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // a real facing - Rods' own move step needs one
         forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - the territory Hanged Man's own move step pushes
@@ -5434,7 +5434,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.board.has(1, 0)).eq(false); // the push actually happened
         expect(g.continued).to.not.be.empty;
         // tradeHands never even shows up on the stack - it's popped by
-        // the same implicit-decline branch that walked straight into
+        // the same implicit-skip branch that walked straight into
         // Fool's own next mandatory flip within this SAME submission.
         expect(g.continued).to.deep.equal(["00.2"]);
         expect(g.discardPile).to.include.members([major(12).uid, "AS"]);
@@ -5697,6 +5697,21 @@ describe("Gnostica: Fool and World", () => {
         expect(declineBtn.attributes).to.deep.equal([{ name: "font-weight", value: "bold" }]);
     });
 
+    // Same message, computed directly by validateFrameStack itself now -
+    // a hand-typed "decline AC (via 00)" gets DECLINE_THEN_AUTO_DRAW
+    // without ever going through the click handler above.
+    it("a hand-typed decline of a revealed card also names the automatic second flip", () => {
+        const g = setupFool();
+        pluckCard(g, "AC");
+        g.drawPile.unshift("AC");
+        g.move(`use ${major(0).uid}`, { trusted: true });
+
+        const validated = g.validateMove(`decline AC (via ${major(0).uid})`);
+        expect(validated.valid).to.be.true;
+        expect(validated.complete).to.eq(1);
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW"));
+    });
+
     // Right after a real flip the status line is the generic "click a
     // button" wording (a Use/Decline pair is on the bar); clicking "Use
     // Card X" (resume_power) is what surfaces the revealed card's own
@@ -5822,7 +5837,7 @@ describe("Gnostica: Fool and World", () => {
     });
 
     // Regression: Fool -> Hanged Man -> (Rods "piece" mode relocates the
-    // acting minion) -> tradeHands auto-declines (no enemy) -> Fool's own
+    // acting minion) -> tradeHands auto-skips (no enemy) -> Fool's own
     // mandatory second flip reveals World, ALL in one submission (the
     // cascade this session's own earlier fixes made possible). World's
     // own frame inherits its "acting minion" from Fool's own buried frame
@@ -5843,7 +5858,7 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use ${major(0).uid}`, { trusted: true });
 
         g.drawPile.unshift(theWorld().uid); // Fool's mandatory 2nd flip reveals World
-        g.move(`play ${major(12).uid}/m0.1 piece m0.1 1 (via ${major(0).uid})`, { trusted: true }); // moves to n0; tradeHands auto-declines (no enemy)
+        g.move(`play ${major(12).uid}/m0.1 piece m0.1 1 (via ${major(0).uid})`, { trusted: true }); // moves to n0; tradeHands auto-skips (no enemy)
         expect(g.continued).to.deep.equal(["00.2"]);
         // The staleness bug this guards is now structurally impossible:
         // buildPendingFromContinued recomputes minions fresh from the
