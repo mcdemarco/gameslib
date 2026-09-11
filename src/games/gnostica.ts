@@ -5533,6 +5533,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 tokens = stepSegments[i];
                 i++;
                 if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
+                    // A pure decline moves nothing on the board, but it's
+                    // still a real, deliberate turn action - log it (via
+                    // "announce", reused from the bidding turn-order case -
+                    // see chatLog()'s own docs) so a turn that ends right
+                    // here doesn't vanish from the log entirely.
+                    this.results.push({ type: "announce", payload: ["decline", top.cardUid] });
                     GnosticaGame.popFrame(stack);
                     // Popping can expose an ALREADY-exhausted frame directly
                     // beneath (a parent whose own single step already ran, but
@@ -5541,7 +5547,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // under whatever it pushed) - cascade the same as every
                     // other pop site, rather than leaving it stranded.
                     GnosticaGame.popExhaustedFrames(this, stack);
-                    continue; // no result to group/snapshot for a pure decline
+                    continue;
                 }
                 if ("special" in step && step.special === "magicianChoice" && borrowed !== undefined) {
                     // "as <suit>" splices back in as the suit-letter token
@@ -8254,6 +8260,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 for (const r of flatResults) {
                     switch (r.type) {
                         case "announce": {
+                            // Reused for two unrelated one-off announcements
+                            // (bidding's own turn-order reveal, and a
+                            // declined revealed card - see walkFrameStack's
+                            // own docs) - tagged by payload[0] since
+                            // "announce" carries no type of its own.
+                            if (r.payload[0] === "decline") {
+                                node.push(i18next.t("apresults:ANNOUNCE.gnostica_decline", { player, card: this.cardDisplayName(r.payload[1] as string) }));
+                                break;
+                            }
                             const nameFor = (p: number): string => p <= players.length ? players[p - 1] : `Player ${p}`;
                             const turnOrderNames = (r.payload as number[]).map(nameFor).join(", ");
                             const redrawOrderNames = [...r.payload as number[]].reverse().map(nameFor).join(", ");

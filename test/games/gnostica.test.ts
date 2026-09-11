@@ -5914,6 +5914,26 @@ describe("Gnostica: Fool and World", () => {
         expect(worldRows[worldRows.length - 1].some(line => line.includes(lovers))).to.be.true;
     });
 
+    // A pure decline pushes no board/state results of its own (see
+    // walkFrameStack's own docs) - reused "announce" gives it a real chat
+    // line anyway, so a turn that ends on a decline (nothing left to
+    // auto-continue into) doesn't vanish from the log entirely.
+    it("chatLog() also logs a pure decline, not just the deckDraw lines it may trigger", () => {
+        const g = setupFool();
+        pluckCard(g, "AC");
+        pluckCard(g, "AD");
+        g.drawPile.unshift("AC");
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        g.drawPile.unshift("AD");
+        g.move(`decline AC (via ${major(0).uid})`, { trusted: true }); // auto-continues into the 2nd flip
+        expect(g.continued).to.deep.equal(["00.2"]);
+        g.move(`decline AD (via ${major(0).uid})`, { trusted: true }); // nothing left to auto-continue
+        expect(g.continued).to.be.empty;
+        const rows = g.chatLog(["Alice", "Bob"]);
+        const adName = minorCards.find(c => c.uid === "AD")!.name;
+        expect(rows[rows.length - 1].some(line => line.includes(adName))).to.be.true;
+    });
+
     it("randomMove() sanity check: a paused activation always yields something validateMove() accepts", () => {
         const g = setupFool();
         pluckCard(g, "AC");
