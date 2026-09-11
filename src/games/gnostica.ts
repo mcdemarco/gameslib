@@ -1122,7 +1122,12 @@ export class GnosticaGame extends GameBaseSequenced {
             return this;
         }
 
-        this.lastmove = m;
+        // "?" marks a "place"-only click-preview facing as still merely
+        // prepopulated, not yet a deliberate choice (see validatePlace's
+        // own docs) - purely a UI/completeness signal, never part of the
+        // real, persisted grammar, so it's dropped the instant a turn is
+        // actually committed.
+        this.lastmove = m.replace(/\?/g, "");
         // The walk this turn (if any) resolved some frames and left
         // others still owing - record that now, past the partial
         // boundary, so a preview never touches this.continued. undefined
@@ -1407,35 +1412,48 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
+    // Parses `s` as an orientation or reports why not - the one place
+    // BAD_ORIENTATION gets built, shared by every context in the file
+    // that names a facing: place, orient, Cups "own", every trailing
+    // post-action correction (Rods/Discs/Swords "piece"), and every
+    // dedicated reorientation step (orientMinion/orientAny/
+    // hierophantReplace).
+    private parseOrientationOrFail(s: string | undefined): { orientation: Orientation } | { key: string; params?: Record<string, unknown> } {
+        const orientation = this.tryParseOrientation(s);
+        return orientation === undefined ? { key: "BAD_ORIENTATION", params: { orientation: s } } : { orientation };
+    }
+
+    // Hard-rejects (ORIENT_NO_OP) a `candidate` orientation that changes
+    // nothing against `reference` (the piece's current facing, or - for a
+    // piece that doesn't exist on the board yet, Cups "own"/place's own
+    // new piece - the mandatory default it's about to get). The one place
+    // that comparison gets made, shared by every context that hard-rejects
+    // a no-op reorientation; the standalone "orient" command's own softer,
+    // click-tolerant no-op leniency is deliberately NOT this - it checks
+    // for a no-op itself, on its own terms, rather than calling this.
+    private checkOrientationChanges(reference: Orientation, candidate: Orientation): { key: string } | undefined {
+        return candidate === reference ? { key: "ORIENT_NO_OP" } : undefined;
+    }
+
     // The "mandatory-or-defaulted facing, plus an optional trailing
-    // correction" shape shared by every brand-new-or-freshly-targeted own
-    // piece: place's own new piece and Cups "own"'s own new piece both
-    // reduce to exactly this same question (their own mandatory facing is
-    // resolved elsewhere - by the caller's own "missing" handling, since
-    // that differs between a top-level head and a shape-gated power step
-    // - this only ever runs once `orientationStr` is confirmed present).
-    // The correction, when given, must be a real, meaningful change - a
-    // request matching the piece's own about-to-be facing achieves
-    // nothing and is hard-rejected (ORIENT_NO_OP), same as every other
-    // reorientation context in this file.
+    // correction" shape shared by every brand-new own piece: place's own
+    // new piece and Cups "own"'s own new piece both reduce to exactly
+    // this same question (the mandatory facing's own "missing" case is
+    // resolved elsewhere by the caller, since that differs between a
+    // top-level head and a shape-gated power step - this only ever runs
+    // once `orientationStr` is confirmed present).
     private resolveTrailingOrientation(
         orientationStr: string, correctionStr: string | undefined,
     ): { orientation: Orientation } | { key: string; params?: Record<string, unknown> } {
-        const orientation = this.tryParseOrientation(orientationStr);
-        if (orientation === undefined) {
-            return { key: "BAD_ORIENTATION", params: { orientation: orientationStr } };
+        const parsed = this.parseOrientationOrFail(orientationStr);
+        if ("key" in parsed || correctionStr === undefined) {
+            return parsed;
         }
-        if (correctionStr === undefined) {
-            return { orientation };
+        const corrected = this.parseOrientationOrFail(correctionStr);
+        if ("key" in corrected) {
+            return corrected;
         }
-        const correction = this.tryParseOrientation(correctionStr);
-        if (correction === undefined) {
-            return { key: "BAD_ORIENTATION", params: { orientation: correctionStr } };
-        }
-        if (correction === orientation) {
-            return { key: "ORIENT_NO_OP" };
-        }
-        return { orientation: correction };
+        return this.checkOrientationChanges(parsed.orientation, corrected.orientation) ?? corrected;
     }
 
     private tryAlgebraic2coords(cell: string): [number, number] | undefined {
@@ -1632,19 +1650,22 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // A syntactically-complete move that the click flow itself built up
     // (as opposed to one the user finished typing) is still provisional -
-    // place/orient's orientation and discard's uid/count list are all optional
+    // orient's own facing and discard's uid/count list are all optional
     // refinements the player may want to keep clicking through, so this
     // deliberately downgrades validateMove()'s natural complete:1 to 0
     // whenever the move is otherwise valid. Matches Knight Line's own
     // mm.complete-vs-result.complete distinction: complete:1 tells the
     // interface it's safe to auto-finalize the move on its own, which is
     // wrong here - only the player's own explicit "Submit Move" should end
-    // the click sequence, or the very first click auto-submits "U" before
-    // there's ever a chance to cycle to a real facing.
+    // the click sequence. "place" is exempt - its own "?" marker already
+    // tells validatePlace exactly when a facing is still merely
+    // prepopulated (complete:0, genuinely) versus a deliberate choice
+    // (complete:1, whether clicked or hand-typed) - see its own docs -
+    // so this blanket guess would only get in its way.
     private provisionalResult(newmove: string, messageKey?: string, messageParams?: Record<string, unknown>): IClickResult {
         const result = this.validateMove(newmove) as IClickResult;
         result.move = newmove;
-        if (result.valid && result.complete === 1) {
+        if (result.valid && result.complete === 1 && this.parseMove(newmove).head !== "place") {
             result.complete = 0;
         }
         if (messageKey !== undefined && result.valid) {
@@ -4230,7 +4251,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 // a further click doesn't rewrite it, it sets the OPTIONAL
                 // trailing correction instead - collapsing back to the
                 // bare 2-token form when the clicked direction IS "U"
-                // (would otherwise be a rejected no-op correction).
+                // (would otherwise be a rejected no-op correction). A
+                // freshly-seeded "U" (nothing clicked yet for THIS cell)
+                // carries a trailing "?" marking it as not yet a
+                // deliberate choice (see validatePlace's own docs) - any
+                // further click, confirming or correcting, drops it.
                 const [prevCell] = args;
                 let dir: Orientation | undefined;
                 if (prevCell !== undefined) {
@@ -4240,7 +4265,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (prevCell !== undefined && dir !== undefined) {
                     newmove = dir === "U" ? `place ${prevCell} U` : `place ${prevCell} U ${dir}`;
                 } else {
-                    newmove = `place ${cell} U`;
+                    newmove = `place ${cell} U?`;
                 }
             } else if (head === "orient") {
                 // Same click-to-orient model as "place" above, but relative
@@ -4425,11 +4450,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Fresh click, nothing placed yet - place is the only legal
                 // start, and needs no button. The facing is always written
                 // out explicitly (see validatePlace's own mandatory-token
-                // docs), defaulting to "U" - already genuinely complete
-                // (see resolveTrailingOrientation's own docs), so
-                // validatePlace's own generic message is left to show
-                // through rather than overridden here.
-                newmove = `place ${cell} U`;
+                // docs), defaulting to "U" - not yet a deliberate choice
+                // (the trailing "?" - see validatePlace's own docs), so
+                // validatePlace's own generic message/complete:0 are left
+                // to show through rather than overridden here.
+                newmove = `place ${cell} U?`;
             } else {
                 // No mode chosen yet (or an unrecognized one) and pieces
                 // already exist - board clicks are genuinely ambiguous
@@ -4764,7 +4789,11 @@ export class GnosticaGame extends GameBaseSequenced {
     // something this function needs to guard against, same as every other
     // legality check that stays validatePlace's job.
     private cmdPlace(args: string[]): void {
-        const [cellStr, orientationStr, correctionStr] = args;
+        const [cellStr, orientationToken, correctionStr] = args;
+        // A trailing "?" (still-prepopulated, not yet a deliberate choice
+        // - see validatePlace's own docs) makes no difference to the
+        // actual piece created; strip it the same way here.
+        const orientationStr = orientationToken?.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
         const orientation = this.parseOrientation(correctionStr ?? orientationStr);
         const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
         let territory = this.board.get(x, y);
@@ -4782,7 +4811,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validatePlace(parsed: IParsedMove): IValidationResult {
-        const [cellStr, orientationStr, correctionStr] = parsed.rest;
+        const [cellStr, orientationToken, correctionStr] = parsed.rest;
         if (cellStr === undefined) {
             return this.invalid("apgames:validation.gnostica.PLACE_CELL_REQUIRED");
         }
@@ -4800,14 +4829,26 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A default orientation is provided in the click flow,
         // but may be missing from a hand-typed move.
-        if (orientationStr === undefined) {
+        if (orientationToken === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_DIRECTION_REQUIRED") };
         }
+        // A trailing "?" marks the click flow's own seeded default as not
+        // yet a deliberate choice - genuinely complete:0 (submittable,
+        // but still soft), computed here directly rather than via
+        // provisionalResult's blanket click-result downgrade, so a
+        // hand-typed "place l0 U" (never carries "?") is correctly
+        // complete:1, the deliberate choice it is. Meaningless once a
+        // correction is also present (the correction is itself always a
+        // deliberate act, see resolveTrailingOrientation's own docs) -
+        // and dropped entirely from the real, persisted move string the
+        // instant a turn is actually committed (see move()'s own docs).
+        const prepopulated = orientationToken.endsWith("?") && correctionStr === undefined;
+        const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
         const resolved = this.resolveTrailingOrientation(orientationStr, correctionStr);
         if ("key" in resolved) {
             return this.invalid(`apgames:validation.gnostica.${resolved.key}`, resolved.params);
         }
-        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        return { valid: true, complete: prepopulated ? 0 : 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // "orient <pieceRef> <facing>" - only your own piece. Legality (args
@@ -6517,9 +6558,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
                 if (orientationStr !== undefined) {
-                    const orientation = this.tryParseOrientation(orientationStr);
-                    if (orientation === undefined) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                    const parsed = this.parseOrientationOrFail(orientationStr);
+                    if ("key" in parsed) {
+                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
                     }
                     // Same "never reorient an existing minion for free"
                     // principle as validateOrient/validateOrientMinion/
@@ -6529,8 +6570,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     // anyway - see its own docs), so it's rejected the
                     // same hard way, not silently accepted.
                     const currentPiece = this.board.get(target.x, target.y)!.pieces[target.index];
-                    if (currentPiece.owner === this.currplayer && orientation === currentPiece.orientation) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+                    const noOp = currentPiece.owner === this.currplayer
+                        ? this.checkOrientationChanges(currentPiece.orientation, parsed.orientation)
+                        : undefined;
+                    if (noOp) {
+                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
                     }
                 }
                 const failure = checkMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, opts);
@@ -6620,14 +6664,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const target = targetResult.ref;
                 if (orientationStr !== undefined) {
-                    const orientation = this.tryParseOrientation(orientationStr);
-                    if (orientation === undefined) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                    const parsed = this.parseOrientationOrFail(orientationStr);
+                    if ("key" in parsed) {
+                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
                     }
                     // See validateRods' own matching docs.
                     const currentPiece = this.board.get(target.x, target.y)!.pieces[target.index];
-                    if (currentPiece.owner === this.currplayer && orientation === currentPiece.orientation) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+                    const noOp = currentPiece.owner === this.currplayer
+                        ? this.checkOrientationChanges(currentPiece.orientation, parsed.orientation)
+                        : undefined;
+                    if (noOp) {
+                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
                     }
                 }
                 const failure = checkGrowPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index);
@@ -6729,14 +6776,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
                 if (orientationStr !== undefined) {
-                    const orientation = this.tryParseOrientation(orientationStr);
-                    if (orientation === undefined) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                    const parsed = this.parseOrientationOrFail(orientationStr);
+                    if ("key" in parsed) {
+                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
                     }
                     // See validateRods' own matching docs.
                     const currentPiece = this.board.get(target.x, target.y)!.pieces[target.index];
-                    if (currentPiece.owner === this.currplayer && orientation === currentPiece.orientation) {
-                        return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+                    const noOp = currentPiece.owner === this.currplayer
+                        ? this.checkOrientationChanges(currentPiece.orientation, parsed.orientation)
+                        : undefined;
+                    if (noOp) {
+                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
                     }
                 }
                 const failure = checkAttackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, opts);
@@ -6789,9 +6839,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     public validateOrientMinion(minion: IMinionRef, rest: string[]): StepValidation {
         const [orientationStr] = rest;
-        const orientation = this.tryParseOrientation(orientationStr);
-        if (orientation === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+        const parsed = this.parseOrientationOrFail(orientationStr);
+        if ("key" in parsed) {
+            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
         }
         const failure = checkOrientMinion(this.buildPowerContext(), minion.x, minion.y, minion.index);
         if (failure) {
@@ -6806,8 +6856,10 @@ export class GnosticaGame extends GameBaseSequenced {
         // handleOrientAnyOrHierophantClick's own default-seed docs) - a
         // same-facing answer reaching here is always a genuine, avoidable
         // player choice, never an unavoidable click-flow artifact.
-        if (orientation === this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+        const currentOrientation = this.board.get(minion.x, minion.y)!.pieces[minion.index].orientation;
+        const noOp = this.checkOrientationChanges(currentOrientation, parsed.orientation);
+        if (noOp) {
+            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
         }
         return { failed: false, outcome: { newMinion: minion, replacesMinion: minion } };
     }
@@ -6833,9 +6885,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
-        const orientation = this.tryParseOrientation(orientationStr);
-        if (orientation === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+        const parsed = this.parseOrientationOrFail(orientationStr);
+        if ("key" in parsed) {
+            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
         }
         const failure = checkOrientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
@@ -6847,8 +6899,10 @@ export class GnosticaGame extends GameBaseSequenced {
         // fixed to never itself produce this (see its docs), so a
         // same-facing answer reaching here is always a genuine, avoidable
         // choice.
-        if (orientation === this.board.get(target.x, target.y)!.pieces[target.index].orientation) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
+        const currentOrientation = this.board.get(target.x, target.y)!.pieces[target.index].orientation;
+        const noOp = this.checkOrientationChanges(currentOrientation, parsed.orientation);
+        if (noOp) {
+            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
         }
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         return owner === this.currplayer ? { failed: false, outcome: { newMinion: target, replacesMinion: target } } : { failed: false };
@@ -6877,8 +6931,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
-        if (this.tryParseOrientation(orientationStr) === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+        const parsed = this.parseOrientationOrFail(orientationStr);
+        if ("key" in parsed) {
+            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
         }
         const failure = checkHierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {

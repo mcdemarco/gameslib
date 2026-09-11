@@ -1677,14 +1677,17 @@ describe("Gnostica: handleClick", () => {
         const [row, col] = rowColFor(g, 0, 0); // "m0"
         const result = g.handleClick("", row, col);
         expect(result.valid).to.be.true;
-        expect(result.move).eq("place m0 U");
+        expect(result.move).eq("place m0 U?"); // "?" - seeded default, not yet a deliberate choice
     });
 
-    // A bare "place <cell>" is already grammatically complete (orientation
-    // defaults to "U"), so validateMove() alone would mark it complete:1 -
-    // but handleClick has to downgrade that to 0, or the interface would
-    // auto-submit "U" on the very first click, before the player ever gets
-    // a chance to click again and cycle to a real facing.
+    // A bare "place <cell> U?" is already grammatically complete
+    // (orientation defaults to "U"), but the trailing "?" tells
+    // validatePlace itself that it's still merely a seeded default, not
+    // yet a deliberate choice (see its own docs) - complete:0 straight
+    // from validateMove, no click-time downgrade needed. Without it, the
+    // interface would auto-submit "U" on the very first click, before the
+    // player ever gets a chance to click again and cycle to a real
+    // facing.
     it("place: the first click is never auto-submittable - complete stays 0 even though the move is already valid", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 0, 0);
@@ -1741,7 +1744,7 @@ describe("Gnostica: handleClick", () => {
         const [rowFar, colFar] = rowColFor(g, 2, 0); // "o0", two cells east - not adjacent to m0
         const far = g.handleClick(first.move, rowFar, colFar);
         expect(far.valid).to.be.true;
-        expect(far.move).eq("place o0 U");
+        expect(far.move).eq("place o0 U?"); // a fresh restart - seeded default again
     });
 
     it("place: a void neighbour is a valid orientation target too", () => {
@@ -1756,11 +1759,33 @@ describe("Gnostica: handleClick", () => {
         expect(g.board.classify(3, 1)).eq("void");
         const [row, col] = rowColFor(g, 2, 1);
         const first = g.handleClick("", row, col);
-        expect(first.move).eq(`place ${placeCell} U`);
+        expect(first.move).eq(`place ${placeCell} U?`);
         const [rowVoid, colVoid] = rowColFor(g, 3, 1);
         const east = g.handleClick(first.move, rowVoid, colVoid);
         expect(east.valid).to.be.true;
         expect(east.move).eq(`place ${placeCell} U E`);
+    });
+
+    // A hand-typed "place l0 U" never carries "?" at all - it's the
+    // player's own deliberate choice, genuinely complete:1, unlike the
+    // click flow's own seeded default.
+    it("place: a hand-typed facing (no \"?\") is genuinely complete, not provisional", () => {
+        const g = new GnosticaGame(2);
+        const result = g.validateMove("place m0 U");
+        expect(result.valid).to.be.true;
+        expect(result.complete).eq(1);
+    });
+
+    // The "?" is purely a UI/completeness marker - a real (non-partial)
+    // commit still works with it present, creates the piece correctly,
+    // and drops it from the persisted move string.
+    it("place: submitting a still-\"?\"-marked move works, and the \"?\" is dropped from the persisted move", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0 U?", { trusted: true });
+        const t = g.board.get(0, 0)!;
+        expect(t.pieces.length).eq(1);
+        expect(t.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "U" });
+        expect(g.lastmove).eq("place m0 U");
     });
 
     it("orient: clicking your own piece (with pieces already on the board/and Orient chosen) starts an orient move", () => {
@@ -3405,17 +3430,18 @@ describe("Gnostica: click-to-orient messaging", () => {
 
     // Place's own facing is now the same mandatory-plus-optional-trailing-
     // correction shape Cups "own" uses (see resolveTrailingOrientation's
-    // own docs) - the mandatory "U" alone already makes the move
-    // genuinely complete (matching Cups "own"'s own precedent), so
-    // there's no separate "still adjustable" state to soft-pedal here
-    // anymore; validatePlace's own generic VALID_MOVE message is the
-    // whole story, click or hand-typed alike.
-    it("place: the very first click is already a genuinely complete, generically-worded move", () => {
+    // own docs), with one addition: a freshly-seeded "U" carries a
+    // trailing "?" (still merely prepopulated, not a deliberate choice -
+    // see validatePlace's own docs), so there's no separate "still
+    // adjustable" MESSAGE to soft-pedal here anymore - the generic
+    // VALID_MOVE is the whole story regardless of complete's own value.
+    it("place: the very first click is already valid, generically-worded, and genuinely marked provisional", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("", row, col);
         expect(result.valid).to.be.true;
-        expect(result.move).eq("place m0 U");
+        expect(result.move).eq("place m0 U?");
+        expect(result.complete).eq(0);
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
     });
 
