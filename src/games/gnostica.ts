@@ -6007,16 +6007,16 @@ export class GnosticaGame extends GameBaseSequenced {
             if (borrowedPower === undefined) {
                 return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "WORLD_BORROW_REQUIRED" }) };
             }
-            const failure = this.validateWorldChoosePower(borrowedPower);
-            if (failure) {
-                return { failed: true, result: failure };
+            const worldResult = this.validateWorldChoosePower(borrowedPower);
+            if (!worldResult.valid) {
+                return { failed: true, result: worldResult };
             }
             return { failed: false, outcome: { pushFrame: { cardUid: borrowedPower, minions } } };
         }
         if ("special" in step && step.special === "highPriestess") {
-            const failure = this.validateHighPriestess(tokens);
-            if (failure) {
-                return { failed: true, result: failure };
+            const hpResult = this.validateHighPriestess(tokens);
+            if (!hpResult.valid) {
+                return { failed: true, result: hpResult };
             }
             return { failed: false, outcome: { forcePause: stepIndex + 1 < totalSteps } };
         }
@@ -6094,8 +6094,8 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tradeHands":
                 return this.validateTradeHands(minion, rest);
             case "judgementDraw": {
-                const failure = this.validateJudgementDraw(minion, rest);
-                return failure !== undefined ? { failed: true, result: failure } : { failed: false };
+                const jResult = this.validateJudgementDraw(minion, rest);
+                return jResult.valid ? { failed: false } : { failed: true, result: jResult };
             }
             case "magicianChoice":
                 return this.validateMagicianChoice(minion, rest);
@@ -6879,9 +6879,9 @@ export class GnosticaGame extends GameBaseSequenced {
         this.results.push({ type: "deckDraw", count: rest.length, from: "discard" });
     }
 
-    public validateJudgementDraw(minion: IMinionRef, rest: string[]): IValidationResult | undefined {
+    public validateJudgementDraw(minion: IMinionRef, rest: string[]): IValidationResult {
         const failure = checkJudgementDraw(this.buildPowerContext(), minion.x, minion.y, minion.index, rest);
-        return failure ? this.failureResult(failure) : undefined;
+        return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // High Priestess: <discardUid...> [draw <n>] - no minion reference at
@@ -6902,20 +6902,20 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    public validateHighPriestess(tokens: string[]): IValidationResult | undefined {
+    public validateHighPriestess(tokens: string[]): IValidationResult {
         const drawIdx = tokens.indexOf("draw");
         const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
         const drawCountStr = drawIdx === -1 ? undefined : tokens[drawIdx + 1];
         const failure = checkHighPriestess(this.buildPowerContext(), discardUids, drawCountStr);
-        return failure ? this.failureResult(failure) : undefined;
+        return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // World: <chosenUid> - the minionRef itself is already stripped/
     // resolved by applyPowerStep's own pre-switch logic, same as every
     // other special.
-    private validateWorldChoosePower(chosenUid: string): IValidationResult | undefined {
+    private validateWorldChoosePower(chosenUid: string): IValidationResult {
         const failure = checkWorldChoosePower(this.buildPowerContext(), chosenUid);
-        return failure ? this.failureResult(failure) : undefined;
+        return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // Magician: <minionRef> <suitLetter: C|R|D|S> <mode> <args...> - the

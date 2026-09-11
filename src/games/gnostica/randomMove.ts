@@ -694,8 +694,7 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
         const maxDraw = Math.min(piece.size, Math.max(0, 6 - hand.length));
         const count = Math.floor(Math.random() * (maxDraw + 1));
         const uids = (shuffle([...game.discardPile]) as string[]).slice(0, count);
-        const failure = game.validateJudgementDraw(minion, uids);
-        if (failure === undefined) {
+        if (game.validateJudgementDraw(minion, uids).valid) {
             const ref = game.pieceRefStr(minion.x, minion.y, minion.index, minions);
             return [ref, ...uids];
         }
@@ -709,8 +708,7 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
 function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
     const hand = game.hands[game.currplayer - 1];
     const discards = hand.filter(() => Math.random() < 0.3);
-    const failure = game.validateHighPriestess(discards);
-    return failure === undefined ? discards : [];
+    return game.validateHighPriestess(discards).valid ? discards : [];
 }
 
 // Once a suit is chosen, magicianChoice's own step IS an ordinary
