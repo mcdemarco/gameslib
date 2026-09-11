@@ -1648,16 +1648,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return { minion: pool[0], ambiguous: true, candidates: pool };
     }
 
-    // Builds a click result from a move string: runs it through
-    // validateMove() and attaches it as .move, optionally overriding the
-    // message with a friendlier click-time instruction. Every validate*
-    // function in this file computes its own complete value directly and
-    // correctly - "a turn is never complete while more refinement remains
-    // genuinely possible, complete:0, whether clicked or hand-typed"
-    // (matching Magnate's own identical rule) is handled by the validate
-    // layer itself (see validateFrameStack's/validateOrient's own docs),
-    // not guessed here after the fact - so there's nothing left for this
-    // to second-guess.
+    // Wraps validateMove(), which already computes complete correctly per head.
     private provisionalResult(newmove: string, messageKey?: string, messageParams?: Record<string, unknown>): IClickResult {
         const result = this.validateMove(newmove) as IClickResult;
         result.move = newmove;
@@ -4955,12 +4946,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (orientation === piece.orientation) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
-        // The player can always click a different neighbour to reconsider
-        // - matches Magnate's own "a turn is never complete, only
-        // submissible" rule: genuinely complete:0, not 1, computed
-        // directly here rather than guessed at click time, the same
-        // whether this exact string was clicked-and-confirmed or
-        // hand-typed.
+        // Facing can always be redirected to a different neighbour, so this is never complete:1.
         return { valid: true, complete: 0, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
@@ -5895,15 +5881,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         const key = top.viaFool === true ? "apgames:validation.gnostica.PENDING_POWER_CHOICE" : "apgames:validation.gnostica.CHOOSE_STEP";
                         return { valid: true, complete: -1, message: i18next.t(key, { card: cardName }) };
                     }
-                    // A genuinely optional further step remains available
-                    // (this frame isn't exhausted) - matches Magnate's own
-                    // "a turn is never complete, only submissible" rule:
-                    // unconditionally complete:0 whenever more could still
-                    // be added, the same fact for a click or a hand-typed
-                    // move alike, computed directly from the frame's own
-                    // state - no marker needed, the same way an outright
-                    // incomplete step already needs none (its own missing
-                    // tokens already say so).
+                    // Frame not exhausted: a further step is still optional, so complete:0.
                     return {
                         valid: true,
                         complete: 0,
