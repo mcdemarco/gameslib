@@ -3445,8 +3445,18 @@ export class GnosticaGame extends GameBaseSequenced {
     // minion is chosen later, from the borrowed card's frame.
     private handleWorldChooseClick(pending: IPendingStep, x: number, y: number): IClickResult | undefined {
         const t = this.board.get(x, y);
-        if (t?.card === undefined || !t.card.major || t.card.uid === "21") {
-            return undefined;
+        if (t?.card === undefined) {
+            return undefined; // not a card cell at all - not this handler's click
+        }
+        // A card cell, but the wrong kind: a World target pick IS in
+        // progress here, so say what's actually needed rather than falling
+        // through to the generic "start a fresh use here" path (which would
+        // complain about a missing minion on that other territory).
+        if (t.card.uid === "21") {
+            return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.WORLD_SELF_REFERENCE") };
+        }
+        if (!t.card.major) {
+            return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET") };
         }
         return this.provisionalResult(this.describePendingMove({ ...pending, asUid: t.card.uid }, pending.priorSteps.map(s => s.split(/\s+/))));
     }

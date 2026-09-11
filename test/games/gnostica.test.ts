@@ -5118,6 +5118,18 @@ describe("Gnostica: Fool and World", () => {
         expect(buttonLabel(preview2, "use")).eq(`Use Territory (${major(6).uid})`);
     });
 
+    it("clicking a minor arcana territory while picking World's target gives the 'choose a major' hint, not a stale no-minion complaint", () => {
+        const g = setupWorldLovers();
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [rowM, colM] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, rowM, colM); // use 21
+        const [rowA, colA] = rowColFor(g, 1, 0); // the Ace of Discs
+        const minorClick = g.handleClick(cellClick.move, rowA, colA);
+        expect(minorClick.valid).to.be.false;
+        expect(minorClick.message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
+        expect(minorClick.move).eq(cellClick.move); // move string unchanged - no silent switch to "use AR"
+    });
+
     it("World rejects a self-reference and an off-board target; declining its own power outright needs a trusted caller (#49, same as any other major)", () => {
         const selfRef = new GnosticaGame(2);
         forceCardAt(selfRef, 0, 0, () => theWorld());
