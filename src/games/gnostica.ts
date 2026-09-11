@@ -1648,13 +1648,10 @@ export class GnosticaGame extends GameBaseSequenced {
         return { minion: pool[0], ambiguous: true, candidates: pool };
     }
 
-    // Wraps validateMove(), which already computes complete correctly per head.
-    private provisionalResult(newmove: string, messageKey?: string, messageParams?: Record<string, unknown>): IClickResult {
+    // Wraps validateMove(), which already computes complete and message correctly per head.
+    private provisionalResult(newmove: string): IClickResult {
         const result = this.validateMove(newmove) as IClickResult;
         result.move = newmove;
-        if (messageKey !== undefined && result.valid) {
-            result.message = i18next.t(messageKey, messageParams);
-        }
         return result;
     }
 
@@ -3453,10 +3450,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
-        return this.provisionalResult(
-            this.assembleStepMove(pending, [minionRef, dir]),
-            "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE",
-        );
+        return this.provisionalResult(this.assembleStepMove(pending, [minionRef, dir]));
     }
 
     // tradeHands: <minionRef> <targetRef> - a single self-or-facing-cell
@@ -3508,10 +3502,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // three are expected is "incomplete" per stepShapes.ts's own
             // fixedArity check, so this is already tolerated as still
             // building, not an error - see validatePowerStep's own docs.
-            return this.provisionalResult(
-                this.assembleStepMove(pending, [minionRef, targetResult]),
-                "apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT",
-            );
+            return this.provisionalResult(this.assembleStepMove(pending, [minionRef, targetResult]));
         }
         const targetRef = pending.rest[0];
         const targetResolution = this.resolvePieceRef(targetRef);
@@ -3522,10 +3513,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (dir === undefined) {
             return undefined;
         }
-        return this.provisionalResult(
-            this.assembleStepMove(pending, [minionRef, targetRef, dir]),
-            "apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE",
-        );
+        return this.provisionalResult(this.assembleStepMove(pending, [minionRef, targetRef, dir]));
     }
 
     // hermitTeleport: `piece <minionRef> piece <targetRef> <destCell>
@@ -3901,26 +3889,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     // Picking a count always completes this step (highPriestess's
                     // own shape check in stepShapes.ts is unconditional -
-                    // any token count is "complete enough" - but the count
-                    // itself is the one thing every submission needs) -
-                    // unlike the
-                    // generic "Looks like a valid move" fallback, tell the
-                    // player what submitting actually does: forces a pause
-                    // for a SECOND round (see applyPowerStep's own docs) if
-                    // this is the first, or ends the whole activation if
-                    // it's the second - same stepIndex-from-pendingPower
-                    // derivation as the resume_power case above, so this
-                    // stays correct even for a High Priestess reached via a
-                    // push (Fool's reveal, World's borrow), not just a
-                    // direct "use"/"play".
-                    const resumeStack = this.resumeStack();
-                    const stepIndex = resumeStack !== undefined
-                        ? resumeStack[resumeStack.length - 1].nextStepIndex
-                        : 0;
-                    const messageKey = stepIndex > 0
-                        ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"
-                        : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1_READY";
-                    return this.provisionalResult(this.assembleStepMove(pending, [...pending.rest, "draw", n]), messageKey);
+                    // any token count is "complete enough") - validateFrameStack's
+                    // own message already says what submitting actually
+                    // does: forces a pause for a SECOND round if this is
+                    // the first, or ends the whole activation if it's the
+                    // second (forcePauseReadyMessage/hpFinalRoundReady).
+                    return this.provisionalResult(this.assembleStepMove(pending, [...pending.rest, "draw", n]));
                 }
                 switch (value) {
                     case "pass":
@@ -5763,6 +5737,27 @@ export class GnosticaGame extends GameBaseSequenced {
         // Decline, not a silently-skipped one (see DECLINE_THEN_AUTO_DRAW's
         // own use of this, further down).
         let justDeclined = false;
+        // Set once High Priestess's own final round completes without a
+        // forcePause (nothing left to auto-continue into) - forcePause's
+        // own readyMsg branch below already covers round 1 (it DOES
+        // force a pause), this is the one completion forcePauseReadyMessage
+        // never gets a chance to run for. Read only at the `top ===
+        // undefined` exit right below - if anything else gets exposed
+        // and processed first (e.g. an outer Fool frame's own next flip),
+        // that flow's own message takes over instead, same as
+        // DECLINE_THEN_AUTO_DRAW's own poppedViaDecline flag.
+        let hpFinalRoundReady: { key: string; params?: Record<string, unknown> } | undefined;
+        // Overwritten (not just set) on EVERY successful step completion
+        // below, to whatever that step's own nature says - "last write
+        // wins" is enough here, no separate capture/reset dance like
+        // justDeclined needs, since it's read at the SAME two spots
+        // (both exits below) that a completion always leads into next.
+        // True only right after orientMinion/orientAny/hierophantReplace's
+        // own step succeeds - the facing it just set can always still be
+        // redirected, matching the standalone "orient" command's own
+        // unconditional complete:0/DIRECTION_STILL_ADJUSTABLE (see
+        // validateOrient's own docs).
+        let stillAdjustableFacing = false;
         for (;;) {
             const top = stack[stack.length - 1];
             const poppedViaDecline = justDeclined;
@@ -5770,6 +5765,12 @@ export class GnosticaGame extends GameBaseSequenced {
             if (top === undefined) {
                 if (i < stepSegments.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
+                }
+                if (hpFinalRoundReady !== undefined) {
+                    return { valid: true, complete: 1, message: i18next.t(hpFinalRoundReady.key, hpFinalRoundReady.params) };
+                }
+                if (stillAdjustableFacing) {
+                    return { valid: true, complete: 1, message: i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE") };
                 }
                 return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
             }
@@ -5842,7 +5843,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     return {
                         valid: true,
                         complete: 0,
-                        message: i18next.t("apgames:validation._general.VALID_MOVE"),
+                        message: stillAdjustableFacing
+                            ? i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE")
+                            : i18next.t("apgames:validation._general.VALID_MOVE"),
                     };
                 }
                 tokens = stepSegments[i];
@@ -5881,6 +5884,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (i >= stepSegments.length) {
                     if (this.isMinionCellStillNarrowing(tokens[0], top.minions)) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
+                    }
+                    // orientAny/hierophantReplace's own target is already
+                    // chosen (2 tokens) but its facing isn't yet - the
+                    // generic powerStepMessageKey narrowing below still
+                    // reads as "pick a target" (CHOOSE_STEP_FACING), wrong
+                    // once past that stage; name the real next click.
+                    if ("special" in step && (step.special === "orientAny" || step.special === "hierophantReplace") && tokens.length >= 2) {
+                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
                     }
                     const msg = this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions);
                     return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
@@ -5928,6 +5939,11 @@ export class GnosticaGame extends GameBaseSequenced {
             const minionsForReplay = top.minions;
             top.minions = GnosticaGame.chainMinion(top.minions, stepResult.outcome ?? {});
             top.nextStepIndex++;
+            if ("special" in step && step.special === "highPriestess" && top.nextStepIndex >= frameDef.powers.length) {
+                hpFinalRoundReady = this.forcePauseReadyMessage(top.cardUid, stepIndex);
+            }
+            stillAdjustableFacing = "special" in step
+                && (step.special === "orientMinion" || step.special === "orientAny" || step.special === "hierophantReplace");
             if (stepResult.outcome?.pushFrame !== undefined) {
                 stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions, viaFool: stepResult.outcome.pushFrame.viaFool === true });
             }

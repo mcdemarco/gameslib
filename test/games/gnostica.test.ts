@@ -4130,6 +4130,13 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const result = g.handleClick(cellClick.move, rowE, colE);
         expect(result.move).eq(`use ${major(3).uid}/m0.1 E`);
         expect(result.valid).to.be.true;
+        // Step 1 (orientMinion) is complete, but its own facing can still
+        // be redirected, AND step 2 (create) is still genuinely optional -
+        // either way, DIRECTION_STILL_ADJUSTABLE, computed directly by
+        // validateMove() now, not just click.
+        expect(result.complete).eq(0);
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
+        expect(g.validateMove(result.move).message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
         g.move(result.move, { trusted: true }); // skips step 2 (create)
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("E");
         expect(g.currplayer).eq(2);
@@ -4191,10 +4198,21 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(step1.move).eq(`use ${major(15).uid}/m0.1 n0.1`); // target chosen, no facing yet
         expect(step1.valid).to.be.true;
         expect(step1.complete).eq(-1);
+        // Target already picked - the message must name the TARGET's own
+        // facing as what's still needed, not the generic "pick a target"
+        // wording (see validateFrameStack's own PICK_DIRECTION_TO_ORIENT
+        // docs) - computed directly by validateMove() now, not just click.
+        expect(step1.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
+        expect(g.validateMove(step1.move).message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
         const [rowO, colO] = rowColFor(g, 2, 0); // o0, east of n0 (the target)
         const step2 = g.handleClick(step1.move, rowO, colO);
         expect(step2.move).eq(`use ${major(15).uid}/m0.1 n0.1 E`);
         expect(step2.valid).to.be.true;
+        // Already complete, but the facing can still be redirected - same
+        // wording (and same direct computation) as the standalone "orient"
+        // command's own DIRECTION_STILL_ADJUSTABLE.
+        expect(step2.message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
+        expect(g.validateMove(step2.move).message).eq(i18next.t("apgames:validation.gnostica.DIRECTION_STILL_ADJUSTABLE"));
         g.move(step2.move, { trusted: true }); // skips steps 2 & 3
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1, orientation: "E" });
         expect(g.currplayer).eq(2);
@@ -4423,6 +4441,11 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
         const round2Draw = g.handleClick(resumed.move, -1, -1, "_btn_hpdraw_0");
         expect(round2Draw.message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
+
+        // Same message, computed directly by validateFrameStack itself now -
+        // a hand-typed round 2 submission gets it without ever going
+        // through the click handler above.
+        expect(g.validateMove(round2Draw.move).message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
     });
 
     // Clicking a "Draw N" button early, then going back to discard ANOTHER
