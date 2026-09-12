@@ -2004,6 +2004,28 @@ describe("Gnostica: handleClick", () => {
         expect(passed.valid).to.be.false;
     });
 
+    // Once lastTurner wraps back around to the declarer's own next turn
+    // (see move()'s own docs on that check), they never re-declare - the
+    // turn either wins outright or reopens the announcement window
+    // (lastTurner reset to undefined). Declaring again mid-cycle, before
+    // that wrap, is exactly as illegal for the declarer as for anyone
+    // else (randomMove()'s own canAnnounce and buildTopLevelBar() both
+    // used to wrongly treat "lastTurner === currplayer" as still
+    // eligible).
+    it("does not offer (or accept) a re-declare from the player who is already the declarer", () => {
+        const g = new GnosticaGame(3);
+        g.move("place m0 U", { trusted: true }); // player 1
+        g.move("place l0 U", { trusted: true }); // player 2
+        g.move("place n0 U", { trusted: true }); // player 3, back to player 1
+        g.lastTurner = g.currplayer;
+        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        expect(bar!.buttons!.map(b => b.value)).to.not.include("declare");
+        const check = g.validateMove("discard (last)");
+        expect(check.valid).to.be.false;
+        expect(check.message).eq(i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
+    });
+
     it("shows only a single, bold Place button with no pieces on the board yet", () => {
         const g = new GnosticaGame(2);
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
@@ -4803,15 +4825,49 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:MOVE.gnostica_rod_piece_own", { player: "Alice", what: "1", from: "m0", to: "n0" }));
     });
 
-    it("place (Cups enemy): names whose stash the copy came from", () => {
+    it("place (Cups enemy): names whose own stash the new piece came from", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place n0 W", { trusted: true }); // player 2, on the targeted cell
         g.move(`use ${aceOfCups().uid}/m0.1 enemy n0 1`, { trusted: true });
         const log = g.chatLog(["Alice", "Bob"]);
-        const line = log.flat().find(l => l.includes("copy of"));
-        expect(line).eq(i18next.t("apresults:PLACE.gnostica_enemy_target", { player: "Alice", where: "n0", target: "Bob" }));
+        const line = log.flat().find(l => l.includes("added a new piece"));
+        expect(line).eq(i18next.t("apresults:PLACE.gnostica_enemy", { player: "Alice", where: "n0", target: "Bob" }));
+    });
+
+    // Regression: neither checkCreateOwn nor checkCreateEnemy verified the
+    // relevant player's own stash had a small left before createOwn/
+    // createEnemy's own takeFromStash call ran - an empty stash reached
+    // validateMove() with no complaint at all, only to THROW a raw,
+    // internal GnosticaRulesError once a real (or even untrusted, properly
+    // routed-through-validation) commit actually tried to apply it.
+    it("Cups (own): validateMove() itself rejects when the acting player's own stash is empty", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place l0 U", { trusted: true }); // player 2
+        g.stashes.get(1)![0] = 0; // drain player 1's own smalls
+        const validated = g.validateMove(`use ${aceOfCups().uid}/m0.1 own n0 U`);
+        expect(validated.valid).to.be.false;
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { player: 1, size: 1 }));
+        // An untrusted commit still throws (same as any other illegal move -
+        // see every other ".to.throw()" case in this file) - the fix is
+        // that validateMove() above already caught it, not that move()
+        // silently succeeds.
+        expect(() => g.move(`use ${aceOfCups().uid}/m0.1 own n0 U`, { trusted: false })).to.throw();
+    });
+
+    it("Cups (enemy): validateMove() itself rejects when the TARGETED enemy's own stash is empty", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place n0 W", { trusted: true }); // player 2, on the targeted cell
+        g.stashes.get(2)![0] = 0; // drain player 2's (the victim's) own smalls
+        const validated = g.validateMove(`use ${aceOfCups().uid}/m0.1 enemy n0 1`);
+        expect(validated.valid).to.be.false;
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { player: 2, size: 1 }));
+        expect(() => g.move(`use ${aceOfCups().uid}/m0.1 enemy n0 1`, { trusted: false })).to.throw();
     });
 
     it("convert (Hierophant replace): names whose piece was displaced", () => {
@@ -5008,6 +5064,29 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         const validated = g.validateMove(`decline ${major(2).uid} (via ${major(2).uid})`);
         expect(validated.valid).to.be.false;
         expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.NOTHING_TO_DECLINE"));
+    });
+
+    // Regression: buildViaMove's own High Priestess branch used to put its
+    // tokens in stepSegments instead of rest, which pickleMove rendered as
+    // a bogus "discard/draw 0"-shaped spelling that resumeStepSegments
+    // (reading rest, not stepSegments, for this exact case) couldn't
+    // recognize - silently no-opping the resume forever instead of
+    // resolving it. This is the same construction the click UI's own
+    // continuedSeedMoveString/getActionButtons use, so a real discard-uid
+    // resume built via the click path (not hand-typed) is covered here.
+    it("buildViaMove's own High Priestess resume round-trips through validateMove/move cleanly", () => {
+        const g = setupHP();
+        g.hands[0] = ["2C", "5C", "AR"];
+        g.move(`use ${major(2).uid}/5C`, { trusted: true });
+        expect(g.continued).to.deep.equal(["02.1"]);
+
+        const built = g.buildViaMove([["AR", "draw", "1"]]);
+        expect(built).to.eq(`discard AR draw 1 (via ${major(2).uid})`);
+        expect(g.validateMove(built).valid).to.be.true;
+        expect(() => g.move(built, { trusted: false })).to.not.throw();
+        expect(g.continued).to.be.empty;
+        expect(g.currplayer).eq(2);
+        expect(g.hands[0]).to.not.include("AR");
     });
 });
 
@@ -5879,6 +5958,51 @@ describe("Gnostica: Fool and World", () => {
         expect(targetClick.move).eq(`play ${theWorld().uid} as ${major(1).uid} (via ${major(0).uid})`);
     });
 
+    // Regression: World's own frame push (isWorldStep, tokens=[]) used to
+    // run before the decline-check ever got a look at the segment, so a
+    // genuine decline of a Fool-revealed World silently fell through to
+    // validating World's own step instead and failed with
+    // WORLD_BORROW_REQUIRED. Declining a Fool-revealed World must work
+    // exactly like declining any other Fool-revealed card.
+    it("declining a Fool-revealed World auto-continues into Fool's own mandatory second flip", () => {
+        const g = setupFool();
+        pluckCard(g, theWorld().uid);
+        g.drawPile.unshift(theWorld().uid);
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
+
+        const declined = g.validateMove(`decline (via ${major(0).uid})`);
+        expect(declined.valid).to.be.true;
+        expect(declined.complete).eq(1);
+        g.move(`decline (via ${major(0).uid})`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.2"]); // Fool's own mandatory second flip
+        expect(g.discardPile).to.include(theWorld().uid);
+    });
+
+    // Regression: only the ROOT card's own untouched first flip is
+    // mandatory (playing/using Fool commits you to it) - a NESTED
+    // self-reveal (Fool flipping to reveal another Fool) is declinable
+    // exactly like any other revealed card, ending the cascade without
+    // triggering a further flip from IT, while the outer Fool's own
+    // still-owed second flip fires regardless (never optional itself).
+    it("Fool revealing Fool offers the ordinary Use/Decline pair, and declining it auto-continues the outer Fool's own mandatory second flip", () => {
+        const g = setupFool();
+        pluckCard(g, major(0).uid);
+        g.drawPile.unshift(major(0).uid); // Fool's own first flip reveals another Fool
+        g.move(`use ${major(0).uid}`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
+        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power"]);
+
+        pluckCard(g, "AC");
+        g.drawPile.unshift("AC"); // the outer's own mandatory second flip, once it fires
+        const validated = g.validateMove(`decline (via ${major(0).uid})`);
+        expect(validated.valid).to.be.true;
+        expect(validated.complete).eq(1);
+        g.move(`decline (via ${major(0).uid})`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.2"]);
+        expect(g.discardPile).to.include.members(["00", "AC"]);
+    });
+
     // Regression: Fool -> Hanged Man -> (Rods "piece" mode relocates the
     // acting minion) -> tradeHands auto-skips (no enemy) -> Fool's own
     // mandatory second flip reveals World, ALL in one submission (the
@@ -5982,9 +6106,19 @@ describe("Gnostica: Fool and World", () => {
 
         expect(g.validateMove(`decline (via ${major(2).uid})`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "ACTION_NOT_ALLOWED" }));
         const move = g.randomMove();
-        expect(move).eq(`discard/draw 0 (via ${major(2).uid})`);
+        // No slash: buildViaMove's own High Priestess branch used to put
+        // its tokens in stepSegments instead of rest, which pickleMove
+        // then rendered as a bogus "discard/draw 0" - a spelling
+        // resumeStepSegments (which reads rest, not stepSegments, for
+        // this exact case) couldn't recognize at all, silently no-opping
+        // the resume forever instead of resolving it (this.continued
+        // never cleared, so the same player got asked again and again -
+        // reproduced live from a stuck game's own saved state).
+        expect(move).eq(`discard draw 0 (via ${major(2).uid})`);
         expect(g.validateMove(move).valid).to.be.true;
         expect(() => g.move(move, { trusted: true })).to.not.throw();
+        expect(g.continued).to.be.empty; // the obligation actually resolved...
+        expect(g.currplayer).eq(2); // ...and the turn actually advanced
     });
 
     it("regression: Judgement can draw itself back from the discard pile", () => {

@@ -221,6 +221,9 @@ export const checkCreateOwn = (
     if (!opts.ignoreCapacity && pieceCount >= 3) {
         return { key: "CELL_FULL" };
     }
+    if (!hasStashAvailable(ctx, ctx.currplayer, 1)) {
+        return { key: "STASH_EMPTY", params: { player: ctx.currplayer, size: 1 } };
+    }
     return undefined;
 };
 
@@ -252,11 +255,11 @@ export const checkCreateEnemy = (
     if (ownErr) return ownErr;
     const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
     if (targetErr) return targetErr;
-    // A genuinely void cell can never legitimately have a piece to copy
-    // (a real victim already rules this out below), but check explicitly
-    // anyway - see checkCreateOwn's own docs on why creation, unlike
-    // movement, has no other cleanup path for a piece stranded in the
-    // void.
+    // A genuinely void cell can never legitimately have a victim piece
+    // there (a real victim already rules this out below), but check
+    // explicitly anyway - see checkCreateOwn's own docs on why creation,
+    // unlike movement, has no other cleanup path for a piece stranded in
+    // the void.
     if (ctx.board.classify(targetX, targetY) === "void") {
         return { key: "TARGET_IS_VOID" };
     }
@@ -270,6 +273,9 @@ export const checkCreateEnemy = (
     }
     if (!opts.ignoreCapacity && (t?.pieces.length ?? 0) >= 3) {
         return { key: "CELL_FULL" };
+    }
+    if (!hasStashAvailable(ctx, victim.owner, 1)) {
+        return { key: "STASH_EMPTY", params: { player: victim.owner, size: 1 } };
     }
     return undefined;
 };

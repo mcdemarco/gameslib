@@ -70,9 +70,9 @@ export function generateRandomMove(game: GnosticaGame): string {
     if (game.continued.length > 0) {
         const activeUid = game.continued[game.continued.length - 1].split(".")[0];
         if (activeUid === "02") {
-            return game.pickleMove(game.buildViaMove([["draw", "0"]]));
+            return game.buildViaMove([["draw", "0"]]);
         }
-        return game.pickleMove(game.buildViaMove([["decline"]]));
+        return game.buildViaMove([["decline"]]);
     }
     if (game.phase === "bidding") {
         const hand = game.hands[game.currplayer - 1];
@@ -87,17 +87,15 @@ export function generateRandomMove(game: GnosticaGame): string {
         return randomPlaceMove(game);
     }
     // Once eligible to declare (own score already at/above target, and
-    // nobody else has an active declaration pending - see move()'s own
-    // ALREADY_ANNOUNCED gate), sometimes append the "(last)" suffix to
-    // whatever move is about to be returned. Without this, a game
-    // played purely by randomMove() could never actually end -
-    // gameover/winner/elimination are only ever decided inside
-    // resolveAnnouncedTurn(), which itself only runs on the turn
-    // following a real declaration (see its own docs). Not unconditional
-    // even once eligible - a real player might wait for a wider safety
-    // margin first, same as this file's own "prefer, don't require"
-    // weighting elsewhere.
-    const canAnnounce = (game.lastTurner === undefined || game.lastTurner === game.currplayer)
+    // nobody has an active declaration pending at all - move()'s own
+    // ALREADY_ANNOUNCED gate rejects a second announceLast even by the
+    // same player who's already the declarer), sometimes append the
+    // "(last)" suffix to whatever move is about to be returned. Without
+    // this, a game played purely by randomMove() could never actually
+    // end. Not unconditional even once eligible - a real player might
+    // wait for a wider safety margin first, same as this file's own
+    // "prefer, don't require" weighting elsewhere.
+    const canAnnounce = game.lastTurner === undefined
         && game.scoreFor(game.currplayer) >= game.targetScore();
     const announce = canAnnounce && Math.random() < 0.25;
     // "discard" is always unconditionally legal once the player has

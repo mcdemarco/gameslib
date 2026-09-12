@@ -1327,36 +1327,45 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.discardPile[this.discardPile.length - 1];
     }
 
-    // The one place that assembles a resumed move's descriptive front -
-    // every "resume seed" call site below shares this instead of hand-
-    // rolling the verb/parenthetical itself. "decline" gives the active
-    // obligation up; "discard" is a High Priestess round (its step IS a
-    // discard/draw - see describePendingMove); "play <revealed card>" is a
-    // Fool reveal - the revealed card named as the head arg, the Fool
-    // itself demoted into "(via 00)".
-    public buildViaMove(stepSegments: string[][], asUid?: string): IParsedMove {
+    // The one place that assembles a resumed move's own move STRING
+    // directly - every "resume seed" call site below shares this instead
+    // of hand-rolling the verb/parenthetical itself, and none of them
+    // want anything but the string (every call site immediately submits
+    // or previews it - see e.g. continuedSeedMoveString), so this returns
+    // one directly rather than an IParsedMove a caller would just pickle
+    // right back into the same string a line later. "decline" gives the
+    // active obligation up; "discard" is a High Priestess round (its step
+    // IS a discard/draw - see describePendingMove); "play <revealed
+    // card>" is a Fool reveal - the revealed card named as the head arg,
+    // the Fool itself demoted into "(via 00)".
+    public buildViaMove(stepSegments: string[][], asUid?: string): string {
         const activeUid = this.getContinuedUid()!;
         const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
         // "decline" is a bare head - it carries no step segments (unlike a
         // mid-chain "/decline", it IS the whole submission).
         const steps = declining ? [] : stepSegments;
+        // Assembled as plain words, matching exactly what a player would
+        // type by hand, rather than as an IParsedMove struct guessing
+        // which field (rest vs stepSegments) each head expects - that
+        // guess is parseMove's own job once this string is actually
+        // submitted, and used to also be re-decided independently here,
+        // where it could (and did, for High Priestess) drift from what
+        // resumeStepSegments actually reads back.
+        let raw: string;
         if (activeUid === "02") {
-            return { announceLast: false, head: declining ? "decline" : "discard", headRecognized: true, rest: [], viaUid: "02", stepSegments: steps, malformedStep: undefined };
+            const tokens = steps.length > 0 ? steps[0] : [];
+            raw = declining ? "decline" : ["discard", ...tokens].join(" ");
+        } else {
+            // Unlike High Priestess (where "(via 02)" already names the
+            // one thing being declined), a Fool decline still names the
+            // REVEALED card ("decline AC (via 00)") - "(via 00)" only
+            // ever names the Fool itself, not what it revealed.
+            const revealed = this.activeCardUid();
+            const headWords = [declining ? "decline" : "play", ...(revealed !== undefined ? [revealed] : []),
+                ...(!declining && asUid !== undefined ? ["as", asUid] : [])];
+            raw = [headWords.join(" "), ...steps.map(s => s.join(" "))].join("/");
         }
-        const revealed = this.activeCardUid();
-        return {
-            announceLast: false,
-            head: declining ? "decline" : "play",
-            headRecognized: true,
-            rest: revealed !== undefined ? [revealed] : [],
-            viaUid: "00",
-            stepSegments: steps,
-            malformedStep: undefined,
-            // A revealed meta-card's borrow choice ("play 21 as 09 (via
-            // 00)") carries in the head, not as a step segment - so the
-            // seed rebuild has to be told it separately.
-            asUid: declining ? undefined : asUid,
-        };
+        return `${raw} (via ${activeUid})`;
     }
 
     // Builds the move string computeActionButtons()'s own pendingMinor
@@ -1368,7 +1377,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private continuedSeedMoveString(): string {
         const forThisObligation = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid();
         const segments = forThisObligation ? this.resumeStepSegments(this.liveMove!) : [];
-        return this.pickleMove(this.buildViaMove(segments, forThisObligation ? this.liveMove!.asUid : undefined));
+        return this.buildViaMove(segments, forThisObligation ? this.liveMove!.asUid : undefined);
     }
 
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
@@ -2094,18 +2103,15 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const declareBtn = topLevel.find(b => b.value === "declare");
 
-        // Fool's own step has nothing to configure at all - no target,
-        // no mode - so there's nothing for a real button bar to offer
-        // for it. Before anything's been clicked this turn, that means
-        // the ORIGINAL explicit Use/Decline pair (mirroring
-        // FOOL_FLIP_READY's own "just submit" messaging) is the only
-        // sensible thing to show. Once something HAS been clicked
-        // (liveMove set) and Fool's own step is STILL what's active,
-        // that can only mean an earlier click declined whatever a flip
-        // revealed and Fool auto-continued past it (see walkFrameStack's
-        // own docs) - nothing more to show beyond the plain top-level
-        // context; getActionButtons()'s own persisting-Decline wrapper
-        // is what actually keeps a real choice visible there.
+        // pendingMinor.special === "fool" here means the pushed frame
+        // currently active IS Fool's own card (Fool flipped and revealed
+        // ANOTHER Fool - the only way this branch is ever reached; an
+        // ordinary revealed card's own step type shows up here instead -
+        // see buildPendingFromContinued's own docs). Only the ROOT card's
+        // own untouched first flip is mandatory (playing Fool commits you
+        // to it); a nested self-reveal is declinable exactly like any
+        // other revealed card, ending the cascade without triggering yet
+        // another flip - hence the ordinary Use/Decline pair here too.
         if (pendingMinor.special === "fool") {
             if (this.liveMove === undefined) {
                 return this.pausedPowerButtons();
@@ -2203,7 +2209,7 @@ export class GnosticaGame extends GameBaseSequenced {
             { label: "Discard/Draw", value: "discard" },
             { label: "Pass", value: "pass" },
         ];
-        if (this.lastTurner === undefined || this.lastTurner === this.currplayer) {
+        if (this.lastTurner === undefined) {
             topLevel.push({ label: "(Declare)", value: "declare" });
         }
         const highlighted = this.highlightedButtonValues();
@@ -3745,7 +3751,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // one-off seeding further down, just applied uniformly here so
             // every OTHER handler doesn't have to duplicate it.
             if (this.continued.length > 0 && this.parseMove(move).head === undefined) {
-                move = this.pickleMove(this.buildViaMove([]));
+                move = this.buildViaMove([]);
             }
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
@@ -3955,7 +3961,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (this.continued.length === 0) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        const seeded = this.pickleMove(this.buildViaMove([]));
+                        const seeded = this.buildViaMove([]);
                         // Routed through provisionalResult (rather than a
                         // hardcoded complete:-1) because a resumed Fool
                         // flip is ALREADY complete via synthesizeFoolStep -
@@ -3978,7 +3984,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         // commit instead of pausing (see walkFrameStack's
                         // own docs); validateFrameStack's own message
                         // already names that outcome plainly.
-                        return this.provisionalResult(this.pickleMove(this.buildViaMove([["decline"]])));
+                        return this.provisionalResult(this.buildViaMove([["decline"]]));
                     }
                     case "random":
                         // Only ever offered for Wheel of Fortune's own
@@ -5513,6 +5519,29 @@ export class GnosticaGame extends GameBaseSequenced {
             const step = frameDef.powers[top.nextStepIndex];
             const isFoolStep = "special" in step && step.special === "fool";
             const isWorldStep = "special" in step && step.special === "worldUseAny";
+            // See validateFrameStack's own identical check for why this
+            // has to run before isWorldStep/isFoolStep would otherwise
+            // force `tokens = []` and never even look at it - a
+            // Fool-revealed World (or a nested Fool-revealed Fool) is
+            // exactly as declinable as any other revealed card.
+            if (i < stepSegments.length && stepSegments[i].length === 1 && stepSegments[i][0].toLowerCase() === "decline") {
+                i++;
+                // A pure decline moves nothing on the board, but it's
+                // still a real, deliberate turn action - log it (via
+                // "announce", reused from the bidding turn-order case -
+                // see chatLog()'s own docs) so a turn that ends right
+                // here doesn't vanish from the log entirely.
+                this.results.push({ type: "announce", payload: ["decline", top.cardUid] });
+                GnosticaGame.popFrame(stack);
+                // Popping can expose an ALREADY-exhausted frame directly
+                // beneath (a parent whose own single step already ran, but
+                // whose push left it buried under the very frame just
+                // declined - e.g. World's own 1-step frame, still sitting
+                // under whatever it pushed) - cascade the same as every
+                // other pop site, rather than leaving it stranded.
+                GnosticaGame.popExhaustedFrames(this, stack);
+                continue;
+            }
             let tokens: string[];
             if (isWorldStep) {
                 // The borrowed card is named up front ("as <uid>"), never
@@ -5554,23 +5583,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 tokens = stepSegments[i];
                 i++;
-                if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                    // A pure decline moves nothing on the board, but it's
-                    // still a real, deliberate turn action - log it (via
-                    // "announce", reused from the bidding turn-order case -
-                    // see chatLog()'s own docs) so a turn that ends right
-                    // here doesn't vanish from the log entirely.
-                    this.results.push({ type: "announce", payload: ["decline", top.cardUid] });
-                    GnosticaGame.popFrame(stack);
-                    // Popping can expose an ALREADY-exhausted frame directly
-                    // beneath (a parent whose own single step already ran, but
-                    // whose push left it buried under the very frame just
-                    // declined - e.g. World's own 1-step frame, still sitting
-                    // under whatever it pushed) - cascade the same as every
-                    // other pop site, rather than leaving it stranded.
-                    GnosticaGame.popExhaustedFrames(this, stack);
-                    continue;
-                }
                 if ("special" in step && step.special === "magicianChoice" && borrowed !== undefined) {
                     // "as <suit>" splices back in as the suit-letter token
                     // applyMagicianChoice/SPECIAL_STEP_SHAPES still expect.
@@ -5809,6 +5821,32 @@ export class GnosticaGame extends GameBaseSequenced {
             // docs on why the ROOT's own untouched first flip is the one
             // case that stays a hard rejection.
             const isFreshRootFool = isFoolStep && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
+            // A "decline" segment (only ever produced by resumeStepSegments,
+            // for a genuine resume - see parseMove's own malformedStep
+            // docs on why a hand-typed chain segment can never spell this)
+            // always addresses the frame ITSELF, walking away from the
+            // whole reveal - checked here, before isWorldStep/isFoolStep
+            // would otherwise force `tokens = []` and never even look at
+            // it, so a Fool-revealed World (or a nested Fool-revealed
+            // Fool) is exactly as declinable as any other revealed card.
+            // Only the ROOT card's own untouched first flip is mandatory
+            // (playing Fool commits you to it) - but that flip is never
+            // itself paused/resumable (see "Fool's own root activation
+            // needs no button"), so isFreshRootFool can't actually be true
+            // here regardless.
+            if (i < stepSegments.length && stepSegments[i].length === 1 && stepSegments[i][0].toLowerCase() === "decline") {
+                i++;
+                GnosticaGame.popFrame(stack);
+                // Popping can expose an already-exhausted buried frame
+                // (e.g. World's own spent 1-step frame), which a later
+                // segment (if any) must not be validated against.
+                GnosticaGame.popExhaustedFrames(this, stack);
+                if (i < stepSegments.length) {
+                    clone ??= this.cloneLive();
+                }
+                justDeclined = true;
+                continue;
+            }
             let tokens: string[];
             if (isWorldStep) {
                 tokens = []; // the borrowed card is named "as <uid>" in the head
@@ -5874,23 +5912,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 tokens = stepSegments[i];
                 i++;
-                if (tokens.length === 1 && tokens[0].toLowerCase() === "decline") {
-                    // Only ever the "decline" head, translated to this token
-                    // by resumeStepSegments - so it always addresses a
-                    // Fool/HP obligation frame, never a World borrow (which
-                    // isn't declinable and can't reach here anyway, since a
-                    // bare "decline" segment is no longer a valid shape).
-                    GnosticaGame.popFrame(stack);
-                    // Popping can expose an already-exhausted buried frame
-                    // (e.g. World's own spent 1-step frame), which a later
-                    // segment (if any) must not be validated against.
-                    GnosticaGame.popExhaustedFrames(this, stack);
-                    if (i < stepSegments.length) {
-                        clone ??= this.cloneLive();
-                    }
-                    justDeclined = true;
-                    continue;
-                }
                 if ("special" in step && step.special === "magicianChoice" && borrowed !== undefined) {
                     tokens = [tokens[0], borrowed, ...tokens.slice(1)];
                     borrowed = undefined;
@@ -6368,7 +6389,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const victimOwner = this.board.get(tx, ty)!.pieces[victimIndex].owner;
                 createEnemy(ctx, minion.x, minion.y, minion.index, tx, ty, victimIndex, opts);
                 this.results.push({ type: "place", where: cellStr, how: "cups-enemy", who: victimOwner });
-                return {}; // the new piece belongs to the copied enemy, not the acting player
+                return {}; // the new piece belongs to the targeted enemy, not the acting player
             }
             case "new": {
                 const [cellStr, cardArg] = rest;
@@ -6455,7 +6476,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                return { failed: false }; // the new piece belongs to the copied enemy, not the acting player
+                return { failed: false }; // the new piece belongs to the targeted enemy, not the acting player
             }
             case "new": {
                 const [cellStr, cardArg] = rest;
@@ -8412,10 +8433,10 @@ export class GnosticaGame extends GameBaseSequenced {
                                     node.push(i18next.t("apresults:PLACE.gnostica_own", { player, where: r.where }));
                                     break;
                                 case "cups-enemy": {
-                                    const target = this.otherPlayerName(r.who, player, players);
-                                    node.push(target === undefined
-                                        ? i18next.t("apresults:PLACE.gnostica_enemy", { player, where: r.where })
-                                        : i18next.t("apresults:PLACE.gnostica_enemy_target", { player, where: r.where, target }));
+                                    // "enemy" mode requires a real enemy target (self-targeting
+                                    // is rejected outright), so `who` always names someone else.
+                                    const target = this.otherPlayerName(r.who, player, players) ?? `Player ${r.who}`;
+                                    node.push(i18next.t("apresults:PLACE.gnostica_enemy", { player, where: r.where, target }));
                                     break;
                                 }
                                 case "territory":
