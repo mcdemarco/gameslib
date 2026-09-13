@@ -5405,6 +5405,48 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
+    // The one decision walkFrameStack and validateFrameStack must never
+    // make independently: what KIND of step is currently on top, given
+    // the next not-yet-consumed segment. A decline segment always
+    // overrides world/fool - checked first, since isWorldStep/isFoolStep
+    // would otherwise force `tokens = []` and never even look at it -
+    // both the World-revealed-via-Fool decline bug and the Fool-reveals-
+    // Fool decline-button bug traced to one walker running this check in
+    // a different order (or with a different exclusion) than the other.
+    // Called once, up front, by both - neither one hand-derives
+    // isFoolStep/isWorldStep/decline-detection on its own anymore.
+    private static classifyStep(step: PowerStep, stepSegments: string[][], i: number): "decline" | "world" | "fool" | "step" {
+        if (i < stepSegments.length && stepSegments[i].length === 1 && stepSegments[i][0].toLowerCase() === "decline") {
+            return "decline";
+        }
+        if ("special" in step && step.special === "worldUseAny") {
+            return "world";
+        }
+        if ("special" in step && step.special === "fool") {
+            return "fool";
+        }
+        return "step";
+    }
+
+    // Consumes stepSegments[i] as an ordinary ("step"-kind) step's own
+    // tokens, splicing a pending magicianChoice's own borrowed suit
+    // letter back in (World's own "as <suit>", stripped out of the head
+    // and threaded through as `borrowed`) - shared identically by
+    // walkFrameStack/validateFrameStack, the only two places a step's
+    // tokens are ever derived this way. Only ever called once the caller
+    // has already confirmed `i < stepSegments.length` - what to do when
+    // segments are exhausted differs too fundamentally between a real
+    // commit (silently skip and pop) and validation (report a specific
+    // "still optional"/"doomed" message and stop) to unify here.
+    private static deriveStepTokens(step: PowerStep, stepSegments: string[][], i: number, borrowed: string | undefined): { tokens: string[]; borrowed: string | undefined } {
+        let tokens = stepSegments[i];
+        if ("special" in step && step.special === "magicianChoice" && borrowed !== undefined) {
+            tokens = [tokens[0], borrowed, ...tokens.slice(1)];
+            borrowed = undefined;
+        }
+        return { tokens, borrowed };
+    }
+
     // The engine's one core stack-walker, shared by a fresh use/play
     // activation (applyMajorPower, called with a new single-frame stack)
     // and a resume submission (resumePendingPower, called with the
@@ -5521,14 +5563,8 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             const frameDef = this.resolveFrameDef(top.cardUid);
             const step = frameDef.powers[top.nextStepIndex];
-            const isFoolStep = "special" in step && step.special === "fool";
-            const isWorldStep = "special" in step && step.special === "worldUseAny";
-            // See validateFrameStack's own identical check for why this
-            // has to run before isWorldStep/isFoolStep would otherwise
-            // force `tokens = []` and never even look at it - a
-            // Fool-revealed World (or a nested Fool-revealed Fool) is
-            // exactly as declinable as any other revealed card.
-            if (i < stepSegments.length && stepSegments[i].length === 1 && stepSegments[i][0].toLowerCase() === "decline") {
+            const kind = GnosticaGame.classifyStep(step, stepSegments, i);
+            if (kind === "decline") {
                 i++;
                 // A pure decline moves nothing on the board, but it's
                 // still a real, deliberate turn action - log it (via
@@ -5547,11 +5583,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 continue;
             }
             let tokens: string[];
-            if (isWorldStep) {
+            if (kind === "world") {
                 // The borrowed card is named up front ("as <uid>"), never
                 // as a segment - so this step consumes nothing.
                 tokens = [];
-            } else if (isFoolStep) {
+            } else if (kind === "fool") {
                 if (partial) {
                     // Nothing genuinely happens under a partial preview
                     // (see applyPowerStep's own fool-branch docs) - not
@@ -5578,21 +5614,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     // instead of being left as a separate, unprompted
                     // resume the player has no button for (see
                     // powerStepMessageKey's own docs - Fool's second flip
-                    // is only ever supposed to reach that dedicated
-                    // isFoolStep branch above, never sit here waiting on a
-                    // resume the bar never actually offers a button for).
+                    // is only ever supposed to reach that dedicated "fool"
+                    // kind above, never sit here waiting on a resume the
+                    // bar never actually offers a button for).
                     GnosticaGame.popFrame(stack);
                     GnosticaGame.popExhaustedFrames(this, stack);
                     continue;
                 }
-                tokens = stepSegments[i];
+                const derived = GnosticaGame.deriveStepTokens(step, stepSegments, i, borrowed);
+                tokens = derived.tokens;
+                borrowed = derived.borrowed;
                 i++;
-                if ("special" in step && step.special === "magicianChoice" && borrowed !== undefined) {
-                    // "as <suit>" splices back in as the suit-letter token
-                    // applyMagicianChoice/SPECIAL_STEP_SHAPES still expect.
-                    tokens = [tokens[0], borrowed, ...tokens.slice(1)];
-                    borrowed = undefined;
-                }
             }
             // Snapshot BEFORE every step except the first processed one
             // this call (there's no way to know in advance whether an
@@ -5612,8 +5644,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 });
             }
             const resultsBefore = this.results.length;
-            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial, isWorldStep ? borrowed : undefined);
-            if (isWorldStep) {
+            const outcome = this.applyPowerStep(step, top.minions, tokens, frameDef, top.nextStepIndex, frameDef.powers.length, partial, kind === "world" ? borrowed : undefined);
+            if (kind === "world") {
                 borrowed = undefined;
             }
             if (outcome === undefined) {
@@ -5819,26 +5851,12 @@ export class GnosticaGame extends GameBaseSequenced {
             const frameDef = this.resolveFrameDef(top.cardUid);
             const stepIndex = top.nextStepIndex;
             const step = frameDef.powers[stepIndex];
-            const isFoolStep = "special" in step && step.special === "fool";
-            const isWorldStep = "special" in step && step.special === "worldUseAny";
+            const kind = GnosticaGame.classifyStep(step, stepSegments, i);
             // Mirrors walkFrameStack's own identical computation - see its
             // docs on why the ROOT's own untouched first flip is the one
             // case that stays a hard rejection.
-            const isFreshRootFool = isFoolStep && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
-            // A "decline" segment (only ever produced by resumeStepSegments,
-            // for a genuine resume - see parseMove's own malformedStep
-            // docs on why a hand-typed chain segment can never spell this)
-            // always addresses the frame ITSELF, walking away from the
-            // whole reveal - checked here, before isWorldStep/isFoolStep
-            // would otherwise force `tokens = []` and never even look at
-            // it, so a Fool-revealed World (or a nested Fool-revealed
-            // Fool) is exactly as declinable as any other revealed card.
-            // Only the ROOT card's own untouched first flip is mandatory
-            // (playing Fool commits you to it) - but that flip is never
-            // itself paused/resumable (see "Fool's own root activation
-            // needs no button"), so isFreshRootFool can't actually be true
-            // here regardless.
-            if (i < stepSegments.length && stepSegments[i].length === 1 && stepSegments[i][0].toLowerCase() === "decline") {
+            const isFreshRootFool = kind === "fool" && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
+            if (kind === "decline") {
                 i++;
                 GnosticaGame.popFrame(stack);
                 // Popping can expose an already-exhausted buried frame
@@ -5852,9 +5870,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 continue;
             }
             let tokens: string[];
-            if (isWorldStep) {
+            if (kind === "world") {
                 tokens = []; // the borrowed card is named "as <uid>" in the head
-            } else if (isFoolStep) {
+            } else if (kind === "fool") {
                 tokens = []; // the flip consumes no segment
             } else {
                 if (i >= stepSegments.length) {
@@ -5914,15 +5932,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         message: i18next.t("apgames:validation._general.VALID_MOVE"),
                     };
                 }
-                tokens = stepSegments[i];
+                const derived = GnosticaGame.deriveStepTokens(step, stepSegments, i, borrowed);
+                tokens = derived.tokens;
+                borrowed = derived.borrowed;
                 i++;
-                if ("special" in step && step.special === "magicianChoice" && borrowed !== undefined) {
-                    tokens = [tokens[0], borrowed, ...tokens.slice(1)];
-                    borrowed = undefined;
-                }
             }
-            const borrowedForStep = isWorldStep ? borrowed : undefined;
-            if (isWorldStep) {
+            const borrowedForStep = kind === "world" ? borrowed : undefined;
+            if (kind === "world") {
                 borrowed = undefined;
             }
             const stepResult = (clone ?? this).validatePowerStep(step, top.minions, tokens, frameDef, stepIndex, frameDef.powers.length, isFreshRootFool, borrowedForStep);
