@@ -33,7 +33,15 @@ import { generateRandomMove } from "./gnostica/randomMove";
 import { ALL_SUITS, MINOR_MODES, HERMIT_MODES, primitiveStepShape, SPECIAL_STEP_SHAPES } from "./gnostica/stepShapes";
 import i18next from "i18next";
 
+const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
+
 export type playerid = 1|2|3|4|5|6;
+
+// Major arcana chaining uses frames.  Discards are abbreviated.
+export type FrameState = {
+    board: UnboundedSquareBoard<CellContents>;
+    discardSummary: DiscardSummary;
+};
 
 // One button-bar choice, before its value gets a `<prefix>_` prepended -
 // see buildChoiceButtons' own docs.
@@ -128,7 +136,7 @@ export interface IStepOutcome {
 // validateMajorPower's own loop can tell "this step is done" apart from
 // "this step was merely never rejected outright" for its own tail
 // (mirrors validateMinorPower's identical distinction, made the same way).
-export type StepValidation =
+type StepValidation =
     | { failed: true; result: IValidationResult }
     | { failed: false; complete?: boolean; outcome?: IStepOutcome };
 
@@ -176,28 +184,6 @@ interface IParsedMove {
     // (minion pick, steps) is exactly as if that card/suit were used
     // directly.
     asUid?: string;
-}
-
-// A theme-relative "muted" tone, matching hand_UNKNOWN's own established
-// placeholder colour below - used anywhere a hardcoded grey would
-// otherwise go, e.g. a struck-through/disabled button fill or a "newly
-// added" highlight backdrop. Blends toward _context_strokes specifically
-// (not _context_fill) because that's the colour the rank/suit glyphs
-// drawn ON TOP of this backdrop actually use - keeping the tint a
-// consistent distance from the text sitting on it in both themes, rather
-// than an unrelated fill colour that happens to land close to the real
-// text colour once flattened (as _context_fill did in dark mode).
-const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
-
-// True iff `pile` (hand or discard-pile uids) holds a card worth exactly
-// `value` points - lets minorModeAvailability tell apart a mode whose
-// completion needs a same-valued card the player doesn't hold, instead of
-// only discovering that once they reach the card-pick step.
-function handHasCardOfValue(pile: string[], value: number): boolean {
-    return pile.some(uid => {
-        const c = allCards().find(cc => cc.uid === uid);
-        return c !== undefined && cardPointValue(c) === value;
-    });
 }
 
 // The engine-side view of an in-progress "use"/"play" click sequence -
@@ -305,44 +291,13 @@ interface IPendingStep {
     rest: string[];
 }
 
-// Major arcana chaining (up to 3 power steps, "become a minion when
-// directly targeted", the Strength/Death/Sun/Chariot same-target
-// shortcuts) is fully supported at the engine level (applyMajorPower/
-// validateMajorPower, driven by a hand-typed move string) - what's still
-// missing is click support for each `special` power's own bespoke
-// argument shape (orientMinion, orientAny, hierophantReplace,
-// hermitTeleport, tradeHands, judgementDraw, highPriestess,
-// magicianChoice); a card's `primitive` steps chain through the exact
-// same click machinery a minor arcana card's own single step already
-// uses - see IPendingStep/parsePendingStep. See docs on `move()` below.
-// One snapshot of state per completed step of a 2+-step major-arcana
-// chain (see applyMajorPower's own docs on when/how these get pushed) -
-// only fields renderFrame() itself actually draws directly from, not a
-// full state snapshot. `results` is NOT a field here - per-frame
-// annotations are handled via `_group`-wrapping this.results itself (see
-// applyMajorPower/render's own docs), not by duplicating results into
-// each frame. `drawPile`/`stashes`/`hands` are excluded entirely -
-// renderFrame() never builds a draw-pile, stash, or hand area at all for
-// a historical frame (see its own docs), so there's nothing for those to
-// feed. `discardSummary` is the one exception: the discard area IS shown
-// per-frame (it's always public, unlike a hand), but only ever needs
-// the abbreviated form buildAreaFromSummary() consumes - individual
-// major uids plus per-(suit, spot/royal) minor counts, exactly what the
-// area itself displays - not the raw uid list buildDeckSummaryArea()
-// needs for the live view's own "just discarded" tinting, which a fixed
-// historical snapshot has no equivalent concept for anyway.
-export type FrameState = {
-    board: UnboundedSquareBoard<CellContents>;
-    discardSummary: DiscardSummary;
-};
-
 // The discard/draw-pile summary areas both ever show only two kinds of
 // information - an individual major arcana card's own uid, or a per-suit,
 // per-(spot|royal) minor arcana COUNT (see buildDeckSummaryArea's own
 // docs on why minors are never shown individually) - so this is a
 // lossless-for-display abbreviation of a raw uid list, small enough to
 // store directly in a FrameState entry instead of the full list.
-export interface DiscardSummary {
+interface DiscardSummary {
     majorUids: string[];
     counts: Map<string, number>;
 }
@@ -3049,6 +3004,13 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return result;
+
+        function handHasCardOfValue(pile: string[], value: number): boolean {
+            return pile.some(uid => {
+                const c = allCards().find(cc => cc.uid === uid);
+                return c !== undefined && cardPointValue(c) === value;
+            });
+        }
     }
 
 
