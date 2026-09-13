@@ -8306,7 +8306,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                 break;
                             }
                             if (r.payload[0] === "declore") {
-                                node.push(i18next.t("apresults:ANNOUNCE.gnostica_declore", { player: name, count: this.cardDisplayName(r.payload[1] as string) }));
+                                node.push(i18next.t("apresults:ANNOUNCE.gnostica_declore", { player: name, count: r.payload[1] as number }));
                                 break;
                             }
                             const nameFor = (p: number): string => p <= players.length ? players[p - 1] : `Player ${p}`;
