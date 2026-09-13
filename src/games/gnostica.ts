@@ -937,11 +937,16 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
         }
+
         m = m.trim();
-        if (!trusted) {
+
+        if (! trusted) {
             const result = this.validateMove(m);
-            if (!result.valid) {
+            if (! result.valid) {
                 throw new UserFacingError("VALIDATION_GENERAL", result.message);
+            }
+            if (! partial && ( result.complete === undefined || result.complete < 0) ) {
+                throw new UserFacingError("VALIDATION_GENERAL", result.message)
             }
         }
 
@@ -1105,6 +1110,7 @@ export class GnosticaGame extends GameBaseSequenced {
         } else {
             // Only on a real end-of-turn do we check the last turn announcement.
             if (this.lastTurner === this.currplayer) {
+                this.results.push({ type: "announce", payload: ["declore", this.getPlayerScore(this.currplayer)] });
                 if (this.scoreFor(this.currplayer) >= this.targetScore()) {
                     this.gameover = true;
                     this.winner = [this.currplayer];
@@ -8277,9 +8283,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (otherPlayer < 1) {
                     otherPlayer = this.numplayers;
                 }
-                let player = `Player ${otherPlayer}`;
+                let name = `Player ${otherPlayer}`;
                 if (otherPlayer <= players.length) {
-                    player = players[otherPlayer - 1];
+                    name = players[otherPlayer - 1];
                 }
                 // Frames for multi-step major arcana moves have _group entries
                 // to frames - flatten here so this loop logs one line per
@@ -8296,7 +8302,11 @@ export class GnosticaGame extends GameBaseSequenced {
                             // own docs) - tagged by payload[0] since
                             // "announce" carries no type of its own.
                             if (r.payload[0] === "decline") {
-                                node.push(i18next.t("apresults:ANNOUNCE.gnostica_decline", { player, card: this.cardDisplayName(r.payload[1] as string) }));
+                                node.push(i18next.t("apresults:ANNOUNCE.gnostica_decline", { player: name, card: this.cardDisplayName(r.payload[1] as string) }));
+                                break;
+                            }
+                            if (r.payload[0] === "declore") {
+                                node.push(i18next.t("apresults:ANNOUNCE.gnostica_declore", { player: name, count: this.cardDisplayName(r.payload[1] as string) }));
                                 break;
                             }
                             const nameFor = (p: number): string => p <= players.length ? players[p - 1] : `Player ${p}`;
@@ -8306,67 +8316,67 @@ export class GnosticaGame extends GameBaseSequenced {
                             break;
                         }
                         case "swap": {
-                            const target = this.otherPlayerName(r.who as number, player, players) ?? `Player ${r.who}`;
-                            node.push(i18next.t("apresults:SWAP.gnostica", { player, target }));
+                            const target = this.otherPlayerName(r.who as number, name, players) ?? `Player ${r.who}`;
+                            node.push(i18next.t("apresults:SWAP.gnostica", { player: name, target }));
                             break;
                         }
                         case "select":
-                            node.push(i18next.t("apresults:SELECT.gnostica", { player }));
+                            node.push(i18next.t("apresults:SELECT.gnostica", { player: name }));
                             break;
                         case "deckDraw":
                             switch (r.from) {
                                 case "pool":
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_pool", { player, what: this.cardDisplayNames(r.what ?? "") }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_pool", { player: name, what: this.cardDisplayNames(r.what ?? "") }));
                                     break;
                                 case "discard":
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_discard", { player, count: r.count }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_discard", { player: name, count: r.count }));
                                     break;
                                 case "deck":
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_deck", { player, count: r.count }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_deck", { player: name, count: r.count }));
                                     break;
                                 case "hand":
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_hand", { player, what: this.cardDisplayName(r.what) }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_hand", { player: name, what: this.cardDisplayName(r.what) }));
                                     break;
                                 case "fool": {
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_fool", { player, what: this.cardDisplayName(r.what) }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_fool", { player: name, what: this.cardDisplayName(r.what) }));
                                     break;
                                 }
                             }
                             break;
                         case "declare":
-                            node.push(i18next.t("apresults:DECLARE.gnostica", { player, count: r.count }));
+                            node.push(i18next.t("apresults:DECLARE.gnostica", { player: name, count: r.count }));
                             break;
                         case "orient": {
                             // The Devil's orientAny can reorient any player's
                             // piece; every other orient path only ever turns
                             // the acting player's own.
-                            const target = this.otherPlayerName(r.who, player, players);
+                            const target = this.otherPlayerName(r.who, name, players);
                             node.push(target === undefined
-                                ? i18next.t("apresults:ORIENT.gnostica_own", { player, where: r.where, what: r.what, facing: r.facing })
-                                : i18next.t("apresults:ORIENT.gnostica_target", { player, where: r.where, what: r.what, facing: r.facing, target }));
+                                ? i18next.t("apresults:ORIENT.gnostica_own", { player: name, where: r.where, what: r.what, facing: r.facing })
+                                : i18next.t("apresults:ORIENT.gnostica_target", { player: name, where: r.where, what: r.what, facing: r.facing, target }));
                             break;
                         }
                         case "use":
                             if (r.count && r.count === 21) {
-                                node.push(i18next.t("apresults:USE.gnostica_world", { player, what: this.cardDisplayName(r.what) }));
+                                node.push(i18next.t("apresults:USE.gnostica_world", { player: name, what: this.cardDisplayName(r.what) }));
                             } else
-                                node.push(i18next.t("apresults:USE.gnostica", { player, what: this.cardDisplayName(r.what) }));
+                                node.push(i18next.t("apresults:USE.gnostica", { player: name, what: this.cardDisplayName(r.what) }));
                             break;
                         case "pass":
                             node.push(r.why === "eliminated"
-                                ? i18next.t("apresults:PASS.gnostica_eliminated", { player })
-                                : i18next.t("apresults:PASS.gnostica_bids", { player }));
+                                ? i18next.t("apresults:PASS.gnostica_eliminated", { player: name })
+                                : i18next.t("apresults:PASS.gnostica_bids", { player: name }));
                             break;
                         case "destroy":
                             if (r.who !== undefined) {
                                 //Someone's minion.
-                                const target = this.otherPlayerName(r.who, player, players);
+                                const target = this.otherPlayerName(r.who, name, players);
                                 node.push(target === undefined
-                                    ? i18next.t("apresults:DESTROY.gnostica_piece_own", { player, what: r.what })
-                                    : i18next.t("apresults:DESTROY.gnostica_piece", { player, what: r.what, target }));
+                                    ? i18next.t("apresults:DESTROY.gnostica_piece_own", { player: name, what: r.what })
+                                    : i18next.t("apresults:DESTROY.gnostica_piece", { player: name, what: r.what, target }));
                             } else {
                                 //A territory.
-                                node.push(i18next.t("apresults:DESTROY.gnostica_tile", { player, where: r.where, what: this.cardDisplayName(r.what) }));
+                                node.push(i18next.t("apresults:DESTROY.gnostica_tile", { player: name, where: r.where, what: this.cardDisplayName(r.what) }));
                             }
                             break;
                         case "move": {
@@ -8376,56 +8386,56 @@ export class GnosticaGame extends GameBaseSequenced {
                             // - no owner restriction on the target) - name
                             // whose it was, same _own/target split as
                             // "destroy".
-                            const target = this.otherPlayerName(r.who, player, players);
+                            const target = this.otherPlayerName(r.who, name, players);
                             switch (r.how) {
                                 case "rod-piece":
                                     node.push(target === undefined
-                                        ? i18next.t("apresults:MOVE.gnostica_rod_piece_own", { player, what: r.what, from: r.from, to: r.to })
-                                        : i18next.t("apresults:MOVE.gnostica_rod_piece", { player, what: r.what, from: r.from, to: r.to, target }));
+                                        ? i18next.t("apresults:MOVE.gnostica_rod_piece_own", { player: name, what: r.what, from: r.from, to: r.to })
+                                        : i18next.t("apresults:MOVE.gnostica_rod_piece", { player: name, what: r.what, from: r.from, to: r.to, target }));
                                     break;
                                 case "rod-tile":
-                                    node.push(i18next.t("apresults:MOVE.gnostica_rod_tile", { player, from: r.from, to: r.to }));
+                                    node.push(i18next.t("apresults:MOVE.gnostica_rod_tile", { player: name, from: r.from, to: r.to }));
                                     break;
                                 case "hermit-piece":
                                     node.push(target === undefined
-                                        ? i18next.t("apresults:MOVE.gnostica_hermit_piece_own", { player, what: r.what, from: r.from, to: r.to })
-                                        : i18next.t("apresults:MOVE.gnostica_hermit_piece", { player, what: r.what, from: r.from, to: r.to, target }));
+                                        ? i18next.t("apresults:MOVE.gnostica_hermit_piece_own", { player: name, what: r.what, from: r.from, to: r.to })
+                                        : i18next.t("apresults:MOVE.gnostica_hermit_piece", { player: name, what: r.what, from: r.from, to: r.to, target }));
                                     break;
                                 case "hermit-tile":
-                                    node.push(i18next.t("apresults:MOVE.gnostica_hermit_tile", { player, from: r.from, to: r.to }));
+                                    node.push(i18next.t("apresults:MOVE.gnostica_hermit_tile", { player: name, from: r.from, to: r.to }));
                                     break;
                                 default:
                                     node.push(r.what === undefined
-                                        ? i18next.t("apresults:MOVE.nowhat", { player, from: r.from, to: r.to })
-                                        : i18next.t("apresults:MOVE.complete_what", { player, what: r.what, from: r.from, to: r.to }));
+                                        ? i18next.t("apresults:MOVE.nowhat", { player: name, from: r.from, to: r.to })
+                                        : i18next.t("apresults:MOVE.complete_what", { player: name, what: r.what, from: r.from, to: r.to }));
                             }
                             break;
                         }
                         case "place":
                             switch (r.how) {
                                 case "cups-own":
-                                    node.push(i18next.t("apresults:PLACE.gnostica_own", { player, where: r.where }));
+                                    node.push(i18next.t("apresults:PLACE.gnostica_own", { player: name, where: r.where }));
                                     break;
                                 case "cups-enemy": {
                                     // "enemy" mode requires a real enemy target (self-targeting
                                     // is rejected outright), so `who` always names someone else.
-                                    const target = this.otherPlayerName(r.who, player, players) ?? `Player ${r.who}`;
-                                    node.push(i18next.t("apresults:PLACE.gnostica_enemy", { player, where: r.where, target }));
+                                    const target = this.otherPlayerName(r.who, name, players) ?? `Player ${r.who}`;
+                                    node.push(i18next.t("apresults:PLACE.gnostica_enemy", { player: name, where: r.where, target }));
                                     break;
                                 }
                                 case "territory":
-                                    node.push(i18next.t("apresults:PLACE.gnostica_territory", { player, where: r.where, what: this.cardDisplayName(r.what) }));
+                                    node.push(i18next.t("apresults:PLACE.gnostica_territory", { player: name, where: r.where, what: this.cardDisplayName(r.what) }));
                                     break;
                                 case "initial":
-                                    node.push(i18next.t("apresults:PLACE.gnostica_initial", { player, where: r.where }));
+                                    node.push(i18next.t("apresults:PLACE.gnostica_initial", { player: name, where: r.where }));
                                     break;
                                 case "discard":
-                                    node.push(i18next.t("apresults:PLACE.gnostica_discard", { player, what: r.what }));
+                                    node.push(i18next.t("apresults:PLACE.gnostica_discard", { player: name, what: r.what }));
                                     break;
                                 default:
                                     node.push(r.what === undefined
-                                        ? i18next.t("apresults:PLACE.nowhat", { player, where: r.where })
-                                        : i18next.t("apresults:PLACE.complete", { player, what: r.what, where: r.where }));
+                                        ? i18next.t("apresults:PLACE.nowhat", { player: name, where: r.where })
+                                        : i18next.t("apresults:PLACE.complete", { player: name, what: r.what, where: r.where }));
                             }
                             break;
                         case "convert":
@@ -8440,21 +8450,21 @@ export class GnosticaGame extends GameBaseSequenced {
                                 // not just the acting player's own - name
                                 // whose, same _own/target split as
                                 // DESTROY's.
-                                const target = this.otherPlayerName(r.who, player, players);
+                                const target = this.otherPlayerName(r.who, name, players);
                                 if (grew) {
                                     node.push(target === undefined
-                                        ? i18next.t("apresults:CONVERT.gnostica_piece_own", { player, into: r.into, where: r.where })
-                                        : i18next.t("apresults:CONVERT.gnostica_piece", { player, into: r.into, where: r.where, target }));
+                                        ? i18next.t("apresults:CONVERT.gnostica_piece_own", { player: name, into: r.into, where: r.where })
+                                        : i18next.t("apresults:CONVERT.gnostica_piece", { player: name, into: r.into, where: r.where, target }));
                                 } else {
                                     node.push(target === undefined
-                                        ? i18next.t("apresults:CONVERT.gnostica_piece_shrink_own", { player, into: r.into, where: r.where })
-                                        : i18next.t("apresults:CONVERT.gnostica_piece_shrink", { player, into: r.into, where: r.where, target }));
+                                        ? i18next.t("apresults:CONVERT.gnostica_piece_shrink_own", { player: name, into: r.into, where: r.where })
+                                        : i18next.t("apresults:CONVERT.gnostica_piece_shrink", { player: name, into: r.into, where: r.where, target }));
                                 }
                             } else if (r.into.startsWith("owner-")) {
-                                const target = this.otherPlayerName(r.who, player, players);
+                                const target = this.otherPlayerName(r.who, name, players);
                                 node.push(target === undefined
-                                    ? i18next.t("apresults:CONVERT.gnostica_hierophant", { player, where: r.where })
-                                    : i18next.t("apresults:CONVERT.gnostica_hierophant_target", { player, where: r.where, target }));
+                                    ? i18next.t("apresults:CONVERT.gnostica_hierophant", { player: name, where: r.where })
+                                    : i18next.t("apresults:CONVERT.gnostica_hierophant_target", { player: name, where: r.where, target }));
                             } else {
                                 // Discs' own grow-replace and Swords' own
                                 // attack-and-replace both land here (same
@@ -8465,7 +8475,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                 const after = allCards().find(c => c.uid === r.into);
                                 const grew = before !== undefined && after !== undefined && cardPointValue(after) > cardPointValue(before);
                                 const key = grew ? "apresults:CONVERT.gnostica_tile" : "apresults:CONVERT.gnostica_tile_shrink";
-                                node.push(i18next.t(key, { player, what: this.cardDisplayName(r.what), into: this.cardDisplayName(r.into), where: r.where }));
+                                node.push(i18next.t(key, { player: name, what: this.cardDisplayName(r.what), into: this.cardDisplayName(r.into), where: r.where }));
                             }
                             break;
                         case "eliminated": {
@@ -8521,4 +8531,3 @@ export class GnosticaGame extends GameBaseSequenced {
         return new GnosticaGame(this.serialize());
     }
 }
-
