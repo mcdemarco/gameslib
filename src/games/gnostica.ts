@@ -978,10 +978,6 @@ export class GnosticaGame extends GameBaseSequenced {
             // optional). Major arcana cards (which can chain up to 3 power
             // steps) aren't supported here yet - see cmdActivate/cmdPlay.
             const parsed = this.parseMove(m);
-            if (parsed.head === undefined || ! parsed.headRecognized ) {
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
-            }
-
             head = parsed.head;
 
             // A genuine cross-turn pause means every legal move right now
@@ -1010,15 +1006,9 @@ export class GnosticaGame extends GameBaseSequenced {
             // it via moves() the instant it's the only legal option, so a
             // human player should never actually see or click a "pass"
             // prompt themselves.
-                if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
-                }
                 this.cmdBid(parsed.rest, partial);
-                
+
             } else if (head === "redraw" || head === "pass") {
-                if (parsed.stepSegments.length > 0 || parsed.announceLast) {
-                    throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head }));
-                }
                 if (head === "redraw") {
                     this.cmdRedraw(parsed.rest, partial);
                 } else {
@@ -1041,11 +1031,13 @@ export class GnosticaGame extends GameBaseSequenced {
                     case "play":
                         residualFrames = this.cmdPlay(parsed.rest[0], parsed.stepSegments, partial, parsed.asUid);
                         break;
-                    default:
-                        // "decline" with nothing pending (the resume gate
-                        // above didn't catch it), or any other recognized
-                        // head that has no business here - a caller bug.
-                        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation._general.INVALID_MOVE", { move: m }));
+                    // "decline" with nothing pending (the resume gate above
+                    // didn't catch it), or any other recognized head that
+                    // has no business here, falls through with no case of
+                    // its own - a caller bug, and not this dispatch's job
+                    // to react to (see this.continued's own identical
+                    // stance just above): validateMove() is the only place
+                    // that decides legality, for a trusted caller too.
                 }
 
                 if (parsed.announceLast) {
