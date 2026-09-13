@@ -61,16 +61,67 @@ export function generateRandomMove(game: GnosticaGame): string {
     }
     // A paused activation obligates this seat before anything else is
     // legal (matches getActionButtons()'s own "only one thing possible
-    // right now" gate) - not real fuzzer-quality coverage of Fool/World's
-    // own decision points (see this file's own class-level docs on why
-    // that's out of scope). High Priestess can't be Declined at all
+    // right now" gate). High Priestess can't be Declined at all
     // (NOTHING_TO_DECLINE - its own round is mandatory, not a revealed
-    // card) - "draw 0" is its own always-legal minimal resume instead,
-    // matching Pass's own bare seed (see buildViaMove's own docs).
+    // card) - round 1's own randomizer, buildRandomHighPriestessResumeTokens,
+    // is reused for round 2 too, since both rounds share the identical
+    // grammar and legality.
     if (game.continued.length > 0) {
         const activeUid = game.continued[game.continued.length - 1].split(".")[0];
         if (activeUid === "02") {
-            return game.buildViaMove([["draw", "0"]]);
+            return game.buildViaMove([buildRandomHighPriestessResumeTokens(game)]);
+        }
+        // A persisted Fool obligation always means an ordinary revealed
+        // card sits on top awaiting a decision (buildPendingFromContinued's
+        // own docs) - sometimes genuinely try to use it instead of always
+        // declining. The player never has to reason about how deep the
+        // reveal is nested - only "what's the card in front of me right
+        // now" - so this reuses the EXACT same per-card logic a fresh
+        // top-level activation uses, Fool/World included, rather than
+        // falling back to decline just because the card happens to be
+        // reached this way: Fool's own step needs no typed input whether
+        // it's a root activation or a nested self-reveal (using it just
+        // means letting it flip again), and World's own borrow-target
+        // pick (randomWorldBorrowUid) works identically regardless of
+        // nesting depth too.
+        const revealedUid = game.discardPile[game.discardPile.length - 1];
+        const revealedCard = revealedUid !== undefined ? allCards().find(c => c.uid === revealedUid) : undefined;
+        // Matches buildRandomChain's own "sometimes skip outright" odds
+        // elsewhere - a real player might just decline a perfectly usable
+        // reveal too, not only an unusable one.
+        if (revealedCard !== undefined && Math.random() >= 0.15) {
+            let candidate: string | undefined;
+            if (revealedCard.uid === "00") {
+                candidate = game.buildViaMove([]);
+            } else if (revealedCard.uid === "21") {
+                const borrowedUid = randomWorldBorrowUid(game);
+                if (borrowedUid !== undefined) {
+                    const borrowedCard = allCards().find(c => c.uid === borrowedUid)!;
+                    const chain = buildRandomChain(game, borrowedCard, game.eligibleMinionsForPlay());
+                    candidate = game.buildViaMove(chain, borrowedUid);
+                }
+            } else {
+                const chain = buildRandomChain(game, revealedCard, game.eligibleMinionsForPlay());
+                if (chain.length > 0) {
+                    candidate = game.buildViaMove(chain);
+                }
+            }
+            if (candidate !== undefined) {
+                const check = game.validateMove(candidate);
+                // Same commit-on-a-clone safety check the top-level loop
+                // below uses (task #45's own class of validate/apply
+                // divergence risk, reachable here too now that a real
+                // chain is being attempted instead of a trivially-always-
+                // legal decline).
+                if (check.valid && check.complete !== -1) {
+                    try {
+                        game.clone().move(candidate, { trusted: false });
+                        return candidate;
+                    } catch {
+                        // fall through to decline below
+                    }
+                }
+            }
         }
         return game.buildViaMove([["decline"]]);
     }
@@ -342,6 +393,9 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
         // weightedPick's own docs) - without ever ruling out a lesser
         // one.
         const { uid, eligible } = weightedPick(onBoard, ({ uid: u }) => cardPointValue(allCards().find(c => c.uid === u)));
+        if (uid === "21") {
+            return buildRandomWorldMove(game, "use", eligible);
+        }
         const card = allCards().find(c => c.uid === uid)!;
         const chain = buildRandomChain(game, card, eligible);
         const steps = chain.map(tokens => tokens.join(" "));
@@ -352,25 +406,62 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
         return undefined;
     }
     const uid = weightedPick(hand, u => cardPointValue(allCards().find(c => c.uid === u)));
-    const card = allCards().find(c => c.uid === uid)!;
     const eligible = game.eligibleMinionsForPlay();
     // cmdPlay removes the played card from hand before resolving its
-    // power (it's spent to fund the ability, same as a discard), so a
-    // chain step that spends a hand card (Cups "new", Discs/Swords
-    // "tile") can't legally reuse this exact uid as its own material.
-    // Temporarily removing it here - restored below regardless of
-    // outcome, since this speculative build must never leave a lasting
-    // side effect on the real hand - makes buildRandomChain's own hand
-    // reads see the same post-play hand a real commit would.
+    // power (it's spent to fund the ability, same as a discard) - true
+    // for World exactly like any other card - so a chain step that spends
+    // a hand card (Cups "new", Discs/Swords "tile") can't legally reuse
+    // this exact uid as its own material. Temporarily removing it here -
+    // restored below regardless of outcome, since this speculative build
+    // must never leave a lasting side effect on the real hand - makes
+    // buildRandomChain's own hand reads see the same post-play hand a
+    // real commit would.
     const handIdx = hand.indexOf(uid);
     hand.splice(handIdx, 1);
     try {
+        if (uid === "21") {
+            return buildRandomWorldMove(game, "play", eligible);
+        }
+        const card = allCards().find(c => c.uid === uid)!;
         const chain = buildRandomChain(game, card, eligible);
         const steps = chain.map(tokens => tokens.join(" "));
         return steps.length === 0 ? `play ${uid}` : `play ${uid}/${steps.join("/")}`;
     } finally {
         hand.splice(handIdx, 0, uid);
     }
+}
+
+// A random legal major arcana uid for World to borrow (excluding itself) -
+// the "as <uid>" head annotation checkWorldChoosePower requires is the
+// ONLY legality rule ("present on the board, not World itself" - see its
+// own docs), so any random pick from the board's own majors is legal by
+// construction. undefined when nothing else is on the board yet - World
+// then has nothing to borrow, matching how it validates for real
+// (WORLD_BORROW_REQUIRED/complete:-1 for a bare "use 21").
+function randomWorldBorrowUid(game: GnosticaGame): string | undefined {
+    const majors: string[] = [];
+    for (const [, , t] of game.board.entries()) {
+        if (t.card !== undefined && t.card.major && t.card.uid !== "21") {
+            majors.push(t.card.uid);
+        }
+    }
+    return majors.length === 0 ? undefined : majors[Math.floor(Math.random() * majors.length)];
+}
+
+// World's own move string: "<head> 21 as <borrowed>[/<steps>]". The
+// borrowed card's own steps are built via buildRandomChain exactly like
+// a fresh activation would build them for itself, using World's own
+// eligible pool - the acting minion World's own step inherits into the
+// pushed frame (see applyPowerStep's own "worldUseAny" case).
+function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible: IMinionRef[]): string | undefined {
+    const borrowedUid = randomWorldBorrowUid(game);
+    if (borrowedUid === undefined) {
+        return undefined;
+    }
+    const borrowedCard = allCards().find(c => c.uid === borrowedUid)!;
+    const chain = buildRandomChain(game, borrowedCard, eligible);
+    const steps = chain.map(tokens => tokens.join(" "));
+    return steps.length === 0 ? `${head} 21 as ${borrowedUid}` : `${head} 21 as ${borrowedUid}/${steps.join("/")}`;
 }
 
 // Every legal target ref for a minion's own "piece"-shaped actions:
@@ -721,6 +812,22 @@ function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
     return game.validateHighPriestess(discards).valid ? discards : [];
 }
 
+// Round 2's own resume, reusing round 1's exact discard-uid randomization
+// above plus the ordinary top-level discard action's own "sometimes name
+// an explicit draw count" behaviour (randomDiscardMove) - both rounds
+// share the identical <discardUid...> [draw <n>] grammar and legality
+// (checkHighPriestess never distinguishes them), so there's nothing
+// round-2-specific left to derive here.
+function buildRandomHighPriestessResumeTokens(game: GnosticaGame): string[] {
+    const discards = buildRandomHighPriestessTokens(game);
+    if (Math.random() < 0.5) {
+        const hand = game.hands[game.currplayer - 1];
+        const maxDraw = Math.max(0, 6 - (hand.length - discards.length));
+        return [...discards, "draw", String(Math.floor(Math.random() * (maxDraw + 1)))];
+    }
+    return discards;
+}
+
 // Once a suit is chosen, magicianChoice's own step IS an ordinary
 // suit-mode step (see buildSpecialPending's own redirect) - reuse
 // findRandomPrimitiveChoice directly rather than re-deriving mode/arg
@@ -797,14 +904,26 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         return result.valid && result.complete === 1 ? [tokens] : [];
     }
     const def = getMajorArcanaDef(card);
-    if (def.uid === "00" || def.uid === "21") {
-        // Fool/World are fully engine-supported now, but this
-        // randomizer only ever skips them - genuinely attempting a
-        // flip/target here is real additional work not justified by
-        // this test-only tool's own scope (see this file's own
-        // class-level docs).
+    if (def.uid === "00") {
+        // Fool's own root step consumes no segment regardless of what's
+        // typed (its flip is mandatory and automatic - see
+        // walkFrameStack's own docs) - there is genuinely nothing to
+        // randomize for a fresh Fool activation itself. This is
+        // independent of the resume case: once Fool's flip has actually
+        // revealed something, generateRandomMove's own continued>0
+        // branch calls back into this SAME function with the revealed
+        // card, which is never "00" again unless Fool reveals itself.
         return [];
     }
+    // World is never reached here directly anymore - randomUseOrPlayMove
+    // redirects a World target to buildRandomWorldMove instead, which
+    // calls this function with the BORROWED card, not World itself (its
+    // own worldUseAny step needs a borrow target named in the move's
+    // head, not a step segment - buildRandomChain has no mechanism for
+    // that). If World's own def somehow does reach here (a caller bug),
+    // buildRandomSpecialStepTokens's own default case already returns
+    // undefined for "worldUseAny", so the loop below still degrades to
+    // the same empty chain it always returned before.
     if (Math.random() < 0.15) {
         return []; // skip outright sometimes, same as minor arcana
     }

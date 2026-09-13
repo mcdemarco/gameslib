@@ -197,6 +197,36 @@ describe("Gnostica: randomMove()", () => {
         // worth knowing - see the coverage test above for the general case.
     });
 
+    // World's own step needs a borrow target named "as <uid>" in the
+    // move's head, not a step segment - randomMove() used to always skip
+    // World entirely rather than build that annotation, so it could never
+    // actually be returned as a move at all (a bare "use 21" validates as
+    // complete:-1, which the top-level loop discards). Confirms World now
+    // genuinely gets chosen and used across enough trials, not just
+    // silently skipped every time.
+    function worldGame(): GnosticaGame {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(21)); // The World
+        forceCardAt(g, 1, 0, () => major(6));  // The Lovers - a real borrow target
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        return commitFixture(g);
+    }
+
+    it("randomMove() sometimes actually uses The World, borrowing a real on-board major", () => {
+        let sawWorldUse = false;
+        for (let i = 0; i < 200 && !sawWorldUse; i++) {
+            const g = worldGame();
+            const move = g.randomMove();
+            if (/^(use|play) 21 as \d\d/.test(move)) {
+                sawWorldUse = true;
+                const check = g.validateMove(move);
+                expect(check.valid, `"${move}" should validate: ${check.message}`).to.be.true;
+                expect(() => g.move(move, { trusted: false })).to.not.throw();
+            }
+        }
+        expect(sawWorldUse, "expected randomMove() to eventually use The World at least once across 200 trials").to.be.true;
+    });
+
     it("eventually declares (last) once the acting player's own score is already at/above target", () => {
         // Without this, a randomMove()-only game could never actually
         // end - gameover/winner/elimination only ever resolve on the

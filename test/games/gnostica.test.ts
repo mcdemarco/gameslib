@@ -6078,16 +6078,71 @@ describe("Gnostica: Fool and World", () => {
         expect(rows[rows.length - 1].some(line => line.includes(adName))).to.be.true;
     });
 
+    // randomMove() now sometimes genuinely tries to USE what Fool revealed
+    // (reusing buildRandomChain, the same builder a fresh activation uses)
+    // rather than always declining - run several fresh trials to confirm
+    // every candidate is still legal AND that "play ..." (a real use, not
+    // just "decline") actually comes up at least once, proving the new
+    // path is reachable and not silently falling back every time.
     it("randomMove() sanity check: a paused activation always yields something validateMove() accepts", () => {
-        const g = setupFool();
-        pluckCard(g, "AC");
-        g.drawPile.unshift("AC");
-        g.move(`use ${major(0).uid}`, { trusted: true });
-        expect(g.continued).to.not.be.empty;
-        const move = g.randomMove();
-        expect(move).eq(`decline AC (via ${major(0).uid})`);
-        expect(g.validateMove(move).valid).to.be.true;
-        expect(() => g.move(move, { trusted: true })).to.not.throw();
+        let sawRealUse = false;
+        for (let i = 0; i < 30; i++) {
+            const g = setupFool();
+            pluckCard(g, "AC");
+            g.drawPile.unshift("AC");
+            g.move(`use ${major(0).uid}`, { trusted: true });
+            expect(g.continued).to.not.be.empty;
+            const move = g.randomMove();
+            expect(g.validateMove(move).valid, `"${move}" should validate`).to.be.true;
+            expect(() => g.move(move, { trusted: true })).to.not.throw();
+            if (move.startsWith("play ")) {
+                sawRealUse = true;
+            }
+        }
+        expect(sawRealUse, "expected at least one trial to actually use the revealed card, not just decline").to.be.true;
+    });
+
+    // The player never reasons about "nesting" - a Fool-revealed Fool or
+    // World is just the card in front of them, exactly like any other
+    // reveal - so randomMove() must try to use these two exactly as
+    // readily as a fresh top-level "use 00"/"use 21" would, not fall back
+    // to decline just because they were reached via a reveal instead of a
+    // direct activation.
+    it("randomMove() sometimes uses a Fool-revealed Fool (lets it flip again) instead of always declining", () => {
+        let sawRealUse = false;
+        for (let i = 0; i < 30; i++) {
+            const g = setupFool();
+            pluckCard(g, major(0).uid);
+            g.drawPile.unshift(major(0).uid); // Fool's own flip reveals another Fool
+            g.move(`use ${major(0).uid}`, { trusted: true });
+            expect(g.continued).to.not.be.empty;
+            const move = g.randomMove();
+            expect(g.validateMove(move).valid, `"${move}" should validate`).to.be.true;
+            expect(() => g.move(move, { trusted: true })).to.not.throw();
+            if (move === `play ${major(0).uid} (via ${major(0).uid})`) {
+                sawRealUse = true;
+            }
+        }
+        expect(sawRealUse, "expected at least one trial to actually use (re-flip) the revealed Fool, not just decline").to.be.true;
+    });
+
+    it("randomMove() sometimes borrows a real major arcana card when Fool reveals The World", () => {
+        let sawRealUse = false;
+        for (let i = 0; i < 30; i++) {
+            const g = setupFool();
+            forceCardAt(g, 1, 0, () => major(6)); // The Lovers - a real borrow target
+            pluckCard(g, theWorld().uid);
+            g.drawPile.unshift(theWorld().uid); // Fool's own flip reveals The World
+            g.move(`use ${major(0).uid}`, { trusted: true });
+            expect(g.continued).to.not.be.empty;
+            const move = g.randomMove();
+            expect(g.validateMove(move).valid, `"${move}" should validate`).to.be.true;
+            expect(() => g.move(move, { trusted: true })).to.not.throw();
+            if (new RegExp(`^play ${theWorld().uid} as \\d\\d`).test(move)) {
+                sawRealUse = true;
+            }
+        }
+        expect(sawRealUse, "expected at least one trial to actually borrow a card via the revealed World, not just decline").to.be.true;
     });
 
     // Regression: randomMove()'s own "paused activation" fallback used to
@@ -6113,8 +6168,10 @@ describe("Gnostica: Fool and World", () => {
         // this exact case) couldn't recognize at all, silently no-opping
         // the resume forever instead of resolving it (this.continued
         // never cleared, so the same player got asked again and again -
-        // reproduced live from a stuck game's own saved state).
-        expect(move).eq(`discard draw 0 (via ${major(2).uid})`);
+        // reproduced live from a stuck game's own saved state). The exact
+        // discard uids/draw count are randomized now (buildRandomHighPriestessResumeTokens
+        // reuses round 1's own randomizer) - only the shape is fixed.
+        expect(move.startsWith("discard ") && move.endsWith(`(via ${major(2).uid})`) && !move.includes("/")).to.be.true;
         expect(g.validateMove(move).valid).to.be.true;
         expect(() => g.move(move, { trusted: true })).to.not.throw();
         expect(g.continued).to.be.empty; // the obligation actually resolved...
