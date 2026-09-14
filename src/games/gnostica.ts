@@ -202,7 +202,7 @@ interface IParsedMove {
     // function would have given for the same malformed token, just
     // caught before dispatch (see the `malformedRest` check just after
     // `malformedStep`'s own, in validateMove).
-    malformedRest: { key: string; params?: Record<string, unknown> } | undefined;
+    malformedRest?: { key: string; params?: Record<string, unknown> };
     // The "(via <uid>)" anchor: the Fool (00) or High Priestess (02) whose
     // still-pending power a resumed step continues, demoted to a
     // parenthetical the same way announceLast demotes "(last)". Populated
@@ -1201,7 +1201,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const viaUid = viaMatch ? viaMatch[1] : undefined;
         if (bare.length === 0) {
-            return { announceLast, head: undefined, headRecognized: true, rest: [], stepSegments: [], malformedStep: undefined, malformedRest: undefined, viaUid };
+            return { announceLast, head: undefined, headRecognized: true, rest: [], stepSegments: [], malformedStep: undefined, viaUid };
         }
         // "/" (or a newline) separates segments - a leading/trailing/doubled one leaves an empty segment that fails the shape check rather than being silently swallowed.
         const segments = bare.split(/\s*[\n/]\s*/);
@@ -1241,109 +1241,82 @@ export class GnosticaGame extends GameBaseSequenced {
         // state (is this cell occupied, is this card actually in hand)
         // stays each validate* function's own job, same as
         // resolvePieceRef's own shape-vs-existence split.
-        let malformedRest: { key: string; params?: Record<string, unknown> } | undefined;
-        switch (head) {
-            case "place": {
-                const [cellStr, orientationToken, correctionStr] = rest;
-                if (cellStr !== undefined && this.tryAlgebraic2coords(cellStr) === undefined) {
-                    malformedRest = { key: "apgames:validation.gnostica.BAD_CELL", params: { cell: cellStr } };
-                    break;
-                }
-                // A trailing "?" marks the click flow's own seeded
-                // default as not yet a deliberate choice - meaningless to
-                // shape, stripped the same way cmdPlace/validatePlace do.
-                const orientationStr = orientationToken?.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
-                if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
-                    malformedRest = { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } };
-                    break;
-                }
-                if (correctionStr !== undefined && this.tryParseOrientation(correctionStr) === undefined) {
-                    malformedRest = { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: correctionStr } };
-                }
-                break;
-            }
-            case "orient": {
-                const [ref, orientationStr] = rest;
-                if (ref !== undefined && !PIECE_REF_SHAPE_RE.test(ref)) {
-                    malformedRest = { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_PIECE_REF" } };
-                    break;
-                }
-                if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
-                    malformedRest = { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } };
-                }
-                break;
-            }
-            case "discard": {
-                const drawIdx = rest.indexOf("draw");
-                const discardUids = drawIdx === -1 ? rest : rest.slice(0, drawIdx);
-                const seen = new Set<string>();
-                for (const uid of discardUids) {
-                    if (seen.has(uid)) {
-                        malformedRest = { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "DUPLICATE_CARD" } };
-                        break;
-                    }
-                    seen.add(uid);
-                    if (!CARD_UID_SHAPE_RE.test(uid)) {
-                        malformedRest = { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid } };
-                        break;
-                    }
-                }
-                if (malformedRest === undefined && drawIdx !== -1) {
-                    const countStr = rest[drawIdx + 1];
-                    if (countStr !== undefined && !/^\d+$/.test(countStr)) {
-                        malformedRest = { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_NUMBER" } };
-                    }
-                }
-                break;
-            }
-            case "bid": {
-                const [nStr] = rest;
-                if (nStr !== undefined && !/^\d+$/.test(nStr)) {
-                    malformedRest = { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_NUMBER" } };
-                }
-                break;
-            }
-            case "redraw": {
-                const seen = new Set<string>();
-                for (const uid of rest) {
-                    if (seen.has(uid)) {
-                        malformedRest = { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "DUPLICATE_CARD" } };
-                        break;
-                    }
-                    seen.add(uid);
-                    if (!CARD_UID_SHAPE_RE.test(uid)) {
-                        malformedRest = { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid } };
-                        break;
-                    }
-                }
-                break;
-            }
-            case "use":
-            case "play": {
-                // asUid's own shape depends on WHICH card is resolved
-                // (a suit letter for the Magician, a full card uid for
-                // The World) - genuinely card-dependent, so it's left
-                // exactly where it already lived, not checked here.
-                const uid = rest[0];
-                if (uid !== undefined && !CARD_UID_SHAPE_RE.test(uid)) {
-                    malformedRest = { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid } };
-                }
-                break;
-            }
-            default:
-                break;
-        }
-        return {
+        //
+        // `base` carries no malformedRest at all (an absent optional
+        // property reads as undefined, same as an explicit one) - each
+        // check below returns the moment it finds a problem, spreading
+        // this with malformedRest added rather than restating every
+        // field at every return site; falling off the end with nothing
+        // found just returns `base` itself, unmodified.
+        const base = {
             announceLast,
             head,
             headRecognized: RECOGNIZED_HEADS.includes(head),
             rest,
             stepSegments,
             malformedStep,
-            malformedRest,
             viaUid,
             asUid,
         };
+        if (head === "place") {
+            const [cellStr, orientationToken, correctionStr] = rest;
+            if (cellStr !== undefined && this.tryAlgebraic2coords(cellStr) === undefined) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_CELL", params: { cell: cellStr } } };
+            }
+            // A trailing "?" marks the click flow's own seeded default as
+            // not yet a deliberate choice - meaningless to shape,
+            // stripped the same way cmdPlace/validatePlace do.
+            const orientationStr = orientationToken?.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
+            if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } } };
+            }
+            if (correctionStr !== undefined && this.tryParseOrientation(correctionStr) === undefined) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: correctionStr } } };
+            }
+        } else if (head === "orient") {
+            const [ref, orientationStr] = rest;
+            if (ref !== undefined && !PIECE_REF_SHAPE_RE.test(ref)) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_PIECE_REF" } } };
+            }
+            if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } } };
+            }
+        } else if (head === "discard" || head === "redraw") {
+            // Identical uid-list grammar for both - discard's own
+            // optional "draw <n>" postscript is the only difference
+            // (drawIdx stays -1 for redraw, so uids collapses to `rest`
+            // itself, same as redraw's own bare list).
+            const drawIdx = head === "discard" ? rest.indexOf("draw") : -1;
+            const uids = drawIdx === -1 ? rest : rest.slice(0, drawIdx);
+            if (new Set(uids).size !== uids.length) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "DUPLICATE_CARD" } } };
+            }
+            const badUid = uids.find(uid => !CARD_UID_SHAPE_RE.test(uid));
+            if (badUid !== undefined) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid: badUid } } };
+            }
+            if (drawIdx !== -1) {
+                const countStr = rest[drawIdx + 1];
+                if (countStr !== undefined && !/^\d+$/.test(countStr)) {
+                    return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_NUMBER" } } };
+                }
+            }
+        } else if (head === "bid") {
+            const [nStr] = rest;
+            if (nStr !== undefined && !/^\d+$/.test(nStr)) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_NUMBER" } } };
+            }
+        } else if (head === "use" || head === "play") {
+            // asUid's own shape depends on WHICH card is resolved (a suit
+            // letter for the Magician, a full card uid for The World) -
+            // genuinely card-dependent, so it's left exactly where it
+            // already lived, not checked here.
+            const uid = rest[0];
+            if (uid !== undefined && !CARD_UID_SHAPE_RE.test(uid)) {
+                return { ...base, malformedRest: { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid } } };
+            }
+        }
+        return base;
     }
 
     // "/" separates every segment - the head/card-uid from its first
@@ -3252,7 +3225,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // World/Magician borrow is spelled with "as <x>", never by swapping
     // in the borrowed card as the head arg.
     private describePendingMove(pending: IPendingStep, stepSegments: string[][]): string {
-        const base: IParsedMove = { announceLast: false, head: pending.head, headRecognized: true, rest: [pending.headArg], stepSegments, malformedStep: undefined, malformedRest: undefined, asUid: pending.asUid };
+        const base: IParsedMove = { announceLast: false, head: pending.head, headRecognized: true, rest: [pending.headArg], stepSegments, malformedStep: undefined, asUid: pending.asUid };
         // A genuine resume always carries a "(via <root>)" anchor for
         // validateResumePendingPower's own mismatch check.
         if (this.continued.length > 0) {

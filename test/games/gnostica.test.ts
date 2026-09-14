@@ -4477,6 +4477,15 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
     it("hermitTeleport: mode button seeds self as target; a click redirects it; the destination click is unrestricted", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(9)); // The Hermit
+        // o0 (2,0), the teleport destination below, must not be "void"
+        // (CANT_END_IN_VOID) - pin a neighbouring card so it's always
+        // "wasteland" regardless of the random initial deal.
+        forceCardAt(g, 3, 0, () => aceOfCups());
+        // n0 (1,0) must keep its own card too: forceCardAt's own
+        // duplicate-clearing above wipes it out on the rare deal where
+        // it was Hermit's original location, and pruneIfEmpty then
+        // deletes the cell entirely once B teleports away from it.
+        forceCardAt(g, 1, 0, () => aceOfRods());
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
         g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, player 2
         const seed = g.handleClick("", -1, -1, "_btn_use");
