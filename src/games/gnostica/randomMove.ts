@@ -901,7 +901,12 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
             return [];
         }
         const result = game.validateMinorPower(suitUid, card.uid, eligible, [tokens]);
-        return result.valid && result.complete === 1 ? [tokens] : [];
+        // Genuinely submittable is complete !== -1, not === 1 - see the
+        // top-level loop's own matching docs. A Rods/Discs/Swords "piece"
+        // step landing on the acting player's own minion is legitimately
+        // final yet still complete:0 (a further reorientation remains
+        // available, never supplied by buildRandomModeArgCandidates).
+        return result.valid && result.complete !== -1 ? [tokens] : [];
     }
     const def = getMajorArcanaDef(card);
     if (def.uid === "00") {

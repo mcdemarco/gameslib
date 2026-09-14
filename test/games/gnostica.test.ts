@@ -2607,7 +2607,9 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
         const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.1");
-        expect(targeted.move).eq(`use ${aceOfRods().uid}/m0.2 piece n0.1 1`); // distance still defaults to 1
+        expect(targeted.move).eq(`use ${aceOfRods().uid}/m0.2 piece n0.1`); // no default - a real distance choice exists
+        expect(targeted.complete).eq(-1);
+        expect(targeted.message).eq(i18next.t("apgames:validation.gnostica.PICK_DESTINATION_TO_SET_DISTANCE"));
         const [row2, col2] = rowColFor(g, 3, 0); // p0, distance 2 from n0
         const distClick2 = g.handleClick(targeted.move, row2, col2);
         expect(distClick2.move).eq(`use ${aceOfRods().uid}/m0.2 piece n0.1 2`);
@@ -2639,6 +2641,36 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_tile");
         expect(modeClick.move).eq(`use ${aceOfRods().uid}/m0.1 tile 1`);
         g.move(modeClick.move, { trusted: true });
+        expect(g.board.has(1, 0)).eq(false);
+        expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
+    });
+
+    it("Rods (tile): mode button leaves distance unset when the minion offers more than one, instructing a cycle click instead", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
+        // o0 (dist 1) is wasteland via adjacency to n0 alone; p0 (dist 2)
+        // isn't adjacent to any territory once n0 is gone, so it needs its
+        // own neighbour card to stay wasteland rather than void.
+        forceCardAt(g, 4, 0, () => card("2C")); // q0
+        g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
+        g.move("place l0 U", { trusted: true }); // player 2
+        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // room to push up to 2
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_tile");
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}/m0.2 tile`); // no default - a real distance choice exists
+        expect(modeClick.complete).eq(-1);
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.PICK_DISTANCE_CYCLE"));
+        // Cycling starts from the implicit "1" and wraps 1..size, same as
+        // an already-seeded "1" would.
+        const cycle1 = g.handleClick(modeClick.move, row, col);
+        expect(cycle1.move).eq(`use ${aceOfRods().uid}/m0.2 tile 2`);
+        const cycle2 = g.handleClick(cycle1.move, row, col);
+        expect(cycle2.move).eq(`use ${aceOfRods().uid}/m0.2 tile 1`);
+        g.move(cycle2.move, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
     });
@@ -2942,7 +2974,9 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
-        expect(modeClick.move).eq(`use ${aceOfRods().uid}/m0.3 piece m0.3 1`); // defaults to distance 1
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}/m0.3 piece m0.3`); // no default - a real distance choice exists
+        expect(modeClick.complete).eq(-1);
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.PICK_DESTINATION_TO_SET_DISTANCE"));
         const [row3, col3] = rowColFor(g, 3, 0); // p0, 3 cells east
         const distClick3 = g.handleClick(modeClick.move, row3, col3);
         expect(distClick3.move).eq(`use ${aceOfRods().uid}/m0.3 piece m0.3 3`);
@@ -2960,7 +2994,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.board.get(2, 0)!.pieces[0]).to.deep.include({ owner: 1, orientation: "E" });
     });
 
-    it("Swords (piece): pips is offered as a button set, not click-cycled, bolding the current value", () => {
+    it("Swords (piece): pips is offered as a button set, not click-cycled, with no default to bold until one is chosen", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfSwords());
@@ -2974,7 +3008,9 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
         expect(modeClick.move).eq(`use ${aceOfSwords().uid}/m0.2 piece`); // genuinely ambiguous - no default
         const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.2");
-        expect(targeted.move).eq(`use ${aceOfSwords().uid}/m0.2 piece n0.2 1`); // pips defaults to 1
+        expect(targeted.move).eq(`use ${aceOfSwords().uid}/m0.2 piece n0.2`); // no default - a real pips choice exists
+        expect(targeted.complete).eq(-1);
+        expect(targeted.message).eq(i18next.t("apgames:validation.gnostica.PICK_PIPS_BUTTON"));
         // partial-applying a Swords step is genuinely destructive (see
         // "does not collapse..." above) - render the bar here, but don't
         // build further click-based moves against a ref this mutation may
@@ -2985,11 +3021,12 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("pips_1");
         expect(values).to.include("pips_2");
+        // No pips value was actually chosen yet, so neither button bolds.
         const pips1Btn = bar!.buttons!.find(b => b.value === "pips_1");
-        expect(pips1Btn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
+        expect(pips1Btn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.not.be.true;
     });
 
-    it("Swords (piece): clicking a pips button sets pips directly, replacing the mode button's own default", () => {
+    it("Swords (piece): clicking a pips button sets pips directly", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfSwords());
@@ -3003,7 +3040,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_S_piece");
         expect(modeClick.move).eq(`use ${aceOfSwords().uid}/m0.2 piece`); // genuinely ambiguous - no default
         const targeted = g.handleClick(modeClick.move, -1, -1, "_btn_target_n0.2");
-        expect(targeted.move).eq(`use ${aceOfSwords().uid}/m0.2 piece n0.2 1`);
+        expect(targeted.move).eq(`use ${aceOfSwords().uid}/m0.2 piece n0.2`);
         const pips2Click = g.handleClick(targeted.move, -1, -1, "_btn_pips_2");
         expect(pips2Click.move).eq(`use ${aceOfSwords().uid}/m0.2 piece n0.2 2`);
         g.move(pips2Click.move, { trusted: true });
@@ -5618,7 +5655,10 @@ describe("Gnostica: Fool and World", () => {
             g.move(`use ${major(0).uid}`, { trusted: true });
             const result = g.validateMove(`play ${major(12).uid}/m0.1 piece m0.1 1 (via ${major(0).uid})`);
             expect(result.valid).to.be.true;
-            expect(result.complete).eq(1);
+            // complete:0, not 1 - step 1 moved the acting player's own
+            // piece and never supplied a reorientation, independent of
+            // step 2's own doomed-and-skipped status.
+            expect(result.complete).eq(0);
             expect(result.message).eq(skippedMsg);
         }
         {

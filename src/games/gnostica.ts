@@ -1725,6 +1725,28 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
+    // A primitive step's own token grammar is "incomplete" (per
+    // primitiveStepShape) for two different reasons that need different
+    // wording: the target itself isn't chosen yet (falls through to
+    // powerStepMessageKey's own generic "use the buttons" CHOOSE_STEP,
+    // still correct there - Cups/Discs "piece" already say the same), or
+    // the target IS chosen and only the dist/pips count remains (only
+    // reachable when the acting minion's size actually offers more than
+    // one value - buildStepModeMove/the target_ button both supply "1"
+    // outright otherwise, never leaving a real choice unset). Called
+    // BEFORE falling back to the generic message; undefined means "no
+    // override, use the generic wording".
+    private primitiveIncompleteMessage(suitUid: string, rest: string[]): { key: string; params?: Record<string, unknown> } | undefined {
+        const [mode, ...args] = rest;
+        if (mode === "piece" && (suitUid === "R" || suitUid === "S") && args.length === 1) {
+            return { key: suitUid === "R" ? "apgames:validation.gnostica.PICK_DESTINATION_TO_SET_DISTANCE" : "apgames:validation.gnostica.PICK_PIPS_BUTTON" };
+        }
+        if (mode === "tile" && suitUid === "R" && args.length === 0) {
+            return { key: "apgames:validation.gnostica.PICK_DISTANCE_CYCLE" };
+        }
+        return undefined;
+    }
+
     // A fresh (no step taken yet) frame's own message: PICK_MINION_CELL
     // when the eligible pool spans more than one cell (a "play" whose
     // acting minion hasn't been narrowed down to a cell yet - "use" is
@@ -3126,6 +3148,14 @@ export class GnosticaGame extends GameBaseSequenced {
         // interchangeable even though they name the same piece here.
         const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
         const selfRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index);
+        const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        // A size-1 minion has only one legal dist/pips value, so it's
+        // simply supplied here. A size>1 minion has a genuine choice among
+        // several - left unset rather than guessing, so the step reads as
+        // still-incomplete (see primitiveIncompleteMessage's own docs on
+        // the resulting instruction to click the destination cell/a
+        // button) instead of seeding a default the player never chose.
+        const onlyCount = minionPiece.size === 1 ? "1" : undefined;
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
         // Whether the minion is actually facing a piece (not "U", which
@@ -3160,11 +3190,16 @@ export class GnosticaGame extends GameBaseSequenced {
                 break;
             case "R.piece":
                 if (!facingHasPiece) {
-                    tokens.push(selfRef, "1");
+                    tokens.push(selfRef);
+                    if (onlyCount !== undefined) {
+                        tokens.push(onlyCount);
+                    }
                 }
                 break;
             case "R.tile":
-                tokens.push("1");
+                if (onlyCount !== undefined) {
+                    tokens.push(onlyCount);
+                }
                 break;
             case "D.piece":
                 if (!facingHasPiece) {
@@ -3176,7 +3211,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 break;
             case "S.piece":
                 if (!facingHasPiece) {
-                    tokens.push(selfRef, "1");
+                    tokens.push(selfRef);
+                    if (onlyCount !== undefined) {
+                        tokens.push(onlyCount);
+                    }
                 }
                 break;
             case "S.tile":
@@ -3820,7 +3858,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
                     const minionRef = this.pieceRefStr(pending.minion.x, pending.minion.y, pending.minion.index, pending.minions);
-                    const rest = pending.suitUid === "D" ? [ref] : [ref, "1"];
+                    const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+                    // Same "size 1 has no real choice, size >1 is left for
+                    // a click/button" rule as buildStepModeMove's own.
+                    const rest = pending.suitUid === "D" || minionPiece.size > 1 ? [ref] : [ref, "1"];
                     return this.assembleStepMove(pending, [minionRef, ...pending.prefix, "piece", ...rest]);
                 }
                 if (value.startsWith("pips_")) {
@@ -5281,7 +5322,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // stepShapes.ts's own docs).
         const shape = primitiveStepShape(suitUid, rest);
         if (shape.status === "incomplete") {
-            const msg = this.powerStepMessageKey(cardUid, 0, eligible);
+            const msg = this.primitiveIncompleteMessage(suitUid, rest) ?? this.powerStepMessageKey(cardUid, 0, eligible);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
         if (shape.status === "malformed") {
@@ -5892,7 +5933,12 @@ export class GnosticaGame extends GameBaseSequenced {
                         const key = (step as { special: SpecialPower }).special === "tradeHands"
                             ? "apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET"
                             : "apgames:validation.gnostica.HIEROPHANT_SKIPPED_NO_TARGET";
-                        return { valid: true, complete: 1, message: i18next.t(key, { card: cardName }) };
+                        // This step being doomed says nothing about whether
+                        // an EARLIER step's own outcome is still soft (see
+                        // softComplete's own docs) - respected here rather
+                        // than overridden the way the generic complete:1
+                        // fallback would be wrong to ignore it.
+                        return { valid: true, complete: softComplete ? 0 : 1, message: i18next.t(key, { card: cardName }) };
                     }
                     // A frame's OWN first step (nextStepIndex still 0) is
                     // different: for anything but the root, arriving here
@@ -5954,7 +6000,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     if ("special" in step && (step.special === "orientAny" || step.special === "hierophantReplace") && tokens.length >= 2) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
                     }
-                    const msg = this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions);
+                    const override = "primitive" in step ? this.primitiveIncompleteMessage(this.primitiveToSuit(step.primitive), tokens.slice(1)) : undefined;
+                    const msg = override ?? this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions);
                     return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                 }
                 // An earlier segment being incomplete means a later one
@@ -5984,7 +6031,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 // own wording instead (this move ALSO performs that
                 // Decline, not just the flip).
                 if (poppedViaDecline && top.cardUid === "00") {
-                    return { valid: true, complete: 1, message: i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW") };
+                    // See specialStepHasNoLegalTarget's own matching docs on
+                    // why softComplete (an earlier step's own state) still
+                    // has to win here too.
+                    return { valid: true, complete: softComplete ? 0 : 1, message: i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW") };
                 }
                 // High Priestess's own round 1 forces this same pause
                 // (round 2 always follows) - but with no explicit "draw
@@ -5995,7 +6045,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
                 }
                 const readyMsg = this.forcePauseReadyMessage(top.cardUid, top.nextStepIndex);
-                return { valid: true, complete: 1, message: i18next.t(readyMsg.key, readyMsg.params) };
+                return { valid: true, complete: softComplete ? 0 : 1, message: i18next.t(readyMsg.key, readyMsg.params) };
             }
             // Captured BEFORE chainMinion updates top.minions below - the
             // replay call further down re-runs THIS SAME step (same
@@ -6641,7 +6691,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     const newIndex = this.board.get(destX, destY)?.pieces.length ?? 0;
                     const finalOrientation = orientationStr !== undefined ? this.tryParseOrientation(orientationStr)! : movedPiece.orientation;
                     const newPiece = new Piece(movedPiece.owner, movedPiece.size, finalOrientation);
-                    return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index } } };
+                    return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
                 return { failed: false };
             }
@@ -6731,7 +6781,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // unchanged, so the pre- and post-mutation "last index"
                     // are the same value.
                     const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
-                    return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } } };
+                    return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
                 return { failed: false };
             }
@@ -6843,7 +6893,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // Shrinking replaces the piece in place, same net
                     // count as Discs' own grow above.
                     const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
-                    return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } } };
+                    return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
                 return { failed: false };
             }
@@ -8454,9 +8504,14 @@ export class GnosticaGame extends GameBaseSequenced {
                                     node.push(i18next.t("apresults:MOVE.gnostica_hermit_tile", { player: name, from: r.from, to: r.to }));
                                     break;
                                 default:
-                                    node.push(r.what === undefined
-                                        ? i18next.t("apresults:MOVE.nowhat", { player: name, from: r.from, to: r.to })
-                                        : i18next.t("apresults:MOVE.complete_what", { player: name, what: r.what, from: r.from, to: r.to }));
+                                    // Gnostica's own "move" results only ever
+                                    // come from the 4 cases above - there's
+                                    // no game rule left to implement that
+                                    // could produce a 5th `how`, so an
+                                    // unrecognized one here is a genuine bug
+                                    // in this file, not an input to degrade
+                                    // gracefully for.
+                                    throw new Error(`chatLog(): unrecognized "move" result how="${r.how}"`);
                             }
                             break;
                         }
@@ -8482,9 +8537,14 @@ export class GnosticaGame extends GameBaseSequenced {
                                     node.push(i18next.t("apresults:PLACE.gnostica_discard", { player: name, what: r.what }));
                                     break;
                                 default:
-                                    node.push(r.what === undefined
-                                        ? i18next.t("apresults:PLACE.nowhat", { player: name, where: r.where })
-                                        : i18next.t("apresults:PLACE.complete", { player: name, what: r.what, where: r.where }));
+                                    // Gnostica's own "place" results only ever
+                                    // come from the 5 cases above - there's
+                                    // no game rule left to implement that
+                                    // could produce a 6th `how`, so an
+                                    // unrecognized one here is a genuine bug
+                                    // in this file, not an input to degrade
+                                    // gracefully for.
+                                    throw new Error(`chatLog(): unrecognized "place" result how="${r.how}"`);
                             }
                             break;
                         case "convert":
