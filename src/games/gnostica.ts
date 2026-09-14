@@ -122,6 +122,17 @@ export interface IStepOutcome {
     // for World's own push - the board is public, so nothing about
     // choosing a target is hidden.
     forcePause?: boolean;
+    // This step's own move-string tokens still carry a trailing "?" -
+    // Cups "own" creation's mandatory facing, mode-button-seeded as "U?"
+    // (mirrors validatePlace's identical convention for the very first
+    // piece) rather than a bare "U", precisely so the real playground
+    // client's own auto-submit-on-complete behavior doesn't whisk the
+    // brand-new piece away before the player gets a click to orient it.
+    // Read by validateMinorPower/validateFrameStack to report complete:0
+    // instead of the unconditional complete:1 every other successful
+    // step gets - stripped (with no effect on the piece created) the
+    // instant a real correction click or a real commit happens.
+    softComplete?: boolean;
 }
 
 // The non-mutating validator's counterpart to IStepOutcome: either a
@@ -1166,7 +1177,11 @@ export class GnosticaGame extends GameBaseSequenced {
     // file (see isMinionCellStillNarrowing's own docs).
     private static readonly PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[nesu])?(\.\d+)?)?$/i;
     private static readonly CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
-    private static readonly STEP_TOKEN_RE = /^[a-z0-9.-]+$/i;
+    // Trailing "?" tolerated on any token - Cups "own" creation's own
+    // still-prepopulated facing (see IStepOutcome.softComplete's own
+    // docs) is the one real use, but this is a pure shape check; nothing
+    // downstream needs a token-position-specific allowance for it.
+    private static readonly STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
     private static readonly MAX_STEP_TOKENS = 12;
 
     private isStepShapeValid(tokens: string[]): boolean {
@@ -3126,7 +3141,12 @@ export class GnosticaGame extends GameBaseSequenced {
         const tokens = [minionRef, ...pending.prefix, mode];
         switch (`${suitUid}.${mode}`) {
             case "C.own":
-                tokens.push(targetCell, "U");
+                // Trailing "?" - the new piece's own default facing isn't
+                // yet a deliberate choice (mirrors "place"'s identical
+                // convention for the very first piece - see validateCups'
+                // own docs on why this matters for the real playground
+                // client's auto-submit behavior).
+                tokens.push(targetCell, "U?");
                 break;
             case "C.enemy": {
                 const t = this.board.get(tx, ty);
@@ -5269,7 +5289,14 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const [mode, ...args] = rest;
         const stepResult = this.validateSuitPrimitive(suitUid, minion, mode, args, {});
-        return stepResult.failed ? stepResult.result : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        if (stepResult.failed) {
+            return stepResult.result;
+        }
+        // Cups "own" creation's still-prepopulated facing (see
+        // IStepOutcome.softComplete's own docs) reports complete:0 -
+        // submittable, but the real playground client shouldn't auto-
+        // submit it before the player gets a click to orient it.
+        return { valid: true, complete: stepResult.outcome?.softComplete ? 0 : 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // Whether `cardUid` names a real major arcana card or a minor arcana
@@ -5792,6 +5819,12 @@ export class GnosticaGame extends GameBaseSequenced {
         // forcePauseReadyMessage's own "ready to submit" framing below -
         // still building beats ready, for the exact same round.
         let hpDrawNotChosen = false;
+        // Overwritten on every successful completion, true right after a
+        // step whose own outcome is still soft (Cups "own" creation's
+        // still-prepopulated facing - see IStepOutcome.softComplete's own
+        // docs). Same "last step's own state wins" convention as
+        // hpDrawNotChosen, checked just below it.
+        let softComplete = false;
         for (;;) {
             const top = stack[stack.length - 1];
             const poppedViaDecline = justDeclined;
@@ -5802,6 +5835,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 if (hpDrawNotChosen) {
                     return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+                }
+                if (softComplete) {
+                    return { valid: true, complete: 0, message: i18next.t("apgames:validation._general.VALID_MOVE") };
                 }
                 if (hpFinalRoundReady !== undefined) {
                     return { valid: true, complete: 1, message: i18next.t(hpFinalRoundReady.key, hpFinalRoundReady.params) };
@@ -5976,6 +6012,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 hpFinalRoundReady = this.forcePauseReadyMessage(top.cardUid, stepIndex);
             }
             hpDrawNotChosen = "special" in step && step.special === "highPriestess" && !tokens.includes("draw");
+            softComplete = stepResult.outcome?.softComplete === true;
             if (stepResult.outcome?.pushFrame !== undefined) {
                 stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions, viaFool: stepResult.outcome.pushFrame.viaFool === true });
             }
@@ -6352,9 +6389,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 // rest[2], once present, is the OPTIONAL reorientation of
                 // the just-created piece (see validateCups' own docs) -
                 // rest[1] is the creation's own mandatory (always real,
-                // "U" included) initial facing.
-                const [cellStr, orientationStr, reorientStr] = rest;
+                // "U" included) initial facing, possibly still carrying a
+                // trailing "?" (see buildStepModeMove's own docs) - makes
+                // no difference to the piece actually created, so it's
+                // stripped the same way cmdPlace strips its own.
+                const [cellStr, orientationToken, reorientStr] = rest;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
                 const orientation = this.parseOrientation(reorientStr ?? orientationStr);
                 createOwn(ctx, minion.x, minion.y, minion.index, tx, ty, orientation, opts);
                 this.addBufferIfWasteland(tx, ty);
@@ -6415,15 +6456,23 @@ export class GnosticaGame extends GameBaseSequenced {
                 // created piece via the exact same trailing-orientation
                 // rule every other target minion gets: hard-reject a
                 // request that changes nothing.
-                const [cellStr, orientationStr, reorientStr] = rest;
+                const [cellStr, orientationToken, reorientStr] = rest;
                 const coords = this.tryAlgebraic2coords(cellStr);
                 if (coords === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
                 }
                 const [tx, ty] = coords;
-                if (orientationStr === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr }) };
+                if (orientationToken === undefined) {
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationToken }) };
                 }
+                // A trailing "?" marks the mode button's own seeded default
+                // as not yet a deliberate choice (mirrors validatePlace's
+                // identical convention for the very first piece) - stripped
+                // before resolving (resolveTrailingOrientation has no "?"
+                // awareness of its own), and only still meaningful when no
+                // real correction has been given either.
+                const prepopulated = orientationToken.endsWith("?") && reorientStr === undefined;
+                const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
                 const resolved = this.resolveTrailingOrientation(orientationStr, reorientStr);
                 if ("key" in resolved) {
                     return { failed: true, result: this.invalid(`apgames:validation.gnostica.${resolved.key}`, resolved.params) };
@@ -6439,7 +6488,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // genuinely untouched wasteland), so this ref carries its
                 // own piece data rather than relying on a later board read.
                 const newIndex = this.board.get(tx, ty)?.pieces.length ?? 0;
-                return { failed: false, outcome: { newMinion: { x: tx, y: ty, index: newIndex, piece: new Piece(this.currplayer, 1, finalOrientation) } } };
+                return { failed: false, outcome: { newMinion: { x: tx, y: ty, index: newIndex, piece: new Piece(this.currplayer, 1, finalOrientation) }, softComplete: prepopulated } };
             }
             case "enemy": {
                 const [cellStr, victimRef] = rest;

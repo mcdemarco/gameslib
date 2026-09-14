@@ -2495,14 +2495,13 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         expect(cellClick.move).eq(`use ${aceOfCups().uid}`);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_own");
-        expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U`);
+        // Trailing "?" - the seeded default facing isn't yet a deliberate
+        // choice (mirrors "place"'s identical convention) - so the real
+        // playground client's own auto-submit-on-complete behaviour
+        // doesn't whisk the new piece away before a click can orient it.
+        expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U?`);
         expect(modeClick.valid).to.be.true;
-        // A minor card's power is always exactly one step, already
-        // exhausted here - the mandatory "U" alone makes this genuinely
-        // complete:1 (matches Cups "own"'s own precedent - see
-        // resolveTrailingOrientation's own docs), the optional trailing
-        // correction below being pure bonus.
-        expect(modeClick.complete).eq(1);
+        expect(modeClick.complete).eq(0);
         // n0 itself is already "U", the creation's own default - a click
         // there hard-rejects as a no-op (same trailing-orientation rule
         // every other target minion gets), rather than silently
@@ -2513,7 +2512,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(sameCell.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
         const [row3, col3] = rowColFor(g, 2, 0); // "o0", east of n0 - sets the new piece's facing
         const east = g.handleClick(modeClick.move, row3, col3);
-        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U E`);
+        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U? E`);
+        expect(east.complete).eq(1); // a real correction is a deliberate choice, no longer soft
+        // Committing the ORIGINAL, still-soft seed directly (never taking
+        // the optional correction) - "?" makes no difference to the piece
+        // actually created, only to whether it auto-submits.
         g.move(modeClick.move, { trusted: true });
         const t = g.board.get(1, 0)!;
         expect(t.pieces.length).eq(1);
@@ -3570,15 +3573,15 @@ describe("Gnostica: click-to-orient messaging", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_own");
-        expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U`);
+        expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U?`);
         const [rowN, colN] = rowColFor(g, 1, 0); // n0 itself - "U" again, already the creation default
         const sameFacing = g.handleClick(modeClick.move, rowN, colN);
-        expect(sameFacing.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U U`);
+        expect(sameFacing.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U? U`);
         expect(sameFacing.valid).to.be.false;
         expect(sameFacing.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
         const [rowE, colE] = rowColFor(g, 2, 0); // "o0", east of n0 - a genuine change
         const east = g.handleClick(modeClick.move, rowE, colE);
-        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U E`);
+        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U? E`);
         expect(east.valid).to.be.true;
         g.move(east.move, { trusted: true });
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
@@ -3954,7 +3957,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(orientClick.move).eq(`use ${major(3).uid}/l0.1 S`);
         const modeClick = g.handleClick(orientClick.move, -1, -1, "_btn_mode_C_own");
         const freshTarget = GnosticaBoard.coords2algebraic(-1, 1); // the NEW (south) facing cell
-        expect(modeClick.move).eq(`use ${major(3).uid}/l0.1 S/l0.1 own ${freshTarget} U`);
+        expect(modeClick.move).eq(`use ${major(3).uid}/l0.1 S/l0.1 own ${freshTarget} U?`);
         expect(modeClick.move).to.not.include(" m0 "); // the STALE, pre-reorientation (east) default
     });
 
@@ -4007,7 +4010,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(values).to.not.include("mode_R_piece");
 
         const step2 = g.handleClick(redirected.move, -1, -1, "_btn_mode_C_own");
-        expect(step2.move).eq(`use ${major(6).uid}/m0.1 piece n0.1 1/m0.1 own n0 U`);
+        expect(step2.move).eq(`use ${major(6).uid}/m0.1 piece n0.1 1/m0.1 own n0 U?`);
         expect(step2.valid).to.be.true;
 
         g.move(step2.move, { trusted: true });
