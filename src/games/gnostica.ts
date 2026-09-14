@@ -1184,7 +1184,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // handleClickCore's own docs) - tolerated the same "still skipped,
     // not yet resolved" way as an incomplete mode/args elsewhere in this
     // file (see isMinionCellStillNarrowing's own docs).
-    private static readonly PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[nesu])?(\.\d+)?)?$/i;
+    private static readonly PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.\d+)?)?$/i;
     private static readonly CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
     // Trailing "?" tolerated on any token - Cups "own" creation's own
     // still-prepopulated facing (see IStepOutcome.softComplete's own
@@ -5487,29 +5487,27 @@ export class GnosticaGame extends GameBaseSequenced {
     // standing on it anymore as a second, still-live candidate.
     //
     // #98/#100: a splice (CellContents.removeAt - Rods' own move, Discs'
-    // grow/Swords' shrink-or-destroy/Hierophant's replace) can shift
-    // every OTHER piece at that same cell with a higher index down by
-    // one, going stale exactly like the entry it superseded - but nothing
-    // downstream needs this array corrected anymore: every `IMinionRef`
-    // that lives in a pool like `minions` carries its own `piece` (see
-    // IMinionRef's own docs), and every reader either uses that directly
-    // (minorTargetCell and friends never touch `.index` at all once
-    // `.piece` is set) or goes through resolvePieceRef, which re-derives
-    // a fresh, board-accurate index by attribute rather than trusting
-    // whatever's stored here (see its own docs on exactly this). This
-    // function's only remaining job is pruning the superseded entry so a
-    // piece that moved/regrew doesn't linger as a second, still-live
-    // candidate (see resolveStepMinion's own ambiguity check,
-    // specialStepHasNoLegalTarget).
+    // grow/Swords' shrink-or-destroy/Hierophant's replace) can shift every
+    // OTHER piece at that same cell with a higher index down by one, going
+    // stale exactly like the entry it superseded - and unlike `.piece`
+    // (which only helps a reader that dereferences it directly), several
+    // validate*/apply* call sites still pass a pool entry's raw `.index`
+    // straight into powers.ts's own index-based lookups, so a stale index
+    // there throws rather than misreads. `replacesMinion` is reported by
+    // every removeAt-performing branch precisely so this can correct for
+    // it - including branches with no `newMinion` of their own (an
+    // outright destroy, or shrinking/growing a piece that isn't the
+    // acting player's own, so nothing new joins THIS pool) - see each
+    // one's own "no newMinion" branch for why `replacesMinion` is still
+    // set there.
     private static chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[] {
-        if (outcome.newMinion === undefined) {
-            return minions;
-        }
         const stale = outcome.replacesMinion;
         const base = stale === undefined
             ? minions
-            : minions.filter(m => !(m.x === stale.x && m.y === stale.y && m.index === stale.index));
-        return [...base, outcome.newMinion];
+            : minions
+                .filter(m => !(m.x === stale.x && m.y === stale.y && m.index === stale.index))
+                .map(m => (m.x === stale.x && m.y === stale.y && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
+        return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
     }
 
     private static popFrame(stack: IPowerFrame[]): void {
@@ -6710,7 +6708,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 movePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, newOrientation, opts);
                 if (destroyedInVoid) {
                     this.results.push({ type: "destroy", where: origin, what: this.getPipsFromRef(targetRef), who: movedOwner });
-                    return {};
+                    // Still a real removeAt at target's old slot - see
+                    // chainMinion's own docs on why replacesMinion is
+                    // reported even with no newMinion.
+                    return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
                 }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
                 this.results.push({ type: "move", from: origin, to: dest, what: this.getPipsFromRef(targetRef), how: "rod-piece", who: movedOwner });
@@ -6719,7 +6720,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     const newIndex = landed.length - 1;
                     return { newMinion: { x: destX, y: destY, index: newIndex, piece: landed[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
                 }
-                return {};
+                return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
             }
             case "tile": {
                 const [distStr] = rest;
@@ -6781,7 +6782,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 const destY = target.y + dy * dist;
                 const destroyedInVoid = opts.skipLandingCheck !== true && this.board.classify(destX, destY) === "void";
                 if (destroyedInVoid) {
-                    return { failed: false };
+                    // Destroyed in the void - still a real removeAt at
+                    // target's old slot, so chainMinion still needs to
+                    // know (see its own docs).
+                    return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
                 }
                 if (movedPiece.owner === this.currplayer) {
                     // The destination may not have a stored CellContents yet (a
@@ -6793,7 +6797,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     const newPiece = new Piece(movedPiece.owner, movedPiece.size, finalOrientation);
                     return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
-                return { failed: false };
+                // Moved an enemy's own piece - not tracked in this pool,
+                // but still a real removeAt at target's old slot (see
+                // chainMinion's own docs).
+                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
             }
             case "tile": {
                 const [distStr] = rest;
@@ -6830,7 +6837,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     const newIndex = grown.length - 1;
                     return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: grown[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
                 }
-                return {};
+                // Grown into a piece this pool doesn't track (an enemy's)
+                // - still a real removeAt at target's old slot, so
+                // chainMinion still needs to know (see its own docs).
+                return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
             }
             case "tile": {
                 const [cellStr, newCardUid] = rest;
@@ -6882,7 +6892,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     const grownPiece = new Piece(targetPiece.owner, (targetPiece.size + 1) as Pips, finalOrientation);
                     return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: grownPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
-                return { failed: false };
+                // Grown into a piece this pool doesn't track (an enemy's)
+                // - still a real removeAt at target's old slot, so
+                // chainMinion still needs to know (see its own docs).
+                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
             }
             case "tile": {
                 const [cellStr, newCardUid] = rest;
@@ -6927,7 +6940,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     const newIndex = shrunk.length - 1;
                     return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunk[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
                 }
-                return {};
+                // Destroyed outright, or shrunk but not into a piece this
+                // pool tracks (an enemy's) - still a real removeAt at
+                // target's old slot, so chainMinion still needs to know
+                // (see its own docs).
+                return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
             }
             case "tile": {
                 const [cellStr, pipsStr, newCardUid] = rest;
@@ -6993,7 +7010,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     const shrunkPiece = new Piece(owner, resultSize as Pips, finalOrientation);
                     return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunkPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
-                return { failed: false };
+                // Destroyed outright, or shrunk but not into a piece this
+                // pool tracks (an enemy's) - still a real removeAt at
+                // target's old slot, so chainMinion still needs to know
+                // (see its own docs).
+                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
             }
             case "tile": {
                 const [cellStr, pipsStr, newCardUid] = rest;
@@ -7160,7 +7181,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
                 return { newMinion: { x: destX, y: destY, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
             }
-            return {};
+            return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
         } else if (mode === "tile") {
             const [targetCellStr, destCellStr] = args;
             const [tx, ty] = GnosticaBoard.algebraic2coords(targetCellStr);
@@ -7207,7 +7228,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 const newPiece = new Piece(movedPiece.owner, movedPiece.size, finalOrientation);
                 return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index } } };
             }
-            return { failed: false };
+            // Moved an enemy's own piece - not tracked in this pool, but
+            // still a real removeAt at target's old slot (see
+            // chainMinion's own docs).
+            return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
         } else if (mode === "tile") {
             const [targetCellStr, destCellStr] = args;
             const targetCoords = this.tryAlgebraic2coords(targetCellStr);

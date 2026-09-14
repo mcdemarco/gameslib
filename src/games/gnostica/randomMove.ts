@@ -41,14 +41,13 @@ import { ALL_SUITS } from "./stepShapes";
 // #98's own crash went unfixed here for a full extra round exactly
 // because this copy was missed the first time.
 function chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[] {
-    if (outcome.newMinion === undefined) {
-        return minions;
-    }
     const stale = outcome.replacesMinion;
     const base = stale === undefined
         ? minions
-        : minions.filter(m => !(m.x === stale.x && m.y === stale.y && m.index === stale.index));
-    return [...base, outcome.newMinion];
+        : minions
+            .filter(m => !(m.x === stale.x && m.y === stale.y && m.index === stale.index))
+            .map(m => (m.x === stale.x && m.y === stale.y && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
+    return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
 }
 
 export function generateRandomMove(game: GnosticaGame): string {

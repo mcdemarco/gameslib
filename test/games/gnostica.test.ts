@@ -3197,6 +3197,28 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         expect(values).to.include("mode_R_piece");
     });
 
+    // Regression: PIECE_REF_SHAPE_RE's orientation tie-break character
+    // class was "[nesu]" - missing "w" entirely - so a same-pip pair
+    // disambiguated by a WEST-facing piece produced a ref like "m0.1.W"
+    // that the move grammar itself rejected as malformed (INVALID_MOVE/
+    // BAD_STEP), even though the minion-picker button offering it came
+    // straight from the engine's own pieceRefStr. N/E/S/U all happened to
+    // be covered by existing tests already; W was the one direction never
+    // exercised, so this slipped through.
+    it("use: a same-pip pair disambiguated by a WEST-facing piece produces a resolvable minion-picker ref, not a malformed one", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfRods());
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "N"), new Piece(1, 1, "W")];
+        g.move(`use ${aceOfRods().uid}`, { partial: true });
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const bar = rep.areas?.find(a => a.type === "buttonBar");
+        const values = bar!.buttons!.map(b => b.value);
+        expect(values).to.include("minion_m0.1.W");
+        const picked = g.handleClick(`use ${aceOfRods().uid}`, -1, -1, "_btn_minion_m0.1.W");
+        expect(picked.valid).to.be.true;
+        expect(picked.move).eq(`use ${aceOfRods().uid}/m0.1.W`);
+    });
+
     it("play: a board-wide pool offers no buttons until a cell is clicked; clicking a cell with just one eligible minion there resolves it directly", () => {
         // A fresh instance per checkpoint, exactly like the real click flow
         // (every click reconstructs a fresh GnosticaGame via GameFactory,
