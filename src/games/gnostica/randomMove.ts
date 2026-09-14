@@ -102,6 +102,15 @@ export function generateRandomMove(game: GnosticaGame): string {
                     const chain = buildRandomChain(game, borrowedCard, game.eligibleMinionsForPlay());
                     candidate = game.buildViaMove(chain, borrowedUid);
                 }
+            } else if (revealedCard.uid === "01") {
+                // Fool's own reveal never spends asUid (unlike World's
+                // borrow) - the suit still goes through "as <suit>" here,
+                // same as a root activation (findRandomMagicianChain's own
+                // docs).
+                const found = findRandomMagicianChain(game, game.eligibleMinionsForPlay());
+                if (found !== undefined) {
+                    candidate = game.buildViaMove(found.chain, found.suitUid);
+                }
             } else {
                 const chain = buildRandomChain(game, revealedCard, game.eligibleMinionsForPlay());
                 if (chain.length > 0) {
@@ -399,6 +408,9 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
         if (uid === "21") {
             return buildRandomWorldMove(game, "use", eligible);
         }
+        if (uid === "01") {
+            return buildRandomMagicianMove(game, "use", eligible);
+        }
         const card = allCards().find(c => c.uid === uid)!;
         const chain = buildRandomChain(game, card, eligible);
         const steps = chain.map(tokens => tokens.join(" "));
@@ -424,6 +436,9 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
     try {
         if (uid === "21") {
             return buildRandomWorldMove(game, "play", eligible);
+        }
+        if (uid === "01") {
+            return buildRandomMagicianMove(game, "play", eligible);
         }
         const card = allCards().find(c => c.uid === uid)!;
         const chain = buildRandomChain(game, card, eligible);
@@ -465,6 +480,40 @@ function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible
     const chain = buildRandomChain(game, borrowedCard, eligible);
     const steps = chain.map(tokens => tokens.join(" "));
     return steps.length === 0 ? `${head} 21 as ${borrowedUid}` : `${head} 21 as ${borrowedUid}/${steps.join("/")}`;
+}
+
+// A random legal (suit, one-step chain) combination for a FRESH Magician
+// activation - shared by a root "use"/"play 01" (buildRandomMagicianMove
+// below) and a Fool-revealed Magician (generateRandomMove's own resume
+// branch). Both put the suit in the head's "as <suit>", never a step
+// token - only a Magician frame PUSHED BY WORLD reads its suit from its
+// own step instead, since World's own borrow already spent the head's
+// one asUid slot (see gnostica.ts's deriveStepTokens/walkFrameStack for
+// the matching real-commit rule, and buildRandomMagicianChoiceTokens
+// below for that one remaining case). findRandomPrimitiveChoice does the
+// real legality search, same as an ordinary suit card's own single step
+// (buildRandomStepTokens's own twin).
+function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { suitUid: string; chain: string[][] } | undefined {
+    for (const suit of shuffle([...ALL_SUITS]) as typeof ALL_SUITS) {
+        const choice = findRandomPrimitiveChoice(game, suit.uid, minions, {});
+        if (choice === undefined) {
+            continue;
+        }
+        const ref = game.pieceRefStr(choice.minion, minions);
+        return { suitUid: suit.uid, chain: [[ref, choice.mode, ...choice.args]] };
+    }
+    return undefined;
+}
+
+// Magician's own move string: "<head> 01 as <suit>/<minionRef> <mode>
+// <args>".
+function buildRandomMagicianMove(game: GnosticaGame, head: "use" | "play", minions: IMinionRef[]): string | undefined {
+    const found = findRandomMagicianChain(game, minions);
+    if (found === undefined) {
+        return undefined;
+    }
+    const steps = found.chain.map(tokens => tokens.join(" "));
+    return `${head} 01 as ${found.suitUid}/${steps.join("/")}`;
 }
 
 // Every legal target ref for a minion's own "piece"-shaped actions:
@@ -877,11 +926,15 @@ function buildRandomHighPriestessResumeTokens(game: GnosticaGame): string[] {
     return discards;
 }
 
-// Once a suit is chosen, magicianChoice's own step IS an ordinary
-// suit-mode step (see buildSpecialPending's own redirect) - reuse
-// findRandomPrimitiveChoice directly rather than re-deriving mode/arg
-// legality, then verify the doubly-wrapped shape via
-// validateMagicianChoice as this step's own final check.
+// Only ever reached with a World-pushed Magician frame - a fresh root
+// Magician activation is intercepted earlier by buildRandomMagicianMove,
+// which puts the suit in the head's "as <suit>" instead. World's own
+// borrow already spent that one asUid slot naming which card to push, so
+// the pushed Magician frame's own suit has nowhere to go but its own step
+// token (see gnostica.ts's deriveStepTokens/walkFrameStack for the
+// matching real-commit rule) - reuse findRandomPrimitiveChoice directly
+// rather than re-deriving mode/arg legality, then verify the doubly-
+// wrapped shape via validateMagicianChoice as this step's own final check.
 function buildRandomMagicianChoiceTokens(game: GnosticaGame, minions: IMinionRef[]): string[] | undefined {
     for (const suit of shuffle([...ALL_SUITS]) as typeof ALL_SUITS) {
         const choice = findRandomPrimitiveChoice(game, suit.uid, minions, {});
@@ -911,6 +964,8 @@ function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower,
         // that one already prepends "discard" itself for the resume's
         // own head word.
         case "highPriestess": return ["discard", ...buildRandomHighPriestessTokens(game)];
+        // A root magicianChoice never reaches here (buildRandomMagicianMove
+        // intercepts it earlier) - only a World-pushed one does.
         case "magicianChoice": return buildRandomMagicianChoiceTokens(game, minions);
         // fool/worldUseAny - never reached; buildRandomChain filters
         // Fool/World out by uid before any step is ever attempted.

@@ -1332,15 +1332,29 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(1)); // The Magician
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        g.move(`use ${major(1).uid}/m0.1 C own m0 U`, { trusted: true });
+        g.move(`use ${major(1).uid} as C/m0.1 own m0 U`, { trusted: true });
         expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode
+    });
+
+    // The suit is chosen ONLY via the head's "as <suit>" - a step segment
+    // that embeds the suit letter directly, with no "as" given at all, is
+    // rejected rather than silently reinterpreted (untrusted validateMove;
+    // a trusted caller sending the same malformed shape throws instead -
+    // see deriveStepTokens' own docs).
+    it("Magician: a suit typed directly into the step, with no 'as', is rejected", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(1)); // The Magician
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const result = g.validateMove(`use ${major(1).uid}/m0.1 C own m0 U`);
+        expect(result.valid).to.be.false;
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.MAGICIAN_NEEDS_AS"));
     });
 
     it("refuses more power-step segments than the card actually grants", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(1)); // The Magician - only 1 power
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        expect(() => g.move(`use ${major(1).uid}/m0.1 C own m0 U/m0.1 C own m0 U`)).to.throw();
+        expect(() => g.move(`use ${major(1).uid} as C/m0.1 own m0 U/m0.1 own m0 U`)).to.throw();
     });
 });
 
@@ -5375,6 +5389,21 @@ describe("Gnostica: Fool and World", () => {
         expect(flat.some(r => r.type === "use" && (r as { what?: string; count?: number }).what === major(6).uid && (r as { count?: number }).count === 21)).eq(true);
     });
 
+    // World's own "as <uid>" already spent the head's one asUid slot
+    // naming which card to push - a pushed Magician frame's own suit
+    // choice has nowhere else to go but its own step token (unlike a
+    // fresh/Fool-revealed Magician, which uses "as <suit>" directly - see
+    // gnostica.ts's deriveStepTokens/walkFrameStack for the matching rule).
+    it("World -> Magician: the pushed Magician frame reads its suit from its own step token, not a second 'as'", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => theWorld());
+        forceCardAt(g, 3, 0, () => major(1)); // The Magician, World's own target
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        g.move(`use ${theWorld().uid} as ${major(1).uid}/m0.1 C own m0 U`, { trusted: true });
+        expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode via the borrowed Magician
+    });
+
     // Matches Magnate's own "a turn is never complete, only submissible"
     // rule: whenever a genuinely optional further step remains available
     // (Lovers' own step 2, once step 1 is done), the move is
@@ -6041,18 +6070,18 @@ describe("Gnostica: Fool and World", () => {
 
     // Same, one click later - validateFrameStack's own "given segment is
     // still incomplete" fallback must not fall back to the root-only
-    // wording either, e.g. once Fool reveals the Magician and Cups is
-    // picked (suit chosen, mode not yet).
+    // wording either, e.g. once Fool reveals the Magician, Cups is chosen
+    // (via "as"), and its own "own" mode is picked but not yet complete.
     it("validating a still-incomplete resumed step (a real segment given, but not enough of one) also names the card", () => {
         const g = setupFool();
         pluckCard(g, major(1).uid); // Magician
         g.drawPile.unshift(major(1).uid);
         g.move(`use ${major(0).uid}`, { trusted: true });
 
-        const suitChosen = g.validateMove(`play ${major(1).uid}/m0.1 C (via ${major(0).uid})`); // suit picked, no mode yet
-        expect(suitChosen.valid).to.be.true;
-        expect(suitChosen.complete).to.eq(-1);
-        expect(suitChosen.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(1).name }));
+        const modeChosen = g.validateMove(`play ${major(1).uid} as C/m0.1 own m0 (via ${major(0).uid})`); // suit + mode chosen, orientation not yet
+        expect(modeChosen.valid).to.be.true;
+        expect(modeChosen.complete).to.eq(-1);
+        expect(modeChosen.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(1).name }));
     });
 
     // Declining a revealed card's own power exposes Fool's own remaining
@@ -6312,6 +6341,30 @@ describe("Gnostica: Fool and World", () => {
             }
         }
         expect(sawRealUse, "expected at least one trial to actually borrow a card via the revealed World, not just decline").to.be.true;
+    });
+
+    // Regression: a Fool-revealed Magician never spends the head's asUid
+    // on the reveal itself (unlike World's own borrow), so its own suit
+    // choice still goes through "as <suit>" - randomMove() must build it
+    // that way too, not the inline form only a World-pushed Magician uses
+    // (see findRandomMagicianChain's own docs, randomMove.ts).
+    it("randomMove() sometimes uses a Fool-revealed Magician, choosing its suit via 'as'", () => {
+        let sawRealUse = false;
+        for (let i = 0; i < 30; i++) {
+            const g = setupFool();
+            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")]; // room for Cups "own" to have a facing target too
+            pluckCard(g, major(1).uid);
+            g.drawPile.unshift(major(1).uid); // Fool's own flip reveals The Magician
+            g.move(`use ${major(0).uid}`, { trusted: true });
+            expect(g.continued).to.not.be.empty;
+            const move = g.randomMove();
+            expect(g.validateMove(move).valid, `"${move}" should validate`).to.be.true;
+            expect(() => g.move(move, { trusted: true })).to.not.throw();
+            if (new RegExp(`^play ${major(1).uid} as [CRDS]`).test(move)) {
+                sawRealUse = true;
+            }
+        }
+        expect(sawRealUse, "expected at least one trial to actually use the revealed Magician, not just decline").to.be.true;
     });
 
     // Regression: randomMove()'s own "paused activation" fallback used to
