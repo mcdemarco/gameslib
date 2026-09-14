@@ -5333,11 +5333,18 @@ export class GnosticaGame extends GameBaseSequenced {
         if (stepResult.failed) {
             return stepResult.result;
         }
-        // Cups "own" creation's still-prepopulated facing (see
-        // IStepOutcome.softComplete's own docs) reports complete:0 -
-        // submittable, but the real playground client shouldn't auto-
-        // submit it before the player gets a click to orient it.
-        return { valid: true, complete: stepResult.outcome?.softComplete ? 0 : 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        // Cups "own" creation's still-prepopulated facing, or an owned
+        // piece Rods/Discs/Swords just acted on with no reorientation
+        // given (see IStepOutcome.softComplete's own docs) - either way,
+        // complete:0 (so the real playground client doesn't auto-submit
+        // before the player gets a click to orient it) with a message
+        // that actually says so, not the bare generic fallback.
+        const softComplete = stepResult.outcome?.softComplete === true;
+        return {
+            valid: true,
+            complete: softComplete ? 0 : 1,
+            message: i18next.t(softComplete ? "apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT" : "apgames:validation._general.VALID_MOVE"),
+        };
     }
 
     // Whether `cardUid` names a real major arcana card or a minor arcana
@@ -5878,7 +5885,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
                 }
                 if (softComplete) {
-                    return { valid: true, complete: 0, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT") };
                 }
                 if (hpFinalRoundReady !== undefined) {
                     return { valid: true, complete: 1, message: i18next.t(hpFinalRoundReady.key, hpFinalRoundReady.params) };

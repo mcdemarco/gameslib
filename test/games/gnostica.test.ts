@@ -2502,6 +2502,9 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U?`);
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(0);
+        // Soft-complete says WHY it's holding open, not the bare generic
+        // "looks like a valid move" fallback.
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
         // n0 itself is already "U", the creation's own default - a click
         // there hard-rejects as a no-op (same trailing-orientation rule
         // every other target minion gets), rather than silently
@@ -3058,6 +3061,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_R_piece");
         expect(modeClick.move).eq(`use ${aceOfRods().uid}/m0.1 piece m0.1 1`);
+        // No reorientation given yet for the acting player's own moved
+        // piece - complete:0, and the message says so instead of the
+        // generic "looks like a valid move" fallback.
+        expect(modeClick.complete).eq(0);
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
         // Effective (post-move) position is n0 - clicking o0 (east of n0)
         // sets the moved piece's new facing to E... which is already its
         // current facing, so this must hard-reject as a no-op.
@@ -3069,6 +3077,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [rowW, colW] = rowColFor(g, 0, 0); // m0
         const faceW = g.handleClick(modeClick.move, rowW, colW);
         expect(faceW.move).eq(`use ${aceOfRods().uid}/m0.1 piece m0.1 1 W`);
+        // A real, deliberate facing is now given - genuinely complete:1,
+        // generic message (nothing left to say "you may also" about).
+        expect(faceW.complete).eq(1);
+        expect(faceW.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         g.move(faceW.move, { trusted: true });
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, orientation: "W" });
     });
