@@ -13,7 +13,7 @@ import {
     attackPiece, attackTerritory,
     orientMinion, orientAny, hierophantReplace,
     hermitMovePiece, hermitMoveTerritory, tradeHands,
-    judgementDraw, highPriestess, fool, worldChoosePower,
+    judgementDraw, discardDraw, fool, worldChoosePower,
 } from "../../src/games/gnostica/powers";
 
 const card = (uid: string) => minorCards.find(c => c.uid === uid) ?? majorCards.find(c => c.uid === uid)!;
@@ -595,7 +595,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess discards chosen cards then redraws up to 6, drawing the just-discarded card back out via reshuffle once the draw pile empties", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: ["KS"] });
-        highPriestess(ctx, ["AC"], undefined, false);
+        discardDraw(ctx, ["AC"], undefined, false);
         // Only 3 cards exist anywhere (2C, KS, AC), so all 3 end up in hand -
         // the reshuffle even pulls the just-discarded AC back in, since the
         // rules make reshuffling unconditional.
@@ -607,7 +607,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess reshuffles the discard pile into the draw pile mid-redraw if the draw pile runs dry", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: ["3C"], drawPile: [] });
-        highPriestess(ctx, ["AC"], undefined, false);
+        discardDraw(ctx, ["AC"], undefined, false);
         expect(ctx.hand.slice().sort()).to.deep.equal(["2C", "3C", "AC"].sort());
         expect(ctx.discardPile).to.deep.equal([]);
         expect(ctx.drawPile).to.deep.equal([]);
@@ -616,7 +616,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess stops redrawing once there is genuinely nothing left in either pile", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: [] });
-        highPriestess(ctx, [], undefined, false); // skip discarding anything
+        discardDraw(ctx, [], undefined, false); // skip discarding anything
         expect(ctx.hand).to.deep.equal(["AC", "2C"]);
         expect(ctx.discardPile).to.deep.equal([]);
         expect(ctx.drawPile).to.deep.equal([]);
@@ -625,7 +625,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess discards eagerly but defers the redraw when partial - matching the ordinary discard/draw action's own convention", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: ["KS", "3C"] });
-        const drawn = highPriestess(ctx, ["AC"], undefined, true);
+        const drawn = discardDraw(ctx, ["AC"], undefined, true);
         expect(drawn).eq(0);
         expect(ctx.hand).to.deep.equal(["2C"]); // discard happened for real...
         expect(ctx.discardPile).to.deep.equal(["AC"]);
@@ -635,7 +635,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess draws exactly the requested count, not always the max - the rules never mandate refilling to 6", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: ["KS", "3C", "4C"] });
-        const drawn = highPriestess(ctx, ["AC"], "1", false);
+        const drawn = discardDraw(ctx, ["AC"], "1", false);
         expect(drawn).eq(1);
         expect(ctx.hand).to.deep.equal(["2C", "KS"]);
         expect(ctx.drawPile).to.deep.equal(["3C", "4C"]);
@@ -646,7 +646,7 @@ describe("Gnostica powers: special (major arcana)", () => {
         // Discarding "AC" from a 2-card hand leaves 1, so the max legal
         // draw is 5 (6 - 1) - requesting 6 exceeds it.
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: ["KS", "3C", "4C", "5C", "6C", "7C"] });
-        expect(() => highPriestess(ctx, ["AC"], "6", false)).to.throw();
+        expect(() => discardDraw(ctx, ["AC"], "6", false)).to.throw();
     });
 
     it("Fool flips the top of the draw pile into the discard pile and returns it", () => {

@@ -70,3 +70,4 @@ Mark items done with @done(date) only as they're confirmed.
 - #100 - The message for distance moving a piece should not specify "your" piece. @done(2026-09-14)
 - #101 - In Hierophant, the new piece should inherit the enemy piece's orientation, not start as U. @done(2026-09-14)
 - #102 - Add structural testing of more steps to parseMove().
+- #103 - Remove via requirement; just autopopulate on completion and always derive vianess from state.

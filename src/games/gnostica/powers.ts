@@ -1052,16 +1052,16 @@ export const judgementDraw = (
     }
 };
 
-// High Priestess: one "discard any or none, then draw" round (the card
-// grants two of these in a row - see MAJOR_ARCANA["02"] - by simply calling
-// this twice). No minion/targeting is involved; this is pure hand/pile
+// The shared "discard any or none, then draw" primitive - one round of
+// it is the ordinary end-of-turn discard/draw action (cmdDiscard/
+// validateDiscard, gnostica.ts); the High Priestess grants two rounds of
+// the exact same thing in a row (MAJOR_ARCANA["02"]) by calling this
+// twice. No minion/targeting is involved; this is pure hand/pile
 // manipulation. The rules never mandate refilling all the way to 6 - the
-// draw count is the player's own choice, exactly like the ordinary
-// end-of-turn "discard and draw" action's own "draw <n>" grammar (see
-// cmdDiscard/validateDiscard, gnostica.ts): omitting a count defaults to
-// the max, same as that action's own default. Every named discard uid is
-// checked up front for the same reason as Judgement above.
-export const checkHighPriestess = (ctx: PowerContext, discardUids: string[], drawCountStr?: string): PowerFailure | undefined => {
+// draw count is the player's own choice; omitting it defaults to the
+// max. Every named discard uid is checked up front for the same reason
+// as Judgement above.
+export const checkDiscardDraw = (ctx: PowerContext, discardUids: string[], drawCountStr?: string): PowerFailure | undefined => {
     const seen = new Set<string>();
     for (const uid of discardUids) {
         if (seen.has(uid)) {
@@ -1090,8 +1090,8 @@ export const checkHighPriestess = (ctx: PowerContext, discardUids: string[], dra
 // number of cards actually drawn, so the caller can log the real count
 // rather than the discard count or the requested one (a reshuffle-starved
 // deck can still fall short of what was asked for).
-export const highPriestess = (ctx: PowerContext, discardUids: string[], drawCountStr: string | undefined, partial: boolean): number => {
-    const failure = checkHighPriestess(ctx, discardUids, drawCountStr);
+export const discardDraw = (ctx: PowerContext, discardUids: string[], drawCountStr: string | undefined, partial: boolean): number => {
+    const failure = checkDiscardDraw(ctx, discardUids, drawCountStr);
     if (failure) {
         throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
     }

@@ -19,14 +19,14 @@ import {
     attackPiece, attackTerritory,
     orientMinion, orientAny, hierophantReplace,
     hermitMovePiece, hermitMoveTerritory, tradeHands,
-    judgementDraw, highPriestess, fool, worldChoosePower,
+    judgementDraw, discardDraw, fool, worldChoosePower,
     checkCreateOwn, checkCreateEnemy, checkCreateTerritory,
     checkMovePiece, checkMoveTerritory,
     checkGrowPiece, checkGrowTerritory,
     checkAttackPiece, checkAttackTerritory,
     checkOrientMinion, checkOrientAny, checkHierophantReplace,
     checkHermitMovePiece, checkHermitMoveTerritory, checkTradeHands,
-    checkJudgementDraw, checkHighPriestess, checkFool, checkWorldChoosePower,
+    checkJudgementDraw, checkDiscardDraw, checkFool, checkWorldChoosePower,
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import { generateRandomMove } from "./gnostica/randomMove";
@@ -1218,8 +1218,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 malformedStep = tokens;
                 break;
             }
-            // "draw <n>" as the WHOLE step (High Priestess, zero discards) is neither a piece ref nor a card uid, so it needs its own allowance.
-            if (tokens[0]?.toLowerCase() === "draw") {
+            // "draw <n>" alone (High Priestess, zero discards) or a
+            // leading "discard" (High Priestess once anything IS chosen -
+            // see IParsedMove.malformedRest's own docs) are neither a
+            // piece ref nor a card uid, so they need their own allowance.
+            if (tokens[0]?.toLowerCase() === "draw" || tokens[0]?.toLowerCase() === "discard") {
                 continue;
             }
             if (!tokens.every(t => STEP_TOKEN_RE.test(t))
@@ -3231,12 +3234,16 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.continued.length > 0) {
             // High Priestess's own step IS a discard/draw - "play 02" would
             // be a lie (there's no card being played), so it resumes as a
-            // bare "discard <uids> draw <n> (via 02)", its tokens sitting
-            // directly after the head the way the ordinary end-of-turn
-            // discard action's own do.
+            // bare "discard <uids> draw <n> (via 02)", its own tokens
+            // sitting directly after the head the way the ordinary
+            // end-of-turn discard action's own do. The step's own leading
+            // "discard" token (see resumeStepSegments' own docs on why
+            // it's there) becomes the head word itself here, so it's
+            // stripped before landing in `rest`.
             if (pending.special === "highPriestess") {
                 const tokens = stepSegments[stepSegments.length - 1] ?? [];
-                return this.pickleMove({ ...base, head: "discard", rest: tokens, stepSegments: [], viaUid: this.getContinuedUid(), asUid: undefined });
+                const rest = tokens[0] === "discard" ? tokens.slice(1) : tokens;
+                return this.pickleMove({ ...base, head: "discard", rest, stepSegments: [], viaUid: this.getContinuedUid(), asUid: undefined });
             }
             return this.pickleMove({ ...base, viaUid: this.getContinuedUid() });
         }
@@ -4085,7 +4092,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     // does: forces a pause for a SECOND round if this is
                     // the first, or ends the whole activation if it's the
                     // second (forcePauseReadyMessage/hpFinalRoundReady).
-                    return this.assembleStepMove(pending, [...pending.rest, "draw", n]);
+                    // Leading "discard" (see resumeStepSegments' own docs)
+                    // is added here if picking a count is this round's
+                    // very first click - already there otherwise.
+                    const base = pending.rest[0] === "discard" ? pending.rest : ["discard", ...pending.rest];
+                    return this.assembleStepMove(pending, [...base, "draw", n]);
                 }
                 switch (value) {
                     case "pass":
@@ -4223,14 +4234,20 @@ export class GnosticaGame extends GameBaseSequenced {
                     // appended past the "draw" token and silently ignored
                     // (never actually discarded) rather than added to the
                     // list.
-                    const drawIdx = pendingForCard.rest.indexOf("draw");
-                    let discards = drawIdx === -1 ? [...pendingForCard.rest] : pendingForCard.rest.slice(0, drawIdx);
+                    // Leading "discard" (see resumeStepSegments' own
+                    // docs) may or may not be there yet depending on
+                    // whether this round's own very first click is
+                    // landing here - stripped before working the list,
+                    // always reattached when rebuilding it.
+                    const body = pendingForCard.rest[0] === "discard" ? pendingForCard.rest.slice(1) : pendingForCard.rest;
+                    const drawIdx = body.indexOf("draw");
+                    let discards = drawIdx === -1 ? [...body] : body.slice(0, drawIdx);
                     if (discards.includes(uid)) {
                         discards = discards.filter(u => u !== uid);
                     } else {
                         discards.push(uid);
                     }
-                    return this.assembleStepMove(pendingForCard, discards);
+                    return this.assembleStepMove(pendingForCard, ["discard", ...discards]);
                 }
                 if (head === "play") {
                     // "play"'s own pool can span the whole board, unlike
@@ -5064,11 +5081,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // draw back: exactly <n> if "draw <n>" is given (0 up to however much
     // room is left in a 6-card hand - it's always legal to draw fewer than
     // the max), or as many as possible if "draw <n>" is omitted entirely.
-    // Reshuffles the discard pile into the draw pile if it runs dry, same
-    // as every other draw-pile-exhaustion spot - see
-    // reshuffle logic in gnostica/powers.ts (this one
-    // can't share that helper directly, since it mutates this.drawPile/
-    // this.discardPile rather than a PowerContext's).
+    // Shares checkDiscardDraw/discardDraw (powers.ts) outright with High
+    // Priestess's own two rounds of the identical action - see their own
+    // docs.
     //
     // `partial` (set only by move()'s live-preview calls, never by a real
     // submitted move) stops after the discard step, deliberately skipping
@@ -5082,63 +5097,31 @@ export class GnosticaGame extends GameBaseSequenced {
     // Legality (every named uid actually in hand, the draw count within
     // range) is validateDiscard's own job, not this one's.
     private cmdDiscard(args: string[], partial = false): void {
-        const hand = this.hands[this.currplayer - 1];
         const drawIdx = args.indexOf("draw");
         const discardUids = drawIdx === -1 ? args : args.slice(0, drawIdx);
-        for (const uid of discardUids) {
-            const idx = hand.indexOf(uid);
-            hand.splice(idx, 1);
-            this.discardPile.push(uid);
-            this.discarded.push(uid);
-        }
+        const drawCountStr = drawIdx === -1 ? undefined : args[drawIdx + 1];
+        const drawn = discardDraw(this.buildPowerContext(), discardUids, drawCountStr, partial);
         if (discardUids.length > 0) {
-            this.results.push({ type: "place", how: "discard", what: this.discarded.join(",") });
+            this.discarded.push(...discardUids);
+            this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
         }
         if (partial) {
             return;
         }
-        const maxDraw = Math.max(0, 6 - hand.length);
-        let count = maxDraw;
-        if (drawIdx !== -1) {
-            const countStr = args[drawIdx + 1];
-            count = countStr === undefined ? NaN : Number(countStr);
-        }
-        let drawnCount = 0;
-        while (drawnCount < count) {
-            if (this.drawPile.length === 0) {
-                if (this.discardPile.length === 0) {
-                    break; // nothing left anywhere
-                }
-                this.drawPile = shuffle(this.discardPile) as string[];
-                this.discardPile = [];
-            }
-            hand.push(this.drawPile.shift() as string);
-            drawnCount++;
-        }
-        this.results.push({ type: "deckDraw", count: drawnCount, from: "deck" });
-        this.cardsDrawn[this.currplayer - 1] = drawnCount;
+        this.results.push({ type: "deckDraw", count: drawn, from: "deck" });
+        this.cardsDrawn[this.currplayer - 1] = drawn;
     }
 
-    // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar and
-    // logic, non-mutating. Every named discard uid is checked up front,
-    // including rejecting the same uid named twice - cmdDiscard's own loop
-    // mutates the hand as it goes, so a repeated uid already fails there
-    // (found once, then genuinely gone from hand on the second lookup);
-    // this reproduces that without actually mutating anything.
+    // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar,
+    // delegating to the same checkDiscardDraw primitive it uses.
     private validateDiscard(parsed: IParsedMove): IValidationResult {
         const tokens = parsed.rest;
-        const hand = this.hands[this.currplayer - 1];
         const drawIdx = tokens.indexOf("draw");
         const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
-        const seen = new Set<string>();
-        for (const uid of discardUids) {
-            if (seen.has(uid)) {
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD" });
-            }
-            seen.add(uid);
-            if (!hand.includes(uid)) {
-                return this.invalid("apgames:validation.gnostica.NOT_IN_HAND", { uid });
-            }
+        const drawCountStr = drawIdx === -1 ? undefined : tokens[drawIdx + 1];
+        const failure = checkDiscardDraw(this.buildPowerContext(), discardUids, drawCountStr);
+        if (failure) {
+            return this.failureResult(failure);
         }
         // A missing "draw <n>" is still perfectly legal to submit as-is
         // (cmdDiscard defaults it to the max at commit time), but the
@@ -5151,12 +5134,6 @@ export class GnosticaGame extends GameBaseSequenced {
         // about how it was produced.
         if (drawIdx === -1) {
             return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
-        }
-        const maxDraw = Math.max(0, 6 - (hand.length - discardUids.length));
-        const countStr = tokens[drawIdx + 1];
-        const count = countStr === undefined ? NaN : Number(countStr);
-        if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
-            return this.invalid("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: countStr, max: maxDraw });
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
@@ -5950,14 +5927,18 @@ export class GnosticaGame extends GameBaseSequenced {
     //    frame on that token; the head itself carries no segments)
     //  - "discard"  -> the High Priestess round's own tokens, which sit
     //    right after the head like the ordinary discard action's rather
-    //    than as a "/"-separated segment - folded back into one segment
+    //    than as a "/"-separated segment - folded back into one segment,
+    //    with the head word itself reattached as the step's own leading
+    //    token (validateHighPriestess/applyHighPriestess expect it there
+    //    the same way a fresh "use 02/discard ..." activation's own step
+    //    already carries it - see their own docs)
     //  - anything else -> the segments as typed
     private resumeStepSegments(parsed: IParsedMove): string[][] {
         if (parsed.head === "decline") {
             return [["decline"]];
         }
         if (parsed.head === "discard" && parsed.viaUid !== undefined) {
-            return parsed.rest.length > 0 ? [parsed.rest] : [];
+            return parsed.rest.length > 0 ? [["discard", ...parsed.rest]] : [];
         }
         return parsed.stepSegments;
     }
@@ -7348,29 +7329,43 @@ export class GnosticaGame extends GameBaseSequenced {
         return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
-    // High Priestess: <discardUid...> [draw <n>] - no minion reference at
-    // all, and now mirrors the ordinary end-of-turn discard/draw action's
-    // own grammar exactly (see cmdDiscard's own docs) - the draw count is
-    // the player's own choice, not forced to the max. The draw itself is
-    // genuinely random (once a reshuffle is needed) and is deferred until
-    // a real (non-partial) commit, same as cmdDiscard's own convention.
-    // No result is logged for a partial call - nothing happened yet worth
-    // logging.
+    // High Priestess: [discard <discardUid...>] [draw <n>] - no minion
+    // reference at all, and shares the ordinary end-of-turn discard/draw
+    // action's own primitive outright (checkDiscardDraw/discardDraw,
+    // powers.ts) - the draw count is the player's own choice, not forced
+    // to the max. Empty tokens (nothing chosen for this round yet) stays
+    // legal-and-soft; once anything IS chosen, the literal "discard"
+    // keyword leads it - validateHighPriestess enforces that, so this
+    // trusted-path function can just drop tokens[0] unconditionally
+    // (slicing an empty array is still an empty array). The draw itself
+    // is genuinely random (once a reshuffle is needed) and is deferred
+    // until a real (non-partial) commit, same as cmdDiscard's own
+    // convention. No result is logged for a partial call - nothing
+    // happened yet worth logging.
     private applyHighPriestess(tokens: string[], partial: boolean): void {
-        const drawIdx = tokens.indexOf("draw");
-        const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
-        const drawCountStr = drawIdx === -1 ? undefined : tokens[drawIdx + 1];
-        const drawn = highPriestess(this.buildPowerContext(), discardUids, drawCountStr, partial);
+        const body = tokens.slice(1);
+        const drawIdx = body.indexOf("draw");
+        const discardUids = drawIdx === -1 ? body : body.slice(0, drawIdx);
+        const drawCountStr = drawIdx === -1 ? undefined : body[drawIdx + 1];
+        const drawn = discardDraw(this.buildPowerContext(), discardUids, drawCountStr, partial);
         if (!partial) {
+            if (discardUids.length > 0) {
+                this.discarded.push(...discardUids);
+                this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
+            }
             this.results.push({ type: "deckDraw", count: drawn, from: "deck" });
         }
     }
 
     public validateHighPriestess(tokens: string[]): IValidationResult {
-        const drawIdx = tokens.indexOf("draw");
-        const discardUids = drawIdx === -1 ? tokens : tokens.slice(0, drawIdx);
-        const drawCountStr = drawIdx === -1 ? undefined : tokens[drawIdx + 1];
-        const failure = checkHighPriestess(this.buildPowerContext(), discardUids, drawCountStr);
+        if (tokens.length > 0 && tokens[0] !== "discard") {
+            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" });
+        }
+        const body = tokens.slice(1);
+        const drawIdx = body.indexOf("draw");
+        const discardUids = drawIdx === -1 ? body : body.slice(0, drawIdx);
+        const drawCountStr = drawIdx === -1 ? undefined : body[drawIdx + 1];
+        const failure = checkDiscardDraw(this.buildPowerContext(), discardUids, drawCountStr);
         if (failure) {
             return this.failureResult(failure);
         }

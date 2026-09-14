@@ -825,7 +825,7 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
 function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
     const hand = game.hands[game.currplayer - 1];
     const discards = hand.filter(() => Math.random() < 0.3);
-    return game.validateHighPriestess(discards).valid ? discards : [];
+    return game.validateHighPriestess(["discard", ...discards]).valid ? discards : [];
 }
 
 // Round 2's own resume, reusing round 1's exact discard-uid randomization
@@ -879,7 +879,12 @@ function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower,
         case "hierophantReplace": return buildRandomOrientAnyOrHierophantTokens(game, minions, "hierophantReplace");
         case "hermitTeleport": return buildRandomHermitTokens(game, minions);
         case "judgementDraw": return buildRandomJudgementDrawTokens(game, minions);
-        case "highPriestess": return buildRandomHighPriestessTokens(game);
+        // Leading "discard" (see resumeStepSegments' own docs, gnostica.ts)
+        // is this step's own real token, unlike buildRandomHighPriestessTokens'
+        // OTHER caller below, which feeds bare tokens to buildViaMove -
+        // that one already prepends "discard" itself for the resume's
+        // own head word.
+        case "highPriestess": return ["discard", ...buildRandomHighPriestessTokens(game)];
         case "magicianChoice": return buildRandomMagicianChoiceTokens(game, minions);
         // fool/worldUseAny - never reached; buildRandomChain filters
         // Fool/World out by uid before any step is ever attempted.

@@ -1323,7 +1323,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         const [firstDiscard] = g.hands[0];
-        g.move(`use ${major(2).uid}/${firstDiscard}`, { trusted: true }); // only the first of the two rounds
+        g.move(`use ${major(2).uid}/discard ${firstDiscard}`, { trusted: true }); // only the first of the two rounds
         expect(g.hands[0]).to.not.include(firstDiscard);
         expect(g.hands[0].length).eq(6);
     });
@@ -3503,12 +3503,12 @@ describe("Gnostica: move-string structural validation", () => {
         expect(result.valid).to.be.false;
     });
 
-    it("accepts a genuinely well-formed step whose first token is a card uid, not a piece ref (High Priestess)", () => {
+    it("accepts a genuinely well-formed step whose first token is the literal 'discard' keyword, not a piece ref or card uid (High Priestess)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         const [firstDiscard] = g.hands[0];
-        const result = g.validateMove(`use ${major(2).uid}/${firstDiscard}`);
+        const result = g.validateMove(`use ${major(2).uid}/discard ${firstDiscard}`);
         expect(result.valid).to.be.true;
     });
 
@@ -4566,7 +4566,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const click1 = g.handleClick(cellClick.move, -1, -1, "hand_2C");
-        expect(click1.move).eq(`use ${major(2).uid}/2C`);
+        expect(click1.move).eq(`use ${major(2).uid}/discard 2C`);
         expect(click1.valid).to.be.true;
         // Regression: no "draw <n>" chosen yet - still soft (complete:0),
         // not "ready to submit" (complete:1), even though this ALREADY
@@ -4576,10 +4576,10 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         // toggle must never read as done.
         expect(click1.complete).eq(0);
         const click2 = g.handleClick(click1.move, -1, -1, "hand_5C");
-        expect(click2.move).eq(`use ${major(2).uid}/2C 5C`);
+        expect(click2.move).eq(`use ${major(2).uid}/discard 2C 5C`);
         expect(click2.complete).eq(0);
         const click3 = g.handleClick(click2.move, -1, -1, "hand_2C"); // toggle back off
-        expect(click3.move).eq(`use ${major(2).uid}/5C`);
+        expect(click3.move).eq(`use ${major(2).uid}/discard 5C`);
         expect(click3.complete).eq(0);
         const click4 = g.handleClick(click3.move, -1, -1, "_btn_hpdraw_1");
         expect(click4.complete).eq(1); // an explicit draw count IS the player's final word
@@ -4609,10 +4609,10 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const discardClick = g.handleClick(cellClick.move, -1, -1, "hand_5C");
-        expect(discardClick.move).eq(`use ${major(2).uid}/5C`);
+        expect(discardClick.move).eq(`use ${major(2).uid}/discard 5C`);
         // maxDraw is 6 - 2 (hand after discarding 5C) = 4; choose 1 instead.
         const drawClick = g.handleClick(discardClick.move, -1, -1, "_btn_hpdraw_1");
-        expect(drawClick.move).eq(`use ${major(2).uid}/5C draw 1`);
+        expect(drawClick.move).eq(`use ${major(2).uid}/discard 5C draw 1`);
         expect(drawClick.valid).to.be.true;
         // A count picked completes the move - tell the player to submit,
         // not the generic "Looks like a valid move" (there's a second
@@ -4652,10 +4652,10 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const discard1 = g.handleClick(cellClick.move, -1, -1, "hand_5C");
         const drawClick = g.handleClick(discard1.move, -1, -1, "_btn_hpdraw_1"); // chosen too early
-        expect(drawClick.move).eq(`use ${major(2).uid}/5C draw 1`);
+        expect(drawClick.move).eq(`use ${major(2).uid}/discard 5C draw 1`);
 
         const discard2 = g.handleClick(drawClick.move, -1, -1, "hand_AR");
-        expect(discard2.move).eq(`use ${major(2).uid}/5C AR`); // stale "draw 1" dropped, AR added
+        expect(discard2.move).eq(`use ${major(2).uid}/discard 5C AR`); // stale "draw 1" dropped, AR added
         expect(discard2.valid).to.be.true;
 
         g.move(discard2.move, { trusted: true }); // 0 remaining in a 3-card hand, defaults to max draw
@@ -4681,12 +4681,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(play02.move).eq("play 02");
         const discard1 = g.handleClick(play02.move, -1, -1, "hand_2C");
         const discard2 = g.handleClick(discard1.move, -1, -1, "hand_5C");
-        expect(discard2.move).eq("play 02/2C 5C");
+        expect(discard2.move).eq("play 02/discard 2C 5C");
 
         // Hand is genuinely down to 3 (6 - the played card - 2 discards),
         // so drawing 3 is legal; drawing 4 is not.
         const draw3 = g.handleClick(discard2.move, -1, -1, "_btn_hpdraw_3");
-        expect(draw3.move).eq("play 02/2C 5C draw 3");
+        expect(draw3.move).eq("play 02/discard 2C 5C draw 3");
         expect(draw3.valid).to.be.true;
 
         g.move(draw3.move, { trusted: true });
@@ -4720,7 +4720,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
             return g;
         };
         const preview = setup();
-        preview.move(`use ${major(2).uid}/5C`, { partial: true }); // exactly what a live client preview does
+        preview.move(`use ${major(2).uid}/discard 5C`, { partial: true }); // exactly what a live client preview does
         expect(preview.hands[0]).to.not.include("5C"); // discarded for real...
         expect(preview.hands[0].length).eq(2); // ...but NOT yet redrawn back to 6
         // A partial preview never persists a continuation - see
@@ -4730,7 +4730,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(preview.currplayer).eq(1);
 
         const g = setup();
-        g.move(`use ${major(2).uid}/5C`, { trusted: true }); // the real, final submit
+        g.move(`use ${major(2).uid}/discard 5C`, { trusted: true }); // the real, final submit
         expect(g.hands[0]).to.not.include("5C");
         expect(g.hands[0].length).eq(6); // now genuinely redrawn
         expect(g.continued).to.not.be.empty; // step 1 of 2 - still owes the second flip
@@ -5171,12 +5171,12 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     it("full scenario: step 1 pauses (currplayer unchanged, pendingPower set), step 2 resumes and clears it, hand redraws to 6", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use ${major(2).uid}/5C`, { trusted: true });
+        g.move(`use ${major(2).uid}/discard 5C`, { trusted: true });
         expect(g.currplayer).eq(1);
         expect(g.continued).to.not.be.empty;
         expect(g.hands[0]).to.not.include("5C");
         expect(g.hands[0].length).eq(6);
-        g.move(`play ${major(2).uid}/AR (via ${major(2).uid})`, { trusted: true }); // step 2: discard AR instead of declining
+        g.move(`discard AR (via ${major(2).uid})`, { trusted: true }); // step 2: discard AR instead of declining
         expect(g.continued).to.be.empty;
         expect(g.currplayer).eq(2);
         expect(g.hands[0]).to.not.include("AR");
