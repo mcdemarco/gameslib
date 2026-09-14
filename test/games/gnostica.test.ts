@@ -3517,6 +3517,53 @@ describe("Gnostica: move-string structural validation", () => {
         const result = g.validateMove("frobnicate m0");
         expect(result.valid).to.be.false;
     });
+
+    // Every non-chained head's own `rest` has a grammar fixed by the head
+    // keyword alone (no card/suit to resolve first) - same structural
+    // reasoning as stepSegments' own shape check above, caught in
+    // parseMove itself before any head-specific validate* function runs.
+    // Each case below still gets the SAME specific message the deeper
+    // validate* function would have given - parseMove just catches it
+    // earlier, not with a generic complaint.
+    it("place: a malformed orientation or cell token is rejected structurally, with the same specific message validatePlace would give", () => {
+        const g = new GnosticaGame(2);
+        expect(g.validateMove("place m0 xyz").message).eq(i18next.t("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: "xyz" }));
+        expect(g.validateMove("place zzz U").message).eq(i18next.t("apgames:validation.gnostica.BAD_CELL", { cell: "zzz" }));
+        expect(g.validateMove("place m0 U xyz").message).eq(i18next.t("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: "xyz" }));
+        // A missing token is "incomplete," not malformed - untouched by
+        // this, still validatePlace's own "still building" message.
+        expect(g.validateMove("place m0").message).eq(i18next.t("apgames:validation.gnostica.PLACE_DIRECTION_REQUIRED"));
+    });
+
+    it("orient: a malformed ref or orientation token is rejected structurally", () => {
+        const g = new GnosticaGame(2);
+        expect(g.validateMove("orient !!! N").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_PIECE_REF" }));
+        expect(g.validateMove("orient m0.1 xyz").message).eq(i18next.t("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: "xyz" }));
+    });
+
+    it("discard: a bad-shaped uid, a duplicate uid, or a non-numeric draw count are all rejected structurally", () => {
+        const g = new GnosticaGame(2);
+        expect(g.validateMove("discard xx").message).eq(i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: "xx" }));
+        expect(g.validateMove("discard AC AC").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD" }));
+        expect(g.validateMove("discard AC draw abc").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }));
+    });
+
+    it("bid: a non-numeric position is rejected structurally, distinct from an out-of-range one", () => {
+        const g = new GnosticaGame(2);
+        expect(g.validateMove("bid abc").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }));
+    });
+
+    it("redraw: a bad-shaped or duplicate uid is rejected structurally", () => {
+        const g = new GnosticaGame(2);
+        expect(g.validateMove("redraw xx").message).eq(i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: "xx" }));
+        expect(g.validateMove("redraw AC AC").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD" }));
+    });
+
+    it("use/play: a bad-shaped card uid is rejected structurally - but 'as <x>' stays deeper (card-dependent: a suit letter for Magician, a card uid for World)", () => {
+        const g = new GnosticaGame(2);
+        expect(g.validateMove("use xx").message).eq(i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: "xx" }));
+        expect(g.validateMove("play xx").message).eq(i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: "xx" }));
+    });
 });
 
 // "orient" (reorienting an EXISTING piece) rewrites a single facing token
