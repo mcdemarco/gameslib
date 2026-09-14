@@ -2505,17 +2505,19 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // Soft-complete says WHY it's holding open, not the bare generic
         // "looks like a valid move" fallback.
         expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
-        // n0 itself is already "U", the creation's own default - a click
-        // there hard-rejects as a no-op (same trailing-orientation rule
-        // every other target minion gets), rather than silently
-        // re-affirming.
+        // n0 itself is already "U", the creation's own default - clicking
+        // it again CONFIRMS that still-soft default (drops "?", no
+        // duplicate token) rather than erroring as a no-op, same as
+        // "place"'s own identical click-to-orient collapse.
         const [row2, col2] = rowColFor(g, 1, 0);
         const sameCell = g.handleClick(modeClick.move, row2, col2);
-        expect(sameCell.valid).to.be.false;
-        expect(sameCell.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        expect(sameCell.valid).to.be.true;
+        expect(sameCell.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U`);
+        expect(sameCell.complete).eq(1); // no longer soft - a deliberate confirmation
+        expect(sameCell.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         const [row3, col3] = rowColFor(g, 2, 0); // "o0", east of n0 - sets the new piece's facing
         const east = g.handleClick(modeClick.move, row3, col3);
-        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U? E`);
+        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U E`); // any click drops "?" outright
         expect(east.complete).eq(1); // a real correction is a deliberate choice, no longer soft
         // Committing the ORIGINAL, still-soft seed directly (never taking
         // the optional correction) - "?" makes no difference to the piece
@@ -3607,13 +3609,12 @@ describe("Gnostica: click-to-orient messaging", () => {
 
     // Cups "own" always creates its new minion with a real, mandatory
     // facing ("U" - never left unstated), the same way place's own first
-    // click does - but adjusting that facing afterward is now the exact
-    // same trailing-optional-orientation primitive every other target
-    // minion gets (see handlePendingStepBoardClick's own docs), not a
-    // special "still adjustable" soft-pedal: no message once the create
-    // step is otherwise complete, and a same-facing click is a hard
-    // ORIENT_NO_OP rejection instead of a silent no-change.
-    it("Cups (own): the mode button's default facing needs no message; a click only changes it, hard-rejecting a same-facing request", () => {
+    // click does - and a click confirming that still-soft default (the
+    // same direction it's already seeded as) drops the "?" instead of
+    // erroring, mirroring place's own identical collapse-back-to-U rule;
+    // only a click that actually changes an already-DELIBERATE facing
+    // hits ORIENT_NO_OP.
+    it("Cups (own): the mode button's default facing needs no message; a click only changes it, confirming (not rejecting) a same-facing request", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
@@ -3623,14 +3624,20 @@ describe("Gnostica: click-to-orient messaging", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_mode_C_own");
         expect(modeClick.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U?`);
-        const [rowN, colN] = rowColFor(g, 1, 0); // n0 itself - "U" again, already the creation default
+        // n0 itself - "U" again, already the creation's own still-soft
+        // default - confirms it (drops "?", no duplicate token) rather
+        // than erroring, since nothing deliberate has been chosen yet.
+        const [rowN, colN] = rowColFor(g, 1, 0);
         const sameFacing = g.handleClick(modeClick.move, rowN, colN);
-        expect(sameFacing.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U? U`);
-        expect(sameFacing.valid).to.be.false;
-        expect(sameFacing.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        expect(sameFacing.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U`);
+        expect(sameFacing.valid).to.be.true;
+        expect(sameFacing.complete).eq(1);
         const [rowE, colE] = rowColFor(g, 2, 0); // "o0", east of n0 - a genuine change
         const east = g.handleClick(modeClick.move, rowE, colE);
-        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U? E`);
+        // Any click (confirm or correct) drops the "?" outright - same
+        // mandatoryOrientationClickTokens shape "place"'s own click
+        // handler already used, now shared rather than duplicated.
+        expect(east.move).eq(`use ${aceOfCups().uid}/m0.1 own n0 U E`);
         expect(east.valid).to.be.true;
         g.move(east.move, { trusted: true });
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });

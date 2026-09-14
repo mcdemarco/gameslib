@@ -2949,6 +2949,24 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
+    // Shared by "place"'s own first-piece click and Cups "own" creation's
+    // click - the only two spots with a MANDATORY, always-"U" facing that
+    // starts out merely seeded (marked "?" until confirmed - see
+    // resolveTrailingOrientation's own docs on the matching validate-side
+    // rule). A click whose own computed direction is "U" (the piece's own
+    // cell) confirms that default outright - a bare "U" says everything,
+    // "?" included, so no separate correction token is needed; any other
+    // direction is a genuine correction, appended after the mandatory "U".
+    // These two click sites used to each hand-roll this same three-line
+    // shape independently, and drifted: place's collapsed back to a bare
+    // "U" on a same-direction click, Cups own's didn't, appending a
+    // doomed, duplicate-looking "U? U" that validateCups then hard-
+    // rejected as a no-op instead of treating it as the confirmation it
+    // obviously was.
+    private mandatoryOrientationClickTokens(dir: Orientation): string[] {
+        return dir === "U" ? ["U"] : ["U", dir];
+    }
+
     // Best-effort feasibility check over which modes are worth offering as
     // buttons right now, given current board state AND hand contents - not
     // a full legality check (validateMove still catches anything this
@@ -3273,18 +3291,18 @@ export class GnosticaGame extends GameBaseSequenced {
             // (the new piece's own facing) - a click here is the exact
             // same trailing-optional-orientation primitive every other
             // target minion gets (see the "piece"-shape branch's own
-            // docs): it sets the OPTIONAL 3rd token (the reorientation),
-            // never the creation's own mandatory 2nd one, and a same-
-            // facing request is hard-rejected by validateCups itself, not
-            // specially softened here. Clickable region is the target
-            // cell PLUS its neighbours, not just the cell itself like
-            // every other cell-shape mode below.
+            // docs): it sets the OPTIONAL 3rd token (the reorientation).
+            // Clickable region is the target cell PLUS its neighbours, not
+            // just the cell itself like every other cell-shape mode below.
+            // Mandatory-facing click shape shared with "place"'s own first
+            // piece - see mandatoryOrientationClickTokens' own docs.
             if (suitUid === "C" && mode === "own") {
                 const dir = this.orientationTowardClick(tx, ty, x, y);
                 if (dir === undefined) {
                     return undefined;
                 }
-                return rebuild([GnosticaBoard.coords2algebraic(tx, ty), pending.rest[1] ?? "U", dir]);
+                const cell = GnosticaBoard.coords2algebraic(tx, ty);
+                return rebuild([cell, ...this.mandatoryOrientationClickTokens(dir)]);
             }
             if (x !== tx || y !== ty) {
                 return undefined;
@@ -4231,17 +4249,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 // "face up", clicking one of its neighbours means "face
                 // that way" - any OTHER cell is a fresh placement there
                 // instead (defaulting to "U" again), same as clicking a
-                // different cell always has. The mandatory facing is
-                // always "U" (matches Cups "own"'s identical mandatory-
-                // token rule - see resolveTrailingOrientation's own docs);
-                // a further click doesn't rewrite it, it sets the OPTIONAL
-                // trailing correction instead - collapsing back to the
-                // bare 2-token form when the clicked direction IS "U"
-                // (would otherwise be a rejected no-op correction). A
-                // freshly-seeded "U" (nothing clicked yet for THIS cell)
-                // carries a trailing "?" marking it as not yet a
-                // deliberate choice (see validatePlace's own docs) - any
-                // further click, confirming or correcting, drops it.
+                // different cell always has. Mandatory-facing click shape
+                // shared with Cups "own" creation - see
+                // mandatoryOrientationClickTokens' own docs. A freshly-
+                // seeded "U" (nothing clicked yet for THIS cell) carries a
+                // trailing "?" marking it as not yet a deliberate choice
+                // (see validatePlace's own docs) - any further click,
+                // confirming or correcting, drops it.
                 const [prevCell] = args;
                 let dir: Orientation | undefined;
                 if (prevCell !== undefined) {
@@ -4249,7 +4263,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     dir = this.orientationTowardClick(px, py, x, y);
                 }
                 if (prevCell !== undefined && dir !== undefined) {
-                    newmove = dir === "U" ? `place ${prevCell} U` : `place ${prevCell} U ${dir}`;
+                    newmove = `place ${prevCell} ${this.mandatoryOrientationClickTokens(dir).join(" ")}`;
                 } else {
                     newmove = `place ${cell} U?`;
                 }
