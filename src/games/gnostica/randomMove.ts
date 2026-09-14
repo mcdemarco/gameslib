@@ -748,20 +748,27 @@ function buildRandomTradeHandsTokens(game: GnosticaGame, minions: IMinionRef[]):
     return undefined;
 }
 
-// Shared by orientAny (Devil) and hierophantReplace (Hierophant) -
-// identical shape (<minionRef> <targetRef> <orientation>), just a
-// different validateX to check against.
+// Shared by orientAny (Devil) and hierophantReplace (Hierophant) - same
+// <minionRef> <targetRef> [<orientation>] shape and target-pick logic,
+// just a different validateX. orientAny's own facing is mandatory;
+// hierophantReplace's is an optional trailing correction (defaults to
+// the captured piece's own prior facing), so `undefined` joins the
+// shuffled candidates only for it, letting the random mover sometimes
+// take that default instead of always stating one.
 function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMinionRef[], special: "orientAny" | "hierophantReplace"): string[] | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
         for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
-            for (const o of shuffle([...allOrientations]) as Orientation[]) {
+            const candidates: (Orientation | undefined)[] = special === "hierophantReplace"
+                ? shuffle([...allOrientations, undefined])
+                : shuffle([...allOrientations]);
+            for (const o of candidates) {
                 const check = special === "orientAny"
-                    ? game.validateOrientAny(minion, [targetRef, o])
-                    : game.validateHierophantReplace(minion, [targetRef, o]);
+                    ? game.validateOrientAny(minion, [targetRef, o as Orientation])
+                    : game.validateHierophantReplace(minion, o === undefined ? [targetRef] : [targetRef, o]);
                 if (!check.failed) {
                     const ref = game.pieceRefStr(minion, minions);
-                    return [ref, targetRef, o];
+                    return o === undefined ? [ref, targetRef] : [ref, targetRef, o];
                 }
             }
         }

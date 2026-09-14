@@ -78,21 +78,13 @@ export const HERMIT_MODES: Record<string, { label: string }> = {
     tile: { label: "Push Territory" },
 };
 
-// Minimum token count (including the leading minionRef, except
-// highPriestess which has none) for a `special` step to be complete.
-// orientMinion/tradeHands/orientAny/hierophantReplace have a real, fixed
-// count once complete, so SPECIAL_STEP_SHAPES below builds their own
-// entries directly from this table (the only entries anything still
-// reads programmatically). The rest have variable-length grammars with
-// no single fixed "complete" token count - their own SPECIAL_STEP_SHAPES
-// entries answer the question directly instead, without consulting this
-// table at all; their own Infinity values here are documentation only,
-// preserved for reference against the numbers those entries derive from.
+// Minimum token count (including the leading minionRef, except highPriestess which has none) for a `special` step to be complete - fixedArity's own "at least N" semantics tolerate extra trailing tokens too (hierophantReplace's own optional orientation).
+// The rest (Infinity here) have variable-length grammars with their own SPECIAL_STEP_SHAPES entry answering this directly instead.
 export const SPECIAL_MIN_TOKENS: Record<SpecialPower, number> = {
     orientMinion: 2,      // minionRef + orientation
     tradeHands: 2,        // minionRef + targetRef
     orientAny: 3,         // minionRef + targetRef + orientation
-    hierophantReplace: 3, // minionRef + targetRef + orientation
+    hierophantReplace: 2, // minionRef + targetRef, [+ optional orientation]
     magicianChoice: Infinity,
     hermitTeleport: Infinity,
     judgementDraw: Infinity,

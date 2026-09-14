@@ -4355,6 +4355,28 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
     });
 
+    // #101: the replacement piece's facing is a trailing OPTIONAL
+    // correction (like Rods/Discs/Swords' own trailing facing), not a
+    // mandatory pick - it defaults to the captured enemy piece's own
+    // prior orientation rather than always starting "U".
+    it("hierophantReplace: with no facing click at all, the replacement inherits the captured piece's own prior orientation", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(5)); // The Hierophant
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "S")]; // enemy B, player 2, facing S
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        const [rowN, colN] = rowColFor(g, 1, 0);
+        const step1 = g.handleClick(cellClick.move, rowN, colN);
+        expect(step1.move).eq(`use ${major(5).uid}/m0.1 n0.1`);
+        // Already submittable as-is - no orientation token needed.
+        expect(step1.valid).to.be.true;
+        expect(step1.complete).to.not.eq(-1);
+        g.move(step1.move, { trusted: false });
+        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "S" });
+    });
+
     it("hierophantReplace: forbids targeting one of the acting player's own pieces - a no-op dressed up as a step", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(5)); // The Hierophant
