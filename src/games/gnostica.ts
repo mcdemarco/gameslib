@@ -1182,12 +1182,12 @@ export class GnosticaGame extends GameBaseSequenced {
     private parseMove(m: string): IParsedMove {
         const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
         const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
-        // A step's first token is always a piece ref or a card uid (High Priestess's discard list); pips/orientation suffix stays optional so a bare "still narrowing" cell also passes.
+        // A step's first token is a piece ref (or, for High Priestess, "draw"/"discard" - exempted separately below); pips/orientation suffix stays optional so a bare "still narrowing" cell also passes.
         const PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.\d+)?)?$/i;
         const CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
         // Trailing "?" tolerated on any token - Cups "own" creation's still-prepopulated facing is the one real use.
         const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
-        // Comfortable headroom above the richest real step shape (Magician wrapping Swords' piece-target form, 6 tokens).
+        // Comfortable headroom above the richest real step shape (High Priestess discarding a full 6-card hand: "discard" + 6 uids + "draw" + count, 9 tokens).
         const MAX_STEP_TOKENS = 12;
         // "(via <uid>)" names the card (Fool/High Priestess) whose paused power a resumed step belongs to, stashed separately from `rest`.
         const VIA_FLAG_RE = /\s*\(via\s+(00|02)\)\s*$/i;
@@ -1218,10 +1218,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 malformedStep = tokens;
                 break;
             }
-            // "draw <n>" alone (High Priestess, zero discards) or a
-            // leading "discard" (High Priestess once anything IS chosen -
-            // see IParsedMove.malformedRest's own docs) are neither a
-            // piece ref nor a card uid, so they need their own allowance.
+            // "draw <n>" alone or a leading "discard" (both High Priestess) are neither a piece ref nor a card uid, so they need their own allowance.
             if (tokens[0]?.toLowerCase() === "draw" || tokens[0]?.toLowerCase() === "discard") {
                 continue;
             }
@@ -1231,26 +1228,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 break;
             }
         }
-        // Unlike malformedStep above (whose grammar depends on a
-        // suit/card not yet resolved, so it can only report a generic
-        // complaint), every head below has a grammar fixed entirely by
-        // the head keyword itself - "what comes after place" is
-        // structural, not legality, exactly like a piece ref's own shape
-        // (see IParsedMove.malformedRest's own docs). Only checks a
-        // token when it's actually PRESENT - a missing one is
-        // "incomplete," not malformed, and stays each head's own
-        // "still building" message (PLACE_DIRECTION_REQUIRED and
-        // friends). Whether the VALUE is legal given board/hand/pool
-        // state (is this cell occupied, is this card actually in hand)
-        // stays each validate* function's own job, same as
-        // resolvePieceRef's own shape-vs-existence split.
-        //
-        // `base` carries no malformedRest at all (an absent optional
-        // property reads as undefined, same as an explicit one) - each
-        // check below returns the moment it finds a problem, spreading
-        // this with malformedRest added rather than restating every
-        // field at every return site; falling off the end with nothing
-        // found just returns `base` itself, unmodified.
+        // Unlike malformedStep (card/suit-dependent, so only a generic complaint), every head below has a grammar fixed by the head keyword alone - see IParsedMove.malformedRest's own docs.
+        // `base` omits malformedRest (absent optional property reads as undefined); each check below returns the moment it finds a problem, spreading this with malformedRest added.
         const base = {
             announceLast,
             head,
@@ -1266,9 +1245,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (cellStr !== undefined && this.tryAlgebraic2coords(cellStr) === undefined) {
                 return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_CELL", params: { cell: cellStr } } };
             }
-            // A trailing "?" marks the click flow's own seeded default as
-            // not yet a deliberate choice - meaningless to shape,
-            // stripped the same way cmdPlace/validatePlace do.
+            // A trailing "?" marks the click flow's own seeded default as not yet deliberate - meaningless to shape, stripped like cmdPlace/validatePlace do.
             const orientationStr = orientationToken?.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
             if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
                 return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } } };
@@ -1285,10 +1262,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } } };
             }
         } else if (head === "discard" || head === "redraw") {
-            // Identical uid-list grammar for both - discard's own
-            // optional "draw <n>" postscript is the only difference
-            // (drawIdx stays -1 for redraw, so uids collapses to `rest`
-            // itself, same as redraw's own bare list).
+            // Identical uid-list grammar for both - discard's own optional "draw <n>" postscript is the only difference (drawIdx stays -1 for redraw).
             const drawIdx = head === "discard" ? rest.indexOf("draw") : -1;
             const uids = drawIdx === -1 ? rest : rest.slice(0, drawIdx);
             if (new Set(uids).size !== uids.length) {
@@ -1310,10 +1284,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_NUMBER" } } };
             }
         } else if (head === "use" || head === "play") {
-            // asUid's own shape depends on WHICH card is resolved (a suit
-            // letter for the Magician, a full card uid for The World) -
-            // genuinely card-dependent, so it's left exactly where it
-            // already lived, not checked here.
+            // asUid's own shape depends on WHICH card is resolved (a suit letter or a full card uid) - genuinely card-dependent, left where it already lived.
             const uid = rest[0];
             if (uid !== undefined && !CARD_UID_SHAPE_RE.test(uid)) {
                 return { ...base, malformedRest: { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid } } };
@@ -1485,13 +1456,13 @@ export class GnosticaGame extends GameBaseSequenced {
     // (never a no-op rejection either way, see checkOrientationChanges'
     // own docs on why: every caller here already has a meaningful action
     // succeed regardless of the final facing). Two different callers feed
-    // this the same shape from two different angles: place/Cups "own"'s
-    // own new piece passes their own mandatory-but-"?"-seeded token as
+    // this the same shape from two different angles: place/Cups "own"/
+    // hierophantReplace's own mandatory-but-"?"-seeded token as
     // `orientationStr` and a real click's override as `correctionStr`;
-    // Rods/Discs/Swords' own trailing facing and hierophantReplace pass
-    // the acted-on piece's own CURRENT orientation as `orientationStr`
-    // (always valid, so it can never itself fail here) and the player's
-    // genuinely optional typed/clicked token as `correctionStr`.
+    // Rods/Discs/Swords' own trailing facing instead pass the acted-on
+    // piece's own CURRENT orientation as `orientationStr` (always valid,
+    // so it can never itself fail here) and the player's genuinely
+    // optional typed/clicked token as `correctionStr`.
     private resolveTrailingOrientation(
         orientationStr: string, correctionStr: string | undefined,
     ): { orientation: Orientation } | { key: string; params?: Record<string, unknown> } {
@@ -3058,22 +3029,20 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    // Shared by "place"'s own first-piece click and Cups "own" creation's
-    // click - the only two spots with a MANDATORY, always-"U" facing that
-    // starts out merely seeded (marked "?" until confirmed - see
-    // resolveTrailingOrientation's own docs on the matching validate-side
-    // rule). A click whose own computed direction is "U" (the piece's own
-    // cell) confirms that default outright - a bare "U" says everything,
-    // "?" included, so no separate correction token is needed; any other
-    // direction is a genuine correction, appended after the mandatory "U".
-    // These two click sites used to each hand-roll this same three-line
-    // shape independently, and drifted: place's collapsed back to a bare
-    // "U" on a same-direction click, Cups own's didn't, appending a
-    // doomed, duplicate-looking "U? U" that validateCups then hard-
-    // rejected as a no-op instead of treating it as the confirmation it
-    // obviously was.
-    private mandatoryOrientationClickTokens(dir: Orientation): string[] {
-        return dir === "U" ? ["U"] : ["U", dir];
+    // Shared by "place"'s own first-piece click, Cups "own" creation's
+    // click, and hierophantReplace's own stage-2 click - every spot with a
+    // MANDATORY facing that starts out merely seeded (marked "?" until
+    // confirmed - see resolveTrailingOrientation's own docs on the
+    // matching validate-side rule). `defaultDir` is "U" for place/Cups
+    // own (always) and the captured piece's own prior facing for
+    // hierophantReplace (seeded at target-pick time - see
+    // handleOrientAnyOrHierophantClick's own docs). A click whose own
+    // computed direction matches `defaultDir` confirms that default
+    // outright - a bare token says everything, "?" included, so no
+    // separate correction token is needed; any other direction is a
+    // genuine correction, appended after the mandatory default.
+    private mandatoryOrientationClickTokens(defaultDir: Orientation, dir: Orientation): string[] {
+        return dir === defaultDir ? [defaultDir] : [defaultDir, dir];
     }
 
     // Best-effort feasibility check over which modes are worth offering as
@@ -3415,7 +3384,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return undefined;
                 }
                 const cell = GnosticaBoard.coords2algebraic(tx, ty);
-                return rebuild([cell, ...this.mandatoryOrientationClickTokens(dir)]);
+                return rebuild([cell, ...this.mandatoryOrientationClickTokens("U", dir)]);
             }
             if (x !== tx || y !== ty) {
                 return undefined;
@@ -3655,18 +3624,22 @@ export class GnosticaGame extends GameBaseSequenced {
     // orientAny/hierophantReplace: <minionRef> <targetRef> <orientation> -
     // same two-stage click shape for both (orientAny reorients the
     // target in place; hierophantReplace swaps it for one of the acting
-    // player's own, then orients THAT), though orientation is mandatory
-    // for orientAny and an optional trailing correction for
-    // hierophantReplace (defaults to the captured piece's own prior
-    // facing - see validateHierophantReplace's own docs). Stage 1
-    // (pending.rest is empty): the same self-or-facing-cell target pick
-    // as tradeHands. Stage 2 (target already in pending.rest[0]): further
-    // clicks adjust ITS OWN orientation via orientationTowardClick,
-    // anchored at the TARGET's cell rather than the minion's. Deliberately
-    // doesn't support re-picking a different target once one's already
-    // chosen (ambiguous with "orient the target toward this neighbour",
-    // since the target's own cell is frequently the minion's self/face
-    // cell too) - retype the segment by hand to change targets instead.
+    // player's own, then orients THAT). Orientation is mandatory for
+    // both, but seeded differently: orientAny has no board-derivable
+    // default (reorienting IS the whole action), so stage 1 leaves it
+    // genuinely unset; hierophantReplace's default (the captured piece's
+    // own prior facing) IS derivable, so stage 1 seeds it immediately as
+    // a "?"-marked token, mirroring Cups "own" creation's mandatory
+    // facing (see mandatoryOrientationClickTokens' own docs) even though
+    // nothing here strictly needs the seed. Stage 1 (pending.rest is
+    // empty): the same self-or-facing-cell target pick as tradeHands.
+    // Stage 2 (target already in pending.rest[0]): further clicks adjust
+    // ITS OWN orientation via orientationTowardClick, anchored at the
+    // TARGET's cell rather than the minion's. Deliberately doesn't
+    // support re-picking a different target once one's already chosen
+    // (ambiguous with "orient the target toward this neighbour", since
+    // the target's own cell is frequently the minion's self/face cell
+    // too) - retype the segment by hand to change targets instead.
     private handleOrientAnyOrHierophantClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         if (pending.rest.length === 0) {
@@ -3676,6 +3649,15 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (typeof targetResult !== "string") {
                 return targetResult;
+            }
+            if (pending.special === "hierophantReplace") {
+                const targetResolution = this.resolvePieceRef(targetResult);
+                if (targetResolution.kind !== "ok") {
+                    return undefined;
+                }
+                const capturedFacing = (targetResolution.ref.piece
+                    ?? this.board.get(targetResolution.ref.x, targetResolution.ref.y)!.pieces[targetResolution.ref.index]).orientation;
+                return this.assembleStepMove(pending, [minionRef, targetResult, `${capturedFacing}?`]);
             }
             // The target is chosen; its new facing is a genuinely separate
             // decision that only the player's own click may make - never
@@ -3695,6 +3677,11 @@ export class GnosticaGame extends GameBaseSequenced {
         const dir = this.orientationTowardClick(targetResolution.ref.x, targetResolution.ref.y, x, y);
         if (dir === undefined) {
             return undefined;
+        }
+        if (pending.special === "hierophantReplace") {
+            const seeded = pending.rest[1];
+            const defaultFacing = this.parseOrientation(seeded.endsWith("?") ? seeded.slice(0, -1) : seeded);
+            return this.assembleStepMove(pending, [minionRef, targetRef, ...this.mandatoryOrientationClickTokens(defaultFacing, dir)]);
         }
         return this.assembleStepMove(pending, [minionRef, targetRef, dir]);
     }
@@ -4399,7 +4386,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     dir = this.orientationTowardClick(px, py, x, y);
                 }
                 if (prevCell !== undefined && dir !== undefined) {
-                    newmove = `place ${prevCell} ${this.mandatoryOrientationClickTokens(dir).join(" ")}`;
+                    newmove = `place ${prevCell} ${this.mandatoryOrientationClickTokens("U", dir).join(" ")}`;
                 } else {
                     newmove = `place ${cell} U?`;
                 }
@@ -6132,15 +6119,16 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (this.isMinionCellStillNarrowing(tokens[0], top.minions)) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
                     }
-                    // orientAny's own target is already chosen (2 tokens)
-                    // but its facing isn't yet - the generic
-                    // powerStepMessageKey narrowing below still reads as
-                    // "pick a target" (CHOOSE_STEP_FACING), wrong once
-                    // past that stage; name the real next click.
-                    // (hierophantReplace never reaches here with 2+
-                    // tokens - its own facing is optional, so 2 tokens is
-                    // already complete, not incomplete.)
-                    if ("special" in step && step.special === "orientAny" && tokens.length >= 2) {
+                    // orientAny/hierophantReplace's own target is already
+                    // chosen (2 tokens) but its facing isn't yet - the
+                    // generic powerStepMessageKey narrowing below still
+                    // reads as "pick a target" (CHOOSE_STEP_FACING), wrong
+                    // once past that stage; name the real next click. A
+                    // click never leaves hierophantReplace at exactly 2
+                    // tokens (its facing is seeded the instant a target is
+                    // picked - see handleOrientAnyOrHierophantClick's own
+                    // docs), but a hand-typed move can.
+                    if ("special" in step && (step.special === "orientAny" || step.special === "hierophantReplace") && tokens.length >= 2) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
                     }
                     const override = "primitive" in step ? this.primitiveIncompleteMessage(this.primitiveToSuit(step.primitive), tokens.slice(1)) : undefined;
@@ -7152,17 +7140,15 @@ export class GnosticaGame extends GameBaseSequenced {
         return { failed: false, outcome: { newMinion, replacesMinion: target } };
     }
 
-    // Hierophant: <minionRef> <targetPieceRef> <newOrientation>
+    // Hierophant: <minionRef> <targetPieceRef> <seededFacing>["?"] [<reorientation>]
     private applyHierophantReplace(minion: IMinionRef, rest: string[]): IStepOutcome {
-        const [targetRef, orientationStr] = rest;
+        const [targetRef, orientationToken, reorientStr] = rest;
         const target = this.resolvePieceRefOrThrow(targetRef);
         // Captured before the replace mutates the board - the previous
-        // owner being displaced (result log), and the default facing when
-        // orientationStr is omitted (see validateHierophantReplace's own
-        // docs).
-        const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
-        const previousOwner = targetPiece.owner;
-        const orientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : targetPiece.orientation;
+        // owner being displaced, for the result log.
+        const previousOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
+        const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
+        const orientation = this.parseOrientation(reorientStr ?? orientationStr);
         hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
         this.results.push({ type: "convert", what: this.getPipsFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: previousOwner });
@@ -7171,20 +7157,33 @@ export class GnosticaGame extends GameBaseSequenced {
         return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replaced[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
     }
 
-    // Orientation is an optional trailing correction, not a mandatory
-    // pick (unlike orientAny) - it defaults to the captured piece's own
-    // prior facing, since replacing it is already the whole meaningful
-    // act; see checkOrientationChanges' own docs on why this doesn't
-    // call it (same Category-2 reasoning as Rods/Discs/Swords).
+    // Orientation is mandatory, same as orientAny (see checkOrientationChanges'
+    // own docs on why this still doesn't call it - replacing the piece is
+    // already the whole meaningful act, so a same-facing answer is never a
+    // no-op here). Unlike orientAny, a default IS derivable (the captured
+    // piece's own prior facing), but it's still written into the move
+    // string as a literal, "?"-marked token from the moment the target is
+    // picked - deliberately matching place/Cups "own"'s mandatory-seeded
+    // convention for consistency (see handleOrientAnyOrHierophantClick's
+    // own docs), even though nothing here strictly requires it.
     public validateHierophantReplace(minion: IMinionRef, rest: string[]): StepValidation {
-        const [targetRef, orientationStr] = rest;
+        const [targetRef, orientationToken, reorientStr] = rest;
         const targetResult = this.resolvePieceRef(targetRef);
         if (targetResult.kind !== "ok") {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
         const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
-        const orientationResolved = this.resolveTrailingOrientation(targetPiece.orientation, orientationStr);
+        if (orientationToken === undefined) {
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationToken }) };
+        }
+        // A trailing "?" marks the click handler's own seeded default as
+        // not yet a deliberate choice (mirrors validateCups' identical
+        // convention for Cups "own") - stripped before resolving, and only
+        // still meaningful when no real correction has been given either.
+        const prepopulated = orientationToken.endsWith("?") && reorientStr === undefined;
+        const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
+        const orientationResolved = this.resolveTrailingOrientation(orientationStr, reorientStr);
         if ("key" in orientationResolved) {
             return { failed: true, result: this.invalid(`apgames:validation.gnostica.${orientationResolved.key}`, orientationResolved.params) };
         }
@@ -7196,7 +7195,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // cell is unchanged, so pre- and post-mutation "last index" match.
         const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
         const replacement = new Piece(this.currplayer, targetPiece.size, orientationResolved.orientation);
-        return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replacement }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
+        return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replacement }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: prepopulated } };
     }
 
     // Hermit - piece <minionRef> piece <targetPieceRef> <destCell> [orientation]

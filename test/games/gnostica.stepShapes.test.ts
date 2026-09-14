@@ -25,7 +25,8 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
         expect(SPECIAL_STEP_SHAPES.tradeHands(["n0.1"])).to.deep.equal({ status: "complete" });
         expect(SPECIAL_STEP_SHAPES.orientAny(["n0.1"])).to.deep.equal({ status: "incomplete" }); // needs targetRef + orientation
         expect(SPECIAL_STEP_SHAPES.orientAny(["n0.1", "U"])).to.deep.equal({ status: "complete" });
-        expect(SPECIAL_STEP_SHAPES.hierophantReplace(["n0.1", "U"])).to.deep.equal({ status: "complete" });
+        expect(SPECIAL_STEP_SHAPES.hierophantReplace(["n0.1"])).to.deep.equal({ status: "incomplete" }); // needs targetRef + orientation, same as orientAny
+        expect(SPECIAL_STEP_SHAPES.hierophantReplace(["n0.1", "U?"])).to.deep.equal({ status: "complete" });
     });
 
     it("SPECIAL_STEP_SHAPES.hermitTeleport: mode then 2 more tokens, bad mode is malformed", () => {

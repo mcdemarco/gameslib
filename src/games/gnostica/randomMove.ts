@@ -510,6 +510,22 @@ function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IMinionRef): { ref
     return [{ ref: selfRef, owner: selfOwner }, ...facing];
 }
 
+// Same target set as pieceTargetRefs, but keeping each ref's own current
+// orientation alongside it - hierophantReplace's own random mover needs
+// it to build the mandatory, seeded `<facing>?` token (validateHierophantReplace's
+// own convention - see its docs).
+function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IMinionRef): { ref: string; orientation: Orientation }[] {
+    const [tx, ty] = game.minorTargetCell(minion);
+    const selfOrientation = (minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index]).orientation;
+    const selfRef = game.pieceRefStr(minion, [minion]);
+    if (tx === minion.x && ty === minion.y) {
+        return [{ ref: selfRef, orientation: selfOrientation }];
+    }
+    const targetT = game.board.get(tx, ty);
+    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ x: tx, y: ty, index: i }), orientation: p.orientation }));
+    return [{ ref: selfRef, orientation: selfOrientation }, ...facing];
+}
+
 // Adapts minorModeAvailability's own switch to a raw minion rather
 // than an IPendingStep (reconstructed from a move string, not
 // convenient here) - a thin, deliberately-looser wrapper over the
@@ -749,26 +765,36 @@ function buildRandomTradeHandsTokens(game: GnosticaGame, minions: IMinionRef[]):
 }
 
 // Shared by orientAny (Devil) and hierophantReplace (Hierophant) - same
-// <minionRef> <targetRef> [<orientation>] shape and target-pick logic,
-// just a different validateX. orientAny's own facing is mandatory;
-// hierophantReplace's is an optional trailing correction (defaults to
-// the captured piece's own prior facing), so `undefined` joins the
-// shuffled candidates only for it, letting the random mover sometimes
-// take that default instead of always stating one.
+// self-or-facing-cell target-pick logic, but genuinely different move
+// shapes: orientAny's facing is a plain mandatory token with no default,
+// while hierophantReplace's is mandatory-but-seeded (the captured
+// piece's own prior facing, written as a "?"-marked token - matches
+// validateHierophantReplace's own convention, mirroring Cups "own").
+// `undefined` joins hierophantReplace's shuffled correction candidates
+// so the random mover sometimes leaves that seeded default in place
+// instead of always overriding it.
 function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMinionRef[], special: "orientAny" | "hierophantReplace"): string[] | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
-        for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
-            const candidates: (Orientation | undefined)[] = special === "hierophantReplace"
-                ? shuffle([...allOrientations, undefined])
-                : shuffle([...allOrientations]);
-            for (const o of candidates) {
-                const check = special === "orientAny"
-                    ? game.validateOrientAny(minion, [targetRef, o as Orientation])
-                    : game.validateHierophantReplace(minion, o === undefined ? [targetRef] : [targetRef, o]);
+        if (special === "orientAny") {
+            for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
+                for (const o of shuffle([...allOrientations]) as Orientation[]) {
+                    const check = game.validateOrientAny(minion, [targetRef, o]);
+                    if (!check.failed) {
+                        const ref = game.pieceRefStr(minion, minions);
+                        return [ref, targetRef, o];
+                    }
+                }
+            }
+            continue;
+        }
+        for (const { ref: targetRef, orientation: capturedFacing } of shuffle(pieceTargetRefsWithOrientation(game, minion)) as { ref: string; orientation: Orientation }[]) {
+            const orientationToken = `${capturedFacing}?`;
+            for (const o of shuffle([...allOrientations, undefined]) as (Orientation | undefined)[]) {
+                const rest = o === undefined ? [targetRef, orientationToken] : [targetRef, orientationToken, o];
+                const check = game.validateHierophantReplace(minion, rest);
                 if (!check.failed) {
-                    const ref = game.pieceRefStr(minion, minions);
-                    return o === undefined ? [ref, targetRef] : [ref, targetRef, o];
+                    return [game.pieceRefStr(minion, minions), ...rest];
                 }
             }
         }

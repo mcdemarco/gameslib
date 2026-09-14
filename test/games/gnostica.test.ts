@@ -4393,19 +4393,21 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const [rowN, colN] = rowColFor(g, 1, 0);
         const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use ${major(5).uid}/m0.1 n0.1`); // target chosen, no facing yet
+        expect(step1.move).eq(`use ${major(5).uid}/m0.1 n0.1 S?`); // target chosen, facing seeded from the captured piece's own prior orientation
         const [rowO, colO] = rowColFor(g, 2, 0);
         const step2 = g.handleClick(step1.move, rowO, colO);
-        expect(step2.move).eq(`use ${major(5).uid}/m0.1 n0.1 E`);
+        expect(step2.move).eq(`use ${major(5).uid}/m0.1 n0.1 S E`);
         expect(step2.valid).to.be.true;
         g.move(step2.move, { trusted: true });
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
     });
 
-    // #101: the replacement piece's facing is a trailing OPTIONAL
-    // correction (like Rods/Discs/Swords' own trailing facing), not a
-    // mandatory pick - it defaults to the captured enemy piece's own
-    // prior orientation rather than always starting "U".
+    // The facing is a mandatory token, seeded with the captured piece's
+    // own prior orientation and "?"-marked until a further click confirms
+    // or corrects it - deliberately matching place/Cups "own"'s
+    // mandatory-seeded convention for consistency, even though the
+    // default here is always derivable from the board (see
+    // validateHierophantReplace's own docs).
     it("hierophantReplace: with no facing click at all, the replacement inherits the captured piece's own prior orientation", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(5)); // The Hierophant
@@ -4416,8 +4418,8 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const [rowN, colN] = rowColFor(g, 1, 0);
         const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use ${major(5).uid}/m0.1 n0.1`);
-        // Already submittable as-is - no orientation token needed.
+        expect(step1.move).eq(`use ${major(5).uid}/m0.1 n0.1 S?`);
+        // Already submittable as-is - the seeded default counts as a real choice.
         expect(step1.valid).to.be.true;
         expect(step1.complete).to.not.eq(-1);
         g.move(step1.move, { trusted: false });
