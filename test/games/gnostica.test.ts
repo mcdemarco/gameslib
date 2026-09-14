@@ -1805,7 +1805,7 @@ describe("Gnostica: handleClick", () => {
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
     });
 
-    it("orient: clicking the piece's own cell again re-affirms \"up\"; clicking a neighbour sets that facing directly", () => {
+    it("orient: clicking the piece's own cell again is a rejected no-op (reorienting IS the whole action); clicking a neighbour sets that facing directly", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U", { trusted: true });
         g.move("place l0 U", { trusted: true });
@@ -1813,8 +1813,9 @@ describe("Gnostica: handleClick", () => {
         const seed = g.handleClick("", -1, -1, "_btn_orient");
         const first = g.handleClick(seed.move, row, col);
         const same = g.handleClick(first.move, row, col);
-        expect(same.valid).to.be.true;
+        expect(same.valid).to.be.false;
         expect(same.move).eq("orient m0.1 U");
+        expect(same.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
         const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
         const east = g.handleClick(first.move, rowE, colE);
         expect(east.valid).to.be.true;
@@ -3052,7 +3053,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // destroyed by the full 2 pips
     });
 
-    it("Rods (piece): a click near the destination cell reorients the minion once distance is set, hard-rejecting a same-facing click", () => {
+    it("Rods (piece): a click near the destination cell reorients the minion once distance is set; a same-facing click completes the step instead of rejecting", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfRods());
@@ -3069,12 +3070,17 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(modeClick.complete).eq(0);
         expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
         // Effective (post-move) position is n0 - clicking o0 (east of n0)
-        // sets the moved piece's new facing to E... which is already its
-        // current facing, so this must hard-reject as a no-op.
+        // computes E, which is already the moved piece's own current
+        // facing. This trailing facing is only an OPTIONAL addition to
+        // the already-meaningful move, not the whole action (unlike
+        // "orient" itself), so a same-facing click completes the step -
+        // exactly as a real correction would - rather than rejecting.
+        // Since the click carries no new information, no token is added.
         const [rowSame, colSame] = rowColFor(g, 2, 0); // o0
         const noOp = g.handleClick(modeClick.move, rowSame, colSame);
-        expect(noOp.valid).to.be.false;
-        expect(noOp.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
+        expect(noOp.valid).to.be.true;
+        expect(noOp.move).eq(`use ${aceOfRods().uid}/m0.1 piece m0.1 1`); // unchanged - no token added
+        expect(noOp.complete).eq(1);
         // Clicking m0 (west of n0, the vacated origin) sets it to face back W.
         const [rowW, colW] = rowColFor(g, 0, 0); // m0
         const faceW = g.handleClick(modeClick.move, rowW, colW);
@@ -3550,7 +3556,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
     });
 
-    it("orient: a genuine no-op reorientation click (clicking the same cell again) carries the ORIENT_NO_OP message", () => {
+    it("orient: a genuine no-op reorientation click (clicking the same cell again) is rejected, carrying the ORIENT_NO_OP message", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U", { trusted: true }); // defaults to "U"
         g.move("place l0 U", { trusted: true });
@@ -3560,21 +3566,20 @@ describe("Gnostica: click-to-orient messaging", () => {
         // Clicking the SAME cell again is a real, deliberate "face up"
         // click (see orientationTowardClick's own docs) - not an
         // auto-assigned default - which happens to be a no-op here since
-        // the piece already faces "U".
+        // the piece already faces "U". Reorienting IS the whole action
+        // for "orient", so this is hard-rejected, not held open.
         const result = g.handleClick(selected.move!, row, col);
-        expect(result.valid).to.be.true;
-        expect(result.complete).eq(-1);
+        expect(result.valid).to.be.false;
         expect(result.move).eq("orient m0.1 U");
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
     });
 
-    it("orient: a genuine no-op reorientation is rejected at validateMove() too/so it can never be an actual final move", () => {
+    it("orient: a genuine no-op reorientation is rejected outright at validateMove() too, hand-typed or clicked alike", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 N", { trusted: true });
         g.move("place l0 U", { trusted: true });
         const result = g.validateMove("orient m0.1 N");
-        expect(result.valid).to.be.true; // still building, not a hard error - see the click test above
-        expect(result.complete).eq(-1);
+        expect(result.valid).to.be.false;
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
         // A genuine change to a DIFFERENT facing is fully valid AND
         // complete - one real direction click is the whole action, the

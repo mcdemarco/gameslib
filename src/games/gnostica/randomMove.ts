@@ -34,9 +34,12 @@ import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, 
 import { ALL_SUITS } from "./stepShapes";
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
-// docs there) - duplicated rather than imported so this file never needs
-// GnosticaGame as a runtime VALUE at all, only as a type (fully erased),
-// avoiding a circular import between this file and gnostica.ts.
+// docs there, including #98/#100's own) - duplicated rather than imported
+// so this file never needs GnosticaGame as a runtime VALUE at all, only
+// as a type (fully erased), avoiding a circular import between this file
+// and gnostica.ts. Keep this in sync by hand if that one ever changes -
+// #98's own crash went unfixed here for a full extra round exactly
+// because this copy was missed the first time.
 function chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[] {
     if (outcome.newMinion === undefined) {
         return minions;
@@ -362,8 +365,9 @@ export function randomOrientMove(game: GnosticaGame): string | undefined {
     if (ownPieces.length === 0) {
         return undefined;
     }
-    const { x, y, index } = ownPieces[Math.floor(Math.random() * ownPieces.length)];
-    const ref = game.pieceRefStr(x, y, index);
+    const picked = ownPieces[Math.floor(Math.random() * ownPieces.length)];
+    const { x, y, index } = picked;
+    const ref = game.pieceRefStr(picked);
     const current = game.board.get(x, y)!.pieces[index].orientation;
     const orientation = weightedRandomOrientation(game, x, y, current);
     return `orient ${ref} ${orientation}`;
@@ -472,12 +476,16 @@ function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible
 // own "piece" mode).
 function pieceTargetRefs(game: GnosticaGame, minion: IMinionRef): string[] {
     const [tx, ty] = game.minorTargetCell(minion);
-    const selfRef = game.pieceRefStr(minion.x, minion.y, minion.index);
+    // Pass `minion` itself as a one-entry pool so pieceRefStr can find it
+    // and use its own `.piece` (see #98/#100's own docs) - without a
+    // pool, it falls straight to a raw `pieces[minion.index]` read, which
+    // can be stale by the time a LATER step in the same chain calls this.
+    const selfRef = game.pieceRefStr(minion, [minion]);
     if (tx === minion.x && ty === minion.y) {
         return [selfRef];
     }
     const targetT = game.board.get(tx, ty);
-    const facingRefs = (targetT?.pieces ?? []).map((_, i) => game.pieceRefStr(tx, ty, i));
+    const facingRefs = (targetT?.pieces ?? []).map((_, i) => game.pieceRefStr({ x: tx, y: ty, index: i }));
     return [selfRef, ...facingRefs];
 }
 
@@ -491,13 +499,15 @@ function pieceTargetRefs(game: GnosticaGame, minion: IMinionRef): string[] {
 // type for them.
 function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IMinionRef): { ref: string; owner: number }[] {
     const [tx, ty] = game.minorTargetCell(minion);
-    const selfOwner = game.board.get(minion.x, minion.y)!.pieces[minion.index].owner;
-    const selfRef = game.pieceRefStr(minion.x, minion.y, minion.index);
+    const selfOwner = (minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index]).owner;
+    // See pieceTargetRefs' own matching docs on why `minion` is passed as
+    // a one-entry pool here.
+    const selfRef = game.pieceRefStr(minion, [minion]);
     if (tx === minion.x && ty === minion.y) {
         return [{ ref: selfRef, owner: selfOwner }];
     }
     const targetT = game.board.get(tx, ty);
-    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr(tx, ty, i), owner: p.owner }));
+    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ x: tx, y: ty, index: i }), owner: p.owner }));
     return [{ ref: selfRef, owner: selfOwner }, ...facing];
 }
 
@@ -531,7 +541,7 @@ function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: st
 // C.new/R.tile, each always self-only, enemy-only, or plain territory)
 // get a flat weight of 1 throughout.
 function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, suitUid: string, mode: string): { args: string[]; weight: number }[] {
-    const piece = game.board.get(minion.x, minion.y)!.pieces[minion.index];
+    const piece = minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index];
     const [tx, ty] = game.minorTargetCell(minion);
     const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
     const targetT = game.board.get(tx, ty);
@@ -572,7 +582,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
             // preference: walking it off into the wasteland is a
             // legitimate destructive use of the same mode).
             const [dx, dy] = game.board.delta(piece.orientation as Exclude<Orientation, "U">);
-            const selfRef = game.pieceRefStr(minion.x, minion.y, minion.index);
+            const selfRef = game.pieceRefStr(minion);
             return pieceTargets.flatMap(({ ref, owner }) => {
                 const [bx, by] = ref === selfRef ? [minion.x, minion.y] : [tx, ty];
                 return pips.map(d => {
@@ -690,7 +700,7 @@ function buildRandomStepTokens(game: GnosticaGame, suitUid: string, minions: IMi
     if (choice === undefined) {
         return undefined;
     }
-    const ref = game.pieceRefStr(choice.minion.x, choice.minion.y, choice.minion.index, minions);
+    const ref = game.pieceRefStr(choice.minion, minions);
     return [ref, choice.mode, ...choice.args];
 }
 
@@ -717,7 +727,7 @@ function buildRandomOrientMinionTokens(game: GnosticaGame, minions: IMinionRef[]
         for (const o of shuffle([...allOrientations]) as Orientation[]) {
             const check = game.validateOrientMinion(minion, [o]);
             if (!check.failed) {
-                const ref = game.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                const ref = game.pieceRefStr(minion, minions);
                 return [ref, o];
             }
         }
@@ -731,7 +741,7 @@ function buildRandomTradeHandsTokens(game: GnosticaGame, minions: IMinionRef[]):
         for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
             const check = game.validateTradeHands(minion, [targetRef]);
             if (!check.failed) {
-                const ref = game.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                const ref = game.pieceRefStr(minion, minions);
                 return [ref, targetRef];
             }
         }
@@ -751,7 +761,7 @@ function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMi
                     ? game.validateOrientAny(minion, [targetRef, o])
                     : game.validateHierophantReplace(minion, [targetRef, o]);
                 if (!check.failed) {
-                    const ref = game.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                    const ref = game.pieceRefStr(minion, minions);
                     return [ref, targetRef, o];
                 }
             }
@@ -777,7 +787,7 @@ function buildRandomHermitTokens(game: GnosticaGame, minions: IMinionRef[]): str
                     const destCell = GnosticaBoard.coords2algebraic(dx, dy);
                     const check = game.validateHermitStep(minion, [mode, target, destCell]);
                     if (!check.failed) {
-                        const ref = game.pieceRefStr(minion.x, minion.y, minion.index, minions);
+                        const ref = game.pieceRefStr(minion, minions);
                         return [ref, mode, target, destCell];
                     }
                 }
@@ -791,12 +801,12 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
     const pool = shuffle([...minions]) as IMinionRef[];
     const hand = game.hands[game.currplayer - 1];
     for (const minion of pool) {
-        const piece = game.board.get(minion.x, minion.y)!.pieces[minion.index];
+        const piece = minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index];
         const maxDraw = Math.min(piece.size, Math.max(0, 6 - hand.length));
         const count = Math.floor(Math.random() * (maxDraw + 1));
         const uids = (shuffle([...game.discardPile]) as string[]).slice(0, count);
         if (game.validateJudgementDraw(minion, uids).valid) {
-            const ref = game.pieceRefStr(minion.x, minion.y, minion.index, minions);
+            const ref = game.pieceRefStr(minion, minions);
             return [ref, ...uids];
         }
     }
@@ -817,10 +827,17 @@ function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
 // an explicit draw count" behaviour (randomDiscardMove) - both rounds
 // share the identical <discardUid...> [draw <n>] grammar and legality
 // (checkHighPriestess never distinguishes them), so there's nothing
-// round-2-specific left to derive here.
+// round-2-specific left to derive here. One thing IS round-2-specific
+// though: a fully empty result (no discards, no "draw") would render as
+// a bare "discard (via <uid>)" - indistinguishable from
+// resumeStepSegments' own "nothing typed yet, just a preview seed" check
+// (see its own docs), so the resume would silently no-op instead of
+// actually clearing the obligation. Never omit "draw" when there are no
+// discards to disambiguate it - mirrors the top-level Pass button's own
+// identical "discard draw 0", never bare "discard", for the same reason.
 function buildRandomHighPriestessResumeTokens(game: GnosticaGame): string[] {
     const discards = buildRandomHighPriestessTokens(game);
-    if (Math.random() < 0.5) {
+    if (discards.length === 0 || Math.random() < 0.5) {
         const hand = game.hands[game.currplayer - 1];
         const maxDraw = Math.max(0, 6 - (hand.length - discards.length));
         return [...discards, "draw", String(Math.floor(Math.random() * (maxDraw + 1)))];
@@ -841,7 +858,7 @@ function buildRandomMagicianChoiceTokens(game: GnosticaGame, minions: IMinionRef
         }
         const check = game.validateMagicianChoice(choice.minion, [suit.uid, choice.mode, ...choice.args]);
         if (!check.failed) {
-            const ref = game.pieceRefStr(choice.minion.x, choice.minion.y, choice.minion.index, minions);
+            const ref = game.pieceRefStr(choice.minion, minions);
             return [ref, suit.uid, choice.mode, ...choice.args];
         }
     }
