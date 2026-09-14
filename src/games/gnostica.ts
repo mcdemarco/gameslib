@@ -1166,62 +1166,14 @@ export class GnosticaGame extends GameBaseSequenced {
     private parseMove(m: string): IParsedMove {
         const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
         const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
-        // Every step's first token is always either a piece ref (every
-        // suit primitive and special power except one) or a card uid
-        // (High Priestess's own discard-list steps, which have no
-        // minion reference at all) - the one thing checkable across the
-        // whole grammar without resolving the card (board state this
-        // parser doesn't have). The pips-and-beyond suffix is OPTIONAL
-        // specifically so a BARE cell (no ".") also passes shape
-        // validation - not a real, resolvable piece ref (resolvePieceRef
-        // still rejects one on its own, unaffected by this), but the
-        // still-narrowing token a "click the cell your desired minion is
-        // on" board click embeds when that cell has more than one
-        // eligible minion (see resolveStepMinion's and handleClickCore's
-        // own docs) - tolerated the same "still skipped, not yet
-        // resolved" way as an incomplete mode/args elsewhere in this
-        // file (see isMinionCellStillNarrowing's own docs).
+        // A step's first token is always a piece ref or a card uid (High Priestess's discard list); pips/orientation suffix stays optional so a bare "still narrowing" cell also passes.
         const PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.\d+)?)?$/i;
         const CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
-        // Trailing "?" tolerated on any token - Cups "own" creation's own
-        // still-prepopulated facing (see IStepOutcome.softComplete's own
-        // docs) is the one real use, but this is a pure shape check;
-        // nothing downstream needs a token-position-specific allowance
-        // for it.
+        // Trailing "?" tolerated on any token - Cups "own" creation's still-prepopulated facing is the one real use.
         const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
-        // No real step needs more than a handful of tokens (the richest
-        // shape - Magician wrapping Swords' own piece-target form - tops
-        // out at 6; discarding several cards at once, Judgement or High
-        // Priestess, is the other realistic outlier) - 12 leaves
-        // comfortable headroom without weakening the check.
+        // Comfortable headroom above the richest real step shape (Magician wrapping Swords' piece-target form, 6 tokens).
         const MAX_STEP_TOKENS = 12;
-        const isStepShapeValid = (tokens: string[]): boolean => {
-            if (tokens.length === 0 || tokens.length > MAX_STEP_TOKENS) {
-                return false;
-            }
-            // High Priestess with zero discards but an explicit draw
-            // count ("draw <n>" as the WHOLE step) - "draw" is neither a
-            // piece ref nor a card uid, so it needs the same allowance.
-            // A discard list followed by "draw <n>" doesn't need this,
-            // since tokens[0] there is a genuine card uid already.
-            if (tokens[0]?.toLowerCase() === "draw") {
-                return true;
-            }
-            if (!tokens.every(t => STEP_TOKEN_RE.test(t))) {
-                return false;
-            }
-            return PIECE_REF_SHAPE_RE.test(tokens[0]) || CARD_UID_SHAPE_RE.test(tokens[0]);
-        };
-        // "(via <uid>)" names the card whose power a resumed step was
-        // reached through - stripped exactly like "(last)" and stashed in
-        // `viaUid` alone (never in `rest`). Dispatch detects a resume from
-        // this.continued's own state, never from the head - but
-        // validateMove still requires the head to be the one that
-        // fits the step ("decline"/"discard"/"play"). The uid can only
-        // ever be one of the two cards whose power pauses across
-        // submissions - the Fool (00) or the High Priestess (02) - so
-        // anything else in the slot isn't a via marker. (The World never
-        // pauses; it borrows a power inline via "as <uid>".)
+        // "(via <uid>)" names the card (Fool/High Priestess) whose paused power a resumed step belongs to, stashed separately from `rest`.
         const VIA_FLAG_RE = /\s*\(via\s+(00|02)\)\s*$/i;
 
         const trimmed = m.trim();
@@ -1235,29 +1187,38 @@ export class GnosticaGame extends GameBaseSequenced {
         if (bare.length === 0) {
             return { announceLast, head: undefined, headRecognized: true, rest: [], stepSegments: [], malformedStep: undefined, viaUid };
         }
-        // "/" (or a newline) separates every segment - the head from its
-        // first power step, and steps from each other. NOT filtered: a
-        // leading/trailing/doubled "/" leaves an empty segment that then
-        // fails the head or step-shape check, rather than being silently
-        // swallowed.
+        // "/" (or a newline) separates segments - a leading/trailing/doubled one leaves an empty segment that fails the shape check rather than being silently swallowed.
         const segments = bare.split(/\s*[\n/]\s*/);
         const [rawHead, ...headTokens] = segments[0].split(/\s+/);
         const head = rawHead.toLowerCase();
-        // "as <x>" carves the borrowed power out of the head segment (see
-        // the `asUid` field); the rest of the head stays in `rest` - just
-        // the front tokens as typed. The "(via <uid>)" anchor is neither -
-        // it lives in `viaUid` alone.
+        // "as <x>" carves the borrowed power out of the head segment into `asUid`; the rest of the head stays in `rest` as typed.
         const asIdx = headTokens.indexOf("as");
         const asUid = asIdx === -1 ? undefined : headTokens[asIdx + 1];
         const rest = asIdx === -1 ? headTokens : headTokens.slice(0, asIdx);
         const stepSegments = segments.slice(1).map(s => s.split(/\s+/));
+        let malformedStep: string[] | undefined;
+        for (const tokens of stepSegments) {
+            if (tokens.length === 0 || tokens.length > MAX_STEP_TOKENS) {
+                malformedStep = tokens;
+                break;
+            }
+            // "draw <n>" as the WHOLE step (High Priestess, zero discards) is neither a piece ref nor a card uid, so it needs its own allowance.
+            if (tokens[0]?.toLowerCase() === "draw") {
+                continue;
+            }
+            if (!tokens.every(t => STEP_TOKEN_RE.test(t))
+                || !(PIECE_REF_SHAPE_RE.test(tokens[0]) || CARD_UID_SHAPE_RE.test(tokens[0]))) {
+                malformedStep = tokens;
+                break;
+            }
+        }
         return {
             announceLast,
             head,
             headRecognized: RECOGNIZED_HEADS.includes(head),
             rest,
             stepSegments,
-            malformedStep: stepSegments.find(tokens => !isStepShapeValid(tokens)),
+            malformedStep,
             viaUid,
             asUid,
         };
