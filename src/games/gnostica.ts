@@ -1382,20 +1382,18 @@ export class GnosticaGame extends GameBaseSequenced {
         return candidate === reference ? { key: "ORIENT_NO_OP" } : undefined;
     }
 
-    // The "mandatory-or-defaulted facing, plus an optional trailing
-    // correction" shape shared by every brand-new own piece: place's own
-    // new piece and Cups "own"'s own new piece both reduce to exactly
-    // this same question (the mandatory facing's own "missing" case is
-    // resolved elsewhere by the caller, since that differs between a
-    // top-level head and a shape-gated power step - this only ever runs
-    // once `orientationStr` is confirmed present). Same Category-2
-    // reasoning as Rods/Discs/Swords' own trailing facing (see
-    // checkOrientationChanges' own docs): creating the piece already
-    // succeeded regardless of which way it ends up facing, so a
-    // correction matching the mandatory base isn't a no-op worth
-    // rejecting - only the caller's own "?" marker (still-prepopulated,
-    // not yet a deliberate pick) distinguishes this shape from theirs,
-    // and that's resolved by the caller before this ever runs.
+    // The shared "base facing, plus an optional override" primitive -
+    // returns `correctionStr`'s own parse when given, else `orientationStr`'s
+    // (never a no-op rejection either way, see checkOrientationChanges'
+    // own docs on why: every caller here already has a meaningful action
+    // succeed regardless of the final facing). Two different callers feed
+    // this the same shape from two different angles: place/Cups "own"'s
+    // own new piece passes their own mandatory-but-"?"-seeded token as
+    // `orientationStr` and a real click's override as `correctionStr`;
+    // Rods/Discs/Swords' own trailing facing and hierophantReplace pass
+    // the acted-on piece's own CURRENT orientation as `orientationStr`
+    // (always valid, so it can never itself fail here) and the player's
+    // genuinely optional typed/clicked token as `correctionStr`.
     private resolveTrailingOrientation(
         orientationStr: string, correctionStr: string | undefined,
     ): { orientation: Orientation } | { key: string; params?: Record<string, unknown> } {
@@ -6723,26 +6721,21 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (Number.isNaN(dist)) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
-                if (orientationStr !== undefined) {
-                    const parsed = this.parseOrientationOrFail(orientationStr);
-                    if ("key" in parsed) {
-                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
-                    }
-                    // Unlike "orient"/orientMinion/orientAny (where
-                    // reorienting IS the whole action, so a no-op is a
-                    // null move and hard-rejected), this facing is only
-                    // ever an OPTIONAL addition to the already-meaningful
-                    // move/grow/attack primitive - a correction matching
-                    // the piece's own current facing is harmless, not a
-                    // reason to reject the whole step (see
-                    // handlePendingStepBoardClick's own matching docs on
-                    // why the click flow never even builds one).
+                const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
+                // Unlike "orient"/orientMinion/orientAny (where
+                // reorienting IS the whole action, so a no-op is a null
+                // move and hard-rejected), this facing is only ever an
+                // OPTIONAL addition to the already-meaningful move
+                // primitive - see resolveTrailingOrientation's own docs
+                // on why a same-facing correction isn't a no-op here.
+                const orientationResolved = this.resolveTrailingOrientation(targetPiece.orientation, orientationStr);
+                if ("key" in orientationResolved) {
+                    return { failed: true, result: this.invalid(`apgames:validation.gnostica.${orientationResolved.key}`, orientationResolved.params) };
                 }
                 const failure = checkMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                const movedPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 const facing = (minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index]).orientation;
                 const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
                 const destX = target.x + dx * dist;
@@ -6754,14 +6747,13 @@ export class GnosticaGame extends GameBaseSequenced {
                     // know (see its own docs).
                     return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
                 }
-                if (movedPiece.owner === this.currplayer) {
+                if (targetPiece.owner === this.currplayer) {
                     // The destination may not have a stored CellContents yet (a
                     // genuinely untouched wasteland), so this ref carries
                     // its own piece data rather than relying on a later
                     // board read - see IMinionRef's own docs.
                     const newIndex = this.board.get(destX, destY)?.pieces.length ?? 0;
-                    const finalOrientation = orientationStr !== undefined ? this.tryParseOrientation(orientationStr)! : movedPiece.orientation;
-                    const newPiece = new Piece(movedPiece.owner, movedPiece.size, finalOrientation);
+                    const newPiece = new Piece(targetPiece.owner, targetPiece.size, orientationResolved.orientation);
                     return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
                 // Moved an enemy's own piece - not tracked in this pool,
@@ -6834,29 +6826,26 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                if (orientationStr !== undefined) {
-                    const parsed = this.parseOrientationOrFail(orientationStr);
-                    if ("key" in parsed) {
-                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
-                    }
-                    // See validateRods' own matching docs - this facing is
-                    // an optional addition to an already-meaningful step,
-                    // not the whole action, so a same-facing correction
-                    // isn't a no-op worth rejecting.
+                const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
+                // See validateRods' own matching docs - this facing is an
+                // optional addition to an already-meaningful step, not
+                // the whole action, so a same-facing correction isn't a
+                // no-op worth rejecting.
+                const orientationResolved = this.resolveTrailingOrientation(targetPiece.orientation, orientationStr);
+                if ("key" in orientationResolved) {
+                    return { failed: true, result: this.invalid(`apgames:validation.gnostica.${orientationResolved.key}`, orientationResolved.params) };
                 }
                 const failure = checkGrowPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 if (targetPiece.owner === this.currplayer) {
                     // Growing replaces the piece in place (removeAt then
                     // add at the end) - net piece count at this cell is
                     // unchanged, so the pre- and post-mutation "last index"
                     // are the same value.
                     const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
-                    const finalOrientation = orientationStr !== undefined ? this.tryParseOrientation(orientationStr)! : targetPiece.orientation;
-                    const grownPiece = new Piece(targetPiece.owner, (targetPiece.size + 1) as Pips, finalOrientation);
+                    const grownPiece = new Piece(targetPiece.owner, (targetPiece.size + 1) as Pips, orientationResolved.orientation);
                     return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: grownPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
                 // Grown into a piece this pool doesn't track (an enemy's)
@@ -6952,29 +6941,26 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (Number.isNaN(pips)) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
-                if (orientationStr !== undefined) {
-                    const parsed = this.parseOrientationOrFail(orientationStr);
-                    if ("key" in parsed) {
-                        return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
-                    }
-                    // See validateRods' own matching docs - this facing is
-                    // an optional addition to an already-meaningful step,
-                    // not the whole action, so a same-facing correction
-                    // isn't a no-op worth rejecting.
+                const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
+                // See validateRods' own matching docs - this facing is an
+                // optional addition to an already-meaningful step, not
+                // the whole action, so a same-facing correction isn't a
+                // no-op worth rejecting.
+                const orientationResolved = this.resolveTrailingOrientation(targetPiece.orientation, orientationStr);
+                if ("key" in orientationResolved) {
+                    return { failed: true, result: this.invalid(`apgames:validation.gnostica.${orientationResolved.key}`, orientationResolved.params) };
                 }
                 const failure = checkAttackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 const owner = targetPiece.owner;
                 const resultSize = targetPiece.size - pips;
                 if (resultSize > 0 && owner === this.currplayer) {
                     // Shrinking replaces the piece in place, same net
                     // count as Discs' own grow above.
                     const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
-                    const finalOrientation = orientationStr !== undefined ? this.tryParseOrientation(orientationStr)! : targetPiece.orientation;
-                    const shrunkPiece = new Piece(owner, resultSize as Pips, finalOrientation);
+                    const shrunkPiece = new Piece(owner, resultSize as Pips, orientationResolved.orientation);
                     return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunkPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
                 // Destroyed outright, or shrunk but not into a piece this
@@ -7122,13 +7108,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const target = targetResult.ref;
         const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
-        let finalOrientation = targetPiece.orientation;
-        if (orientationStr !== undefined) {
-            const parsed = this.parseOrientationOrFail(orientationStr);
-            if ("key" in parsed) {
-                return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
-            }
-            finalOrientation = parsed.orientation;
+        const orientationResolved = this.resolveTrailingOrientation(targetPiece.orientation, orientationStr);
+        if ("key" in orientationResolved) {
+            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${orientationResolved.key}`, orientationResolved.params) };
         }
         const failure = checkHierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
@@ -7137,7 +7119,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Replace-in-place (removeAt then add) - net piece count at this
         // cell is unchanged, so pre- and post-mutation "last index" match.
         const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
-        const replacement = new Piece(this.currplayer, targetPiece.size, finalOrientation);
+        const replacement = new Piece(this.currplayer, targetPiece.size, orientationResolved.orientation);
         return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replacement }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
     }
 
