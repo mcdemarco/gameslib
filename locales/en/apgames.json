@@ -5844,7 +5844,7 @@
             "PICK_DIRECTION_TO_ORIENT": "Click on or around the piece to choose its new orientation.",
             "PICK_MINION_BUTTON": "More than one minion is available; please click a button to choose one.",
             "PICK_MINION_CELL": "Click on the cell containing the minion you want to use.",
-            "PICK_DESTINATION_TO_SET_DISTANCE": "Click the cell your piece should land on to set the distance.",
+            "PICK_DESTINATION_TO_SET_DISTANCE": "Click the cell the targeted piece should land on to set the distance.",
             "PICK_DISTANCE_CYCLE": "Click your minion's own cell again to cycle through the possible distances.",
             "PICK_PIPS_BUTTON": "More than one pip count is available; please click a button to choose one.",
             "PICK_PIECE_TO_ORIENT": "Choose the cell containing the piece you want to orient.",
