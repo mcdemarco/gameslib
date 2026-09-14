@@ -1163,57 +1163,55 @@ export class GnosticaGame extends GameBaseSequenced {
         return `${n}th`;
     }
 
-    // Every step's first token is always either a piece ref (every suit
-    // primitive and special power except one) or a card uid (High
-    // Priestess's own discard-list steps, which have no minion reference
-    // at all) - the one thing checkable across the whole grammar without
-    // resolving the card (board state this parser doesn't have - see the
-    // "Move parsing" docs above). Every token everywhere in a step is
-    // built from the same small alphabet regardless of which suit/power
-    // it belongs to, and no real step needs more than a handful of
-    // tokens (the richest shape - Magician wrapping Swords' own
-    // piece-target form - tops out at 6; discarding several cards at
-    // once, Judgement or High Priestess, is the other realistic
-    // outlier) - 12 leaves comfortable headroom without weakening the
-    // check. The pips-and-beyond suffix is OPTIONAL specifically so a
-    // BARE cell (no ".") also passes shape validation - not a real,
-    // resolvable piece ref (resolvePieceRef still rejects one on its own,
-    // unaffected by this), but the still-narrowing token a "click the
-    // cell your desired minion is on" board click embeds when that cell
-    // has more than one eligible minion (see resolveStepMinion's and
-    // handleClickCore's own docs) - tolerated the same "still skipped,
-    // not yet resolved" way as an incomplete mode/args elsewhere in this
-    // file (see isMinionCellStillNarrowing's own docs).
-    private static readonly PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.\d+)?)?$/i;
-    private static readonly CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
-    // Trailing "?" tolerated on any token - Cups "own" creation's own
-    // still-prepopulated facing (see IStepOutcome.softComplete's own
-    // docs) is the one real use, but this is a pure shape check; nothing
-    // downstream needs a token-position-specific allowance for it.
-    private static readonly STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
-    private static readonly MAX_STEP_TOKENS = 12;
-
-    private isStepShapeValid(tokens: string[]): boolean {
-        if (tokens.length === 0 || tokens.length > GnosticaGame.MAX_STEP_TOKENS) {
-            return false;
-        }
-        // High Priestess with zero discards but an explicit draw count
-        // ("draw <n>" as the WHOLE step) - "draw" is neither a piece ref
-        // nor a card uid, so it needs the same allowance. A discard list
-        // followed by "draw <n>" doesn't need this, since tokens[0] there
-        // is a genuine card uid already.
-        if (tokens[0]?.toLowerCase() === "draw") {
-            return true;
-        }
-        if (!tokens.every(t => GnosticaGame.STEP_TOKEN_RE.test(t))) {
-            return false;
-        }
-        return GnosticaGame.PIECE_REF_SHAPE_RE.test(tokens[0]) || GnosticaGame.CARD_UID_SHAPE_RE.test(tokens[0]);
-    }
-
     private parseMove(m: string): IParsedMove {
         const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
         const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
+        // Every step's first token is always either a piece ref (every
+        // suit primitive and special power except one) or a card uid
+        // (High Priestess's own discard-list steps, which have no
+        // minion reference at all) - the one thing checkable across the
+        // whole grammar without resolving the card (board state this
+        // parser doesn't have). The pips-and-beyond suffix is OPTIONAL
+        // specifically so a BARE cell (no ".") also passes shape
+        // validation - not a real, resolvable piece ref (resolvePieceRef
+        // still rejects one on its own, unaffected by this), but the
+        // still-narrowing token a "click the cell your desired minion is
+        // on" board click embeds when that cell has more than one
+        // eligible minion (see resolveStepMinion's and handleClickCore's
+        // own docs) - tolerated the same "still skipped, not yet
+        // resolved" way as an incomplete mode/args elsewhere in this
+        // file (see isMinionCellStillNarrowing's own docs).
+        const PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.\d+)?)?$/i;
+        const CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
+        // Trailing "?" tolerated on any token - Cups "own" creation's own
+        // still-prepopulated facing (see IStepOutcome.softComplete's own
+        // docs) is the one real use, but this is a pure shape check;
+        // nothing downstream needs a token-position-specific allowance
+        // for it.
+        const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
+        // No real step needs more than a handful of tokens (the richest
+        // shape - Magician wrapping Swords' own piece-target form - tops
+        // out at 6; discarding several cards at once, Judgement or High
+        // Priestess, is the other realistic outlier) - 12 leaves
+        // comfortable headroom without weakening the check.
+        const MAX_STEP_TOKENS = 12;
+        const isStepShapeValid = (tokens: string[]): boolean => {
+            if (tokens.length === 0 || tokens.length > MAX_STEP_TOKENS) {
+                return false;
+            }
+            // High Priestess with zero discards but an explicit draw
+            // count ("draw <n>" as the WHOLE step) - "draw" is neither a
+            // piece ref nor a card uid, so it needs the same allowance.
+            // A discard list followed by "draw <n>" doesn't need this,
+            // since tokens[0] there is a genuine card uid already.
+            if (tokens[0]?.toLowerCase() === "draw") {
+                return true;
+            }
+            if (!tokens.every(t => STEP_TOKEN_RE.test(t))) {
+                return false;
+            }
+            return PIECE_REF_SHAPE_RE.test(tokens[0]) || CARD_UID_SHAPE_RE.test(tokens[0]);
+        };
         // "(via <uid>)" names the card whose power a resumed step was
         // reached through - stripped exactly like "(last)" and stashed in
         // `viaUid` alone (never in `rest`). Dispatch detects a resume from
@@ -1259,7 +1257,7 @@ export class GnosticaGame extends GameBaseSequenced {
             headRecognized: RECOGNIZED_HEADS.includes(head),
             rest,
             stepSegments,
-            malformedStep: stepSegments.find(tokens => !this.isStepShapeValid(tokens)),
+            malformedStep: stepSegments.find(tokens => !isStepShapeValid(tokens)),
             viaUid,
             asUid,
         };
@@ -2436,11 +2434,18 @@ export class GnosticaGame extends GameBaseSequenced {
             if ((suitUid === "R" || suitUid === "D" || suitUid === "S") && pendingMinor.mode === "piece" && pendingMinor.rest.length === 0) {
                 const [tx, ty] = this.minorTargetCell(pendingMinor.minion);
                 const verb = MINOR_MODES[suitUid].piece.label.replace(" Piece", "");
-                const selfRef = this.pieceRefStr(pendingMinor.minion);
-                const targetOptions: ChoiceOption[] = [{ value: selfRef, label: `${verb} self` }];
+                const selfOption: ChoiceOption = { value: this.pieceRefStr(pendingMinor.minion), label: `${verb} self` };
+                const targetOptions: ChoiceOption[] = suitUid === "S" ? [] : [selfOption];
                 const facingCell = this.board.get(tx, ty);
                 if ((tx !== pendingMinor.minion.x || ty !== pendingMinor.minion.y) && (facingCell?.pieces.length ?? 0) > 0) {
                     targetOptions.push({ value: this.pieceRefStr({ x: tx, y: ty, index: 0 }), label: `${verb} ${this.textFormat(facingCell!.pieces[0])}` });
+                }
+                // Attacking self is a real option (Swords can shrink your
+                // own piece) but a distinctly secondary one against the
+                // list's own usual order elsewhere - last, not first,
+                // here specifically.
+                if (suitUid === "S") {
+                    targetOptions.push(selfOption);
                 }
                 buttons.push(...this.buildChoiceButtons("target", targetOptions, undefined));
             }

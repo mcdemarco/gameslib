@@ -69,4 +69,3 @@ Mark items done with ✔ + @done(date) as they're confirmed.
 - #99 - Remove one-liner wrappers like invalid().
 - #100 - The message for distance moving a piece should not specify "your" piece.
 - #101 - In Hierophant, the new piece should inherit the enemy piece's orientation, not start as U.
-✔ #102 - PIECE_REF_SHAPE_RE's orientation tie-break character class was "[nesu]" - missing "w" - so a minion-picker button for a same-pip pair disambiguated by a WEST-facing piece (ref like "m0.1.W") got rejected by the move grammar itself as malformed (BAD_STEP), even though the engine's own pieceRefStr produced the ref. @done(26-09-14)
