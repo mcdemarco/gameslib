@@ -180,29 +180,22 @@ interface IParsedMove {
     // undefined only for a genuinely empty move (or one that's just
     // "last" alone).
     head: string | undefined;
-    // true if head is undefined, or is one of the recognized keywords -
-    // false is a real structural failure (UNRECOGNIZED_MOVE), not
-    // something left for a switch statement's default arm to rediscover.
-    headRecognized: boolean;
+    // Purely structural: head is undefined or a recognized keyword, and
+    // every step segment at least has the right subhead/minionRef shape
+    // (see parseMove's own docs on what "shape" means here and why it
+    // can't go any deeper without already knowing which suit/power is
+    // involved). false means "this string doesn't parse at all" - a
+    // hand-edit or a broken client, never something the click UI
+    // produces. Legality of a recognized head's own `rest` (a bad cell,
+    // an unknown card uid, a malformed number, ...) is deliberately NOT
+    // checked here - that's each head's own validate* function's job,
+    // the same place that has to check it anyway for legitimate input.
+    valid: boolean;
     // The front tokens as typed - a fresh "use"/"play <uid>", the discard
     // uids for an ordinary discard, or (for a resume) the revealed card
     // being resolved. The "via <uid>" anchor is NOT here; it's `viaUid`.
     rest: string[];
     stepSegments: string[][];
-    // The first step segment that fails isStepShapeValid, if any - see
-    // its own docs on what "shape" means here and why it can't go any
-    // deeper without already knowing which suit/power is involved.
-    malformedStep: string[] | undefined;
-    // `rest`'s own shape complaint, if any - unlike malformedStep (whose
-    // grammar depends on which card/suit gets resolved, so it can only
-    // report a generic BAD_STEP), every head's own `rest` (and `use`/
-    // `play`'s leading uid) has a grammar fixed by the head keyword
-    // alone, so this carries a real, specific key/params pair straight
-    // from parseMove - the exact same message the deeper validate*
-    // function would have given for the same malformed token, just
-    // caught before dispatch (see the `malformedRest` check just after
-    // `malformedStep`'s own, in validateMove).
-    malformedRest?: { key: string; params?: Record<string, unknown> };
     // The "via <uid>" anchor: the Fool (00) or High Priestess (02) whose
     // still-pending power a resumed step continues, demoted to a
     // parenthetical the same way announceLast demotes "last". Populated
@@ -843,21 +836,15 @@ export class GnosticaGame extends GameBaseSequenced {
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
-        if (!parsed.headRecognized) {
+        // An unrecognized head, or a step segment whose token grammar is
+        // broken (see parseMove's own docs on `valid`) - the click UI
+        // never produces either; this is a hand-edit or a broken client.
+        // A recognized head's own `rest` failing its specific grammar
+        // (a bad cell, an unknown card uid, ...) is NOT caught here -
+        // that's each head's own validate* function's job, dispatched to
+        // just below.
+        if (!parsed.valid) {
             return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: m });
-        }
-        // A step segment whose token grammar is broken (see parseMove's own
-        // docs on malformedStep) - rejected the moment it's known, ahead of
-        // any head dispatch. The click UI never produces one; this is a
-        // hand-edit or a broken client.
-        if (parsed.malformedStep !== undefined) {
-            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" });
-        }
-        // A head's own `rest` failing ITS fixed grammar (see
-        // IParsedMove.malformedRest's own docs) - same early rejection,
-        // but with the specific message parseMove already worked out.
-        if (parsed.malformedRest !== undefined) {
-            return this.invalid(parsed.malformedRest.key, parsed.malformedRest.params);
         }
 
         const head = parsed.head;
@@ -1182,7 +1169,9 @@ export class GnosticaGame extends GameBaseSequenced {
     private parseMove(m: string): IParsedMove {
         const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
         /*
-          const KEYWORDS = ["as", "at", "create", "discard", "draw", "grow", "last", "move", "orient", "replace", "shrink", "to", "trade", "via", "with"];
+          const STEPWORDS = ["discard", "draw", "fly", "orient", "replace", "trade", "with"];
+        const OTHERWORDS = ["as", "at", "create", "draw", "grow", "last", "move", "orient", "shrink", "to", "via"];
+
           //only some of these  (with, discard, draw, orient, replace, trade) can be a subhead/start a step 
 
           last: no arguments
@@ -1216,7 +1205,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const announceLast = LAST_FLAG_RE.test(trimmed);
         const bare = trimmed.replace(LAST_FLAG_RE, "").trim();
         if (bare.length === 0) {
-            return { announceLast, head: undefined, headRecognized: true, rest: [], stepSegments: [], malformedStep: undefined, viaUid: undefined };
+            return { announceLast, head: undefined, valid: true, rest: [], stepSegments: [], viaUid: undefined };
         }
         // "/" (or a newline) separates segments - a leading/trailing/doubled one leaves an empty segment that fails the shape check rather than being silently swallowed.
         const segments = bare.split(/\s*[\n/]\s*/);
@@ -1252,11 +1241,11 @@ export class GnosticaGame extends GameBaseSequenced {
         // all, so neither subhead applies to them.
         const rawStepSegments = segments.slice(1).map(s => s.split(/\s+/));
         const stepSegments = rawStepSegments.map(raw => raw[0]?.toLowerCase() === "with" ? raw.slice(1) : raw);
-        let malformedStep: string[] | undefined;
+        let stepsWellFormed = true;
         for (let i = 0; i < rawStepSegments.length; i++) {
             const raw = rawStepSegments[i];
             if (raw.length === 0 || raw.length > MAX_STEP_TOKENS) {
-                malformedStep = raw;
+                stepsWellFormed = false;
                 break;
             }
             if (raw[0]?.toLowerCase() === "draw" || raw[0]?.toLowerCase() === "discard"
@@ -1264,7 +1253,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 continue;
             }
             if (raw[0]?.toLowerCase() !== "with" && raw[0]?.toLowerCase() !== "orient") {
-                malformedStep = raw;
+                stepsWellFormed = false;
                 break;
             }
             const tokens = stepSegments[i];
@@ -1273,73 +1262,25 @@ export class GnosticaGame extends GameBaseSequenced {
             const refIdx = tokens[0]?.toLowerCase() === "orient" ? 1 : 0;
             if (!tokens.every(t => STEP_TOKEN_RE.test(t))
                 || !(PIECE_REF_SHAPE_RE.test(tokens[refIdx]) || CARD_UID_SHAPE_RE.test(tokens[refIdx]))) {
-                malformedStep = tokens;
+                stepsWellFormed = false;
                 break;
             }
         }
-        // Unlike malformedStep (card/suit-dependent, so only a generic complaint), every head below has a grammar fixed by the head keyword alone - see IParsedMove.malformedRest's own docs.
-        // `base` omits malformedRest (absent optional property reads as undefined); each check below returns the moment it finds a problem, spreading this with malformedRest added.
-        const base = {
+        // Purely structural: a recognized head, plus every step segment
+        // at least shaped right. A recognized head's own `rest` (a bad
+        // cell, an unknown card uid, a malformed number, ...) is
+        // deliberately NOT checked here - each head's own validate*
+        // function already has to check that for legitimate input, so
+        // there's no separate "pre-check" duplicating it here anymore.
+        return {
             announceLast,
             head,
-            headRecognized: HEADWORDS.includes(head),
+            valid: HEADWORDS.includes(head) && stepsWellFormed,
             rest,
             stepSegments,
-            malformedStep,
             viaUid,
             asUid,
         };
-        if (head === "place") {
-            const [cellStr, orientationToken, correctionStr] = rest;
-            if (cellStr !== undefined && this.tryAlgebraic2coords(cellStr) === undefined) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_CELL", params: { cell: cellStr } } };
-            }
-            // A trailing "?" marks the click flow's own seeded default as not yet deliberate - meaningless to shape, stripped like cmdPlace/validatePlace do.
-            const orientationStr = orientationToken?.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
-            if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } } };
-            }
-            if (correctionStr !== undefined && this.tryParseOrientation(correctionStr) === undefined) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: correctionStr } } };
-            }
-        } else if (head === "orient") {
-            const [ref, orientationStr] = rest;
-            if (ref !== undefined && !PIECE_REF_SHAPE_RE.test(ref)) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_PIECE_REF" } } };
-            }
-            if (orientationStr !== undefined && this.tryParseOrientation(orientationStr) === undefined) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.BAD_ORIENTATION", params: { orientation: orientationStr } } };
-            }
-        } else if (head === "discard" || head === "redraw") {
-            // Identical uid-list grammar for both - discard's own optional "draw <n>" postscript is the only difference (drawIdx stays -1 for redraw).
-            const drawIdx = head === "discard" ? rest.indexOf("draw") : -1;
-            const uids = drawIdx === -1 ? rest : rest.slice(0, drawIdx);
-            if (new Set(uids).size !== uids.length) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "DUPLICATE_CARD" } } };
-            }
-            const badUid = uids.find(uid => !CARD_UID_SHAPE_RE.test(uid));
-            if (badUid !== undefined) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid: badUid } } };
-            }
-            if (drawIdx !== -1) {
-                const countStr = rest[drawIdx + 1];
-                if (countStr !== undefined && !/^\d+$/.test(countStr)) {
-                    return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_NUMBER" } } };
-                }
-            }
-        } else if (head === "bid") {
-            const [nStr] = rest;
-            if (nStr !== undefined && !/^\d+$/.test(nStr)) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.INVALID_MOVE", params: { reason: "BAD_NUMBER" } } };
-            }
-        } else if (head === "use" || head === "play") {
-            // asUid's own shape depends on WHICH card is resolved (a suit letter or a full card uid) - genuinely card-dependent, left where it already lived.
-            const uid = rest[0];
-            if (uid !== undefined && !CARD_UID_SHAPE_RE.test(uid)) {
-                return { ...base, malformedRest: { key: "apgames:validation.gnostica.UNKNOWN_CARD", params: { uid } } };
-            }
-        }
-        return base;
     }
 
     // "/" separates every segment - the head/card-uid from its first
@@ -3289,7 +3230,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // World/Magician borrow is spelled with "as <x>", never by swapping
     // in the borrowed card as the head arg.
     private describePendingMove(pending: IPendingStep, stepSegments: string[][]): string {
-        const base: IParsedMove = { announceLast: false, head: pending.head, headRecognized: true, rest: [pending.headArg], stepSegments, malformedStep: undefined, asUid: pending.asUid };
+        const base: IParsedMove = { announceLast: false, head: pending.head, valid: true, rest: [pending.headArg], stepSegments, asUid: pending.asUid };
         // A genuine resume always carries a "via <root>" anchor for
         // validateResumePendingPower's own mismatch check.
         if (this.continued.length > 0) {
