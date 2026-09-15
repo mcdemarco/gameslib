@@ -31,7 +31,7 @@ import { cardPointValue } from "./cell";
 import { Orientation, allOrientations } from "./piece";
 import { GnosticaBoard } from "./board";
 import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana";
-import { ALL_SUITS } from "./stepShapes";
+import { ALL_SUITS, buildRdsTokens, buildHermitTokens } from "./stepShapes";
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
 // docs there, including #98/#100's own) - duplicated rather than imported
@@ -152,7 +152,7 @@ export function generateRandomMove(game: GnosticaGame): string {
     // nobody has an active declaration pending at all - move()'s own
     // ALREADY_ANNOUNCED gate rejects a second announceLast even by the
     // same player who's already the declarer), sometimes append the
-    // "(last)" suffix to whatever move is about to be returned. Without
+    // "last" suffix to whatever move is about to be returned. Without
     // this, a game played purely by randomMove() could never actually
     // end. Not unconditional even once eligible - a real player might
     // wait for a wider safety margin first, same as this file's own
@@ -172,7 +172,7 @@ export function generateRandomMove(game: GnosticaGame): string {
             if (candidate === undefined) {
                 continue;
             }
-            const finalCandidate = announce ? `${candidate} (last)` : candidate;
+            const finalCandidate = announce ? `${candidate} last` : candidate;
             const check = game.validateMove(finalCandidate);
             // Genuinely submittable is complete !== -1, not === 1 -
             // several heads (orient, a use/play chain with a further
@@ -207,7 +207,7 @@ export function generateRandomMove(game: GnosticaGame): string {
             continue;
         }
     }
-    return announce ? "discard (last)" : "discard";
+    return announce ? "discard last" : "discard";
 }
 
 function buildRandomHeadMove(game: GnosticaGame, head: string): string | undefined {
@@ -500,7 +500,7 @@ function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { s
             continue;
         }
         const ref = game.pieceRefStr(choice.minion, minions);
-        return { suitUid: suit.uid, chain: [[ref, choice.mode, ...choice.args]] };
+        return { suitUid: suit.uid, chain: [["with", ref, ...suitStepTokens(suit.uid, choice.mode, choice.args)]] };
     }
     return undefined;
 }
@@ -759,13 +759,28 @@ function findRandomPrimitiveChoice(
     return undefined;
 }
 
+// The inverse of deriveMinorMode (gnostica/stepShapes.ts) - given the
+// same (mode, args) shape findRandomPrimitiveChoice/validateSuitPrimitive
+// already use internally, rebuilds this suit's own verb-first (Rods/
+// Discs/Swords) or "at <cell> create ..." (Cups) tokens. Needed
+// immediately here, not deferred like "with" itself (see buildRandomChain's
+// own docs on why "with" alone can be patched on later at the
+// string-join step while this can't).
+function suitStepTokens(suitUid: string, mode: string, args: string[]): string[] {
+    if (suitUid === "C") {
+        const [cellStr, ...trailingArgs] = args;
+        return ["at", cellStr, "create", ...trailingArgs];
+    }
+    return buildRdsTokens(suitUid, mode, args);
+}
+
 function buildRandomStepTokens(game: GnosticaGame, suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>): string[] | undefined {
     const choice = findRandomPrimitiveChoice(game, suitUid, minions, opts);
     if (choice === undefined) {
         return undefined;
     }
     const ref = game.pieceRefStr(choice.minion, minions);
-    return [ref, choice.mode, ...choice.args];
+    return [ref, ...suitStepTokens(suitUid, choice.mode, choice.args)];
 }
 
 // A major card's own `primitive` step - same suit machinery as a minor
@@ -803,10 +818,10 @@ function buildRandomTradeHandsTokens(game: GnosticaGame, minions: IMinionRef[]):
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
         for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
-            const check = game.validateTradeHands(minion, [targetRef]);
+            const check = game.validateTradeHands(minion, ["trade", targetRef]);
             if (!check.failed) {
                 const ref = game.pieceRefStr(minion, minions);
-                return [ref, targetRef];
+                return [ref, "trade", targetRef];
             }
         }
     }
@@ -828,10 +843,16 @@ function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMi
         if (special === "orientAny") {
             for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
                 for (const o of shuffle([...allOrientations]) as Orientation[]) {
-                    const check = game.validateOrientAny(minion, [targetRef, o]);
+                    const check = game.validateOrientAny(minion, ["orient", targetRef, o]);
                     if (!check.failed) {
                         const ref = game.pieceRefStr(minion, minions);
-                        return [ref, targetRef, o];
+                        // No "with" here - these tokens feed validatePowerStep/
+                        // applyPowerStep directly (buildRandomChain, below),
+                        // bypassing parseMove's own "with"-stripping entirely;
+                        // "with" is optional there anyway (parseMove tolerates
+                        // its absence), so the eventual move STRING this
+                        // becomes still parses correctly without it.
+                        return [ref, "orient", targetRef, o];
                     }
                 }
             }
@@ -840,7 +861,7 @@ function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMi
         for (const { ref: targetRef, orientation: capturedFacing } of shuffle(pieceTargetRefsWithOrientation(game, minion)) as { ref: string; orientation: Orientation }[]) {
             const orientationToken = `${capturedFacing}?`;
             for (const o of shuffle([...allOrientations, undefined]) as (Orientation | undefined)[]) {
-                const rest = o === undefined ? [targetRef, orientationToken] : [targetRef, orientationToken, o];
+                const rest = o === undefined ? ["replace", targetRef, orientationToken] : ["replace", targetRef, orientationToken, o];
                 const check = game.validateHierophantReplace(minion, rest);
                 if (!check.failed) {
                     return [game.pieceRefStr(minion, minions), ...rest];
@@ -866,10 +887,11 @@ function buildRandomHermitTokens(game: GnosticaGame, minions: IMinionRef[]): str
             for (const target of pieceTargets) {
                 for (const [dx, dy] of destinations) {
                     const destCell = GnosticaBoard.coords2algebraic(dx, dy);
-                    const check = game.validateHermitStep(minion, [mode, target, destCell]);
+                    const tokens = buildHermitTokens(mode, [target, destCell]);
+                    const check = game.validateHermitStep(minion, tokens);
                     if (!check.failed) {
                         const ref = game.pieceRefStr(minion, minions);
-                        return [ref, mode, target, destCell];
+                        return [ref, ...tokens];
                     }
                 }
             }
@@ -886,9 +908,9 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
         const maxDraw = Math.min(piece.size, Math.max(0, 6 - hand.length));
         const count = Math.floor(Math.random() * (maxDraw + 1));
         const uids = (shuffle([...game.discardPile]) as string[]).slice(0, count);
-        if (game.validateJudgementDraw(minion, uids).valid) {
+        if (game.validateJudgementDraw(minion, ["draw", ...uids]).valid) {
             const ref = game.pieceRefStr(minion, minions);
-            return [ref, ...uids];
+            return [ref, "draw", ...uids];
         }
     }
     return undefined;
@@ -910,7 +932,7 @@ function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
 // (checkHighPriestess never distinguishes them), so there's nothing
 // round-2-specific left to derive here. One thing IS round-2-specific
 // though: a fully empty result (no discards, no "draw") would render as
-// a bare "discard (via <uid>)" - indistinguishable from
+// a bare "discard via <uid>" - indistinguishable from
 // resumeStepSegments' own "nothing typed yet, just a preview seed" check
 // (see its own docs), so the resume would silently no-op instead of
 // actually clearing the obligation. Never omit "draw" when there are no
@@ -941,10 +963,11 @@ function buildRandomMagicianChoiceTokens(game: GnosticaGame, minions: IMinionRef
         if (choice === undefined) {
             continue;
         }
-        const check = game.validateMagicianChoice(choice.minion, [suit.uid, choice.mode, ...choice.args]);
+        const suitTokens = suitStepTokens(suit.uid, choice.mode, choice.args);
+        const check = game.validateMagicianChoice(choice.minion, [suit.uid, ...suitTokens]);
         if (!check.failed) {
             const ref = game.pieceRefStr(choice.minion, minions);
-            return [ref, suit.uid, choice.mode, ...choice.args];
+            return [ref, suit.uid, ...suitTokens];
         }
     }
     return undefined;
@@ -1015,7 +1038,12 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         // step landing on the acting player's own minion is legitimately
         // final yet still complete:0 (a further reorientation remains
         // available, never supplied by buildRandomModeArgCandidates).
-        return result.valid && result.complete !== -1 ? [tokens] : [];
+        // `tokens` itself stays bare for validateMinorPower above (a
+        // direct-array call, bypassing parseMove) - "with" only gets
+        // added to the copy returned here, which becomes part of the
+        // eventual move STRING (see buildRandomChain's own matching docs
+        // on the major-arcana loop below for why).
+        return result.valid && result.complete !== -1 ? [["with", ...tokens]] : [];
     }
     const def = getMajorArcanaDef(card);
     if (def.uid === "00") {
@@ -1086,5 +1114,18 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
     while (stepSegments.length > 0 && !isCleanSuccess(stepSegments)) {
         stepSegments.pop();
     }
-    return stepSegments;
+    // stepSegments validated above bare (validateMajorPower is a direct-
+    // array call too, bypassing parseMove exactly like validatePowerStep/
+    // applyPowerStep above - see this function's own top docs). The
+    // eventual move STRING this chain becomes (joined by the caller) does
+    // need a "with"/"orient" subhead on every segment though, now that
+    // parseMove requires one (see its own docs) - added here, once, after
+    // trimming, rather than while the chain's still being built and
+    // internally re-validated.
+    const NO_SUBHEAD = ["discard", "draw", "decline"];
+    return stepSegments.map((seg, idx) => {
+        const stepAtIdx = def.powers[idx];
+        const subhead = "special" in stepAtIdx && stepAtIdx.special === "orientMinion" ? "orient" : "with";
+        return NO_SUBHEAD.includes(seg[0]?.toLowerCase()) ? seg : [subhead, ...seg];
+    });
 }

@@ -227,10 +227,10 @@ describe("Gnostica: randomMove()", () => {
         expect(sawWorldUse, "expected randomMove() to eventually use The World at least once across 200 trials").to.be.true;
     });
 
-    it("eventually declares (last) once the acting player's own score is already at/above target", () => {
+    it("eventually declares last once the acting player's own score is already at/above target", () => {
         // Without this, a randomMove()-only game could never actually
         // end - gameover/winner/elimination only ever resolve on the
-        // turn following a real "(last)" declaration (see
+        // turn following a real "last" declaration (see
         // resolveAnnouncedTurn's own docs).
         let sawDeclare = false;
         for (let i = 0; i < 200 && !sawDeclare; i++) {
@@ -249,14 +249,14 @@ describe("Gnostica: randomMove()", () => {
             }
             commitFixture(g);
             const move = g.randomMove();
-            if (!move.includes("(last)")) {
+            if (!move.includes(" last")) {
                 continue;
             }
             sawDeclare = true;
             const check = g.validateMove(move);
             expect(check.valid, `"${move}" should validate: ${check.message}`).to.be.true;
             // Genuinely submittable, not necessarily complete:1 - an
-            // "orient" or a still-extendable chain underneath the "(last)"
+            // "orient" or a still-extendable chain underneath the "last"
             // is legitimately complete:0 (see generateRandomMove's own
             // docs).
             expect(check.complete).to.not.eq(-1);
@@ -265,14 +265,14 @@ describe("Gnostica: randomMove()", () => {
         expect(sawDeclare, "expected randomMove() to declare at least once across 200 eligible attempts").to.be.true;
     });
 
-    it("never declares (last) while the acting player's own score is still below target", () => {
+    it("never declares last while the acting player's own score is still below target", () => {
         for (let i = 0; i < 200; i++) {
             const g = new GnosticaGame(2);
             g.move("place m0 U", { trusted: true });
             g.move("place n0 U", { trusted: true });
             commitFixture(g);
             const move = g.randomMove();
-            expect(move.includes("(last)"), `should not declare while ineligible: ${move}`).to.be.false;
+            expect(move.includes(" last"), `should not declare while ineligible: ${move}`).to.be.false;
         }
     });
 
