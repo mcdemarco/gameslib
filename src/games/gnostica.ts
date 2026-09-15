@@ -1180,12 +1180,33 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private parseMove(m: string): IParsedMove {
-        const RECOGNIZED_HEADS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
+        const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
+        /*
+          const KEYWORDS = ["as", "create", "discard", "draw", "grow", "last", "move", "orient", "replace", "shrink", "to", "trade", "via", "with"];
+          //only some of these  (with, discard, draw, orient, replace, trade) can be a subhead/start a step 
+
+          last: no arguments
+          via: 00 or 02
+          as: cardUid or suitId  -- World and Magician
+          with: own minion ref
+          discard/draw: for High Priestess and Judgement (draw only)
+          create: <target cell> + ( new cardUid or enemy.minion.ref or just direction )  -- includes Wheel of Fortune
+          grow: (<target cell> + oldcardUid to newcarduid ) or minion.ref  -- includes Star
+          shrink: (<target cell> + oldcardUid to newcarduid ) or minion.ref  -- includes Death, Tower
+          move: (<target cell> + <new target cell> )  or ( minion.ref + distance)  -- include hermit
+          orient: minion.ref direction  -- the Devil, empress, emperor, tower, star
+          replace: Hierophant
+          trade: Justice and the Hanged Man
+
+          Stuff that isn't keywords:  pieceRefs, cell, cardUid, suitId, playerId, Direction
+          Special issues:  question mark for orients, previously floating terms like (last) and (via)  
+        */
+
         const LAST_FLAG_RE = /\s*\(last\)\s*$/i;
         // A step's first token is a piece ref (or, for High Priestess, "draw"/"discard" - exempted separately below); pips/orientation suffix stays optional so a bare "still narrowing" cell also passes.
         const PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.\d+)?)?$/i;
         const CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
-        // Trailing "?" tolerated on any token - Cups "own" creation's still-prepopulated facing is the one real use.
+        // A trailing "?" is tolerated on any token but should be restricted to a create, place, or replace.
         const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
         // Comfortable headroom above the richest real step shape (High Priestess discarding a full 6-card hand: "discard" + 6 uids + "draw" + count, 9 tokens).
         const MAX_STEP_TOKENS = 12;
@@ -1233,7 +1254,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const base = {
             announceLast,
             head,
-            headRecognized: RECOGNIZED_HEADS.includes(head),
+            headRecognized: HEADWORDS.includes(head),
             rest,
             stepSegments,
             malformedStep,
