@@ -1215,6 +1215,42 @@ export class GnosticaGame extends GameBaseSequenced {
         //was trimmed.split(/\s*[\n/]\s*/);
         const segments = trimmed.split("/").map(part => part.trim());
 
+/* deprecated code to be removed */
+        
+        const segments2 = trimmed.split("/").map(part => part.trim());
+        const rawStepSegments = segments2.slice(1).map(s => s.split(/\s+/));
+        const stepSegments = rawStepSegments.map(raw => raw[0]?.toLowerCase() === "with" ? raw.slice(1) : raw);
+        let stepsWellFormed = true;
+        for (let i = 0; i < rawStepSegments.length; i++) {
+            const raw = rawStepSegments[i];
+            if (raw.length === 0 || raw.length > MAX_STEP_TOKENS) {
+                stepsWellFormed = false;
+                break;
+            }
+            if (raw[0]?.toLowerCase() === "draw" || raw[0]?.toLowerCase() === "discard"
+                || (raw.length === 1 && raw[0]?.toLowerCase() === "decline")) {
+                continue;
+            }
+            if (raw[0]?.toLowerCase() !== "with" && raw[0]?.toLowerCase() !== "orient") {
+                stepsWellFormed = false;
+                break;
+            }
+            const tokens = stepSegments[i];
+            // "orient" wasn't stripped, so the real minionRef sits one
+            // slot later for it than for everything else here.
+            const refIdx = tokens[0]?.toLowerCase() === "orient" ? 1 : 0;
+            if (!tokens.every(t => STEP_TOKEN_RE.test(t))
+                || !(PIECE_REF_RE.test(tokens[refIdx]) || CARD_UID_RE.test(tokens[refIdx]))) {
+                stepsWellFormed = false;
+                break;
+            }
+        }
+
+        pm.stepSegments = stepSegments;
+        console.log("old analysis: ", stepsWellFormed); 
+
+/* end deprecation */
+        
         if (segments[segments.length - 1] === "last") {
             pm.announceLast = true;
             segments.pop();
@@ -1661,41 +1697,11 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 //Otherwise pass through to the push and end of loop.
             }
-            
+
             pm.steps.push(step);    
         }
 
-        //Code to remove.
-        const rawStepSegments = segments.slice(1).map(s => s.split(/\s+/));
-        const stepSegments = rawStepSegments.map(raw => raw[0]?.toLowerCase() === "with" ? raw.slice(1) : raw);
-        let stepsWellFormed = true;
-        for (let i = 0; i < rawStepSegments.length; i++) {
-            const raw = rawStepSegments[i];
-            if (raw.length === 0 || raw.length > MAX_STEP_TOKENS) {
-                stepsWellFormed = false;
-                break;
-            }
-            if (raw[0]?.toLowerCase() === "draw" || raw[0]?.toLowerCase() === "discard"
-                || (raw.length === 1 && raw[0]?.toLowerCase() === "decline")) {
-                continue;
-            }
-            if (raw[0]?.toLowerCase() !== "with" && raw[0]?.toLowerCase() !== "orient") {
-                stepsWellFormed = false;
-                break;
-            }
-            const tokens = stepSegments[i];
-            // "orient" wasn't stripped, so the real minionRef sits one
-            // slot later for it than for everything else here.
-            const refIdx = tokens[0]?.toLowerCase() === "orient" ? 1 : 0;
-            if (!tokens.every(t => STEP_TOKEN_RE.test(t))
-                || !(PIECE_REF_RE.test(tokens[refIdx]) || CARD_UID_RE.test(tokens[refIdx]))) {
-                stepsWellFormed = false;
-                break;
-            }
-        }
-
-        pm.stepSegments = stepSegments;
-        pm.valid = stepsWellFormed;  // Should become true.
+        pm.valid = true;
         return pm;
     }
 
