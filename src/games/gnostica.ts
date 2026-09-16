@@ -178,6 +178,7 @@ interface IParsedMove {
     announceLast: boolean;
     asUid?: string;  //for World
     asSuit?: string; //for Magician
+    error?: string;
     head: string | undefined;  //Head may be absent.
     steps: IStep[];
     valid: boolean;
@@ -823,7 +824,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const parsed = this.parseMove(m);
-        console.log(parsed);
+        console.log(JSON.stringify(parsed));
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
@@ -1157,7 +1158,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return `${n}th`;
     }
 
-    private parseMove(m: string): IParsedMove {
+    public parseMove(m: string): IParsedMove {
         const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
         const STEPWORDS = ["discard", "draw", "fly", "orient", "replace", "trade", "with"];
         const OTHERWORDS = ["as", "at", "create", "draw", "grow", "last", "move", "orient", "shrink", "to", "via"];
@@ -1186,7 +1187,7 @@ export class GnosticaGame extends GameBaseSequenced {
         //const LAST_FLAG_RE = /\blast\s*$/i;
         const CARD_UID_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
         const CELL_RE = /^[a-z]{1,2}-?\d+$/i;
-        const DIRECTION_RE = /^[NESWU]$/i;
+        const DIRECTION_RE = /^[NESWU]\??$/i;
         const PIECE_REF_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.[1-6])?)?$/i;
         const MAJOR_ARCANA_RE = /^[0-1][0-9]|20|21$/i;
         const NUMBER_RE = /^[0-6]$/i; //Used for player Ids, card counts, bids, etc.
@@ -1200,7 +1201,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const pm: IParsedMove = {
             announceLast: false,
             head: undefined,
-            valid: false,
+            valid: true,
             steps: [],
             rest: [],
             stepSegments: []
@@ -1208,7 +1209,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
         if (trimmed.length === 0) {
             //Not sure we want this case to be valid
-            pm.valid = true;
             return pm;
         }
 
@@ -1262,10 +1262,10 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         //Here we step through ALL segments.
-        //TODO: May need some checking for empty segments here.
+        //TODO: May need more checking for empty segments here.
 
         for (let s=0; s < segments.length; s++) {
-            const segment = segments[s].split(/\s+/);
+            let segment = segments[s].split(/\s+/);
             const lastStep = (s === segments.length - 1); //Used for testing incomplete moves.
 
             if (s === 0) {
@@ -1275,18 +1275,18 @@ export class GnosticaGame extends GameBaseSequenced {
                 pm.head = rawHead.toLowerCase();
                 
                 if (! HEADWORDS.includes(pm.head)) {
-                    return pm;
+                    pm.error = "BAD_HEADWORD";
                 }
         
                 if (headTokens.length === 0) {
                     //The only head that can have no arguments *and* no following steps is a "pass".
                     if (lastStep) {
                         //If there is only the one step, it can be a "pass" or an incomplete move.
-                        pm.valid = true;
-                        return pm;
+                        break;
                     } else {
                         //"Pass" can't be followed by more steps, so whatever the head is, it's invalid.
-                        return pm;
+                        pm.error = "HEAD_STEP_NEEDS_CONTENT";
+                        break;
                     }
                 }
                 
@@ -1296,21 +1296,24 @@ export class GnosticaGame extends GameBaseSequenced {
                     const viaIdx = headTokens.indexOf("via");
                     if (pm.head !== "play" && pm.head !== "decline" && pm.head !== "discard") {
                         //Fool may only play/decline, and High Priestess may only discard.
-                        return pm;
+                        pm.error = "BAD_VIA_HEADWORD";
+                        break;
                     }
                     if (headTokens.length > viaIdx + 1) {
                         pm.viaUid = headTokens[viaIdx + 1];
                         //Test viaUid.
                         if (pm.viaUid !== "00" && pm.viaUid !== "02") {
-                            return pm;
+                            pm.error = "BAD_VIA_CARD";
+                            break;
                         }
                     } else {
                         //If there are other segments after a partial via, we fail this one.
                         if (!lastStep) {
-                            return pm;
+                            pm.error = "VIA_INCOMPLETE";
+                            break;
                         }
                     }
-                    //Remove consumed segments (to be deleted with deprecated code)
+                    //Remove consumed segments.
                     headTokens =  [...headTokens.slice(0, viaIdx), ...headTokens.slice(viaIdx + 2)];
                 }
                 if (headTokens.indexOf("as") > -1) {
@@ -1319,10 +1322,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     //Only The Magician and The World (or both) may have as.
                     if (pm.head !== "play" && pm.head !== "use") {
                         //They must be played or used.
-                        return pm;
+                        pm.error = "BAD_AS_HEADWORD";
+                        break;
                     }
                     if (headTokens[0] !== "01" && headTokens[0] !== "21") {
-                        return pm;
+                        pm.error = "AS_NEEDS_MAGICIAN_OR_WORLD";
+                        break;
                     }
                     while (headTokens.indexOf("as") > -1) {
                         const asIdx = headTokens.indexOf("as");
@@ -1334,7 +1339,8 @@ export class GnosticaGame extends GameBaseSequenced {
                             else if (tempAs.length === 2 && pm.asUid === undefined)
                                 pm.asUid = tempAs;
                             else {
-                                return pm;
+                                pm.error = "AS_NOT_SUIT_OR_CARD";
+                                break;
                             }
                         } else {
                             //If there are other segments after a partial as, we fail this one.
@@ -1348,33 +1354,40 @@ export class GnosticaGame extends GameBaseSequenced {
                     //Further testing of the values we got for as.
                     if ( pm.asUid !== undefined && ( (! MAJOR_ARCANA_RE.test(pm.asUid)) || pm.asUid === "21" ) ) {
                         //Bad card for the World.
-                        return pm;
+                        pm.error = pm.asUid === "21" ? "WORLD_NOT_SELF" : "WORLD_NEEDS_MAJOR_ARCANA";
+                        break;
                     }
                     if ( pm.asSuit !== undefined && (! SUIT_RE.test(pm.asSuit)) ) {
-                        //Bad card for the World.
-                        return pm;
+                        //Bad suit for the Magician.
+                        pm.error = "MAGICIAN_BAD_SUIT";
+                        break;
                     }
                 }
                 
                 pm.rest = headTokens.slice();
+                segment = headTokens.slice();
                 //End of special head treatment.
+                
             } else {
                 //Head is set in step 0.
                 if (s === 1) {
                     // Test that our head has further steps (use or play).
-                    if ( pm.head !== "use" && pm.head !== "play" )
-                        return pm;
+                    if ( pm.head !== "use" && pm.head !== "play" ) {
+                        pm.error = "TOO_MANY_STEPS_FOR_HEADWORD";
+                        break;
+                    }
                 }
                 
                 //If it's not the head, we must validate the step headword.
                 if (! STEPWORDS.includes(segment[0]) ) {
-                    return pm;
+                    pm.error = "BAD_STEPWORD";
+                    break;
                 }
             }
             
             //In all cases, construct the step.
             const step:IStep = {
-                action: ( s === 0 ? pm.head! : segment.shift()! )
+                action: (s === 0 ? pm.head! : segment.shift()!)
             }
 
             //All steps require more content (except "pass" which was handled already)
@@ -1382,24 +1395,29 @@ export class GnosticaGame extends GameBaseSequenced {
             if (segment.length === 0) {
                 if (lastStep) {
                     //Partial move.
-                    pm.valid = true;
-                    return pm;
+                    break;
                 } else {
-                    return pm;
+                    pm.error = "STEP_TOO_SHORT";
+                    break;
                 }
             }
 
             if (step.action === "with") {
                 //Parse minion.
                 step.withPiece = segment.shift()!;
-                if (! PIECE_REF_RE.test(step.withPiece) )
-                    return pm;
+                if (! PIECE_REF_RE.test(step.withPiece) ) {
+                    pm.error = "WITH_BAD_PIECE_REF";
+                    break;
+                }
 
                 if (segment.length === 0) {
-                    //Partial move.
-                    pm.valid = true;
-                    pm.steps.push(step);
-                    return pm;
+                    if (lastStep) {
+                        //Partial move.
+                        pm.steps.push(step);
+                     } else {
+                        pm.error = "STEP_TOO_SHORT";
+                     }
+                    break;
                 } else {
                     //"with" is not really the step action, so move on.
                     step.action = segment.shift()!;
@@ -1407,15 +1425,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     //though not necessarily at the real action yet,
                     //so check OTHERWORDS.
                     if (! OTHERWORDS.includes(segment[0]) ) {
-                        return pm;
+                        pm.error = "BAD_OTHERWORD";
+                        break;
                     }
                     if (segment.length === 0) {
                         if (lastStep) {
+                            //Partial move.
                             pm.steps.push(step);
-                            pm.valid = true;
-                            return pm;
-                        } else
-                            return pm;
+                        } else {
+                            pm.error = "STEP_TOO_SHORT";
+                        }
+                        break;
                     }
                     //Otherwise, we pass the new action to the next check.
                 }
@@ -1423,27 +1443,34 @@ export class GnosticaGame extends GameBaseSequenced {
             if (step.action === "at") {
                 //Parse cell
                 step.atCell = segment.shift()!;
-                if (! CELL_RE.test(step.atCell) )
-                    return pm;
+                if (! CELL_RE.test(step.atCell) ) {
+                    pm.error = "BAD_AT_CELL";
+                    break;
+                }
 
                 if (segment.length === 0) {
-                    //Partial move.
-                    pm.valid = true;
-                    pm.steps.push(step);
-                    return pm;
+                    if (lastStep) {
+                        //Partial move.
+                        pm.steps.push(step);
+                    } else {
+                        pm.error = "STEP_TOO_SHORT";
+                    }
+                    break;
                 } else {
                     //This one should be the real action.
                     step.action = segment.shift()!;
                     if (! OTHERWORDS.includes(segment[0]) ) {
-                        return pm;
+                        pm.error = "BAD_OTHERWORD";
+                        break;
                     }
                     if (segment.length === 0) {
                         if (lastStep) {
+                          //Partial move.
                             pm.steps.push(step);
-                            pm.valid = true;
-                            return pm;
-                        } else
-                            return pm;
+                        } else {
+                            pm.error = "STEP_TOO_SHORT";
+                        }            
+                        break;
                     }
                 }
             }
@@ -1456,13 +1483,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 step.cardList = segment.slice()!;
                 
                 //There are limits on how many cards can be drawn with Judgement.
-                if (segment.length > 6 || (step.action === "draw" && segment.length > 3) )
-                    return pm;
-                
+                if (segment.length > 6 || (step.action === "draw" && segment.length > 3) ) {
+                    pm.error = "TOO_MANY_CARDS_DRAWN";
+                    break;
+                }             
                 const allAreCards = segment.reduce((acc, curr) => acc && CARD_UID_RE.test(curr), true);
-                if (!allAreCards)
-                    return pm;
-                else {
+                if (!allAreCards) {
+                    pm.error = "BAD_CARD_IDS";
+                    break;
+                } else {
                     pm.steps.push(step);
                     continue;
                 }
@@ -1472,16 +1501,21 @@ export class GnosticaGame extends GameBaseSequenced {
                 const drawIdx = segment.indexOf("draw");
                 if ( drawIdx < 0 && ! lastStep ) {
                     //Discard requires draw or it's incomplete.
-                    return pm;
+                    pm.error = "DISCARD_NEEDS_DRAW";
+                    break;
                 }
                 if ( segment.length > drawIdx + 1 ) {
                     const tempamount = segment[drawIdx + 1];
-                    if (! NUMBER_RE.test(tempamount) )
-                        return pm;
+                    if (! NUMBER_RE.test(tempamount) ) {
+                        pm.error = "BAD_DRAW_COUNT";
+                        break;
+                    }
                     step.amount = parseInt(tempamount, 10);
                     //The segment cannot go on after this.
-                    if (segment.length > drawIdx + 2)
-                        return pm;
+                    if (segment.length > drawIdx + 2) {
+                        pm.error = "SURPLUS_STEP_CONTENT";
+                        break;
+                    }
 
                 }
                 if (drawIdx > -1)
@@ -1489,34 +1523,38 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 step.cardList = segment.slice();
                 //There are limits on how many cards can be discarded.
-                if (segment.length > 6)
-                    return pm;
-                
+                if (segment.length > 6) {
+                    pm.error = "TOO_MANY_DISCARDS";
+                    break;
+                }
                 const allAreCards = segment.reduce((acc, curr) => acc && CARD_UID_RE.test(curr), true);
-                if (!allAreCards)
-                    return pm;
-                else {
+                if (!allAreCards) {
+                    pm.error = "BAD_DISCARD_IDS";
+                    break;
+                } else {
                     pm.steps.push(step);
                     continue;
                 }
             }
 
             //Now that we know it's not a whole list of cards, we can pop the segment.
-            const tempwhat:string = segment.shift()!;
+            const tempwhat = segment.shift()!;
 
             //Start with some low-hanging fruit.
             if (step.action === "bid") {
-                if (! NUMBER_RE.test(tempwhat) )
-                    return pm;
-                
+                if (! NUMBER_RE.test(tempwhat) ) {
+                    pm.error = "BAD_BID";
+                    break;
+                }
                 step.amount = parseInt(tempwhat, 10);
 
                 //Bid is terminal to the move.
-                if (segment.length === 0)
-                    pm.valid = true;
-
+                if (segment.length > 0) {
+                    pm.error = "SURPLUS_STEP_CONTENT";
+                    break;
+                } 
                 pm.steps.push(step);
-                return pm;
+                break;
             }
 
             //Create was mostly handled in our pre-processing.
@@ -1524,16 +1562,19 @@ export class GnosticaGame extends GameBaseSequenced {
                 if ( CARD_UID_RE.test(tempwhat) )
                     step.card = tempwhat;
                 else if ( DIRECTION_RE.test(tempwhat) )
-                    step.direction = tempwhat as Direction;
+                    step.direction = tempwhat.substring(0, 1) as Direction;
                 else if ( PIECE_REF_RE.test(tempwhat) )
                     step.targetPiece = tempwhat;
-                else
-                    return pm;
-
-                //Create is terminal to the step.
-                if (segment.length > 0)
-                    return pm;
                 else {
+                    pm.error = "BAD_CREATE_CONTENT";
+                    break;
+                }
+                
+                //Create is terminal to the step.
+                if (segment.length > 0) {
+                    pm.error = "SURPLUS_STEP_CONTENT";
+                    break;
+                } else {
                     pm.steps.push(step);
                     continue;
                 }
@@ -1543,37 +1584,45 @@ export class GnosticaGame extends GameBaseSequenced {
             //so this is only full orients.
             if ( step.action === "place" || step.action === "orient" ) {
                 if ( step.action === "place" ) {
-                    if (! CELL_RE.test(tempwhat) )
-                        return pm;
+                    if (! CELL_RE.test(tempwhat) ) {
+                        pm.error = "BAD_PLACEMENT_CELL";
+                        break;
+                    }
                     step.targetCell = tempwhat;
                 } else { //step.action === "orient" 
-                    if (! PIECE_REF_RE.test(tempwhat) )
-                    return pm;
+                    if (! PIECE_REF_RE.test(tempwhat) ) {
+                        pm.error = "BAD_PIECE_REF_FOR_ORIENT";
+                        break;
+                    }
                     step.targetPiece = tempwhat;
                 }
 
+
                 if ( segment.length > 0 ) {
                     const tempdirection = segment.shift()!;
-                    if (! DIRECTION_RE.test(tempdirection) )
-                        return pm;
-                    else
-                        step.direction = tempwhat as Direction;
+                    if (! DIRECTION_RE.test(tempdirection) ) {
+                        pm.error = "BAD_DIRECTION";
+                        break;
+                    } else
+                        step.direction = tempdirection.substring(0, 1) as Direction;
                 } else {
                     // Sans direction it's a partial move.
-                    if (lastStep)
-                        pm.valid = true;
-                    
+                    if (!lastStep) {
+                        pm.error = "STEP_NEEDS_CONTENT";
+                        break;
+                    }
                     pm.steps.push(step);
-                    return pm;
+                    break;
                 }
                 //Neither can go on after popping the direction.
-                if ( segment.length > 0 )
-                    return pm;
-
+                if ( segment.length > 0 ) {
+                    pm.error = "SURPLUS_STEP_CONTENT";
+                    break;
+                }
                 pm.steps.push(step);
                 if ( step.action === "place" ) {
                     //Place is terminal to the move.
-                    return pm;
+                    break;
                 } else {
                     continue;
                 }
@@ -1582,34 +1631,43 @@ export class GnosticaGame extends GameBaseSequenced {
             if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {
                 step.card = tempwhat;
                 //Validate the card UID.
-                if (! CARD_UID_RE.test(step.card) )
-                    return pm;
-                
+                if (! CARD_UID_RE.test(step.card) ) {
+                    pm.error = "BAD_CARD_ID";
+                    break;
+                }
                 //We've already handled vias and as-es, so more segments in this step is a failure.
-                if (segment.length > 0)
-                    return pm;
-                else {
+                if (segment.length > 0) {
+                    pm.error = "SURPLUS_STEP_CONTENT";
+                    break;
+                } else {
                     pm.steps.push(step);
                     continue;
                 }
             }
             
-           if ( step.action === "trade" || step.action === "replace" ) {
+            if ( step.action === "trade" || step.action === "replace" ) {
                 step.targetPiece = tempwhat;
-                if (! PIECE_REF_RE.test(step.targetPiece) )
-                    return pm;
+                if (! PIECE_REF_RE.test(step.targetPiece) ) {
+                    pm.error = "BAD_PIECE_REF";
+                    break;
+                }
 
                 if (segment.length > 0) {
                     const tempdirection = segment.shift()!;
-                    if (! DIRECTION_RE.test(tempdirection) || step.action === "trade")
-                        return pm;
-                    else
-                        step.direction = tempdirection as Direction;
+                    if (! DIRECTION_RE.test(tempdirection) ) {
+                        pm.error = "BAD_DIRECTION";
+                        break;
+                    } else if ( step.action === "trade" ) {
+                        pm.error = "SURPLUS_STEP_CONTENT";
+                        break;
+                    } else
+                        step.direction = tempdirection.substring(0, 1) as Direction;
 
                     //Must be at the end of the step now.
-                    if (segment.length > 0)
-                        return pm;
-                    else {
+                    if (segment.length > 0) {
+                        pm.error = "SURPLUS_STEP_CONTENT";
+                        break;
+                    } else {
                         pm.steps.push(step);
                         continue;
                     }
@@ -1622,8 +1680,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     step.targetCell = tempwhat;
                 else if ( PIECE_REF_RE.test(tempwhat) )
                     step.targetPiece = tempwhat;
-                else
-                    return pm;
+                else {
+                    pm.error = "BAD_STEP_CONTENT";
+                    break;
+                }
 
                 if (segment.length === 0) {
                     //More is needed for these actions, except grow *can* end with a piece.
@@ -1631,11 +1691,12 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.steps.push(step);
                         continue;
                     } else if (lastStep) {
+                        //Partial move.
                         pm.steps.push(step);
-                        pm.valid = true;
-                        return pm;
-                    } else {
-                        return pm;
+                        break;
+                    } else  {
+                        pm.error = "MISSING_STEP_CONTENT";
+                        break;
                     }
                 }
                 
@@ -1657,13 +1718,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (segment.length === 0) {
                         if (lastStep)
                             pm.valid = true;
-
+                        else {
+                            pm.error = "MISSING_STEP_CONTENT";
+                        }
                         pm.steps.push(step);
-                        return pm;
+                        break;
                     } else {
                         step.card = segment.shift()!;
-                        if (! CARD_UID_RE.test(step.card) )
-                            return pm;
+                        if (! CARD_UID_RE.test(step.card) ) {
+                            pm.error = "BAD_TO_CARD";
+                            break;
+                        }
                     }
 
                     if (segment.length > 0)
@@ -1677,31 +1742,36 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 if (nextseg === "orient") {
                     if (segment.length === 0) {
-                        if (lastStep)
-                            pm.valid = true;
-
+                        if (! lastStep) {
+                            pm.valid = true;pm.error = "MISSING_STEP_CONTENT";
+                        }
                         pm.steps.push(step);
-                        return pm;
+                        break;
                     } else {
                         const tempdirection = segment.shift()!;
-                        if (! CARD_UID_RE.test(tempdirection) )
-                            return pm;
-                        else
-                            step.direction = tempdirection as Direction;
+                        if (! CARD_UID_RE.test(tempdirection) ) {
+                            pm.error = "BAD_DIRECTION";
+                            break;
+                        } else
+                            step.direction = tempdirection.substring(0, 1) as Direction;
                     }
 
                     //Orient is our last otherword.
-                    if (segment.length > 0)
-                        return pm;
+                    if (segment.length > 0) {
+                        pm.error = "SURPLUS_STEP_CONTENT";
+                        break;
+                    }
                 }
 
                 //Otherwise pass through to the push and end of loop.
             }
 
-            pm.steps.push(step);    
+            pm.steps.push(step);  
         }
 
-        pm.valid = true;
+        if (pm.error !== undefined)
+            pm.valid = false;
+            
         return pm;
     }
 
