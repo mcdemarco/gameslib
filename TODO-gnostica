@@ -71,6 +71,6 @@ Mark items done with @done(date) only as they're confirmed.
 - #101 - In Hierophant, the new piece should inherit the enemy piece's orientation, not start as U. @done(2026-09-14)
 - #102 - Add structural testing of more steps to parseMove().
 - #103 - Remove via requirement; just autopopulate on completion and always derive vianess from state.
-- #104 - I want to systematically add some words to move strings.  "with" before the minion.  "draw" before drawn card count (for Judgement), etc.  "create" for cups, move for rods, etc.  I think we can get rid of the piece vs tile distinction if we use cardUids when acting on "tiles".
+- #104 - I want to systematically add some words to move strings.  "with" before the minion.  "draw" before drawn card count (for Judgement), etc.  "create" for cups, move for rods, etc.  I think we can get rid of the piece vs tile distinction if we use cardUids when acting on "tiles". @done(2026-09-16)
 - #105 - Replace the single asUid head slot with a real chain, so a nested meta-card borrow (World borrowing the Magician) writes "as 01 as C" instead of falling back to reading the Magician's suit off its own step token.
-- #106 - Handle directions with question marks in new move string parsing
+- #106 - Make sure create change to enemy pieceref (to be more of a pieceref) is implemented fully.

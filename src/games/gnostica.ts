@@ -1434,7 +1434,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             //Partial move.
                             pm.steps.push(step);
                         } else {
-                            pm.error = "STEP_TOO_SHORT";
+                            pm.error = "MISSING_STEP_CONTENTS";
                         }
                         break;
                     }
@@ -1460,7 +1460,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 } else {
                     //This one should be the real action.
                     step.action = segment.shift()!;
-                    if (! OTHERWORDS.includes(segment[0]) ) {
+                    if (! OTHERWORDS.includes(step.action) ) {
                         pm.error = "BAD_OTHERWORD";
                         break;
                     }
@@ -1469,7 +1469,7 @@ export class GnosticaGame extends GameBaseSequenced {
                           //Partial move.
                             pm.steps.push(step);
                         } else {
-                            pm.error = "STEP_TOO_SHORT";
+                            pm.error = "MISSING_STEP_CONTENTS";
                         }            
                         break;
                     }
@@ -1750,7 +1750,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         break;
                     } else {
                         const tempdirection = segment.shift()!;
-                        if (! CARD_UID_RE.test(tempdirection) ) {
+                        if (! DIRECTION_RE.test(tempdirection) ) {
                             pm.error = "BAD_DIRECTION";
                             break;
                         } else

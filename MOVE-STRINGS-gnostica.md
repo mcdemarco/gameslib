@@ -15,7 +15,7 @@ except High Priestess.
 | **pass** (redraw phase / forced)                    | `pass`                                           |                                                                        |
 | **use** (bare, no power step)                       | `use AC`                                         |                                                                        |
 | **use** — Cups own                                  | `use AC/m0.1 own n0 U`                           | `use AC/with m0.1 at n0 create U`                                      |
-| **use** — Cups enemy                                | `use AC/m0.1 enemy n0 1`                         | `use AC/with m0.1 at n0 create 1`                                      |
+| **use** — Cups enemy                                | `use AC/m0.1 enemy n0 1`                         | `use AC/with m0.1 at n0 create n0.1`                                      |
 | **use** — Cups new                                  | `use AC/l0.1 new k0 5D`                          | `use AC/with l0.1 at k0 create 5D`                                     |
 | **use** — Rods piece                                | `use AR/m0.1 piece m0.1 1 N`                     | `use AR/with m0.1 move m0.1 1 orient N`                                |
 | **use** — Rods tile                                 | `use AR/m0.1 tile 1`                             | `use AR/with m0.1 move n0 1`                                           |
