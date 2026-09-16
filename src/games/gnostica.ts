@@ -1160,8 +1160,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
     public parseMove(m: string): IParsedMove {
         const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
-        const STEPWORDS = ["discard", "draw", "fly", "orient", "replace", "trade", "with"];
-        const OTHERWORDS = ["as", "at", "create", "draw", "grow", "last", "move", "orient", "shrink", "to", "via"];
+        const STEPWORDS = ["discard", "draw", "orient", "with"];
+        const OTHERWORDS = ["as", "at", "create", "draw", "fly", "grow", "last", "move", "orient", "replace", "shrink", "to", "trade", "via"];
         /*
 
           //only some of these  (with, discard, draw, orient, replace, trade) can be a subhead/start a step 
@@ -1426,7 +1426,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     //so check OTHERWORDS.
                     if (! OTHERWORDS.includes(step.action) ) {
                         pm.error = "BAD_OTHERWORD";
-                        console.log(step.action);
+                        console.log("bad actor: ",step.action);
                         break;
                     }
                     if (segment.length === 0) {
@@ -1725,9 +1725,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.steps.push(step);
                         break;
                     } else {
-                        step.card = segment.shift()!;
-                        if (! CARD_UID_RE.test(step.card) ) {
-                            pm.error = "BAD_TO_CARD";
+                        const tempdest = segment.shift()!;
+                        if ( CARD_UID_RE.test(tempdest) ) {
+                            step.card = tempdest;
+                        } else if ( CELL_RE.test(tempdest) ) {
+                            step.targetCell = tempdest;
+                        } else {
+                            pm.error = "BAD_TO_DESTINATION";
                             break;
                         }
                     }

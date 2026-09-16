@@ -89,23 +89,23 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("play 6D via 00/with l0.1 grow l0.1")).to.have.deep.property("valid", true);
         expect(g.parseMove("discard AR draw 1 via 02")).to.have.deep.property("valid", true);
         expect(g.parseMove("last")).to.have.deep.property("valid", true);
-
-        g.validateMove("use AC last");
         expect(g.parseMove("use AC last")).to.have.deep.property("valid", true);
-        /*
-          expect(g.parseMove("use 11/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
-
-          expect(g.parseMove("use 05/with m0.1 replace n0.1 N")).to.have.deep.property("valid", true);
-          expect(g.parseMove("use 09/with m0.1 fly m0.1 to o0")).to.have.deep.property("valid", true);
-          expect(g.parseMove("discard draw 0 last")).to.have.deep.property("valid", true);
-
-          expect(g.parseMove("use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U")).to.have.deep.property("valid", true);
-          expect(g.parseMove("use 12/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
-          expect(g.parseMove("use 07/with m0.1 move m0.1 3 orient E/with j0.1 move j0.1 3 orient U")).to.have.deep.property("valid", true);
-        */
+        expect(g.parseMove("use 05/with m0.1 replace n0.1 N")).to.have.deep.property("valid", true);
+        expect(g.parseMove("discard draw 0 last")).to.have.deep.property("valid", true);
+        //g.validateMove("use 09/with m0.1 fly m0.1 to o0");
+        expect(g.parseMove("use 09/with m0.1 fly m0.1 to o0")).to.have.deep.property("valid", true);
+        expect(g.parseMove("use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U")).to.have.deep.property("valid", true);
+        expect(g.parseMove("use 12/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
+        expect(g.parseMove("use 07/with m0.1 move m0.1 3 orient E/with j0.1 move j0.1 3 orient U")).to.have.deep.property("valid", true);
+        expect(g.parseMove("use 11/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
     });
     
     it ("Pickles", () =>  {
+        const move = "use 9D/with l1.1 grow l1.1";
+        expect(g.pickleMove(g.parseMove(move))).to.equal(move);
+        const move2 = "use 07/with m0.1 move m0.1 3 orient E/with j0.1 move j0.1 3 orient U";
+        expect(g.pickleMove(g.parseMove(move2))).to.equal(move2);
+
     });
 
 });
