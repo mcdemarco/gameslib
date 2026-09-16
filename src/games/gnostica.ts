@@ -1184,7 +1184,6 @@ export class GnosticaGame extends GameBaseSequenced {
           Special issues:  question mark for orients, previously floating terms like last and via  
         */
 
-        //const LAST_FLAG_RE = /\blast\s*$/i;
         const CARD_UID_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
         const CELL_RE = /^[a-z]{1,2}-?\d+$/i;
         const DIRECTION_RE = /^[NESWU]\??$/i;
@@ -1197,7 +1196,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Comfortable headroom above the richest real step shape (High Priestess discarding a full 6-card hand: "discard" + 6 uids + "draw" + count, 9 tokens).
         const MAX_STEP_TOKENS = 12;
 
-        const trimmed = m.trim();
+        let trimmed = m.trim();
         const pm: IParsedMove = {
             announceLast: false,
             head: undefined,
@@ -1207,6 +1206,11 @@ export class GnosticaGame extends GameBaseSequenced {
             stepSegments: []
         };
 
+        if ( trimmed.endsWith("last") ) {
+            pm.announceLast = true;
+            trimmed = trimmed.substring(0, trimmed.length - 4).trim();
+        }
+
         if (trimmed.length === 0) {
             //Not sure we want this case to be valid
             return pm;
@@ -1215,9 +1219,14 @@ export class GnosticaGame extends GameBaseSequenced {
         //was trimmed.split(/\s*[\n/]\s*/);
         const segments = trimmed.split("/").map(part => part.trim());
 
+        if (segments.length === 0) {
+            pm.valid = true;
+            return pm;
+        }
+
 /* deprecated code to be removed */
         
-        const segments2 = trimmed.split("/").map(part => part.trim());
+        const segments2 = segments.slice();
         const rawStepSegments = segments2.slice(1).map(s => s.split(/\s+/));
         const stepSegments = rawStepSegments.map(raw => raw[0]?.toLowerCase() === "with" ? raw.slice(1) : raw);
         let stepsWellFormed = true;
@@ -1250,16 +1259,7 @@ export class GnosticaGame extends GameBaseSequenced {
         console.log("old analysis: ", stepsWellFormed);
 
 /* end deprecation */
-        
-        if (segments[segments.length - 1] === "last") {
-            pm.announceLast = true;
-            segments.pop();
-        }
 
-        if (segments.length === 0) {
-            pm.valid = true;
-            return pm;
-        }
 
         //Here we step through ALL segments.
         //TODO: May need more checking for empty segments here.
