@@ -195,7 +195,6 @@ interface IStep {
     cardList?: string[]; 
     direction?: Direction;
     targetPiece?: string;
-    targetPlayer?: number;
     targetCell?: string;
     withPiece?: string;
 }
@@ -824,6 +823,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const parsed = this.parseMove(m);
+        console.log(parsed);
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
@@ -1225,17 +1225,19 @@ export class GnosticaGame extends GameBaseSequenced {
             return pm;
         }
 
-        //Here we step through ALL segments.  
+        //Here we step through ALL segments.
+        //TODO: May need some checking for empty segments here.
 
         for (let s=0; s < segments.length; s++) {
             const segment = segments[s].split(/\s+/);
-            const lastStep = (s === segments.length - 1); //Shorthand for testing the last round.
+            const lastStep = (s === segments.length - 1); //Used for testing incomplete moves.
 
             if (s === 0) {
                 //The head segment is treated somewhat differently.
                 const rawHead = segment[0];
                 let headTokens = segment.slice(1);
                 pm.head = rawHead.toLowerCase();
+                
                 if (! HEADWORDS.includes(pm.head)) {
                     return pm;
                 }
@@ -1319,29 +1321,40 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 
                 pm.rest = headTokens.slice();
-                //End of special head treatment.   
+                //End of special head treatment.
             } else {
-                //Validate step headword.
+                //Head is set in step 0.
+                if (s === 1) {
+                    // Test that our head has further steps (use or play).
+                    if ( pm.head !== "use" && pm.head !== "play" )
+                        return pm;
+                }
+                
+                //If it's not the head, we must validate the step headword.
                 if (! STEPWORDS.includes(segment[0]) ) {
                     return pm;
                 }
             }
-            //Construct the step.
+            
+            //In all cases, construct the step.
             const step:IStep = {
-                action: segment.shift()!
+                action: ( s === 0 ? pm.head! : segment.shift()! )
+            }
+
+            //All steps require more content (except "pass" which was handled already)
+            //so if there is no more it's either a partial move or invalid.  
+            if (segment.length === 0) {
+                if (lastStep) {
+                    //Partial move.
+                    pm.valid = true;
+                    return pm;
+                } else {
+                    return pm;
+                }
             }
 
             if (step.action === "with") {
                 //Parse minion.
-                if (segment.length === 0) {
-                    if (s === segments.length - 1) {
-                        //Partial move.
-                        pm.valid = true;
-                        return pm;
-                    } else {
-                        return pm;
-                    }
-                }
                 step.withPiece = segment.shift()!;
                 if (! PIECE_REF_RE.test(step.withPiece) )
                     return pm;
@@ -1352,6 +1365,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.steps.push(step);
                     return pm;
                 } else {
+                    //"with" is not really the step action, so move on.
                     step.action = segment.shift()!;
                     //We're past the step headword,
                     //though not necessarily at the real action yet,
@@ -1367,6 +1381,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         } else
                             return pm;
                     }
+                    //Otherwise, we pass the new action to the next check.
                 }
             }
             if (step.action === "at") {
@@ -1397,73 +1412,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             }
             
-            //We have our final step.action here, plus at least one segment to pop.
+            //We have our real step.action now, plus at least one segment to pop.
 
-            //Start with some low-hanging fruit.
-            if (step.action === "bid") {
-                //Bidding must be the only step and only action.
-                if (! lastStep )
-                    return pm;
-                
-                if (segment.length === 0) {
-                    pm.steps.push(step);
-                    pm.valid = true;
-                    return pm;
-                }
-                const tempamount = segment.shift()!;
-                if (! NUMBER_RE.test(tempamount) )
-                    return pm;
-                
-                step.amount = parseInt(tempamount, 10);
-                
-                if (segment.length === 0)
-                    pm.valid = true;
-
-                pm.steps.push(step);
-                return pm;
-            }
-
-            if ( step.action === "create" ) {
-                if (segment.length === 0) {
-                    if (lastStep) {
-                        pm.steps.push(step);
-                        pm.valid = true;
-                        return pm;
-                    } else
-                        return pm;
-                }
-                const tempwhat = segment.shift()!;
-                if ( NUMBER_RE.test(tempwhat) )
-                    step.targetPlayer = parseInt(tempwhat,10);
-                else if ( DIRECTION_RE.test(tempwhat) )
-                    step.direction = tempwhat as Direction;
-                else if ( PIECE_REF_RE.test(tempwhat) )
-                    step.targetPiece = tempwhat;
-                else
-                    return pm;
-
-                //Create is terminal.
-                if (segment.length > 0)
-                    return pm;
-                else {
-                    pm.steps.push(step);
-                    continue;
-                }
-            }
-
-            if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {
-                step.card = segment.shift()!;
-                if (! CARD_UID_RE.test(step.card) )
-                    return pm;
-                //We've already handled vias and as-es, so more segments in this step is a failure.
-                if (segment.length > 0)
-                    return pm;
-                else {
-                    pm.steps.push(step);
-                    continue;
-                }
-            }
-
+            //Start with the multi-argument cases.
             if ( step.action === "draw" || step.action === "redraw" ) {
                 //If draw comes before discard, it's a special Judgement draw of explicit cards.
                 step.cardList = segment.slice()!;
@@ -1482,7 +1433,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             
             if ( step.action === "discard" ) {
-                let drawIdx = segment.indexOf("draw");
+                const drawIdx = segment.indexOf("draw");
                 if ( drawIdx < 0 && ! lastStep ) {
                     //Discard requires draw or it's incomplete.
                     return pm;
@@ -1514,24 +1465,205 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             }
 
+            //Now that we know it's not a whole list of cards, we can pop the segment.
+            const tempwhat:string = segment.shift()!;
+
+            //Start with some low-hanging fruit.
+            if (step.action === "bid") {
+                if (! NUMBER_RE.test(tempwhat) )
+                    return pm;
+                
+                step.amount = parseInt(tempwhat, 10);
+
+                //Bid is terminal to the move.
+                if (segment.length === 0)
+                    pm.valid = true;
+
+                pm.steps.push(step);
+                return pm;
+            }
+
+            //Create was mostly handled in our pre-processing.
+            if ( step.action === "create" ) {
+                if ( CARD_UID_RE.test(tempwhat) )
+                    step.card = tempwhat;
+                else if ( DIRECTION_RE.test(tempwhat) )
+                    step.direction = tempwhat as Direction;
+                else if ( PIECE_REF_RE.test(tempwhat) )
+                    step.targetPiece = tempwhat;
+                else
+                    return pm;
+
+                //Create is terminal to the step.
+                if (segment.length > 0)
+                    return pm;
+                else {
+                    pm.steps.push(step);
+                    continue;
+                }
+            }
+
+            //Note that terminal orients don't become the step action,
+            //so this is only full orients.
+            if ( step.action === "place" || step.action === "orient" ) {
+                if ( step.action === "place" ) {
+                    if (! CELL_RE.test(tempwhat) )
+                        return pm;
+                    step.targetCell = tempwhat;
+                } else { //step.action === "orient" 
+                    if (! PIECE_REF_RE.test(tempwhat) )
+                    return pm;
+                    step.targetPiece = tempwhat;
+                }
+
+                if ( segment.length > 0 ) {
+                    const tempdirection = segment.shift()!;
+                    if (! DIRECTION_RE.test(tempdirection) )
+                        return pm;
+                    else
+                        step.direction = tempwhat as Direction;
+                } else {
+                    // Sans direction it's a partial move.
+                    if (lastStep)
+                        pm.valid = true;
+                    
+                    pm.steps.push(step);
+                    return pm;
+                }
+                //Neither can go on after popping the direction.
+                if ( segment.length > 0 )
+                    return pm;
+
+                pm.steps.push(step);
+                if ( step.action === "place" ) {
+                    //Place is terminal to the move.
+                    return pm;
+                } else {
+                    continue;
+                }
+            }
+            
+            if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {
+                step.card = tempwhat;
+                //Validate the card UID.
+                if (! CARD_UID_RE.test(step.card) )
+                    return pm;
+                
+                //We've already handled vias and as-es, so more segments in this step is a failure.
+                if (segment.length > 0)
+                    return pm;
+                else {
+                    pm.steps.push(step);
+                    continue;
+                }
+            }
+            
+           if ( step.action === "trade" || step.action === "replace" ) {
+                step.targetPiece = tempwhat;
+                if (! PIECE_REF_RE.test(step.targetPiece) )
+                    return pm;
+
+                if (segment.length > 0) {
+                    const tempdirection = segment.shift()!;
+                    if (! DIRECTION_RE.test(tempdirection) || step.action === "trade")
+                        return pm;
+                    else
+                        step.direction = tempdirection as Direction;
+
+                    //Must be at the end of the step now.
+                    if (segment.length > 0)
+                        return pm;
+                    else {
+                        pm.steps.push(step);
+                        continue;
+                    }
+                }
+            }
 
             if ( step.action === "grow" || step.action === "move" || step.action === "shrink" || step.action === "fly" ) {
+                //Test tempwhat.
+                if ( CELL_RE.test(tempwhat) )
+                    step.targetCell = tempwhat;
+                else if ( PIECE_REF_RE.test(tempwhat) )
+                    step.targetPiece = tempwhat;
+                else
+                    return pm;
 
-                //...
+                if (segment.length === 0) {
+                    //More is needed for these actions, except grow *can* end with a piece.
+                    if ( step.action === "grow" && step.targetPiece !== undefined ) {
+                        pm.steps.push(step);
+                        continue;
+                    } else if (lastStep) {
+                        pm.steps.push(step);
+                        pm.valid = true;
+                        return pm;
+                    } else {
+                        return pm;
+                    }
+                }
                 
-            }
-            
-            //These are last for terminal orients.
-            if ( step.action === "place" || step.action === "orient" || step.action === "replace" ) {
-                //...const firstseg = segment.shift();
-                
-            }
-            
+                //We have three choices for the next segment: "to", "orient", or an amount.
+                let nextseg = segment.shift()!;
 
+                if ( NUMBER_RE.test(nextseg) ) {
+                    step.amount = parseInt(nextseg, 10);
+                    if (segment.length > 0)
+                        nextseg = segment.shift()!;
+                    else {
+                        //Can end with a number.
+                        pm.steps.push(step);
+                        continue;
+                    }
+                }
+                
+                if (nextseg === "to") {
+                    if (segment.length === 0) {
+                        if (lastStep)
+                            pm.valid = true;
+
+                        pm.steps.push(step);
+                        return pm;
+                    } else {
+                        step.card = segment.shift()!;
+                        if (! CARD_UID_RE.test(step.card) )
+                            return pm;
+                    }
+
+                    if (segment.length > 0)
+                        nextseg = segment.shift()!;
+                    else {
+                        //Can end with the replacement card.
+                        pm.steps.push(step);
+                        continue;
+                    }
+                }
+
+                if (nextseg === "orient") {
+                    if (segment.length === 0) {
+                        if (lastStep)
+                            pm.valid = true;
+
+                        pm.steps.push(step);
+                        return pm;
+                    } else {
+                        const tempdirection = segment.shift()!;
+                        if (! CARD_UID_RE.test(tempdirection) )
+                            return pm;
+                        else
+                            step.direction = tempdirection as Direction;
+                    }
+
+                    //Orient is our last otherword.
+                    if (segment.length > 0)
+                        return pm;
+                }
+
+                //Otherwise pass through to the push and end of loop.
+            }
             
             pm.steps.push(step);    
         }
-
 
         //Code to remove.
         const rawStepSegments = segments.slice(1).map(s => s.split(/\s+/));
