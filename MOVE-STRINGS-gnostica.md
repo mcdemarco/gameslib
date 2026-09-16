@@ -40,7 +40,7 @@ except High Priestess.
 | **discard … (via)** (High Priestess round 2 resume) | `discard AR draw 1 (via 02)`                     | `discard AR draw 1 via 02`                                             |
 | **(last)** bare (declare with nothing else typed)   | `(last)`                                         | `last`                                                                 |
 | **(last)** appended to discard                      | `discard draw 0 (last)`                          | `discard draw 0 last`                                                  |
-| **(last)** appended to use                          | `use AC (last)`                                  | `use AC last`                                                        |
+| **(last)** appended to use                          | `use AC (last)`                                  | `use AC last`                                                          |
 
 ## Notes
 

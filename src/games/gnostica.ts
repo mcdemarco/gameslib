@@ -191,11 +191,11 @@ interface IStep {
     action: string;
     amount?: number;
     atCell?: string;
-    card?: string[]; 
+    card?: string; 
     cardList?: string[]; 
     direction?: Direction;
-    drawNum?: number; //for High Priestess
     targetPiece?: string;
+    targetPlayer?: number;
     targetCell?: string;
     withPiece?: string;
 }
@@ -1184,12 +1184,12 @@ export class GnosticaGame extends GameBaseSequenced {
         */
 
         //const LAST_FLAG_RE = /\blast\s*$/i;
-        // A step's first token is a piece ref (or, for High Priestess, "draw"/"discard" - exempted separately below); pips/orientation suffix stays optional so a bare "still narrowing" cell also passes.
-        const BID_RE = /^[0-6]$/i;
+        const CARD_UID_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
         const CELL_RE = /^[a-z]{1,2}-?\d+$/i;
+        const DIRECTION_RE = /^[NESWU]$/i;
         const PIECE_REF_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.[1-6])?)?$/i;
-        const CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
         const MAJOR_ARCANA_RE = /^[0-1][0-9]|20|21$/i;
+        const NUMBER_RE = /^[0-6]$/i; //Used for player Ids, card counts, bids, etc.
         const SUIT_RE = /^[CDRS]$/i;
         // A trailing "?" is tolerated on any token but should be restricted to a create, place, or replace.
         const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
@@ -1229,11 +1229,12 @@ export class GnosticaGame extends GameBaseSequenced {
 
         for (let s=0; s < segments.length; s++) {
             const segment = segments[s].split(/\s+/);
-            let lastStep = (s === segments.length - 1); //Shorthand for testing the last round.
+            const lastStep = (s === segments.length - 1); //Shorthand for testing the last round.
 
             if (s === 0) {
                 //The head segment is treated somewhat differently.
-                let [rawHead, ...headTokens] = segment;
+                const rawHead = segment[0];
+                let headTokens = segment.slice(1);
                 pm.head = rawHead.toLowerCase();
                 if (! HEADWORDS.includes(pm.head)) {
                     return pm;
@@ -1290,9 +1291,9 @@ export class GnosticaGame extends GameBaseSequenced {
      
                         if (headTokens.length > asIdx + 1) {
                             const tempAs = headTokens[asIdx + 1];
-                            if (tempAs.length === 1 && typeof pm.asSuit === undefined)
+                            if (tempAs.length === 1 && pm.asSuit === undefined)
                                 pm.asSuit = tempAs;
-                            else if (tempAs.length === 2 && typeof pm.asUid === undefined)
+                            else if (tempAs.length === 2 && pm.asUid === undefined)
                                 pm.asUid = tempAs;
                             else {
                                 return pm;
@@ -1395,8 +1396,34 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                 }
             }
-            //We have our final step.action here, so start with some low-hanging fruit.
+            
+            //We have our final step.action here, plus at least one segment to pop.
+
+            //Start with some low-hanging fruit.
             if (step.action === "bid") {
+                //Bidding must be the only step and only action.
+                if (! lastStep )
+                    return pm;
+                
+                if (segment.length === 0) {
+                    pm.steps.push(step);
+                    pm.valid = true;
+                    return pm;
+                }
+                const tempamount = segment.shift()!;
+                if (! NUMBER_RE.test(tempamount) )
+                    return pm;
+                
+                step.amount = parseInt(tempamount, 10);
+                
+                if (segment.length === 0)
+                    pm.valid = true;
+
+                pm.steps.push(step);
+                return pm;
+            }
+
+            if ( step.action === "create" ) {
                 if (segment.length === 0) {
                     if (lastStep) {
                         pm.steps.push(step);
@@ -1405,11 +1432,101 @@ export class GnosticaGame extends GameBaseSequenced {
                     } else
                         return pm;
                 }
-                const tempamount = segment.shift()!;
-                if (! BID_RE.test(tempamount) )
+                const tempwhat = segment.shift()!;
+                if ( NUMBER_RE.test(tempwhat) )
+                    step.targetPlayer = parseInt(tempwhat,10);
+                else if ( DIRECTION_RE.test(tempwhat) )
+                    step.direction = tempwhat as Direction;
+                else if ( PIECE_REF_RE.test(tempwhat) )
+                    step.targetPiece = tempwhat;
+                else
                     return pm;
-                step.amount = parseInt(tempamount, 10);
+
+                //Create is terminal.
+                if (segment.length > 0)
+                    return pm;
+                else {
+                    pm.steps.push(step);
+                    continue;
+                }
             }
+
+            if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {
+                step.card = segment.shift()!;
+                if (! CARD_UID_RE.test(step.card) )
+                    return pm;
+                //We've already handled vias and as-es, so more segments in this step is a failure.
+                if (segment.length > 0)
+                    return pm;
+                else {
+                    pm.steps.push(step);
+                    continue;
+                }
+            }
+
+            if ( step.action === "draw" || step.action === "redraw" ) {
+                //If draw comes before discard, it's a special Judgement draw of explicit cards.
+                step.cardList = segment.slice()!;
+                
+                //There are limits on how many cards can be drawn with Judgement.
+                if (segment.length > 6 || (step.action === "draw" && segment.length > 3) )
+                    return pm;
+                
+                const allAreCards = segment.reduce((acc, curr) => acc && CARD_UID_RE.test(curr), true);
+                if (!allAreCards)
+                    return pm;
+                else {
+                    pm.steps.push(step);
+                    continue;
+                }
+            }
+            
+            if ( step.action === "discard" ) {
+                let drawIdx = segment.indexOf("draw");
+                if ( drawIdx < 0 && ! lastStep ) {
+                    //Discard requires draw or it's incomplete.
+                    return pm;
+                }
+                if ( segment.length > drawIdx + 1 ) {
+                    const tempamount = segment[drawIdx + 1];
+                    if (! NUMBER_RE.test(tempamount) )
+                        return pm;
+                    step.amount = parseInt(tempamount, 10);
+                    //The segment cannot go on after this.
+                    if (segment.length > drawIdx + 2)
+                        return pm;
+
+                }
+                if (drawIdx > -1)
+                    segment.length = drawIdx;
+
+                step.cardList = segment.slice();
+                //There are limits on how many cards can be discarded.
+                if (segment.length > 6)
+                    return pm;
+                
+                const allAreCards = segment.reduce((acc, curr) => acc && CARD_UID_RE.test(curr), true);
+                if (!allAreCards)
+                    return pm;
+                else {
+                    pm.steps.push(step);
+                    continue;
+                }
+            }
+
+
+            if ( step.action === "grow" || step.action === "move" || step.action === "shrink" || step.action === "fly" ) {
+
+                //...
+                
+            }
+            
+            //These are last for terminal orients.
+            if ( step.action === "place" || step.action === "orient" || step.action === "replace" ) {
+                //...const firstseg = segment.shift();
+                
+            }
+            
 
             
             pm.steps.push(step);    
@@ -1439,7 +1556,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // slot later for it than for everything else here.
             const refIdx = tokens[0]?.toLowerCase() === "orient" ? 1 : 0;
             if (!tokens.every(t => STEP_TOKEN_RE.test(t))
-                || !(PIECE_REF_RE.test(tokens[refIdx]) || CARD_UID_SHAPE_RE.test(tokens[refIdx]))) {
+                || !(PIECE_REF_RE.test(tokens[refIdx]) || CARD_UID_RE.test(tokens[refIdx]))) {
                 stepsWellFormed = false;
                 break;
             }
@@ -3397,7 +3514,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // World/Magician borrow is spelled with "as <x>", never by swapping
     // in the borrowed card as the head arg.
     private describePendingMove(pending: IPendingStep, stepSegments: string[][]): string {
-        const base: IParsedMove = { announceLast: false, head: pending.head, valid: true, rest: [pending.headArg], stepSegments, asUid: pending.asUid };
+        const base: IParsedMove = { announceLast: false, head: pending.head, valid: true, rest: [pending.headArg], stepSegments, asUid: pending.asUid, steps: [] };
         // A genuine resume always carries a "via <root>" anchor for
         // validateResumePendingPower's own mismatch check.
         if (this.continued.length > 0) {
