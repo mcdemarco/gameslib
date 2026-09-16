@@ -23,7 +23,7 @@ describe("Gnostica parsing", () => {
         });
 
         g.validateMove("decline 00 via 00");
-//        expect(g.validateMove("decline 00 via 00")).to.have.deep.property("valid", true);
+        //expect(g.validateMove("decline 00 via 00")).to.have.deep.property("valid", true);
         
         expect(g.parseMove("decline 00 via 00")).to.deep.equal({
             announceLast: false,
@@ -37,7 +37,25 @@ describe("Gnostica parsing", () => {
             valid: true,
             viaUid: "00"
         });
+        
+        g.validateMove("orient n0.1 N");
+        //expect(g.validateMove("orient n0.1 N")).to.have.deep.property("valid", true);
+        
+        expect(g.parseMove("orient n0.1 N")).to.deep.equal({
+            announceLast: false,
+            head: "orient",
+            rest: ["n0.1", "N"],
+            steps: [{
+                action: "orient",
+                targetPiece: "n0.1",
+                direction: "N"
+            }],
+            stepSegments: [],
+            valid: true
+        });
 
+        g.validateMove("use 9D/with l1.1 grow l1.1");
+        
     });
 
     it ("Pickles", () => {

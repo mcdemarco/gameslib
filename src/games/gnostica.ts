@@ -1247,7 +1247,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         pm.stepSegments = stepSegments;
-        console.log("old analysis: ", stepsWellFormed); 
+        console.log("old analysis: ", stepsWellFormed);
 
 /* end deprecation */
         
@@ -1424,8 +1424,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     //We're past the step headword,
                     //though not necessarily at the real action yet,
                     //so check OTHERWORDS.
-                    if (! OTHERWORDS.includes(segment[0]) ) {
+                    if (! OTHERWORDS.includes(step.action) ) {
                         pm.error = "BAD_OTHERWORD";
+                        console.log(step.action);
                         break;
                     }
                     if (segment.length === 0) {
