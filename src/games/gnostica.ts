@@ -174,39 +174,30 @@ type PieceRefResolution =
     | { kind: "not_found" }
     | { kind: "ambiguous" };
 
-// See parseMove()/pickleMove() for details.
 interface IParsedMove {
     announceLast: boolean;
-    // undefined only for a genuinely empty move (or one that's just
-    // "last" alone).
-    head: string | undefined;
-    // Purely structural: head is undefined or a recognized keyword, and
-    // every step segment at least has the right subhead/minionRef shape
-    // (see parseMove's own docs on what "shape" means here and why it
-    // can't go any deeper without already knowing which suit/power is
-    // involved). false means "this string doesn't parse at all" - a
-    // hand-edit or a broken client, never something the click UI
-    // produces. Legality of a recognized head's own `rest` (a bad cell,
-    // an unknown card uid, a malformed number, ...) is deliberately NOT
-    // checked here - that's each head's own validate* function's job,
-    // the same place that has to check it anyway for legitimate input.
+    asUid?: string;  //for World
+    asSuit?: string; //for Magician
+    head: string | undefined;  //Head may be absent.
+    steps: IStep[];
     valid: boolean;
-    // The front tokens as typed - a fresh "use"/"play <uid>", the discard
-    // uids for an ordinary discard, or (for a resume) the revealed card
-    // being resolved. The "via <uid>" anchor is NOT here; it's `viaUid`.
+    viaUid?: string; //for Fool and High Priestess
+    //Deprecated attributes.
     rest: string[];
     stepSegments: string[][];
-    // The "via <uid>" anchor: the Fool (00) or High Priestess (02) whose
-    // still-pending power a resumed step continues, demoted to a
-    // parenthetical the same way announceLast demotes "last". Populated
-    // by parseMove when the marker is present, consumed by pickleMove.
-    viaUid?: string;
-    // "as <uid>" in the head segment: the power a meta-card borrows - the
-    // card The World uses ("play 21 as 09"), or the suit letter The
-    // Magician runs ("play 01 as S"). Everything downstream of that choice
-    // (minion pick, steps) is exactly as if that card/suit were used
-    // directly.
-    asUid?: string;
+}
+
+interface IStep {
+    action: string;
+    amount?: number;
+    atCell?: string;
+    card?: string[]; 
+    cardList?: string[]; 
+    direction?: Direction;
+    drawNum?: number; //for High Priestess
+    targetPiece?: string;
+    targetCell?: string;
+    withPiece?: string;
 }
 
 // The engine-side view of an in-progress "use"/"play" click sequence -
@@ -1168,9 +1159,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private parseMove(m: string): IParsedMove {
         const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
-        /*
-          const STEPWORDS = ["discard", "draw", "fly", "orient", "replace", "trade", "with"];
+        const STEPWORDS = ["discard", "draw", "fly", "orient", "replace", "trade", "with"];
         const OTHERWORDS = ["as", "at", "create", "draw", "grow", "last", "move", "orient", "shrink", "to", "via"];
+        /*
 
           //only some of these  (with, discard, draw, orient, replace, trade) can be a subhead/start a step 
 
@@ -1192,53 +1183,240 @@ export class GnosticaGame extends GameBaseSequenced {
           Special issues:  question mark for orients, previously floating terms like last and via  
         */
 
-        const LAST_FLAG_RE = /\blast\s*$/i;
+        //const LAST_FLAG_RE = /\blast\s*$/i;
         // A step's first token is a piece ref (or, for High Priestess, "draw"/"discard" - exempted separately below); pips/orientation suffix stays optional so a bare "still narrowing" cell also passes.
-        const PIECE_REF_SHAPE_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.\d+)?)?$/i;
+        const BID_RE = /^[0-6]$/i;
+        const CELL_RE = /^[a-z]{1,2}-?\d+$/i;
+        const PIECE_REF_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.[1-6])?)?$/i;
         const CARD_UID_SHAPE_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
+        const MAJOR_ARCANA_RE = /^[0-1][0-9]|20|21$/i;
+        const SUIT_RE = /^[CDRS]$/i;
         // A trailing "?" is tolerated on any token but should be restricted to a create, place, or replace.
         const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
         // Comfortable headroom above the richest real step shape (High Priestess discarding a full 6-card hand: "discard" + 6 uids + "draw" + count, 9 tokens).
         const MAX_STEP_TOKENS = 12;
 
         const trimmed = m.trim();
-        const announceLast = LAST_FLAG_RE.test(trimmed);
-        const bare = trimmed.replace(LAST_FLAG_RE, "").trim();
-        if (bare.length === 0) {
-            return { announceLast, head: undefined, valid: true, rest: [], stepSegments: [], viaUid: undefined };
+        const pm: IParsedMove = {
+            announceLast: false,
+            head: undefined,
+            valid: false,
+            steps: [],
+            rest: [],
+            stepSegments: []
+        };
+
+        if (trimmed.length === 0) {
+            //Not sure we want this case to be valid
+            pm.valid = true;
+            return pm;
         }
-        // "/" (or a newline) separates segments - a leading/trailing/doubled one leaves an empty segment that fails the shape check rather than being silently swallowed.
-        const segments = bare.split(/\s*[\n/]\s*/);
-        const [rawHead, ...headTokens] = segments[0].split(/\s+/);
-        const head = rawHead.toLowerCase();
-        // "as <x>" carves the borrowed power out of the head segment into `asUid`; "via <uid>" (the card whose paused power a resumed step belongs to) is carved out the same way into `viaUid` - the two can appear in either order, so each is found and removed independently, leaving whatever's left as `rest`.
-        const asIdx = headTokens.indexOf("as");
-        const asUid = asIdx === -1 ? undefined : headTokens[asIdx + 1];
-        const withoutAs = asIdx === -1 ? headTokens : [...headTokens.slice(0, asIdx), ...headTokens.slice(asIdx + 2)];
-        const viaIdx = withoutAs.indexOf("via");
-        const viaUid = viaIdx === -1 ? undefined : withoutAs[viaIdx + 1];
-        const rest = viaIdx === -1 ? withoutAs : [...withoutAs.slice(0, viaIdx), ...withoutAs.slice(viaIdx + 2)];
-        // "with" is a purely structural subhead marking "a minion ref
-        // comes next" - stripped here so every step segment still starts
-        // at the minionRef, matching what every validateX/applyX below
-        // has always expected. Suit-agnostic (nothing here needs to know
-        // WHICH suit/special the segment belongs to), so it's required
-        // outright rather than merely tolerated - a segment missing it
-        // is malformed, same as a segment missing anything else its own
-        // grammar demands. orientMinion's own step is the one exception -
-        // reorienting IS the whole step, so "orient" itself is its own
-        // subhead in place of "with" - but UNLIKE "with", it's kept
-        // literally in the segment rather than stripped: applyPowerStep/
-        // validatePowerStep's own shared minionRef-extraction knows to
-        // skip it there. Preserving it is what lets pickleMove tell an
-        // orientMinion segment apart from any other once reconstructing a
-        // move string - both would otherwise collapse to the same bare
-        // [minionRef, ...] shape after stripping, genuinely ambiguous with
-        // any other special whose own verb happened to be omitted too.
-        // High Priestess's own step ("draw"/"discard") and a mid-chain
-        // "decline" (a bare, single-token step declining just that one
-        // step - see classifyStep's own docs) both have no minionRef at
-        // all, so neither subhead applies to them.
+
+        //was trimmed.split(/\s*[\n/]\s*/);
+        const segments = trimmed.split("/").map(part => part.trim());
+
+        if (segments[segments.length - 1] === "last") {
+            pm.announceLast = true;
+            segments.pop();
+        }
+
+        if (segments.length === 0) {
+            pm.valid = true;
+            return pm;
+        }
+
+        //Here we step through ALL segments.  
+
+        for (let s=0; s < segments.length; s++) {
+            const segment = segments[s].split(/\s+/);
+            let lastStep = (s === segments.length - 1); //Shorthand for testing the last round.
+
+            if (s === 0) {
+                //The head segment is treated somewhat differently.
+                let [rawHead, ...headTokens] = segment;
+                pm.head = rawHead.toLowerCase();
+                if (! HEADWORDS.includes(pm.head)) {
+                    return pm;
+                }
+        
+                if (headTokens.length === 0) {
+                    //The only head that can have no arguments *and* no following steps is a "pass".
+                    if (lastStep) {
+                        //If there is only the one step, it can be a "pass" or an incomplete move.
+                        pm.valid = true;
+                        return pm;
+                    } else {
+                        //"Pass" can't be followed by more steps, so whatever the head is, it's invalid.
+                        return pm;
+                    }
+                }
+                
+                //Via and as are peculiar to the first step and need separate treatment.
+                
+                if (headTokens.indexOf("via") > -1) {
+                    const viaIdx = headTokens.indexOf("via");
+                    if (pm.head !== "play" && pm.head !== "decline" && pm.head !== "discard") {
+                        //Fool may only play/decline, and High Priestess may only discard.
+                        return pm;
+                    }
+                    if (headTokens.length > viaIdx + 1) {
+                        pm.viaUid = headTokens[viaIdx + 1];
+                        //Test viaUid.
+                        if (pm.viaUid !== "00" && pm.viaUid !== "02") {
+                            return pm;
+                        }
+                    } else {
+                        //If there are other segments after a partial via, we fail this one.
+                        if (!lastStep) {
+                            return pm;
+                        }
+                    }
+                    //Remove consumed segments (to be deleted with deprecated code)
+                    headTokens =  [...headTokens.slice(0, viaIdx), ...headTokens.slice(viaIdx + 2)];
+                }
+                if (headTokens.indexOf("as") > -1) {
+                    //A loop of at most two.  Structural conditions will fail any more as-es.
+                    
+                    //Only The Magician and The World (or both) may have as.
+                    if (pm.head !== "play" && pm.head !== "use") {
+                        //They must be played or used.
+                        return pm;
+                    }
+                    if (headTokens[0] !== "01" && headTokens[0] !== "21") {
+                        return pm;
+                    }
+                    while (headTokens.indexOf("as") > -1) {
+                        const asIdx = headTokens.indexOf("as");
+     
+                        if (headTokens.length > asIdx + 1) {
+                            const tempAs = headTokens[asIdx + 1];
+                            if (tempAs.length === 1 && typeof pm.asSuit === undefined)
+                                pm.asSuit = tempAs;
+                            else if (tempAs.length === 2 && typeof pm.asUid === undefined)
+                                pm.asUid = tempAs;
+                            else {
+                                return pm;
+                            }
+                        } else {
+                            //If there are other segments after a partial as, we fail this one.
+                            if (! lastStep) {
+                                return pm;
+                            }
+                        }
+                        //We splice off this as to get the next one.
+                        headTokens = [...headTokens.slice(0, asIdx), ...headTokens.slice(asIdx + 2)];
+                    }
+                    //Further testing of the values we got for as.
+                    if ( pm.asUid !== undefined && ( (! MAJOR_ARCANA_RE.test(pm.asUid)) || pm.asUid === "21" ) ) {
+                        //Bad card for the World.
+                        return pm;
+                    }
+                    if ( pm.asSuit !== undefined && (! SUIT_RE.test(pm.asSuit)) ) {
+                        //Bad card for the World.
+                        return pm;
+                    }
+                }
+                
+                pm.rest = headTokens.slice();
+                //End of special head treatment.   
+            } else {
+                //Validate step headword.
+                if (! STEPWORDS.includes(segment[0]) ) {
+                    return pm;
+                }
+            }
+            //Construct the step.
+            const step:IStep = {
+                action: segment.shift()!
+            }
+
+            if (step.action === "with") {
+                //Parse minion.
+                if (segment.length === 0) {
+                    if (s === segments.length - 1) {
+                        //Partial move.
+                        pm.valid = true;
+                        return pm;
+                    } else {
+                        return pm;
+                    }
+                }
+                step.withPiece = segment.shift()!;
+                if (! PIECE_REF_RE.test(step.withPiece) )
+                    return pm;
+
+                if (segment.length === 0) {
+                    //Partial move.
+                    pm.valid = true;
+                    pm.steps.push(step);
+                    return pm;
+                } else {
+                    step.action = segment.shift()!;
+                    //We're past the step headword,
+                    //though not necessarily at the real action yet,
+                    //so check OTHERWORDS.
+                    if (! OTHERWORDS.includes(segment[0]) ) {
+                        return pm;
+                    }
+                    if (segment.length === 0) {
+                        if (lastStep) {
+                            pm.steps.push(step);
+                            pm.valid = true;
+                            return pm;
+                        } else
+                            return pm;
+                    }
+                }
+            }
+            if (step.action === "at") {
+                //Parse cell
+                step.atCell = segment.shift()!;
+                if (! CELL_RE.test(step.atCell) )
+                    return pm;
+
+                if (segment.length === 0) {
+                    //Partial move.
+                    pm.valid = true;
+                    pm.steps.push(step);
+                    return pm;
+                } else {
+                    //This one should be the real action.
+                    step.action = segment.shift()!;
+                    if (! OTHERWORDS.includes(segment[0]) ) {
+                        return pm;
+                    }
+                    if (segment.length === 0) {
+                        if (lastStep) {
+                            pm.steps.push(step);
+                            pm.valid = true;
+                            return pm;
+                        } else
+                            return pm;
+                    }
+                }
+            }
+            //We have our final step.action here, so start with some low-hanging fruit.
+            if (step.action === "bid") {
+                if (segment.length === 0) {
+                    if (lastStep) {
+                        pm.steps.push(step);
+                        pm.valid = true;
+                        return pm;
+                    } else
+                        return pm;
+                }
+                const tempamount = segment.shift()!;
+                if (! BID_RE.test(tempamount) )
+                    return pm;
+                step.amount = parseInt(tempamount, 10);
+            }
+
+            
+            pm.steps.push(step);    
+        }
+
+
+        //Code to remove.
         const rawStepSegments = segments.slice(1).map(s => s.split(/\s+/));
         const stepSegments = rawStepSegments.map(raw => raw[0]?.toLowerCase() === "with" ? raw.slice(1) : raw);
         let stepsWellFormed = true;
@@ -1261,26 +1439,15 @@ export class GnosticaGame extends GameBaseSequenced {
             // slot later for it than for everything else here.
             const refIdx = tokens[0]?.toLowerCase() === "orient" ? 1 : 0;
             if (!tokens.every(t => STEP_TOKEN_RE.test(t))
-                || !(PIECE_REF_SHAPE_RE.test(tokens[refIdx]) || CARD_UID_SHAPE_RE.test(tokens[refIdx]))) {
+                || !(PIECE_REF_RE.test(tokens[refIdx]) || CARD_UID_SHAPE_RE.test(tokens[refIdx]))) {
                 stepsWellFormed = false;
                 break;
             }
         }
-        // Purely structural: a recognized head, plus every step segment
-        // at least shaped right. A recognized head's own `rest` (a bad
-        // cell, an unknown card uid, a malformed number, ...) is
-        // deliberately NOT checked here - each head's own validate*
-        // function already has to check that for legitimate input, so
-        // there's no separate "pre-check" duplicating it here anymore.
-        return {
-            announceLast,
-            head,
-            valid: HEADWORDS.includes(head) && stepsWellFormed,
-            rest,
-            stepSegments,
-            viaUid,
-            asUid,
-        };
+
+        pm.stepSegments = stepSegments;
+        pm.valid = stepsWellFormed;  // Should become true.
+        return pm;
     }
 
     // "/" separates every segment - the head/card-uid from its first
