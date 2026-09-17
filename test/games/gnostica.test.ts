@@ -1748,7 +1748,7 @@ describe("Gnostica: handleClick", () => {
         const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
         const east = g.handleClick(first.move, rowE, colE);
         expect(east.valid).to.be.true;
-        expect(east.move).eq("place m0 U E"); // mandatory "U" stays; E is the optional trailing correction
+        expect(east.move).eq("place m0 E"); // the click's own facing replaces the seeded "U?" outright
     });
 
     it("place: clicking a non-adjacent cell restarts placement there instead", () => {
@@ -1776,9 +1776,8 @@ describe("Gnostica: handleClick", () => {
         expect(first.move).eq(`place ${placeCell} U?`);
         const [rowVoid, colVoid] = rowColFor(g, 3, 1);
         const east = g.handleClick(first.move, rowVoid, colVoid);
-        console.log(east.move);
         expect(east.valid).to.be.true;
-        expect(east.move).eq(`place ${placeCell} U E`);
+        expect(east.move).eq(`place ${placeCell} E`); // the click's own facing replaces the seeded "U?" outright
     });
 
     // A hand-typed "place l0 U" never carries "?" at all - it's the
@@ -3610,12 +3609,12 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
     });
 
-    it("place: clicking a neighbour appends the optional trailing correction, same generic message", () => {
+    it("place: clicking a neighbour replaces the facing with the correction, same generic message", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 1, 0); // n0, east of m0
         const result = g.handleClick("place m0 U", row, col);
         expect(result.valid).to.be.true;
-        expect(result.move).eq("place m0 U E");
+        expect(result.move).eq("place m0 E");
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
     });
 

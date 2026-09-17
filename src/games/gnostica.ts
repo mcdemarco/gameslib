@@ -3717,21 +3717,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    // Shared by "place"'s own first-piece click, Cups "own" creation's
-    // click, and hierophantReplace's own stage-2 click - every spot with a
-    // MANDATORY facing that starts out merely seeded (marked "?" until
-    // confirmed - see resolveTrailingOrientation's own docs on the
-    // matching validate-side rule). `defaultDir` is "U" for place/Cups
-    // own (always) and the captured piece's own prior facing for
-    // hierophantReplace (seeded at target-pick time - see
-    // handleOrientAnyOrHierophantClick's own docs). A click whose own
-    // computed direction matches `defaultDir` confirms that default
-    // outright - a bare token says everything, "?" included, so no
-    // separate correction token is needed; any other direction is a
-    // genuine correction, appended after the mandatory default.
-    private mandatoryOrientationClickTokens(defaultDir: Orientation, dir: Orientation): string[] {
-        return dir === defaultDir ? [defaultDir] : [defaultDir, dir];
-    }
 
     // Best-effort feasibility check over which modes are worth offering as
     // buttons right now, given current board state AND hand contents - not
@@ -4275,7 +4260,9 @@ export class GnosticaGame extends GameBaseSequenced {
             // Clickable region is the target cell PLUS its neighbours, not
             // just the cell itself like every other cell-shape mode below.
             // Mandatory-facing click shape shared with "place"'s own first
-            // piece - see mandatoryOrientationClickTokens' own docs.
+            // piece - a click's own facing REPLACES the seeded "?" token
+            // outright, whether it confirms "U" or corrects to something
+            // else.
             if (suitUid === "C" && mode === "own") {
                 const dir = this.orientationTowardClick(tx, ty, x, y);
                 if (dir === undefined) {
@@ -4285,7 +4272,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Cups carries no mode word (see deriveMinorMode's own
                 // docs) - built directly here instead of via `rebuild`,
                 // which would wrongly splice "own" back in.
-                return this.assembleStepMove(pending, this.buildCupsStep(minionRef, "own", [cell, ...this.mandatoryOrientationClickTokens("U", dir)]));
+                return this.assembleStepMove(pending, this.buildCupsStep(minionRef, "own", [cell, dir]));
             }
             // Rods' own "tile" mode: the cell itself is fixed (always the
             // facing cell, per checkMoveTerritory's own docs) - a click
@@ -4536,9 +4523,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // genuinely unset; hierophantReplace's default (the captured piece's
     // own prior facing) IS derivable, so stage 1 seeds it immediately as
     // a "?"-marked token, mirroring Cups "own" creation's mandatory
-    // facing (see mandatoryOrientationClickTokens' own docs) even though
-    // nothing here strictly needs the seed. Stage 1 (pending.rest is
-    // empty): the same self-or-facing-cell target pick as tradeHands.
+    // facing, even though nothing here strictly needs the seed. Stage 1
+    // (pending.rest is empty): the same self-or-facing-cell target pick
+    // as tradeHands.
     // Stage 2 (target already in pending.rest[0]): further clicks adjust
     // ITS OWN orientation via orientationTowardClick, anchored at the
     // TARGET's cell rather than the minion's. Deliberately doesn't
@@ -4593,9 +4580,8 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (pending.special === "hierophantReplace") {
             // `dir` is already the click's own final, resolved facing
-            // regardless of whether it matches the seeded default (see
-            // mandatoryOrientationClickTokens' own docs) - no need to also
-            // carry the now-superseded seed.
+            // regardless of whether it matches the seeded default - no
+            // need to also carry the now-superseded seed.
             return this.assembleStepMove(pending, { action: "replace", withPiece: minionRef, targetPiece: targetRef, direction: dir });
         }
         return this.assembleStepMove(pending, { action: "orient", withPiece: minionRef, targetPiece: targetRef, direction: dir });
@@ -5272,8 +5258,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 // that way" - any OTHER cell is a fresh placement there
                 // instead (defaulting to "U" again), same as clicking a
                 // different cell always has. Mandatory-facing click shape
-                // shared with Cups "own" creation - see
-                // mandatoryOrientationClickTokens' own docs. A freshly-
+                // shared with Cups "own" creation - a click's own facing
+                // REPLACES the seeded "?" token outright, whether it
+                // confirms "U" or corrects to something else. A freshly-
                 // seeded "U" (nothing clicked yet for THIS cell) carries a
                 // trailing "?" marking it as not yet a deliberate choice
                 // (see validatePlace's own docs) - any further click,
@@ -5285,7 +5272,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     dir = this.orientationTowardClick(px, py, x, y);
                 }
                 if (prevCell !== undefined && dir !== undefined) {
-                    newmove = `place ${prevCell} ${this.mandatoryOrientationClickTokens("U", dir).join(" ")}`;
+                    newmove = `place ${prevCell} ${dir}`;
                 } else {
                     newmove = `place ${cell} U?`;
                 }
