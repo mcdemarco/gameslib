@@ -5949,6 +5949,16 @@ export class GnosticaGame extends GameBaseSequenced {
         this.cardsDrawn[this.currplayer - 1] = drawn;
     }
 
+    // A discard/draw step's own "draw <n>" is only genuinely given once
+    // BOTH the keyword and a real value after it are present - "discard"
+    // alone or "discard draw" (the word with nothing after it) don't
+    // count, unlike the old "the word alone is enough" check this
+    // replaces (see validateDiscard's own docs on why that mattered).
+    private hasExplicitDrawCount(tokens: string[]): boolean {
+        const drawIdx = tokens.indexOf("draw");
+        return drawIdx !== -1 && tokens[drawIdx + 1] !== undefined;
+    }
+
     // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar,
     // delegating to the same checkDiscardDraw primitive it uses.
     private validateDiscard(parsed: IParsedMove): IValidationResult {
@@ -5960,17 +5970,13 @@ export class GnosticaGame extends GameBaseSequenced {
         if (failure) {
             return this.failureResult(failure);
         }
-        // A missing "draw <n>" is still perfectly legal to submit as-is
-        // (cmdDiscard defaults it to the max at commit time), but the
-        // move string itself hasn't recorded an explicit draw decision -
-        // same "undecided default" principle as place's own missing
-        // facing (see its own docs), just soft (complete:0, still
-        // submittable) rather than hard, since discard's own grammar
-        // genuinely allows omitting it. Applies uniformly - hand-typed or
-        // click-built alike - since it's a fact about the string, not
-        // about how it was produced.
-        if (drawIdx === -1) {
-            return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+        // A missing (or value-less) "draw <n>" is never complete - the
+        // player must make an explicit draw-count choice, 0 included,
+        // rather than this silently completing on a default. Applies
+        // uniformly - hand-typed or click-built alike - since it's a
+        // fact about the string, not about how it was produced.
+        if (!this.hasExplicitDrawCount(tokens)) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
@@ -6853,12 +6859,11 @@ export class GnosticaGame extends GameBaseSequenced {
         let hpFinalRoundReady: { key: string; params?: Record<string, unknown> } | undefined;
         // Overwritten on every successful completion, true right after
         // High Priestess's own step succeeds WITHOUT an explicit
-        // "draw <n>" (defaults to the max at commit time, but that's a
-        // default, not the player's own final word - same distinction
-        // validateDiscard already makes for the ordinary top-level discard
-        // action). Takes priority over hpFinalRoundReady/
-        // forcePauseReadyMessage's own "ready to submit" framing below -
-        // still building beats ready, for the exact same round.
+        // "draw <n>" - never complete without one, same as validateDiscard's
+        // own identical rule for the ordinary top-level discard action.
+        // Takes priority over hpFinalRoundReady/forcePauseReadyMessage's
+        // own "ready to submit" framing below - still building beats
+        // ready, for the exact same round.
         let hpDrawNotChosen = false;
         // Overwritten on every successful completion, true right after a
         // step whose own outcome is still soft (Cups "own" creation's
@@ -6875,7 +6880,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
                 }
                 if (hpDrawNotChosen) {
-                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
                 }
                 if (softComplete) {
                     return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT") };
@@ -7046,11 +7051,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // High Priestess's own round 1 forces this same pause
                 // (round 2 always follows) - but with no explicit "draw
-                // <n>" given, the round itself is still soft (complete:0),
-                // same as round 2's identical case below - "ready to
-                // submit" would be actively wrong to say here.
-                if ("special" in step && step.special === "highPriestess" && !tokens.includes("draw")) {
-                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+                // <n>" given, the round itself is never complete
+                // (complete:-1), same as round 2's identical case below -
+                // "ready to submit" would be actively wrong to say here.
+                if ("special" in step && step.special === "highPriestess" && !this.hasExplicitDrawCount(tokens)) {
+                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
                 }
                 const readyMsg = this.forcePauseReadyMessage(top.cardUid, top.nextStepIndex);
                 return { valid: true, complete: softComplete ? 0 : 1, message: i18next.t(readyMsg.key, readyMsg.params) };
@@ -7069,7 +7074,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if ("special" in step && step.special === "highPriestess" && top.nextStepIndex >= frameDef.powers.length) {
                 hpFinalRoundReady = this.forcePauseReadyMessage(top.cardUid, stepIndex);
             }
-            hpDrawNotChosen = "special" in step && step.special === "highPriestess" && !tokens.includes("draw");
+            hpDrawNotChosen = "special" in step && step.special === "highPriestess" && !this.hasExplicitDrawCount(tokens);
             softComplete = stepResult.outcome?.softComplete === true;
             if (stepResult.outcome?.pushFrame !== undefined) {
                 stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions, viaFool: stepResult.outcome.pushFrame.viaFool === true });
@@ -8272,12 +8277,11 @@ export class GnosticaGame extends GameBaseSequenced {
         if (failure) {
             return this.failureResult(failure);
         }
-        // A missing "draw <n>" is legal to submit as-is (defaults to the
-        // max at commit time), but still soft - same "undecided default"
-        // treatment validateDiscard already gives the ordinary top-level
-        // discard action's own identical shape.
-        if (drawIdx === -1) {
-            return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL") };
+        // A missing "draw <n>" is never complete - same rule
+        // validateDiscard already gives the ordinary top-level discard
+        // action's own identical shape.
+        if (!this.hasExplicitDrawCount(body)) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }

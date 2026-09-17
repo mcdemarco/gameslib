@@ -5792,7 +5792,7 @@
             "DESTINATION_HAS_ENEMY": "This move is not permitted when there are enemies in the target wasteland.",
             "DESTROYED_NEEDS_NO_CARD": "No replacement card is needed when destroying a territory.",
             "DECLINE_THEN_AUTO_DRAW": "Submit to decline this card's power, and the second card for the Fool (00) will be drawn automatically.",
-            "DISCARD_CARDS_OPTIONAL": "Click hand cards to discard, if desired, then choose a number of cards to draw and/or submit.  If no number is chosen, you will draw back up to the hand limit.",
+            "DISCARD_DRAW_REQUIRED": "Click hand cards to discard, if desired, then choose a number of cards to draw (0 is fine) before submitting.",
             "DRAW_PILE_EMPTY": "There are no cards to draw.",
             "FOOL_FLIP_READY": "Submit, and the next card for the Fool (00) will be drawn automatically.",
             "HERMIT_NEEDS_EMPTY": "The Hermit (VIIII) cannot move a piece to an occupied card.",

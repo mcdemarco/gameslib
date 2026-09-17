@@ -1952,13 +1952,10 @@ describe("Gnostica: handleClick", () => {
         const result = g.handleClick("", -1, -1, "_btn_discard");
         expect(result.valid).to.be.true;
         expect(result.move).eq("discard");
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.DISCARD_CARDS_OPTIONAL"));
-        // No "draw <n>" yet - the move is already legal (an omitted draw
-        // defaults to the max at commit time), but the string hasn't
-        // recorded an explicit draw decision, so genuinely complete:0,
-        // regardless of hand contents (see validateDiscard's own docs) -
-        // not the -1 an actually-illegal move would get.
-        expect(result.complete).eq(0);
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED"));
+        // No "draw <n>" yet - never complete without one (0 included),
+        // regardless of hand contents (see validateDiscard's own docs).
+        expect(result.complete).eq(-1);
         const withCount = g.handleClick(result.move, -1, -1, "_btn_drawcount_0");
         expect(withCount.move).eq("discard draw 0");
         expect(withCount.complete).eq(1);
@@ -2244,7 +2241,7 @@ describe("Gnostica: handleClick", () => {
         const first = g.handleClick(btn.move, -1, -1, `hand_${uid}`);
         expect(first.valid).to.be.true;
         expect(first.move).eq(`discard ${uid}`);
-        expect(first.complete).eq(0); // same auto-submit guard as place/orient
+        expect(first.complete).eq(-1); // no draw count chosen yet - never complete without one
         const second = g.handleClick(first.move, -1, -1, `hand_${uid}`);
         expect(second.valid).to.be.true;
         expect(second.move).eq("discard");
@@ -4572,19 +4569,16 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const click1 = g.handleClick(cellClick.move, -1, -1, "hand_2C");
         expect(click1.move).eq(`use ${major(2).uid}/discard 2C`);
         expect(click1.valid).to.be.true;
-        // Regression: no "draw <n>" chosen yet - still soft (complete:0),
-        // not "ready to submit" (complete:1), even though this ALREADY
-        // forces round 1's own pause into round 2 if actually committed -
-        // a missing draw count is a default, not the player's final word
+        // No "draw <n>" chosen yet - never complete without one
         // (see validateHighPriestess's own docs), so a single discard
         // toggle must never read as done.
-        expect(click1.complete).eq(0);
+        expect(click1.complete).eq(-1);
         const click2 = g.handleClick(click1.move, -1, -1, "hand_5C");
         expect(click2.move).eq(`use ${major(2).uid}/discard 2C 5C`);
-        expect(click2.complete).eq(0);
+        expect(click2.complete).eq(-1);
         const click3 = g.handleClick(click2.move, -1, -1, "hand_2C"); // toggle back off
         expect(click3.move).eq(`use ${major(2).uid}/discard 5C`);
-        expect(click3.complete).eq(0);
+        expect(click3.complete).eq(-1);
         const click4 = g.handleClick(click3.move, -1, -1, "_btn_hpdraw_1");
         expect(click4.complete).eq(1); // an explicit draw count IS the player's final word
         g.move(click3.move, { trusted: true }); // step 1 commits and pauses, awaiting step 2
