@@ -3935,7 +3935,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 step.amount = parseInt(distStr, 10);
             }
             if (orient !== undefined) {
-                step.direction = orient as Direction;
+                step.direction = orient;
             }
             return step;
         }
@@ -3946,7 +3946,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     step.targetPiece = targetRef;
                 }
                 if (orient !== undefined) {
-                    step.direction = orient as Direction;
+                    step.direction = orient;
                 }
                 return step;
             }
@@ -3969,7 +3969,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 step.amount = parseInt(pipsStr, 10);
             }
             if (orient !== undefined) {
-                step.direction = orient as Direction;
+                step.direction = orient;
             }
             return step;
         }
@@ -4005,7 +4005,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // this port's own final report on that gap.
             const facing = trailing[trailing.length - 1];
             if (facing !== undefined) {
-                step.direction = facing as Direction;
+                step.direction = facing;
             }
         } else if (mode === "enemy") {
             if (trailing[0] !== undefined) {
@@ -4032,7 +4032,7 @@ export class GnosticaGame extends GameBaseSequenced {
             step.targetCell = destCell;
         }
         if (mode === "piece" && orient !== undefined) {
-            step.direction = orient as Direction;
+            step.direction = orient;
         }
         return step;
     }
@@ -4058,15 +4058,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 // "place"/"orient" head-command handling) - the acting
                 // minion is the target, carried in targetPiece, never
                 // withPiece (which would wrongly add a "with" prefix).
-                return { action: "orient", targetPiece: minionRef, direction: rest[0] as Direction };
+                return { action: "orient", targetPiece: minionRef, direction: rest[0] };
             case "tradeHands":
                 return { action: "trade", withPiece: minionRef, targetPiece: rest[1] };
             case "orientAny":
-                return { action: "orient", withPiece: minionRef, targetPiece: rest[1], direction: rest[2] as Direction };
-            case "hierophantReplace": {
-                const seeded = rest[2]?.endsWith("?") ? rest[2].slice(0, -1) : rest[2];
-                return { action: "replace", withPiece: minionRef, targetPiece: rest[1], direction: (rest[3] ?? seeded) as Direction };
-            }
+                return { action: "orient", withPiece: minionRef, targetPiece: rest[1], direction: rest[2] };
+            case "hierophantReplace":
+                // rest[3] (a real correction) always wins over rest[2]
+                // (the seeded default, "?" and all, when still soft -
+                // IStep.direction is a plain string now, so no stripping
+                // needed to carry it through).
+                return { action: "replace", withPiece: minionRef, targetPiece: rest[1], direction: rest[3] ?? rest[2] };
             case "hermitTeleport":
                 return this.buildHermitStep(minionRef!, rest);
             case "judgementDraw":
@@ -4156,9 +4158,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 // yet a deliberate choice (mirrors "place"'s identical
                 // convention for the very first piece - see validateCups'
                 // own docs on why this matters for the real playground
-                // client's auto-submit behavior). pickleMove has no "?"
-                // marker support yet, so this is written plain for now.
-                step = this.buildCupsStep(minionRef, "own", [targetCell, "U"]);
+                // client's auto-submit behavior).
+                step = this.buildCupsStep(minionRef, "own", [targetCell, "U?"]);
             } else if (targetRef === "new") {
                 step = this.buildCupsStep(minionRef, "new", [targetCell]);
             } else {
@@ -4503,7 +4504,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-        return this.assembleStepMove(pending, { action: "orient", targetPiece: minionRef, direction: dir as Direction });
+        return this.assembleStepMove(pending, { action: "orient", targetPiece: minionRef, direction: dir });
     }
 
     // tradeHands: <minionRef> trade <targetRef> - a single self-or-facing-cell
@@ -4556,7 +4557,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const capturedFacing = (targetResolution.ref.piece
                     ?? this.board.get(targetResolution.ref.x, targetResolution.ref.y)!.pieces[targetResolution.ref.index]).orientation;
-                return this.assembleStepMove(pending, { action: "replace", withPiece: minionRef, targetPiece: targetResult, direction: capturedFacing as Direction });
+                // Trailing "?" - seeded from the captured piece's own
+                // prior facing, not yet a deliberate choice (mirrors Cups
+                // "own"'s identical convention - see buildTargetedStepMove's
+                // own docs).
+                return this.assembleStepMove(pending, { action: "replace", withPiece: minionRef, targetPiece: targetResult, direction: `${capturedFacing}?` });
             }
             // The target is chosen; its new facing is a genuinely separate
             // decision that only the player's own click may make - never
@@ -4585,9 +4590,9 @@ export class GnosticaGame extends GameBaseSequenced {
             // regardless of whether it matches the seeded default (see
             // mandatoryOrientationClickTokens' own docs) - no need to also
             // carry the now-superseded seed.
-            return this.assembleStepMove(pending, { action: "replace", withPiece: minionRef, targetPiece: targetRef, direction: dir as Direction });
+            return this.assembleStepMove(pending, { action: "replace", withPiece: minionRef, targetPiece: targetRef, direction: dir });
         }
-        return this.assembleStepMove(pending, { action: "orient", withPiece: minionRef, targetPiece: targetRef, direction: dir as Direction });
+        return this.assembleStepMove(pending, { action: "orient", withPiece: minionRef, targetPiece: targetRef, direction: dir });
     }
 
     // hermitTeleport: `<minionRef> fly <targetRef> to <destCell> [orient

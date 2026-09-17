@@ -2510,25 +2510,33 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const cellClick = g.handleClick(seed.move, row, col);
         expect(cellClick.move).eq(`use ${aceOfCups().uid}`);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_own");
-        // No trailing "?" - IStep has no field yet for "seeded, not yet a
-        // deliberate choice" (unlike "place"'s own identical convention,
-        // built on raw string tokens) - a known, called-out gap (see
-        // buildCupsStep's own docs), so this reads as already-deliberate
-        // (complete:1) immediately rather than holding open for an
-        // optional correction first.
-        expect(modeClick.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create U`);
+        // Trailing "?" - the seeded default facing isn't yet a deliberate
+        // choice (mirrors "place"'s identical convention) - so the real
+        // playground client's own auto-submit-on-complete behaviour
+        // doesn't whisk the new piece away before a click can orient it.
+        expect(modeClick.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create U?`);
         expect(modeClick.valid).to.be.true;
-        expect(modeClick.complete).eq(1);
-        // n0 itself is already "U", the creation's own default - clicking
-        // it again is a no-op confirmation, same string either way.
+        expect(modeClick.complete).eq(0);
+        // Soft-complete says WHY it's holding open, not the bare generic
+        // "looks like a valid move" fallback.
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
+        // n0 itself is already "U", the creation's own still-soft
+        // default - confirms it (drops "?", no duplicate token) rather
+        // than erroring as a no-op, same as "place"'s own identical
+        // click-to-orient collapse.
         const [row2, col2] = rowColFor(g, 1, 0);
         const sameCell = g.handleClick(modeClick.move, row2, col2);
         expect(sameCell.valid).to.be.true;
         expect(sameCell.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create U`);
+        expect(sameCell.complete).eq(1); // no longer soft - a deliberate confirmation
+        expect(sameCell.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         const [row3, col3] = rowColFor(g, 2, 0); // "o0", east of n0 - sets the new piece's facing
         const east = g.handleClick(modeClick.move, row3, col3);
-        expect(east.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create E`);
-        expect(east.complete).eq(1);
+        expect(east.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create E`); // any click drops "?" outright
+        expect(east.complete).eq(1); // a real correction is a deliberate choice, no longer soft
+        // Committing the ORIGINAL, still-soft seed directly (never taking
+        // the optional correction) - "?" makes no difference to the piece
+        // actually created, only to whether it auto-submits.
         g.move(modeClick.move, { trusted: true });
         const t = g.board.get(1, 0)!;
         expect(t.pieces.length).eq(1);
@@ -3693,11 +3701,10 @@ describe("Gnostica: click-to-orient messaging", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_own");
-        // No trailing "?" - a known, called-out gap (see buildCupsStep's
-        // own docs) - so this reads as already-deliberate immediately.
-        expect(modeClick.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create U`);
-        // n0 itself - "U" again, already the creation's own default -
-        // confirms it (no-op, same string) rather than erroring.
+        expect(modeClick.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create U?`);
+        // n0 itself - "U" again, already the creation's own still-soft
+        // default - confirms it (drops "?", no duplicate token) rather
+        // than erroring, since nothing deliberate has been chosen yet.
         const [rowN, colN] = rowColFor(g, 1, 0);
         const sameFacing = g.handleClick(modeClick.move, rowN, colN);
         expect(sameFacing.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create U`);
@@ -4081,9 +4088,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(orientClick.move).eq(`use ${major(3).uid}/orient l0.1 S`);
         const modeClick = g.handleClick(orientClick.move, -1, -1, "_btn_target_own");
         const freshTarget = GnosticaBoard.coords2algebraic(-1, 1); // the NEW (south) facing cell
-        // No trailing "?" - a known, called-out gap (see buildCupsStep's
-        // own docs).
-        expect(modeClick.move).eq(`use ${major(3).uid}/orient l0.1 S/with l0.1 at ${freshTarget} create U`);
+        expect(modeClick.move).eq(`use ${major(3).uid}/orient l0.1 S/with l0.1 at ${freshTarget} create U?`);
         expect(modeClick.move).to.not.include(" m0 "); // the STALE, pre-reorientation (east) default
     });
 
@@ -4133,9 +4138,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
         expect(values).to.not.include("target_n0.1"); // step 1's own target candidate, not step 2's
 
         const step2 = g.handleClick(redirected.move, -1, -1, "_btn_target_own");
-        // No trailing "?" - a known, called-out gap (see buildCupsStep's
-        // own docs).
-        expect(step2.move).eq(`use ${major(6).uid}/with m0.1 move n0.1 1/with m0.1 at n0 create U`);
+        expect(step2.move).eq(`use ${major(6).uid}/with m0.1 move n0.1 1/with m0.1 at n0 create U?`);
         expect(step2.valid).to.be.true;
 
         g.move(step2.move, { trusted: true });
@@ -4386,7 +4389,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const [rowN, colN] = rowColFor(g, 1, 0);
         const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use ${major(5).uid}/with m0.1 replace n0.1 S`); // target chosen, facing seeded from the captured piece's own prior orientation - no "?" (a known gap, see buildCupsStep's own docs)
+        expect(step1.move).eq(`use ${major(5).uid}/with m0.1 replace n0.1 S?`); // target chosen, facing seeded from the captured piece's own prior orientation
         const [rowO, colO] = rowColFor(g, 2, 0);
         const step2 = g.handleClick(step1.move, rowO, colO);
         // IStep has one direction slot - a correction REPLACES the seeded
@@ -4414,7 +4417,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const cellClick = g.handleClick(seed.move, row, col);
         const [rowN, colN] = rowColFor(g, 1, 0);
         const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use ${major(5).uid}/with m0.1 replace n0.1 S`); // no "?" - a known gap, see buildCupsStep's own docs
+        expect(step1.move).eq(`use ${major(5).uid}/with m0.1 replace n0.1 S?`);
         // Already submittable as-is - the seeded default counts as a real choice.
         expect(step1.valid).to.be.true;
         expect(step1.complete).to.not.eq(-1);
