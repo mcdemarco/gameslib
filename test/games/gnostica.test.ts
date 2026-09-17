@@ -1776,6 +1776,7 @@ describe("Gnostica: handleClick", () => {
         expect(first.move).eq(`place ${placeCell} U?`);
         const [rowVoid, colVoid] = rowColFor(g, 3, 1);
         const east = g.handleClick(first.move, rowVoid, colVoid);
+        console.log(east.move);
         expect(east.valid).to.be.true;
         expect(east.move).eq(`place ${placeCell} U E`);
     });
@@ -3933,12 +3934,9 @@ describe("Gnostica: choose-step click messaging", () => {
 
     // A genuine pendingPower obligation shows X's own buttons directly
     // (here, the Draw N count picker) whenever X's own step (like High
-    // Priestess's round 2) has real buttons to offer. Unlike every other
-    // obligation, High Priestess's own round 2 is never Declinable
-    // (NOTHING_TO_DECLINE/ACTION_NOT_ALLOWED - only "discard" is an
-    // allowed resume head for it - see validateMove's own resume-head
-    // gate) - so no persisting Decline button here at all; offering one
-    // would be a button whose click is guaranteed to fail.
+    // Priestess's round 2) has real buttons to offer. Unlike the one
+    // other pending obligation, High Priestess's own round 2 is not
+    // not declinable - so no persisting Decline button here.
     it("a pending High Priestess obligation's own buttons show directly, with no persisting Decline button", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2));
@@ -3952,7 +3950,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(bar.buttons!.find(b => b.value === "resume_power")).to.be.undefined;
         expect(bar.buttons!.some(b => b.value?.startsWith("hpdraw_"))).to.be.true;
         expect(bar.buttons!.find(b => b.value === "decline_power")).to.be.undefined;
-        expect(g.validateMove(`decline via ${major(2).uid}`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "ACTION_NOT_ALLOWED" }));
+        expect(g.validateMove(`decline via ${major(2).uid}`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_CONTINUED_ACTION" }));
     });
 
     // The persisting Decline button must be labeled after the ACTIVE
@@ -6354,10 +6352,10 @@ describe("Gnostica: Fool and World", () => {
     // Regression: randomMove()'s own "paused activation" fallback used to
     // build "decline" unconditionally for ANY this.continued obligation -
     // wrong for High Priestess specifically, whose own round 2 rejects
-    // "decline" outright (ACTION_NOT_ALLOWED - see validateMove's own
+    // "decline" outright (WRONG_CONTINUED_ACTION - see validateMove's own
     // resume-head gate). "draw 0" is High Priestess's own always-legal
     // minimal resume instead.
-    it("randomMove() never declines a persisted High Priestess obligation (ACTION_NOT_ALLOWED otherwise)", () => {
+    it("randomMove() never declines a persisted High Priestess obligation (WRONG_CONTINUED_ACTION otherwise)", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -6365,7 +6363,7 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use ${major(2).uid}/discard ${discardUid}`, { trusted: true }); // round 1
         expect(g.continued).to.deep.equal(["02.1"]); // round 2 owed
 
-        expect(g.validateMove(`decline via ${major(2).uid}`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "ACTION_NOT_ALLOWED" }));
+        expect(g.validateMove(`decline via ${major(2).uid}`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_CONTINUED_ACTION" }));
         const move = g.randomMove();
         // No slash: buildViaMove's own High Priestess branch used to put
         // its tokens in stepSegments instead of rest, which pickleMove

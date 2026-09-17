@@ -78,4 +78,5 @@ Mark items done with @done(date) only as they're confirmed.
 - #108 - Rods must provide a target, not just a distance. @done(2026-09-17)
 - #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.
 - #110 - Reattach last flag and the expected behavior of retaining the last flag don't seem to be working anymore.
-- #111 - handleClick(Core) should not involve a try/catch.
+- #111 - handleClick(Core) should use the parsed move, not the old strings
+- #112 - The click handler is not revising trailing orientation with ? correctly.  This leads to the void neighbor test failing, for example.

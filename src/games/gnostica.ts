@@ -851,10 +851,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.continued.length > 0) {
             const activeUid = this.getContinuedUid();
             if (parsed.viaUid !== activeUid)
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_VIA_STRING"});
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "WRONG_VIA_CARD"});
             const allowed = activeUid === "02" ? ["discard"] : ["decline", "play"];
             if (! allowed.includes(parsed.head!))
-                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "ACTION_NOT_ALLOWED"});
+                return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "WRONG_CONTINUED_ACTION"});
             return this.validateResumePendingPower(parsed);
         }
         
@@ -875,7 +875,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if ((head === "redraw" || head === "pass") && this.phase !== "redraw") {
                 return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
             }
-            if (parsed.stepSegments.length > 0 || parsed.announceLast) {
+            if (parsed.steps.length > 1 || parsed.announceLast) {
                 return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
             }
             if (head === "bid")
@@ -902,7 +902,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "place" && hasPieces) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
         }
-        if ((head === "place" || head === "orient" || head === "discard") && parsed.stepSegments.length > 0) {
+        if ((head === "place" || head === "orient" || head === "discard") && parsed.steps.length > 1) {
             return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
         }
         // Concurrent lastTurners aren't allowed, so no need to check *who* it is.
@@ -2668,8 +2668,8 @@ export class GnosticaGame extends GameBaseSequenced {
     // off the resume stack's own top frame - the same uid both call sites
     // used to independently re-derive.
     private pausedPowerButtons(): [ButtonBarButton, ButtonBarButton] {
-        const resumeStack = this.resumeStack()!;
-        const activeUid = resumeStack[resumeStack.length - 1].cardUid;
+        const resumeQueue = this.resumeQueue()!;
+        const activeUid = resumeQueue[resumeQueue.length - 1].cardUid;
         return [
             { label: `Use Card ${activeUid}`, value: "resume_power" },
             { label: `Decline ${activeUid}`, value: "decline_power" },
@@ -3287,7 +3287,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // otherwise fresh from the root card just resolved.
         const stack: { cardUid: string; nextStepIndex: number; eligible: IMinionRef[]; minions: IMinionRef[] }[] =
             isGenuineResume
-                ? this.resumeStack()!.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }))
+                ? this.resumeQueue()!.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }))
                 : [{ cardUid: def.uid, nextStepIndex: 0, eligible: [...eligible], minions: [...eligible] }];
 
         // The World's sole step (worldUseAny) takes no segment - the
@@ -6816,7 +6816,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // ordinary card its last flip revealed, re-derived from the discard
     // pile's top (see buildPendingFromContinued). Undefined when nothing
     // is pending.
-    private resumeStack(): IPowerFrame[] | undefined {
+    private resumeQueue(): IPowerFrame[] | undefined {
         const pending = this.buildPendingFromContinued();
         return pending?.stack.map(f => ({ ...f, minions: [...f.minions] }));
     }
@@ -6844,7 +6844,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private resumePendingPower(stepSegments: string[][], partial: boolean, borrowedPower?: string): IPowerFrame[] | undefined {
-        const stack = this.resumeStack();
+        const stack = this.resumeQueue();
         if (stack === undefined) {
             return undefined;
         }
@@ -7172,23 +7172,23 @@ export class GnosticaGame extends GameBaseSequenced {
     // for legality. The click UI always names it right, so a mismatch is
     // only ever a hand-edit.
     private validateResumePendingPower(parsed: IParsedMove): IValidationResult {
-        const stack = this.resumeStack()!;
-        if (parsed.head === "play" && parsed.rest[0] !== undefined && parsed.rest[0] !== stack[stack.length - 1].cardUid) {
+        const queue = this.resumeQueue()!;
+        if (parsed.head === "play" && parsed.rest[0] !== undefined && parsed.rest[0] !== queue[queue.length - 1].cardUid) {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_CARD"});
         }
         const stepSegments = this.resumeStepSegments(parsed);
         const borrowed = parsed.asUid ?? parsed.asSuit;
         const worldBorrow = borrowed !== undefined && !ALL_SUITS.some(s => s.uid === borrowed);
-        if (stepSegments.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
+        if (stepSegments.length === 0 && !this.topStepIsFool(queue) && !worldBorrow) {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
             // everywhere else for an in-progress chain. Fool's own step is
             // exempt - see topStepIsFool's own docs.
-            const activeTop = stack[stack.length - 1];
+            const activeTop = queue[queue.length - 1];
             const msg = this.freshStepMessage(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
-        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!, borrowed);
+        return this.validateFrameStack(queue, stepSegments, this.getContinuedUid()!, borrowed);
     }
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as
