@@ -1578,13 +1578,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     step.targetPiece = tempwhat;
                 }
 
-
                 if ( segment.length > 0 ) {
                     const tempdirection = segment.shift()!;
                     if (! DIRECTION_RE.test(tempdirection) ) {
                         pm.error = "BAD_DIRECTION";
                         break;
+                    } else if ( step.action === "orient" && tempdirection.length > 1 ) {
+                        //This is not a place where the ? is allowed.
+                        pm.error = "AMBIGUOUS_DIRECTION";
+                        break;
                     } else
+
                         step.direction = tempdirection;
                 } else {
                     // Sans direction it's a partial move.
@@ -5911,7 +5915,9 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validateOrient(parsed: IParsedMove): IValidationResult {
-        const [ref, orientationStr] = parsed.rest;
+        const step = parsed.steps[0];
+        const ref = step.targetPiece;
+        const orientationStr = step.direction;
         if (ref === undefined) {
             return this.invalid("apgames:validation.gnostica.ORIENT_ARGS_REQUIRED");
         }
@@ -5942,18 +5948,12 @@ export class GnosticaGame extends GameBaseSequenced {
         if (orientationStr === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
         }
-        const orientation = this.tryParseOrientation(orientationStr);
-        if (orientation === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationStr });
-        }
-        // "orient" IS the whole action (unlike Rods/Discs/Swords' own
-        // trailing facing, an optional addition to an already-meaningful
-        // step) - a no-op reorientation achieves nothing at all, so it's
-        // hard-rejected, same as orientMinion/orientAny/hierophantReplace
-        // (see checkOrientationChanges' own docs).
-        const noOp = this.checkOrientationChanges(piece.orientation, orientation);
-        if (noOp) {
-            return this.invalid(`apgames:validation.gnostica.${noOp.key}`);
+        //The parser already checked the orientation string so just cast it.
+        const orientation = orientationStr as Orientation;
+        
+        // "orient" IS the whole action, so a no-op is rejected.
+        if (piece.orientation === orientation) {
+            return this.invalid(`apgames:validation.gnostica.ORIENT_NO_OP`);
         }
         // One real direction click is the whole action - done.
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };

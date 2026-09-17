@@ -79,4 +79,5 @@ Mark items done with @done(date) only as they're confirmed.
 - #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.
 - #110 - Reattach last flag and the expected behavior of retaining the last flag don't seem to be working anymore.
 - #111 - handleClick(Core) should use the parsed move, not the old strings
-- #112 - The click handler is not revising trailing orientation with ? correctly.  This leads to the void neighbor test failing, for example.
+- #112 - The click handler is not revising trailing orientation with ? correctly.  This leads to the void neighbor test failing, for example.  It's unclear where the notion of correctionString came from; what should happen is that X? should be replaced with the new direction, no question mark, by the click handlder.
+- #113 - We should not need both Direction and Orientation types.

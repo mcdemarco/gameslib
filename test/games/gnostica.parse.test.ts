@@ -5,11 +5,9 @@ import { GnosticaGame } from '../../src/games';
 
 describe("Gnostica parsing", () => {
     const g = new GnosticaGame(3);
-    it ("Parses", () => {
+    it ("Parses moves", () => {
 
-        expect(g.validateMove("place m0 U?")).to.have.deep.property("valid", true);
-
-        expect(g.parseMove("place m0 U?")).to.deep.equal({
+         expect(g.parseMove("place m0 U?")).to.deep.equal({
             announceLast: false,
             head: "place",
             rest: ["m0", "U?"],
@@ -22,8 +20,6 @@ describe("Gnostica parsing", () => {
             valid: true
         });
 
-        g.validateMove("decline 00 via 00");
-        
         expect(g.parseMove("decline 00 via 00")).to.deep.equal({
             announceLast: false,
             head: "decline",
@@ -36,7 +32,7 @@ describe("Gnostica parsing", () => {
             valid: true,
             viaUid: "00"
         });
-        
+ 
         expect(g.parseMove("orient n0.1 N")).to.deep.equal({
             announceLast: false,
             head: "orient",
@@ -57,7 +53,11 @@ describe("Gnostica parsing", () => {
             "steps":[{"action":"use","card":"9D"},{"action":"grow","withPiece":"l1.1","targetPiece":"l1.1"}],
             "rest":["9D"],
             "stepSegments":[["l1.1","grow","l1.1"]]
-        });
+            });
+
+    });
+    
+    it ("Does parser validation", () =>  {
 
         expect(g.parseMove("use 9D/with l1.1 grow l1.1")).to.have.deep.property("valid", true);
         expect(g.parseMove("discard AC KS draw 2")).to.have.deep.property("valid", true);
@@ -66,11 +66,9 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("pass")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AC")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AC/with m0.1 at n0 create U")).to.have.deep.property("valid", true);
-        //g.validateMove("use AC/with m0.1 at n0 create n0.1");
         expect(g.parseMove("use AC/with m0.1 at n0 create n0.1")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AC/with l0.1 at k0 create 5D")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AR/with m0.1 move n0 1")).to.have.deep.property("valid", true);
-        //g.validateMove("use AR/with m0.1 move m0.1 1 orient N");
         expect(g.parseMove("use AR/with m0.1 move m0.1 1 orient N")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AD/with m0.1 grow m0.1 orient N")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AD/with m0.1 grow n0 to QD")).to.have.deep.property("valid", true);
@@ -92,14 +90,11 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use AC last")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 05/with m0.1 replace n0.1 N")).to.have.deep.property("valid", true);
         expect(g.parseMove("discard draw 0 last")).to.have.deep.property("valid", true);
-        //g.validateMove("use 09/with m0.1 fly m0.1 to o0");
         expect(g.parseMove("use 09/with m0.1 fly m0.1 to o0")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 12/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 07/with m0.1 move m0.1 3 orient E/with j0.1 move j0.1 3 orient U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 11/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
-
-        g.validateMove("use 01 as C/with m0.1 at m1 create U");
         expect(g.parseMove("use 21 as 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("play 21 as 01 as C via 00/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
