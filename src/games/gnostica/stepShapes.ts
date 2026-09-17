@@ -22,7 +22,7 @@ import { SpecialPower } from "./majorArcana";
 
 export interface MinorModeConfig {
     label: string;
-    shape: "cell" | "piece" | "none";
+    shape: "cell" | "piece";
     minArgs: number;
 }
 
@@ -56,7 +56,7 @@ export const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
     },
     R: {
         piece: { label: "Move Piece", shape: "piece", minArgs: 2 },
-        tile: { label: "Push Territory", shape: "none", minArgs: 1 },
+        tile: { label: "Push Territory", shape: "cell", minArgs: 2 },
     },
     D: {
         piece: { label: "Grow Piece", shape: "piece", minArgs: 1 },
@@ -162,15 +162,18 @@ export function deriveMinorMode(suitUid: string, rest: string[]): { mode: string
             return undefined;
         }
         if (suitUid === "R") {
-            // Rods' own "tile" mode has no target at all - a "push" always
-            // acts on the minion's own facing territory (moveTerritory
-            // derives the source purely from its facing), so a bare
-            // distance is all that's left after the verb to tell apart
-            // from a piece-shaped "move".
-            if (!PIECE_WITH_PIPS_RE.test(rest[1])) {
-                return { mode: "tile", args: [rest[1]] };
+            const targetOrCell = rest[1];
+            const isPiece = PIECE_WITH_PIPS_RE.test(targetOrCell);
+            if (!isPiece) {
+                // Rods' own "tile" mode keeps the cell - the territory
+                // being pushed, always the minion's own facing cell, but
+                // written explicitly like every other suit's "tile" mode
+                // (see checkMoveTerritory's own docs) - then the push
+                // distance.
+                const distStr = rest[2];
+                return { mode: "tile", args: distStr === undefined ? [targetOrCell] : [targetOrCell, distStr] };
             }
-            const targetRef = rest[1];
+            const targetRef = targetOrCell;
             const distStr = rest[2];
             if (distStr === undefined) {
                 return { mode: "piece", args: [targetRef] };

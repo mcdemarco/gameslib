@@ -3939,7 +3939,10 @@ export class GnosticaGame extends GameBaseSequenced {
         const step: IStep = { action: verb, withPiece: minionRef };
         if (suitUid === "R") {
             if (mode === "tile") {
-                const [distStr] = args;
+                const [cellStr, distStr] = args;
+                if (cellStr !== undefined) {
+                    step.targetCell = cellStr;
+                }
                 if (distStr !== undefined) {
                     step.amount = parseInt(distStr, 10);
                 }
@@ -4199,12 +4202,13 @@ export class GnosticaGame extends GameBaseSequenced {
             // unlike "piece" (still left for a button/click when
             // genuinely ambiguous), there's no separate target ref to
             // disambiguate several tile distances by, so a seeded default
-            // plus the existing own-cell-click cycling (untouched "none"
-            // shape - see handlePendingStepBoardClick's own docs) is the
-            // only way to reach any distance beyond 1 anyway.
+            // plus a further destination-cell click (same mechanism as
+            // "piece" mode's own distance-click - see
+            // handlePendingStepBoardClick's own docs) is how the player
+            // reaches any distance beyond 1.
             step = isPieceTarget
                 ? this.buildRdsStep("R", "piece", minionRef, onlyCount !== undefined ? [targetRef, onlyCount] : [targetRef])
-                : this.buildRdsStep("R", "tile", minionRef, ["1"]);
+                : this.buildRdsStep("R", "tile", minionRef, [targetCell, "1"]);
         } else if (suitUid === "D") {
             step = isPieceTarget
                 ? this.buildRdsStep("D", "piece", minionRef, [targetRef])
@@ -4241,7 +4245,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Board-click handling once a minor-arcana power step's MODE is already
-    // chosen (see buildStepModeMove) - cycling or switching whichever
+    // chosen (see buildTargetedStepMove) - cycling or switching whichever
     // trailing arg(s) that mode's shape supports. Returns undefined when
     // the click isn't one of this step's own interactive targets, so the
     // caller falls back to its own (unrelated) handling.
@@ -4296,6 +4300,20 @@ export class GnosticaGame extends GameBaseSequenced {
                 // docs) - built directly here instead of via `rebuild`,
                 // which would wrongly splice "own" back in.
                 return this.assembleStepMove(pending, this.buildCupsStep(minionRef, "own", [cell, ...this.mandatoryOrientationClickTokens("U", dir)]));
+            }
+            // Rods' own "tile" mode: the cell itself is fixed (always the
+            // facing cell, per checkMoveTerritory's own docs) - a click
+            // instead sets DISTANCE, the same destination-click mechanism
+            // "piece" mode's own uses below, just anchored on the facing
+            // cell rather than a chosen piece target.
+            if (suitUid === "R") {
+                const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
+                for (let n = 1; n <= minionPiece.size; n++) {
+                    if (x === tx + dx * n && y === ty + dy * n) {
+                        return rebuild([pending.rest[0], String(n)]);
+                    }
+                }
+                return undefined;
             }
             if (x !== tx || y !== ty) {
                 return undefined;
@@ -4384,15 +4402,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return rebuild([...pending.rest.slice(0, config.minArgs), dir]);
         }
 
-        // "none" shape (Rods' "tile" mode) - only the minion's own cell is
-        // interactive, cycling distance.
-        if (x !== pending.minion.x || y !== pending.minion.y) {
-            return undefined;
-        }
-        const maxArg = minionPiece.size;
-        const current = parseInt(pending.rest[0] ?? "1", 10);
-        const next = (current % maxArg) + 1;
-        return rebuild([String(next)]);
+        return undefined;
     }
 
     // Supplies a hand-card uid for whichever minor-arcana mode is currently
@@ -7686,16 +7696,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
             }
             case "tile": {
-                const [distStr] = rest;
+                const [cellStr, distStr] = rest;
+                const [srcX, srcY] = GnosticaBoard.algebraic2coords(cellStr);
                 const dist = parseInt(distStr, 10);
                 const facing = (minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index]).orientation;
                 const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
-                const srcX = minion.x + dx;
-                const srcY = minion.y + dy;
-                moveTerritory(ctx, minion.x, minion.y, minion.index, dist);
-                const from = GnosticaBoard.coords2algebraic(srcX, srcY);
+                moveTerritory(ctx, minion.x, minion.y, minion.index, srcX, srcY, dist);
                 const to = GnosticaBoard.coords2algebraic(srcX + dx * dist, srcY + dy * dist);
-                this.results.push({ type: "move", from, to, how: "rod-tile" });
+                this.results.push({ type: "move", from: cellStr, to, how: "rod-tile" });
                 return {};
             }
             default:
@@ -7760,12 +7768,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
             }
             case "tile": {
-                const [distStr] = rest;
+                const [cellStr, distStr] = rest;
+                const coords = this.tryAlgebraic2coords(cellStr);
+                if (coords === undefined) {
+                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
+                }
+                const [srcX, srcY] = coords;
                 const dist = parseInt(distStr, 10);
                 if (Number.isNaN(dist)) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_NUMBER" }) };
                 }
-                const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, dist);
+                const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, srcX, srcY, dist);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }

@@ -440,20 +440,25 @@ export const movePiece = (
     destT.add(moved, opts.ignoreCapacity || opts.skipLandingCheck);
 };
 
-// Push the territory the minion is pointing at (never the minion's own
-// cell - a rod can't push "itself") `dist` spaces further in that same
-// direction.
+// Push the territory at (srcX, srcY) - always the cell the minion is
+// pointing at (never the minion's own cell - a rod can't push "itself";
+// checkCanUseRod already forbids facing "U") - `dist` spaces further in
+// that same direction. `srcX/srcY` are an explicit, caller-supplied
+// target (checked against the minion's own facing via
+// checkValidCellTarget, same as every other suit's "tile" mode) rather
+// than silently re-derived here, so the move string itself always names
+// the territory being pushed instead of leaving it implicit.
 export const checkMoveTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number, dist: number,
+    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
+    srcX: number, srcY: number, dist: number,
 ): PowerFailure | undefined => {
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const ownErr = checkOwnMinion(minion, ctx.currplayer);
     if (ownErr) return ownErr;
     const rodErr = checkCanUseRod(minion);
     if (rodErr) return rodErr;
-    const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
-    const srcX = minionX + dx;
-    const srcY = minionY + dy;
+    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, srcX, srcY);
+    if (targetErr) return targetErr;
     if (ctx.board.classify(srcX, srcY) !== "territory") {
         return { key: "NO_TERRITORY_THAT_WAY" };
     }
@@ -463,6 +468,7 @@ export const checkMoveTerritory = (
     if (dist < 1 || dist > minion.size) {
         return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
     }
+    const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
     const destX = srcX + dx * dist;
     const destY = srcY + dy * dist;
     if (destX === minionX && destY === minionY) {
@@ -479,16 +485,14 @@ export const checkMoveTerritory = (
 
 export const moveTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    dist: number,
+    srcX: number, srcY: number, dist: number,
 ): void => {
-    const failure = checkMoveTerritory(ctx, minionX, minionY, minionIndex, dist);
+    const failure = checkMoveTerritory(ctx, minionX, minionY, minionIndex, srcX, srcY, dist);
     if (failure) {
         throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
     }
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
-    const srcX = minionX + dx;
-    const srcY = minionY + dy;
     const destX = srcX + dx * dist;
     const destY = srcY + dy * dist;
     // Pushing the card out from under the departure cell can strand any

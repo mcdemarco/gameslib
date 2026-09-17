@@ -878,7 +878,7 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place l0 U", { trusted: true }); // player 2, onto the wasteland beside m0
-        g.move(`use ${aceOfRods().uid}/with m0.1 move 1`, { trusted: true });
+        g.move(`use ${aceOfRods().uid}/with m0.1 move n0 1`, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
     });
@@ -916,7 +916,7 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         // this test is about.
         g.board.get(0, 0)!.pieces[0].size = 3;
 
-        const pushMove = `use ${aceOfRods().uid}/with m0.3 move 3`;
+        const pushMove = `use ${aceOfRods().uid}/with m0.3 move n0 3`;
         expect(g.validateMove(pushMove).valid).to.be.true; // through real validation, not a trusted bypass
         g.move(pushMove);
 
@@ -2646,13 +2646,13 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(modeClick.move).eq(`use ${aceOfRods().uid}/with m0.1 move 1`);
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}/with m0.1 move n0 1`);
         g.move(modeClick.move, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
     });
 
-    it("Rods (tile): the tile candidate always seeds distance 1", () => {
+    it("Rods (tile): the tile candidate seeds distance 1; a destination click sets any further distance", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfRods());
@@ -2668,23 +2668,19 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(modeClick.move).eq(`use ${aceOfRods().uid}/with m0.2 move 1`);
-        // A same-cell click is SUPPOSED to still cycle distance (Rods'
-        // own "none"-shape mode, untouched by this redesign - see
-        // handlePendingStepBoardClick's own docs), but a bare distance
-        // like "move 1"/"move 2" - no piece ref, no cell - doesn't
-        // actually round-trip through parseMove's own "grow"/"move"/
-        // "shrink" content recognition (it only accepts CELL_RE/
-        // PIECE_REF_RE shaped content there - a known, already-reported
-        // parseMove gap, not something this port can fix): handleClick's
-        // own pre-normalization re-parses every incoming move string, so
-        // feeding "move 1" back in for the cycle click throws it away
-        // (BAD_STEP_CONTENT) instead of cycling it. Committing the
-        // uncycled default still works fine, since a trusted commit
-        // doesn't go through that same strict round-trip.
-        g.move(modeClick.move, { trusted: true });
+        expect(modeClick.move).eq(`use ${aceOfRods().uid}/with m0.2 move n0 1`);
+        // Same destination-click mechanism "piece" mode's own distance
+        // uses (see handlePendingStepBoardClick's own docs), anchored on
+        // the fixed facing cell (n0) instead of a chosen piece target.
+        const [row2, col2] = rowColFor(g, 3, 0); // p0, distance 2 from n0
+        const distClick2 = g.handleClick(modeClick.move, row2, col2);
+        expect(distClick2.move).eq(`use ${aceOfRods().uid}/with m0.2 move n0 2`);
+        const [row1, col1] = rowColFor(g, 2, 0); // o0, distance 1 from n0
+        const distClick1 = g.handleClick(distClick2.move, row1, col1);
+        expect(distClick1.move).eq(`use ${aceOfRods().uid}/with m0.2 move n0 1`);
+        g.move(distClick2.move, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
-        expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
+        expect(g.board.get(3, 0)!.card).to.not.eq(undefined);
     });
 
     it("Discs (piece): the only candidate at the (self) target cell is the minion itself", () => {
@@ -4739,7 +4735,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.continued).to.not.be.empty; // step 1 of 2 - still owes the second flip
     });
 
-    it("Hanged Man (move, then tradeHands): a click on a cell already 'claimed' by step 1 still starts step 2, not step 1's own refinement", () => {
+    it("Hanged Man (move, then tradeHands): a click on A's own cell starts step 2 (tradeHands), rejected as self-targeting; skipping it still completes step 1", () => {
         const g = new GnosticaGame(2);
         // Fully deterministic (see clearBoard's own docs): the random
         // initial deal could otherwise occasionally put The Hanged Man
@@ -4753,19 +4749,20 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const step1 = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(step1.move).eq(`use ${major(12).uid}/with m0.1 move 1`); // pushes n0's territory east; A never moves
-        // m0 is BOTH step 1's own "cycle distance" click target AND
-        // tradeHands' own "self" target - starting step 2 is SUPPOSED to
-        // win (see handleClickCore's own docs on this priority), but a
-        // bare Rods distance like "move 1" - no piece ref, no cell -
-        // doesn't round-trip through parseMove's own "move" content
-        // recognition (a known, already-reported gap - see "Rods (tile):
-        // the tile candidate always seeds distance 1"'s own docs), so a
-        // second click here can't even be attempted: handleClick's own
-        // pre-normalization throws step1's move away before routing logic
-        // is ever reached. Skipping tradeHands (the chain's own tail)
-        // stays legal though, so step 1's own push still completes
-        // correctly via a trusted commit.
+        expect(step1.move).eq(`use ${major(12).uid}/with m0.1 move n0 1`); // pushes n0's territory east; A never moves
+        // A's own cell (m0) has no interactive meaning for step 1 anymore
+        // (its own click target is now the destination beyond n0, not
+        // m0), so a click there routes straight to step 2's own tradeHands
+        // - rejected immediately as a no-op dressed up as a real step
+        // (see checkTradeHands's own docs), rather than building the
+        // doomed move and letting it fail later.
+        const [rowM, colM] = rowColFor(g, 0, 0);
+        const step2 = g.handleClick(step1.move, rowM, colM);
+        expect(step2.move).eq(step1.move);
+        expect(step2.valid).to.be.false;
+        expect(step2.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
+        // Skipping tradeHands (the chain's own tail) stays legal, so
+        // step 1's own push still completes correctly on its own.
         g.move(step1.move, { trusted: true });
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
@@ -5731,7 +5728,7 @@ describe("Gnostica: Fool and World", () => {
         // Only step 1 (the push) is typed - no enemy exists anywhere to
         // trade hands with, so step 2 is left entirely unaddressed rather
         // than explicitly declined.
-        g.move(`play ${major(12).uid} via ${major(0).uid}/with m0.1 move 1`, { trusted: true });
+        g.move(`play ${major(12).uid} via ${major(0).uid}/with m0.1 move n0 1`, { trusted: true });
         expect(g.board.has(1, 0)).eq(false); // the push actually happened
         expect(g.continued).to.not.be.empty;
         // tradeHands never even shows up on the stack - it's popped by
@@ -5758,7 +5755,7 @@ describe("Gnostica: Fool and World", () => {
             forceCardAt(g, 0, 0, () => major(12)); // The Hanged Man
             forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - the territory to push
             g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            const result = g.validateMove(`use ${major(12).uid}/with m0.1 move 1`);
+            const result = g.validateMove(`use ${major(12).uid}/with m0.1 move n0 1`);
             expect(result.valid).to.be.true;
             expect(result.complete).eq(1); // still a genuinely complete, submittable move
             expect(result.message).eq(skippedMsg);
@@ -5771,7 +5768,7 @@ describe("Gnostica: Fool and World", () => {
             pluckCard(g, major(12).uid);
             g.drawPile.unshift(major(12).uid);
             g.move(`use ${major(0).uid}`, { trusted: true });
-            const result = g.validateMove(`play ${major(12).uid} via ${major(0).uid}/with m0.1 move 1`);
+            const result = g.validateMove(`play ${major(12).uid} via ${major(0).uid}/with m0.1 move n0 1`);
             expect(result.valid).to.be.true;
             expect(result.complete).eq(1);
             expect(result.message).eq(skippedMsg);

@@ -263,7 +263,7 @@ describe("Gnostica powers: Rods (move)", () => {
         // Legality is checked against the board as it stands before the push,
         // so (2,0) still counts as a wasteland (adjacent to (1,0)'s card,
         // which hasn't left yet) even though (1,0) is about to be vacated.
-        moveTerritory(ctx, 0, 0, 0, 1);
+        moveTerritory(ctx, 0, 0, 0, 1, 0, 1);
         // (1,0) had no pieces left behind, so the vacated cell is dropped entirely.
         expect(b.has(1, 0)).eq(false);
         expect(b.get(2, 0)!.card?.uid).eq("2C");
@@ -283,7 +283,7 @@ describe("Gnostica powers: Rods (move)", () => {
         b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(1, 1, "U")]));
         b.store.set(5, 0, new CellContents(aceOfCups())); // keeps the landing spot a legal wasteland
         const ctx = makeCtx(b);
-        moveTerritory(ctx, 0, 0, 0, 3); // (1,0) -> (4,0), adjacent to (5,0)
+        moveTerritory(ctx, 0, 0, 0, 1, 0, 3); // (1,0) -> (4,0), adjacent to (5,0)
         expect(b.get(4, 0)!.card?.uid).eq("2C");
         expect(b.has(1, 0)).eq(false);
         expect(ctx.stashes.get(1)!).to.deep.equal([6, 5, 5]);
@@ -294,13 +294,13 @@ describe("Gnostica powers: Rods (move)", () => {
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         b.store.set(1, 0, new CellContents(twoOfCups(), [new Piece(2, 1, "U")]));
         const ctx = makeCtx(b);
-        expect(() => moveTerritory(ctx, 0, 0, 0, 1)).to.throw(); // enemy-occupied
+        expect(() => moveTerritory(ctx, 0, 0, 0, 1, 0, 1)).to.throw(); // enemy-occupied
 
         const b2 = new GnosticaBoard();
         b2.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "E")]));
         b2.store.set(1, 0, new CellContents(twoOfCups()));
         const ctx2 = makeCtx(b2);
-        expect(() => moveTerritory(ctx2, 0, 0, 0, 5)).to.throw(); // beyond size, lands in void
+        expect(() => moveTerritory(ctx2, 0, 0, 0, 1, 0, 5)).to.throw(); // beyond size, lands in void
     });
 });
 

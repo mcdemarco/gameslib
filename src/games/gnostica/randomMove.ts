@@ -659,7 +659,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
             });
         }
         case "R.tile":
-            return flat(pips.map(d => [d]));
+            return flat(pips.map(d => [targetCell, d]));
         case "D.piece":
             // Growing is constructive - strongly favor your own minion
             // over an enemy's.

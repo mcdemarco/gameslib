@@ -12,8 +12,9 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
 
     it("primitiveStepShape: mode undefined is incomplete, short args is incomplete, enough args is complete", () => {
         expect(primitiveStepShape("R", [])).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("R", ["move"])).to.deep.equal({ status: "incomplete" }); // no target/distance yet
-        expect(primitiveStepShape("R", ["move", "1"])).to.deep.equal({ status: "complete" }); // tile: a bare distance
+        expect(primitiveStepShape("R", ["move"])).to.deep.equal({ status: "incomplete" }); // no target/cell yet
+        expect(primitiveStepShape("R", ["move", "n0"])).to.deep.equal({ status: "incomplete" }); // tile: cell chosen, distance still needed
+        expect(primitiveStepShape("R", ["move", "n0", "1"])).to.deep.equal({ status: "complete" }); // tile: cell + distance
         expect(primitiveStepShape("R", ["move", "m0.1"])).to.deep.equal({ status: "incomplete" }); // piece: target chosen, distance still needed
         expect(primitiveStepShape("R", ["move", "m0.1", "3"])).to.deep.equal({ status: "complete" });
         // No suit spells a mode word anymore - Rods/Discs/Swords infer
