@@ -824,7 +824,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const parsed = this.parseMove(m);
-        console.log(JSON.stringify(parsed));
+        //console.log(JSON.stringify(parsed));
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
@@ -1426,7 +1426,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     //so check OTHERWORDS.
                     if (! OTHERWORDS.includes(step.action) ) {
                         pm.error = "BAD_OTHERWORD";
-                        console.log("bad actor: ",step.action);
                         break;
                     }
                     if (segment.length === 0) {
@@ -1679,6 +1678,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 //Test tempwhat.
                 if ( CELL_RE.test(tempwhat) )
                     step.targetCell = tempwhat;
+                else if ( CARD_UID_RE.test(tempwhat) )
+                    step.card = tempwhat;
                 else if ( PIECE_REF_RE.test(tempwhat) )
                     step.targetPiece = tempwhat;
                 else {
@@ -1776,6 +1777,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
         if (pm.error !== undefined)
             pm.valid = false;
+
+        console.log(pm.steps);
             
         return pm;
     }
@@ -1787,6 +1790,11 @@ export class GnosticaGame extends GameBaseSequenced {
         if (p.head === undefined) {
             return p.announceLast ? "last" : "";
         }
+        if (p.steps === undefined || p.steps.length === 0) {
+            return p.head;
+        }
+       
+        /* old version
         const headPart = [p.head, ...p.rest, ...(p.asUid !== undefined ? ["as", p.asUid] : []), ...(p.viaUid !== undefined ? ["via", p.viaUid] : [])].join(" ");
         // p.stepSegments are already "with"-stripped (see parseMove's own
         // docs) - re-add it here so a round-trip through parseMove then
@@ -1799,6 +1807,125 @@ export class GnosticaGame extends GameBaseSequenced {
         ).join("/");
         const base = stepsPart.length === 0 ? headPart : `${headPart}/${stepsPart}`;
         return p.announceLast ? (base.length === 0 ? "last" : `${base} last`) : base;
+        */
+        
+        const pparts: string[] = [];
+        for (let s = 0; s < p.steps.length; s++) {
+            const ppart: string[] = [];
+            const step = p.steps[s];
+            if (step.withPiece !== undefined) {
+                ppart.push("with");
+                ppart.push(step.withPiece);
+            }
+            if (step.atCell !== undefined) {
+                ppart.push("at");
+                ppart.push(step.atCell);
+            }
+            
+            ppart.push(step.action);
+            
+            if ( step.action === "draw" || step.action === "redraw" || step.action === "discard" ) {
+                if (step.cardList !== undefined)
+                    ppart.push(...step.cardList);
+         
+                if ( step.action === "discard" && step.amount !== undefined ) {
+                    ppart.push("draw");
+                    ppart.push(step.amount.toString());
+                }
+            }
+            if ( step.action === "bid" && step.amount !== undefined ) {
+                ppart.push(step.amount.toString());
+            }
+
+            if ( step.action === "create" ) {
+                if ( step.card !== undefined || step.direction !== undefined || step.targetPiece !== undefined)
+                    ppart.push(((step.card ?? step.direction) ?? step.targetPiece) as string);
+            }
+                
+            if ( step.action === "place" || step.action === "orient" || step.action === "replace" ) {
+
+                if ( step.action === "place" && step.targetCell !== undefined ) {
+                    ppart.push(step.targetCell);
+                } else if ( (step.action === "orient" || step.action === "replace") && step.targetPiece !== undefined ) {
+                    ppart.push(step.targetPiece);
+                }
+
+                if ( step.direction !== undefined ) {
+                    ppart.push(step.direction);
+                }
+            
+            }
+
+            if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {
+                if ( step.card !== undefined ) {
+                    ppart.push(step.card);
+                }
+            }
+
+            if ( step.action === "trade" ) {
+                if ( step.targetPiece !== undefined ) {
+                    ppart.push(step.targetPiece);
+                }
+            }
+                
+            if ( step.action === "grow" || step.action === "shrink" || step.action === "move" ) {
+                if ( step.targetCell !== undefined || step.targetPiece !== undefined ) {
+                    ppart.push((step.targetCell ?? step.targetPiece)!);
+                }
+                if ( step.amount !== undefined ) {
+                    ppart.push(step.amount.toString());
+                }
+                if ( step.card !== undefined ) {
+                    ppart.push("to")
+                    ppart.push(step.card);
+                }
+
+            }
+
+            if ( step.action === "fly" ) {
+                if ( step.card !== undefined || step.targetPiece !== undefined ) {
+                    ppart.push((step.card ?? step.targetPiece)!);
+                }
+                if ( step.targetCell !== undefined ) {
+                    ppart.push("to")
+                    ppart.push(step.targetCell);
+                }
+            }
+
+            if ( step.action === "grow" || step.action === "move" || step.action === "shrink" || step.action === "fly" ) {
+                if ( step.direction !== undefined ) {
+                    ppart.push("orient")
+                    ppart.push(step.direction as string);
+                }
+            }
+
+
+            //First round.
+            if (s === 0) {
+                if (p.asUid !== undefined) {
+                    ppart.push("as");
+                    ppart.push(p.asUid);
+                }
+                if (p.asSuit !== undefined) {
+                    ppart.push("as");
+                    ppart.push(p.asSuit);
+                }
+                if (p.viaUid !== undefined) {
+                    ppart.push("via");
+                    ppart.push(p.viaUid);
+                }
+            }
+
+            
+            //Last round.
+            if (s ===  p.steps.length -1 && p.announceLast === true)
+                ppart.push("last");
+
+            
+            pparts.push(ppart.join(" "));
+        }
+
+        return pparts.join("/");
     }
 
     // The innermost continued obligation's own uid ("00" or "02") - the
