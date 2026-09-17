@@ -1345,9 +1345,14 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(1)); // The Magician
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        // Hand-typed nonsense, not reachable through any click path - a
+        // bare suit letter isn't valid step content at all anymore (Cups
+        // itself carries no mode word - see deriveMinorMode's own docs),
+        // so this is just an ordinary malformed-step rejection now, not a
+        // Magician-specific one.
         const result = g.validateMove(`use ${major(1).uid}/with m0.1 C own m0 U`);
         expect(result.valid).to.be.false;
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.MAGICIAN_NEEDS_AS"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_OTHERWORD" }));
     });
 
     it("refuses more power-step segments than the card actually grants", () => {
