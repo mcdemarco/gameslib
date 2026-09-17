@@ -8917,8 +8917,17 @@ export class GnosticaGame extends GameBaseSequenced {
             // not the final/current ones. Legal despite liveMove being
             // private: TypeScript scopes private access to the class, not
             // the instance - the same trick validateMajorPower's own
-            // clone-and-replay logic already relies on.
-            snapshot.liveMove = { ...this.liveMove, stepSegments: this.liveMove.stepSegments.slice(0, stepIndex + 1) };
+            // clone-and-replay logic already relies on. `steps[0]` is the
+            // head itself (see IParsedMove's own docs), so keeping
+            // `stepIndex + 2` entries keeps the head plus power-steps
+            // 0..stepIndex - the IStep-based equivalent of the deprecated
+            // stepSegments slice below, which pickleMove itself no longer
+            // reads at all (only steps drives its own output now).
+            snapshot.liveMove = {
+                ...this.liveMove,
+                steps: this.liveMove.steps.slice(0, stepIndex + 2),
+                stepSegments: this.liveMove.stepSegments.slice(0, stepIndex + 1),
+            };
         }
         return snapshot;
     }
