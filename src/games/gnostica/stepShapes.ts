@@ -144,16 +144,6 @@ function trailingOrient(tokens: string[]): string | undefined {
 // has to import a value from the other.
 export function buildRdsTokens(suitUid: string, mode: string, args: string[]): string[] {
     const verb = RDS_VERBS[suitUid];
-    if (args.length === 0) {
-        // Nothing chosen yet - with no argument left to infer a shape
-        // from, the verb alone can't tell piece from tile apart (either
-        // one can legitimately still be empty here - see
-        // buildStepModeMove's own "genuine choice, leave unset" cases),
-        // so the mode itself is spelled out as a transient anchor.
-        // deriveMinorMode recognizes it and drops it again the instant a
-        // real argument arrives.
-        return [verb, mode];
-    }
     if (suitUid === "R" && mode === "tile") {
         return [verb, ...args];
     }
@@ -170,15 +160,6 @@ export function deriveMinorMode(suitUid: string, rest: string[]): { mode: string
     if (verb !== undefined) {
         if (rest[0]?.toLowerCase() !== verb || rest[1] === undefined) {
             return undefined;
-        }
-        // The transient "nothing chosen yet" anchor buildRdsTokens writes
-        // when there's a genuine choice still to make (see its own docs) -
-        // recognized and stripped back down to a real, empty-args mode
-        // the moment it's seen, same as every other mode below once its
-        // own real argument(s) arrive.
-        const anchor = rest[1].toLowerCase();
-        if (rest.length === 2 && (anchor === "piece" || anchor === "tile")) {
-            return { mode: anchor, args: [] };
         }
         if (suitUid === "R") {
             // Rods' own "tile" mode has no target at all - a "push" always
@@ -264,10 +245,6 @@ export function deriveHermitMode(rest: string[]): { mode: string; args: string[]
     if (rest[0]?.toLowerCase() !== "fly" || rest[1] === undefined) {
         return undefined;
     }
-    const anchor = rest[1].toLowerCase();
-    if (rest.length === 2 && (anchor === "piece" || anchor === "tile")) {
-        return { mode: anchor, args: [] };
-    }
     const targetOrCell = rest[1];
     const mode = PIECE_WITH_PIPS_RE.test(targetOrCell) ? "piece" : "tile";
     if (rest[2]?.toLowerCase() !== "to" || rest[3] === undefined) {
@@ -283,15 +260,8 @@ export function deriveHermitMode(rest: string[]): { mode: string; args: string[]
 
 // The inverse of deriveHermitMode - same internal args shape
 // applyHermitStep/validateHermitStep already expect, rebuilt into
-// verb-first move-string tokens. `mode` is only consulted for the
-// zero-arg anchor (see buildRdsTokens' own matching docs) - Hermit's
-// own click flow never actually leaves it empty (both mode buttons seed
-// a default target immediately), but this stays consistent with the
-// same "nothing chosen yet" convention regardless.
-export function buildHermitTokens(mode: string, args: string[]): string[] {
-    if (args.length === 0) {
-        return ["fly", mode];
-    }
+// verb-first move-string tokens.
+export function buildHermitTokens(args: string[]): string[] {
     if (args.length === 1) {
         return ["fly", args[0]];
     }

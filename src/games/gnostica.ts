@@ -1010,7 +1010,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // job alone now; a trusted caller passing garbage is a caller
             // bug, not something this dispatch re-checks.
             if (this.continued.length > 0) {
-                residualFrames = this.resumePendingPower(this.resumeStepSegments(parsed), partial, parsed.asUid);
+                residualFrames = this.resumePendingPower(this.resumeStepSegments(parsed), partial, parsed.asUid ?? parsed.asSuit);
             } else if (head === "bid") {
 
             // The "bidding" variant's own opening procedure - see cmdBid's/
@@ -1046,10 +1046,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         this.cmdDiscard(parsed.rest, partial);
                         break;
                     case "use":
-                        residualFrames = this.cmdActivate(parsed.rest[0], parsed.stepSegments, partial, parsed.asUid);
+                        residualFrames = this.cmdActivate(parsed.rest[0], parsed.stepSegments, partial, parsed.asUid ?? parsed.asSuit);
                         break;
                     case "play":
-                        residualFrames = this.cmdPlay(parsed.rest[0], parsed.stepSegments, partial, parsed.asUid);
+                        residualFrames = this.cmdPlay(parsed.rest[0], parsed.stepSegments, partial, parsed.asUid ?? parsed.asSuit);
                         break;
                     // "decline" with nothing pending (the resume gate above
                     // didn't catch it), or any other recognized head that
@@ -1998,7 +1998,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private continuedSeedMoveString(): string {
         const forThisObligation = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid();
         const segments = forThisObligation ? this.resumeStepSegments(this.liveMove!) : [];
-        return this.buildViaMove(segments, forThisObligation ? this.liveMove!.asUid : undefined);
+        return this.buildViaMove(segments, forThisObligation ? (this.liveMove!.asUid ?? this.liveMove!.asSuit) : undefined);
     }
 
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
@@ -3036,13 +3036,79 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.buildChoiceButtons("hpdraw", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
+    // One candidate per real target for a fresh (nothing-chosen-yet)
+    // suit-power step - the tile at minorTargetCell plus every piece
+    // currently occupying that same cell (any owner, self included
+    // whenever facing "U" puts the target cell on the minion's own
+    // square - naturally uniquified, since it's just whatever's really
+    // there rather than a separately hardcoded "self" entry), or, for
+    // Cups, "own"/every enemy piece there/"new". Clicking one supplies
+    // both "which mode" and "which target" together via
+    // buildTargetedStepMove - see its own docs.
+    private suitTargetCandidates(pending: IPendingStep, suitUid: string): ChoiceOption[] {
+        const availability = this.minorModeAvailability(pending);
+        const [tx, ty] = this.minorTargetCell(pending.minion);
+        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
+        if (suitUid === "C") {
+            const options: ChoiceOption[] = [{ value: "own", label: MINOR_MODES.C.own.label, disabledReason: availability.get("own") }];
+            cellPieces.forEach((p, index) => {
+                if (p.owner !== this.currplayer) {
+                    options.push({ value: this.victimRefStr(tx, ty, index), label: `Capture ${this.textFormat(p)}`, disabledReason: availability.get("enemy") });
+                }
+            });
+            options.push({ value: "new", label: MINOR_MODES.C.new.label, disabledReason: availability.get("new") });
+            return options;
+        }
+        const verb = MINOR_MODES[suitUid].piece.label.replace(" Piece", "");
+        const options: ChoiceOption[] = [{ value: targetCell, label: MINOR_MODES[suitUid].tile.label, disabledReason: availability.get("tile") }];
+        const seen = new Set<string>();
+        const pushPieceCandidate = (x: number, y: number, index: number): void => {
+            const ref = this.pieceRefStr({ x, y, index });
+            if (seen.has(ref)) {
+                return;
+            }
+            seen.add(ref);
+            options.push({ value: ref, label: `${verb} ${this.textFormat(this.board.get(x, y)!.pieces[index])}`, disabledReason: availability.get("piece") });
+        };
+        // Self is always a candidate - "piece" mode can always act on the
+        // acting minion itself regardless of facing - uniquified against
+        // the facing cell's own pieces below (the same piece whenever
+        // facing "U" puts the target cell on the minion's own square).
+        pushPieceCandidate(pending.minion.x, pending.minion.y, pending.minion.index);
+        cellPieces.forEach((_, index) => pushPieceCandidate(tx, ty, index));
+        return options;
+    }
+
+    // Hermit's own twin of suitTargetCandidates - same tile-plus-self-
+    // plus-every-co-located-piece enumeration, via HERMIT_MODES' own
+    // labels.
+    private hermitTargetCandidates(pending: IPendingStep): ChoiceOption[] {
+        const [tx, ty] = this.minorTargetCell(pending.minion);
+        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
+        const options: ChoiceOption[] = [{ value: targetCell, label: HERMIT_MODES.tile.label }];
+        const seen = new Set<string>();
+        const pushPieceCandidate = (x: number, y: number, index: number): void => {
+            const ref = this.pieceRefStr({ x, y, index });
+            if (seen.has(ref)) {
+                return;
+            }
+            seen.add(ref);
+            options.push({ value: ref, label: `Teleport ${this.textFormat(this.board.get(x, y)!.pieces[index])}` });
+        };
+        pushPieceCandidate(pending.minion.x, pending.minion.y, pending.minion.index);
+        cellPieces.forEach((_, index) => pushPieceCandidate(tx, ty, index));
+        return options;
+    }
+
     // The final fallback once every click-only/no-button state above has
-    // been ruled out: a primitive suit-power step (mode buttons, "piece"'s
-    // own self/facing target, Swords' own pips), or hermitTeleport/
-    // magicianChoice's own dedicated button sets (suit not chosen yet for
-    // the latter - buildSpecialPending redirects `pendingMinor` into an
-    // ordinary suit-shaped one the instant it is, so this same "else"
-    // branch handles that stage too, unmodified).
+    // been ruled out: a primitive suit-power step (target candidates,
+    // Swords' own pips), or hermitTeleport/magicianChoice's own
+    // dedicated button sets (suit not chosen yet for the latter -
+    // buildSpecialPending redirects `pendingMinor` into an ordinary
+    // suit-shaped one the instant it is, so this same "else" branch
+    // handles that stage too, unmodified).
     private stepModeBar(
         pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
     ): [ButtonBarButton, ...ButtonBarButton[]] {
@@ -3052,21 +3118,17 @@ export class GnosticaGame extends GameBaseSequenced {
         buttons.push({ label: spacerLabel, value: "_spacer",  attributes: [{ name: "font-style", value: "italic" }] });
 
         if (pendingMinor.special === "hermitTeleport") {
-            const options = Object.entries(HERMIT_MODES).map(([mode, config]) => ({ value: mode, label: config.label }));
-            buttons.push(...this.buildChoiceButtons("hermit", options, pendingMinor.rest[0]));
+            if (pendingMinor.rest.length === 0) {
+                buttons.push(...this.buildChoiceButtons("target", this.hermitTargetCandidates(pendingMinor), undefined));
+            }
         } else if (pendingMinor.special === "magicianChoice") {
             const options = ALL_SUITS.map(suit => ({ value: suit.uid, label: suit.label }));
             buttons.push(...this.buildChoiceButtons("magician", options, undefined));
         } else {
             const suitUid = pendingMinor.suitUid!;
-            const availability = this.minorModeAvailability(pendingMinor);
-            const options = Object.keys(MINOR_MODES[suitUid]).map(mode => ({
-                value: `${suitUid}_${mode}`,
-                label: MINOR_MODES[suitUid][mode].label,
-                disabledReason: availability.get(mode),
-            }));
-            const currentMode = pendingMinor.mode !== undefined ? `${suitUid}_${pendingMinor.mode}` : undefined;
-            buttons.push(...this.buildChoiceButtons("mode", options, currentMode));
+            if (pendingMinor.mode === undefined) {
+                buttons.push(...this.buildChoiceButtons("target", this.suitTargetCandidates(pendingMinor, suitUid), undefined));
+            }
             // "new" mode's own required card arg is otherwise only ever
             // suppliable by clicking a hand card (see supplyStepCardUid's
             // own docs) - Wheel of Fortune's own step (the only card with
@@ -3076,31 +3138,6 @@ export class GnosticaGame extends GameBaseSequenced {
             // button instead, exactly parallel to a hand-card click.
             if (suitUid === "C" && pendingMinor.mode === "new" && pendingMinor.opts.allowRandomDraw === true) {
                 buttons.push({ label: "Random Card", value: "random" });
-            }
-            // Every "piece" mode's target is either self or whatever's at
-            // the facing cell - buildStepModeMove leaves it unset (rather
-            // than picking one) exactly when both genuinely exist, so a
-            // button set is the ONLY way to choose between them (never a
-            // board click - see handlePendingStepBoardClick's own docs on
-            // why overloading self/face clicks with a second meaning
-            // there is confusing).
-            if ((suitUid === "R" || suitUid === "D" || suitUid === "S") && pendingMinor.mode === "piece" && pendingMinor.rest.length === 0) {
-                const [tx, ty] = this.minorTargetCell(pendingMinor.minion);
-                const verb = MINOR_MODES[suitUid].piece.label.replace(" Piece", "");
-                const selfOption: ChoiceOption = { value: this.pieceRefStr(pendingMinor.minion), label: `${verb} self` };
-                const targetOptions: ChoiceOption[] = suitUid === "S" ? [] : [selfOption];
-                const facingCell = this.board.get(tx, ty);
-                if ((tx !== pendingMinor.minion.x || ty !== pendingMinor.minion.y) && (facingCell?.pieces.length ?? 0) > 0) {
-                    targetOptions.push({ value: this.pieceRefStr({ x: tx, y: ty, index: 0 }), label: `${verb} ${this.textFormat(facingCell!.pieces[0])}` });
-                }
-                // Attacking self is a real option (Swords can shrink your
-                // own piece) but a distinctly secondary one against the
-                // list's own usual order elsewhere - last, not first,
-                // here specifically.
-                if (suitUid === "S") {
-                    targetOptions.push(selfOption);
-                }
-                buttons.push(...this.buildChoiceButtons("target", targetOptions, undefined));
             }
             // Swords pips is pure damage, no destination cell to click
             // (unlike Rods' own distance - see
@@ -3186,9 +3223,12 @@ export class GnosticaGame extends GameBaseSequenced {
         if (headArg === undefined) {
             return undefined;
         }
-        // "as <x>": the card The World borrows (a uid) or the suit The
-        // Magician runs (a letter).
-        const borrowed = parsed.asUid;
+        // "as <x>": the card The World borrows (a uid, parseMove's own
+        // asUid) or the suit The Magician runs (a letter, parseMove's own
+        // separate asSuit) - either lands here uniformly, the same way
+        // describePendingMove's own write side already splits pending.asUid
+        // back into whichever of the two the value's own shape calls for.
+        const borrowed = parsed.asUid ?? parsed.asSuit;
         const worldBorrow = borrowed !== undefined && !ALL_SUITS.some(s => s.uid === borrowed);
         // "decline" is already a complete choice - there's no step for a
         // button set to configure, so the bar falls back to the plain
@@ -3808,21 +3848,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
 
-    // Builds the move string for choosing a suit-power mode via button -
-    // the minion is always the first eligible one (see
-    // IPendingStep's docs), and the target cell is auto-derived
-    // (minorTargetCell) since it's fully determined by the minion's own
-    // facing, not something the player needs to click. "Piece"-shaped
-    // modes leave the target unset instead of guessing whenever there's a
-    // genuine choice (self vs. whatever's at the facing cell) - see
-    // getActionButtons' own "target_" button set, the only way to choose
-    // between them (handlePendingStepBoardClick's own docs explain why
-    // that's button-only, not a board click). Deliberately produces a step with
-    // FEWER tokens than MINOR_MODES' minArgs for modes needing a hand-card
-    // uid (Cups "new", Discs/Swords "tile") - applyMinorPower's own
-    // tolerance (see its docs) keeps that a harmless, still-provisional
-    // "not given yet" state rather than a thrown error, until
-    // supplyStepCardUid fills it in.
     // Cups "enemy"'s victim argument reuses the same <pips>[.<orientation>]
     // [.<player>] qualifier vocabulary as a full piece ref, just without
     // its own leading cell segment (the target cell is already "enemy"'s
@@ -3998,7 +4023,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // this port's own final report on that gap.
             const facing = trailing[trailing.length - 1];
             if (facing !== undefined) {
-                step.direction = facing.replace(/\?$/, "") as Direction;
+                step.direction = facing as Direction;
             }
         } else if (mode === "enemy") {
             if (trailing[0] !== undefined) {
@@ -4098,15 +4123,36 @@ export class GnosticaGame extends GameBaseSequenced {
     // gives a bare verb as the last-typed step (see its own "with"
     // handling). Shared by every board/button click that only narrows the
     // acting minion without choosing a mode/target yet.
-    private buildAnchorStep(pending: IPendingStep, minionRef: string): IStep {
+    // A special step's single verb is never ambiguous, so it's included
+    // right away (matches buildSpecialStep's own docs). A suit-primitive
+    // step's verb, though, IS the still-undecided choice at this point
+    // (piece vs tile) - see suitTargetCandidates'/buildTargetedStepMove's
+    // own docs on why that choice is now made by ONE click, together with
+    // the target - so seeding it here would misrepresent this state as
+    // "verb chosen, target not yet" when nothing has actually been
+    // decided beyond which minion is acting. Reproduces everything up to
+    // (not including) this still-undecided step, then appends the bare
+    // ref by hand - pickleMove has no way to omit a step's own verb once
+    // the step itself is present in `steps`.
+    private buildAnchorMove(pending: IPendingStep, ref: string): string {
         if (pending.special !== undefined) {
-            return this.buildSpecialStep(pending.special, minionRef, []);
+            return this.assembleStepMove(pending, this.buildSpecialStep(pending.special, ref, []));
         }
-        const verb = pending.suitUid === "C" ? "create" : pending.suitUid === "R" ? "move" : pending.suitUid === "D" ? "grow" : "shrink";
-        return { action: verb, withPiece: minionRef };
+        return `${this.describePendingMove(pending, pending.priorSteps)}/with ${ref}`;
     }
 
-    private buildStepModeMove(pending: IPendingStep, mode: string): string {
+    // Builds the move string for a step whose primary target was just
+    // picked directly from the unified candidate list (see stepModeBar's
+    // own docs on why there's no separate mode-then-target stage anymore)
+    // - `targetRef` is either the one tile cell (`minorTargetCell`), a
+    // piece ref (any piece at that same cell, self included), or - Cups
+    // only - the literal `"own"`/`"new"` or a victim ref. Which suit-mode
+    // this becomes is inferred entirely from `targetRef`'s own shape,
+    // exactly the way the move string's own grammar already infers it
+    // (see deriveMinorMode's own docs) - a piece ref always contains a
+    // "." (its mandatory pips segment - see PIECE_REF_RE), a bare cell
+    // never does.
+    private buildTargetedStepMove(pending: IPendingStep, targetRef: string): string {
         // Only ever called for a suit-shaped pending (a minor card, a
         // major card's own `primitive` step, or magicianChoice's 2nd
         // stage once a suit letter is chosen - see buildSpecialPending) -
@@ -4114,16 +4160,30 @@ export class GnosticaGame extends GameBaseSequenced {
         // IPendingStep's own docs on the two branches being mutually
         // exclusive.
         const suitUid = pending.suitUid!;
-        // Two different refs to the acting minion: `minionRef` fills the
-        // step's own minion-selector slot (disambiguated only against the
-        // player's OTHER minions currently in play - see resolvePieceRef's
-        // docs on the "minion-selector" pool); `selfRef` is used wherever the same
-        // piece is the DEFAULT TARGET of a "piece"-shaped mode instead
-        // (disambiguated against every piece at that cell, any owner -
-        // the "target" pool). These can differ, so they're never
-        // interchangeable even though they name the same piece here.
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-        const selfRef = this.pieceRefStr(pending.minion);
+        const [tx, ty] = this.minorTargetCell(pending.minion);
+        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        // `pending.prefix` (magicianChoice's own inline suit letter,
+        // World-borrow only) has no IStep slot yet - dropped here, a
+        // known gap (TODO-gnostica #105 territory), same as before this
+        // port.
+        if (suitUid === "C") {
+            let step: IStep;
+            if (targetRef === "own") {
+                // Trailing "?" - the new piece's own default facing isn't
+                // yet a deliberate choice (mirrors "place"'s identical
+                // convention for the very first piece - see validateCups'
+                // own docs on why this matters for the real playground
+                // client's auto-submit behavior). pickleMove has no "?"
+                // marker support yet, so this is written plain for now.
+                step = this.buildCupsStep(minionRef, "own", [targetCell, "U"]);
+            } else if (targetRef === "new") {
+                step = this.buildCupsStep(minionRef, "new", [targetCell]);
+            } else {
+                step = this.buildCupsStep(minionRef, "enemy", [targetCell, targetRef]);
+            }
+            return this.assembleStepMove(pending, step);
+        }
         const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
         // A size-1 minion has only one legal dist/pips value, so it's
         // simply supplied here. A size>1 minion has a genuine choice among
@@ -4132,69 +4192,39 @@ export class GnosticaGame extends GameBaseSequenced {
         // the resulting instruction to click the destination cell/a
         // button) instead of seeding a default the player never chose.
         const onlyCount = minionPiece.size === 1 ? "1" : undefined;
-        const [tx, ty] = this.minorTargetCell(pending.minion);
-        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
-        // Whether the minion is actually facing a piece (not "U", which
-        // has no facing cell at all) - shared by all three "piece" modes
-        // below to decide whether there's a genuine target CHOICE to make
-        // at all. When there is, this button leaves the target unset
-        // rather than picking a side - see getActionButtons' own
-        // "target_" button set, the sole way to choose between them now
-        // (never a board click - see handlePendingStepBoardClick's own
-        // docs on why that would be ambiguous with distance/orientation).
-        const facingHasPiece = (tx !== pending.minion.x || ty !== pending.minion.y)
-            && (this.board.get(tx, ty)?.pieces.length ?? 0) > 0;
-        // Cups alone carries no mode word - "own"/"enemy"/"new" is
-        // inferred from the trailing argument's own shape once "at
-        // <cell> create" is stripped (see deriveMinorMode's own docs), so
-        // "mode" itself is never actually written for it. `pending.prefix`
-        // (magicianChoice's own inline suit letter, World-borrow only) has
-        // no IStep slot yet - dropped here, a known gap (TODO-gnostica
-        // #105 territory), same as before this port.
+        const isPieceTarget = targetRef.includes(".");
         let step: IStep;
-        switch (`${suitUid}.${mode}`) {
-            case "C.own":
-                // Trailing "?" - the new piece's own default facing isn't
-                // yet a deliberate choice (mirrors "place"'s identical
-                // convention for the very first piece - see validateCups'
-                // own docs on why this matters for the real playground
-                // client's auto-submit behavior). pickleMove has no "?"
-                // marker support yet, so this is written plain for now.
-                step = this.buildCupsStep(minionRef, "own", [targetCell, "U"]);
-                break;
-            case "C.enemy": {
-                const t = this.board.get(tx, ty);
-                const victim = (t?.pieces ?? []).find(p => p.owner !== this.currplayer);
-                const victimIdx = victim !== undefined ? t!.pieces.indexOf(victim) : 0;
-                step = this.buildCupsStep(minionRef, "enemy", [targetCell, this.victimRefStr(tx, ty, victimIdx)]);
-                break;
-            }
-            case "C.new":
-                step = this.buildCupsStep(minionRef, "new", [targetCell]);
-                break;
-            case "R.piece":
-                step = this.buildRdsStep("R", "piece", minionRef, !facingHasPiece
-                    ? (onlyCount !== undefined ? [selfRef, onlyCount] : [selfRef]) : []);
-                break;
-            case "R.tile":
-                step = this.buildRdsStep("R", "tile", minionRef, onlyCount !== undefined ? [onlyCount] : []);
-                break;
-            case "D.piece":
-                step = this.buildRdsStep("D", "piece", minionRef, !facingHasPiece ? [selfRef] : []);
-                break;
-            case "D.tile":
-                step = this.buildRdsStep("D", "tile", minionRef, [targetCell]);
-                break;
-            case "S.piece":
-                step = this.buildRdsStep("S", "piece", minionRef, !facingHasPiece
-                    ? (onlyCount !== undefined ? [selfRef, onlyCount] : [selfRef]) : []);
-                break;
-            case "S.tile":
-                step = this.buildRdsStep("S", "tile", minionRef, [targetCell, "1"]);
-                break;
-            default:
-                throw new Error(`Unknown minor mode "${suitUid}.${mode}".`);
+        if (suitUid === "R") {
+            // Rods' own "tile" mode always seeds a real distance of 1 -
+            // unlike "piece" (still left for a button/click when
+            // genuinely ambiguous), there's no separate target ref to
+            // disambiguate several tile distances by, so a seeded default
+            // plus the existing own-cell-click cycling (untouched "none"
+            // shape - see handlePendingStepBoardClick's own docs) is the
+            // only way to reach any distance beyond 1 anyway.
+            step = isPieceTarget
+                ? this.buildRdsStep("R", "piece", minionRef, onlyCount !== undefined ? [targetRef, onlyCount] : [targetRef])
+                : this.buildRdsStep("R", "tile", minionRef, ["1"]);
+        } else if (suitUid === "D") {
+            step = isPieceTarget
+                ? this.buildRdsStep("D", "piece", minionRef, [targetRef])
+                : this.buildRdsStep("D", "tile", minionRef, [targetCell]);
+        } else {
+            step = isPieceTarget
+                ? this.buildRdsStep("S", "piece", minionRef, onlyCount !== undefined ? [targetRef, onlyCount] : [targetRef])
+                : this.buildRdsStep("S", "tile", minionRef, [targetCell, "1"]);
         }
+        return this.assembleStepMove(pending, step);
+    }
+
+    // Hermit's own twin of buildTargetedStepMove - same "shape of the
+    // clicked target decides piece-vs-tile" inference, via
+    // buildHermitStepFromArgs instead of buildRdsStep.
+    private buildTargetedHermitMove(pending: IPendingStep, targetRef: string): string {
+        const minionRef = this.pieceRefStr(pending.minion, pending.minions);
+        const step = targetRef.includes(".")
+            ? this.buildHermitStepFromArgs(minionRef, "piece", [targetRef])
+            : this.buildHermitStepFromArgs(minionRef, "tile", [GnosticaBoard.coords2algebraic(...this.minorTargetCell(pending.minion))]);
         return this.assembleStepMove(pending, step);
     }
 
@@ -4223,7 +4253,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // reorientation available after acting on your own piece isn't
     // click-driven either. Both remain available by typing a move
     // manually.
-    private handlePendingStepBoardClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
+    private handlePendingStepBoardClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
         if (pending.mode === undefined) {
             return undefined;
         }
@@ -4270,28 +4300,15 @@ export class GnosticaGame extends GameBaseSequenced {
             if (x !== tx || y !== ty) {
                 return undefined;
             }
-            if (suitUid === "C" && mode === "enemy") {
-                const t = this.board.get(tx, ty);
-                const enemyIndices = (t?.pieces ?? [])
-                    .map((p, i) => ({ owner: p.owner, i }))
-                    .filter(({ owner }) => owner !== this.currplayer)
-                    .map(({ i }) => i);
-                if (enemyIndices.length === 0) {
-                    return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.NO_ENEMY_THERE", { cell }) };
-                }
-                const currentResolution = this.resolveVictimRef(cell, pending.rest[1]);
-                const current = currentResolution.kind === "ok" ? currentResolution.ref.index : -1;
-                const at = enemyIndices.indexOf(current);
-                const next = enemyIndices[(at + 1) % enemyIndices.length];
-                // Cups carries no mode word (see deriveMinorMode's own
-                // docs) - built directly here instead of via `rebuild`.
-                return this.assembleStepMove(pending, this.buildCupsStep(minionRef, "enemy", [cell, this.victimRefStr(tx, ty, next)]));
-            }
-            // "new" (Cups) / "tile" (Discs) - the only remaining arg is a
-            // hand-card uid (supplyStepCardUid), nothing to cycle here.
+            // "new" (Cups) - the only remaining arg is a hand-card uid
+            // (supplyStepCardUid), nothing to cycle here. "enemy"'s own
+            // victim is already chosen the instant this mode is inferred
+            // (see deriveMinorMode's own docs), so there's nothing left
+            // for a board click to refine there either.
             if (suitUid === "C") {
-                return this.assembleStepMove(pending, this.buildCupsStep(minionRef, "new", pending.rest));
+                return mode === "new" ? this.assembleStepMove(pending, this.buildCupsStep(minionRef, "new", pending.rest)) : undefined;
             }
+            // "tile" (Discs) - same as "new" above.
             return rebuild(pending.rest);
         }
 
@@ -4838,7 +4855,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${rodReason.key}`) };
                     }
                     const minionRef = this.pieceRefStr(resolved.ref, pending.minions);
-                    return this.assembleStepMove(pending, this.buildAnchorStep(pending, minionRef));
+                    return this.buildAnchorMove(pending, minionRef);
                 }
                 if (value.startsWith("orientpick_")) {
                     // "orientpick_<ref>" - orient's own minion-picker (see
@@ -4860,40 +4877,39 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     return `orient ${this.pieceRefStr(resolved.ref)}`;
                 }
-                if (value.startsWith("mode_")) {
-                    // "mode_<suitUid>_<mode>" - see getActionButtons()'s own
-                    // pendingMinor branch, which only ever offers one of
-                    // these once a minor-arcana use/play is already
-                    // seeded (0 steps taken yet).
-                    const [, suitUid, mode] = value.split("_");
+                if (value.startsWith("target_")) {
+                    // The unified candidate list stepModeBar offers for a
+                    // fresh (nothing-chosen-yet) suit-power step or
+                    // hermitTeleport - see suitTargetCandidates'/
+                    // hermitTargetCandidates' own docs. One click supplies
+                    // both mode and target together, so this is only ever
+                    // offered while nothing's been chosen yet.
+                    const ref = value.slice("target_".length);
                     const pending = this.parsePendingStep(move);
-                    if (pending === undefined || pending.suitUid !== suitUid) {
+                    if (pending === undefined) {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
-                    const reason = this.minorModeAvailability(pending).get(mode);
+                    if (pending.special === "hermitTeleport") {
+                        if (pending.rest.length !== 0) {
+                            return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                        }
+                        return this.buildTargetedHermitMove(pending, ref);
+                    }
+                    if (pending.suitUid === undefined || pending.mode !== undefined) {
+                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                    }
+                    // Same per-mode availability check the old mode_
+                    // buttons used - a struck-through candidate must still
+                    // reject a click on it, not silently build a doomed
+                    // move that fails later at submit time.
+                    const clickedMode = pending.suitUid === "C"
+                        ? (ref === "own" || ref === "new" ? ref : "enemy")
+                        : (ref.includes(".") ? "piece" : "tile");
+                    const reason = this.minorModeAvailability(pending).get(clickedMode);
                     if (reason !== undefined) {
                         return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${reason.key}`, reason.params ?? {}) };
                     }
-                    return this.buildStepModeMove(pending, mode);
-                }
-                if (value.startsWith("target_")) {
-                    // "piece" mode's own target - see getActionButtons'
-                    // own docs on why this is button-only, not a board
-                    // click. Only ever offered while rest is still empty
-                    // (the choice hasn't been made yet), so this always
-                    // starts the step's own trailing args fresh.
-                    const ref = value.slice("target_".length);
-                    const pending = this.parsePendingStep(move);
-                    if (pending === undefined || pending.mode !== "piece"
-                        || (pending.suitUid !== "R" && pending.suitUid !== "D" && pending.suitUid !== "S") || pending.rest.length !== 0) {
-                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                    }
-                    const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-                    const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
-                    // Same "size 1 has no real choice, size >1 is left for
-                    // a click/button" rule as buildStepModeMove's own.
-                    const rest = pending.suitUid === "D" || minionPiece.size > 1 ? [ref] : [ref, "1"];
-                    return this.assembleStepMove(pending, this.buildRdsStep(pending.suitUid, "piece", minionRef, rest));
+                    return this.buildTargetedStepMove(pending, ref);
                 }
                 if (value.startsWith("pips_")) {
                     // Swords "piece" (attack) pips - see getActionButtons'
@@ -4922,29 +4938,6 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                     }
                     return this.describePendingMove({ ...pending, asUid: suitUid }, pending.priorSteps);
-                }
-                if (value.startsWith("hermit_")) {
-                    // Stage 1 of hermitTeleport - picks piece/tile mode,
-                    // seeding "piece"'s target to self by default (mirrors
-                    // Rods "piece" mode's own default) - "tile"'s target has
-                    // no self-vs-face choice at all (see handleHermitTeleportClick's
-                    // own docs), so it's filled in immediately too.
-                    const mode = value.slice("hermit_".length);
-                    const pending = this.parsePendingStep(move);
-                    if (pending === undefined || pending.special !== "hermitTeleport") {
-                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                    }
-                    const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-                    if (mode === "piece") {
-                        const selfRef = this.pieceRefStr(pending.minion);
-                        return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "piece", [selfRef]));
-                    }
-                    if (mode === "tile") {
-                        const [tx, ty] = this.minorTargetCell(pending.minion);
-                        const targetCellStr = GnosticaBoard.coords2algebraic(tx, ty);
-                        return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "tile", [targetCellStr]));
-                    }
-                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                 }
                 if (value.startsWith("drawcount_")) {
                     // The count-picker buttons getActionButtons() offers
@@ -5404,9 +5397,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     if (atCell.length === 1) {
                         const ref = this.pieceRefStr(atCell[0], candidate.minions);
-                        return this.assembleStepMove(candidate, this.buildAnchorStep(candidate, ref));
+                        return this.buildAnchorMove(candidate, ref);
                     }
-                    return this.assembleStepMove(candidate, this.buildAnchorStep(candidate, cell));
+                    return this.buildAnchorMove(candidate, cell);
                 };
                 if (advanced !== undefined && advanced.special !== undefined && advanced.rest.length === 0
                     && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1)) {
@@ -5426,7 +5419,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                 }
                 if (pending !== undefined && pending.mode !== undefined) {
-                    const result = this.handlePendingStepBoardClick(pending, x, y, cell);
+                    const result = this.handlePendingStepBoardClick(pending, x, y);
                     if (result !== undefined) {
                         return result;
                     }
@@ -6166,7 +6159,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (eligible.length === 0) {
             return this.invalid("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid });
         }
-        return this.validateCardPower(t.card!, eligible, parsed.stepSegments, parsed.asUid);
+        return this.validateCardPower(t.card!, eligible, parsed.stepSegments, parsed.asUid ?? parsed.asSuit);
     }
 
     // "Play a card from your hand to the discard pile. All your pieces on
@@ -6232,7 +6225,7 @@ export class GnosticaGame extends GameBaseSequenced {
         hand.splice(handIdx, 1);
         this.discardPile.push(uid);
         try {
-            return this.validateCardPower(card, eligible, parsed.stepSegments, parsed.asUid);
+            return this.validateCardPower(card, eligible, parsed.stepSegments, parsed.asUid ?? parsed.asSuit);
         } finally {
             hand.splice(handIdx, 0, uid);
             this.discardPile.pop();
@@ -7188,7 +7181,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_CARD"});
         }
         const stepSegments = this.resumeStepSegments(parsed);
-        const worldBorrow = parsed.asUid !== undefined && !ALL_SUITS.some(s => s.uid === parsed.asUid);
+        const borrowed = parsed.asUid ?? parsed.asSuit;
+        const worldBorrow = borrowed !== undefined && !ALL_SUITS.some(s => s.uid === borrowed);
         if (stepSegments.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
             // Same bare seed as resumePendingPower - valid but incomplete,
             // matching the "still building" complete:-1 pattern used
@@ -7198,7 +7192,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const msg = this.freshStepMessage(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
-        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!, parsed.asUid);
+        return this.validateFrameStack(stack, stepSegments, this.getContinuedUid()!, borrowed);
     }
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as

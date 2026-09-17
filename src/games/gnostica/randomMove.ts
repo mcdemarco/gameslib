@@ -887,7 +887,7 @@ function buildRandomHermitTokens(game: GnosticaGame, minions: IMinionRef[]): str
             for (const target of pieceTargets) {
                 for (const [dx, dy] of destinations) {
                     const destCell = GnosticaBoard.coords2algebraic(dx, dy);
-                    const tokens = buildHermitTokens(mode, [target, destCell]);
+                    const tokens = buildHermitTokens([target, destCell]);
                     const check = game.validateHermitStep(minion, tokens);
                     if (!check.failed) {
                         const ref = game.pieceRefStr(minion, minions);
