@@ -1773,7 +1773,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return p.announceLast ? "last" : "";
         }
         if (p.steps === undefined || p.steps.length === 0) {
-            return p.head;
+            return p.head + ( p.announceLast ? " last" : "");
         }
        
         /* old version
