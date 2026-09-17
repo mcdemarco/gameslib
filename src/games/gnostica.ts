@@ -1257,10 +1257,7 @@ export class GnosticaGame extends GameBaseSequenced {
         
                 if (headTokens.length === 0) {
                     //The only head that can have no arguments *and* no following steps is a "pass".
-                    if (lastStep) {
-                        //If there is only the one step, it can be a "pass" or an incomplete move.
-                        break;
-                    } else {
+                    if (! lastStep) {
                         //"Pass" can't be followed by more steps, so whatever the head is, it's invalid.
                         pm.error = "HEAD_STEP_NEEDS_CONTENT";
                         break;
@@ -1372,6 +1369,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (segment.length === 0) {
                 if (lastStep) {
                     //Partial move.
+                    pm.steps.push(step);
                     break;
                 } else {
                     pm.error = "STEP_TOO_SHORT";
@@ -1442,7 +1440,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     if (segment.length === 0) {
                         if (lastStep) {
-                          //Partial move.
+                            //Partial move.
                             pm.steps.push(step);
                         } else {
                             pm.error = "MISSING_STEP_CONTENTS";
