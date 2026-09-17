@@ -3039,7 +3039,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const options: ChoiceOption[] = [{ value: "own", label: MINOR_MODES.C.own.label, disabledReason: availability.get("own") }];
             cellPieces.forEach((p, index) => {
                 if (p.owner !== this.currplayer) {
-                    options.push({ value: this.victimRefStr(tx, ty, index), label: `Capture ${this.textFormat(p)}`, disabledReason: availability.get("enemy") });
+                    options.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Capture ${this.textFormat(p)}`, disabledReason: availability.get("enemy") });
                 }
             });
             options.push({ value: "new", label: MINOR_MODES.C.new.label, disabledReason: availability.get("new") });
@@ -3818,34 +3818,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
 
-    // Cups "enemy"'s victim argument reuses the same <pips>[.<orientation>]
-    // [.<player>] qualifier vocabulary as a full piece ref, just without
-    // its own leading cell segment (the target cell is already "enemy"'s
-    // own first argument) - built/read by borrowing pieceRefStr/
-    // resolvePieceRef's own logic and stripping/re-adding the cell.
-    public victimRefStr(x: number, y: number, index: number): string {
-        const full = this.pieceRefStr({ x, y, index });
-        return full.slice(full.indexOf(".") + 1);
-    }
-
-    private resolveVictimRef(cellStr: string, suffix: string | undefined): PieceRefResolution {
-        if (suffix === undefined) {
-            return { kind: "malformed" };
-        }
-        return this.resolvePieceRef(`${cellStr}.${suffix}`);
-    }
-
-    private resolveVictimRefOrThrow(cellStr: string, suffix: string | undefined): { x: number; y: number; index: number } {
-        const result = this.resolveVictimRef(cellStr, suffix);
-        if (result.kind === "ok") {
-            return result.ref;
-        }
-        if (result.kind === "ambiguous") {
-            throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.AMBIGUOUS_PIECE_REF", { ref: suffix }));
-        }
-        throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: result.kind === "malformed" ? "BAD_PIECE_REF" : "NO_SUCH_PIECE" }));
-    }
-
     // Spells a pending step's own head, shared by assembleStepMove (mid-
     // click, still adding a segment) and pendingMoveString (echoing back
     // the CURRENT state unmodified, e.g. on a rejected click) - both need
@@ -3979,11 +3951,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Cups' own (mode, args) - args always [cellStr, ...trailingArgs], see
     // deriveMinorMode's own docs - into the same IStep shape. The "enemy"
-    // victim ref stays the bare, cell-less shape victimRefStr/
-    // resolveVictimRef already use (they still prepend the cell
-    // themselves) - not the fuller piece ref discussed for parseMove's own
-    // grammar, since applyCups/resolveVictimRef weren't part of this port
-    // and still expect the old shape.
+    // victim ref is a full piece ref now (#106) - its own cell, pips, and
+    // qualifiers - stored straight into targetPiece, the same slot every
+    // other action's own target already uses.
     private buildCupsStep(minionRef: string, mode: string, args: string[]): IStep {
         const [cellStr, ...trailing] = args;
         const step: IStep = { action: "create", withPiece: minionRef, atCell: cellStr };
@@ -7504,7 +7474,12 @@ export class GnosticaGame extends GameBaseSequenced {
             case "enemy": {
                 const [cellStr, victimRef] = rest;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const { index: victimIndex } = this.resolveVictimRefOrThrow(cellStr, victimRef);
+                // victimRef is a full piece ref now (#106) - validateCups
+                // already confirmed it names a piece at this same cell, so
+                // its own index is trusted directly (see "no trusted-path
+                // defense" - that cross-check is validate's job, not this
+                // one's).
+                const { index: victimIndex } = this.resolvePieceRefOrThrow(victimRef);
                 const victimOwner = this.board.get(tx, ty)!.pieces[victimIndex].owner;
                 createEnemy(ctx, minion.x, minion.y, minion.index, tx, ty, victimIndex, opts);
                 this.results.push({ type: "place", where: cellStr, how: "cups-enemy", who: victimOwner });
@@ -7595,9 +7570,18 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
                 }
                 const [tx, ty] = coords;
-                const victimResult = this.resolveVictimRef(cellStr, victimRef);
+                // victimRef is a full piece ref now (#106), resolved
+                // board-wide like any other target - but Cups can only
+                // ever act on the SAME cell "at <cell>" already named, so
+                // a ref resolving to somewhere else is rejected the same
+                // way "no victim at this cell" always was, not silently
+                // trusted.
+                const victimResult = this.resolvePieceRef(victimRef);
                 if (victimResult.kind !== "ok") {
                     return { failed: true, result: this.invalidPieceRef(victimResult.kind, victimRef) };
+                }
+                if (victimResult.ref.x !== tx || victimResult.ref.y !== ty) {
+                    return { failed: true, result: this.failureResult({ key: "NO_VICTIM_THERE" }) };
                 }
                 const failure = checkCreateEnemy(ctx, minion.x, minion.y, minion.index, tx, ty, victimResult.ref.index, opts);
                 if (failure) {

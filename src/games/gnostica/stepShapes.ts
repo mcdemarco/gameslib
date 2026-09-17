@@ -116,10 +116,9 @@ const fixedArity = (n: number) => (rest: string[]): StepShape =>
 // own/enemy/new from <arg>'s own shape once "at"/"create" are stripped -
 // an orientation letter (own), a full piece ref naming the victim (enemy -
 // see pieceRefStr's own docs; the "at <cell>" already named, cell and
-// all, for readability, not just its own trailing pips), or anything
-// else, (implementation of this was interrupted and is still pending)
-// trusted as a card uid the same way an explicit mode word always
-// was (new). Shared by every call site below that used to just
+// all, for readability, not just its own trailing pips - #106), or
+// anything else, trusted as a card uid the same way an explicit mode
+// word always was (new). Shared by every call site below that used to just
 // destructure `rest` directly - undefined here means "still building
 // or malformed enough that there's no real mode to report yet," which
 // they already treated a missing/bad mode as, so nothing there changes.
@@ -229,12 +228,13 @@ export function deriveMinorMode(suitUid: string, rest: string[]): { mode: string
         return { mode: "new", args: [cellStr] };
     }
     const bare = first.endsWith("?") ? first.slice(0, -1) : first;
-    // A victim ref's own leading digit is ALWAYS followed by either
-    // nothing else or a "." (an orientation/player qualifier) - never a
-    // letter glued straight on, which is exactly how a rank-2/3 card uid
-    // ("2S", "3C", ...) is shaped instead. Without that distinction,
-    // "enemy" would wrongly swallow those uids away from "new".
-    const mode = /^[neswu]$/i.test(bare) ? "own" : /^[1-3](\.|$)/.test(bare) ? "enemy" : "new";
+    // The victim ref is now a full piece ref (its own cell, pips, and
+    // qualifiers - #106), the same PIECE_WITH_PIPS_RE-recognized shape
+    // Rods/Discs/Swords already use to tell "a specific piece" apart from
+    // everything else - a rank-2/3 card uid ("2S", "3C", ...) never has
+    // the mandatory "." pips separator, so there's no ambiguity to guard
+    // against here the way a bare digit once needed.
+    const mode = /^[neswu]$/i.test(bare) ? "own" : PIECE_WITH_PIPS_RE.test(bare) ? "enemy" : "new";
     return { mode, args: [cellStr, ...argTokens] };
 }
 

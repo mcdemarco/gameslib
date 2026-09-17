@@ -29,7 +29,7 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
         expect(primitiveStepShape("C", ["at", "m0"])).to.deep.equal({ status: "incomplete" }); // no "create" yet
         expect(primitiveStepShape("C", ["at", "m0", "create"])).to.deep.equal({ status: "incomplete" }); // "new" inferred, still needs a card uid
         expect(primitiveStepShape("C", ["at", "m0", "create", "U"])).to.deep.equal({ status: "complete" }); // "own" inferred from the orientation shape
-        expect(primitiveStepShape("C", ["at", "m0", "create", "1"])).to.deep.equal({ status: "complete" }); // "enemy" inferred from the victim-ref shape
+        expect(primitiveStepShape("C", ["at", "m0", "create", "m0.1"])).to.deep.equal({ status: "complete" }); // "enemy" inferred from the full piece-ref shape
         expect(primitiveStepShape("C", ["at", "m0", "create", "5D"])).to.deep.equal({ status: "complete" }); // "new" inferred from the card-uid shape
     });
 

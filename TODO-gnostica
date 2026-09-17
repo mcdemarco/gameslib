@@ -73,7 +73,7 @@ Mark items done with @done(date) only as they're confirmed.
 - #103 - Remove via requirement; just autopopulate on completion and always derive vianess from state.
 - #104 - I want to systematically add some words to move strings.  "with" before the minion.  "draw" before drawn card count (for Judgement), etc.  "create" for cups, move for rods, etc.  I think we can get rid of the piece vs tile distinction if we use cardUids when acting on "tiles". @done(2026-09-16)
 - #105 - Replace the single asUid head slot with a real chain, so a nested meta-card borrow (World borrowing the Magician) writes "as 01 as C".  Also fix other issues with Magician picking up the suit.
-- #106 - Implement change to enemy pieceref (to be more of a pieceref) in create path fully.
+- #106 - Implement change to enemy pieceref (to be more of a pieceref) in create path fully. @done(2026-09-17)
 - #107 - Tests should not assemble internal structures manually.
 - #108 - Rods must provide a target, not just a distance. @done(2026-09-17)
 - #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.

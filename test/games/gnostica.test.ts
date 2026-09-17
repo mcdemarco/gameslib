@@ -834,7 +834,7 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place n0 W", { trusted: true }); // player 2, on the targeted cell
-        g.move(`use ${aceOfCups().uid}/with m0.1 at n0 create 1`, { trusted: true });
+        g.move(`use ${aceOfCups().uid}/with m0.1 at n0 create n0.1`, { trusted: true });
         const t = g.board.get(1, 0)!;
         expect(t.pieces.length).eq(2);
         expect(t.pieces[1]).to.deep.include({ owner: 2, size: 1, orientation: "W" });
@@ -2551,8 +2551,8 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
-        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_1");
-        expect(modeClick.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create 1`);
+        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.1");
+        expect(modeClick.move).eq(`use ${aceOfCups().uid}/with m0.1 at n0 create n0.1`);
         g.move(modeClick.move, { trusted: true });
         const t = g.board.get(1, 0)!;
         expect(t.pieces.length).eq(2);
@@ -4992,7 +4992,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place n0 W", { trusted: true }); // player 2, on the targeted cell
-        g.move(`use ${aceOfCups().uid}/with m0.1 at n0 create 1`, { trusted: true });
+        g.move(`use ${aceOfCups().uid}/with m0.1 at n0 create n0.1`, { trusted: true });
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("added a new piece"));
         expect(line).eq(i18next.t("apresults:PLACE.gnostica_enemy", { player: "Alice", where: "n0", target: "Bob" }));
@@ -5026,10 +5026,10 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.move("place m0 E", { trusted: true }); // player 1, pointing at n0
         g.move("place n0 W", { trusted: true }); // player 2, on the targeted cell
         g.stashes.get(2)![0] = 0; // drain player 2's (the victim's) own smalls
-        const validated = g.validateMove(`use ${aceOfCups().uid}/with m0.1 at n0 create 1`);
+        const validated = g.validateMove(`use ${aceOfCups().uid}/with m0.1 at n0 create n0.1`);
         expect(validated.valid).to.be.false;
         expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { player: 2, size: 1 }));
-        expect(() => g.move(`use ${aceOfCups().uid}/with m0.1 at n0 create 1`, { trusted: false })).to.throw();
+        expect(() => g.move(`use ${aceOfCups().uid}/with m0.1 at n0 create n0.1`, { trusted: false })).to.throw();
     });
 
     it("convert (Hierophant replace): names whose piece was displaced", () => {

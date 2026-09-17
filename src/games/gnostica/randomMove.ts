@@ -630,7 +630,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
             return flat((targetT?.pieces ?? [])
                 .map((p, i) => ({ p, i }))
                 .filter(({ p }) => p.owner !== game.currplayer)
-                .map(({ i }) => [targetCell, game.victimRefStr(tx, ty, i)]));
+                .map(({ i }) => [targetCell, game.pieceRefStr({ x: tx, y: ty, index: i })]));
         case "C.new":
             return flat(cardsWorth(1).map(uid => [targetCell, uid]));
         case "R.piece": {
