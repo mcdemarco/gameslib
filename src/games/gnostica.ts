@@ -5970,12 +5970,13 @@ export class GnosticaGame extends GameBaseSequenced {
         if (failure) {
             return this.failureResult(failure);
         }
-        // A missing (or value-less) "draw <n>" is never complete - the
-        // player must make an explicit draw-count choice, 0 included,
-        // rather than this silently completing on a default. Applies
-        // uniformly - hand-typed or click-built alike - since it's a
-        // fact about the string, not about how it was produced.
-        if (!this.hasExplicitDrawCount(tokens)) {
+        // A missing "draw <n>" is never complete - the player must make
+        // an explicit draw-count choice, 0 included, rather than this
+        // silently completing on a default. parsed.steps[0] is the
+        // discard step itself (parseMove's own single entry for a
+        // "discard" head), so its already-parsed amount says this
+        // directly - no need to re-scan tokens for "draw" ourselves.
+        if (parsed.steps[0]?.amount === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
