@@ -98,14 +98,35 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 12/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 07/with m0.1 move m0.1 3 orient E/with j0.1 move j0.1 3 orient U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 11/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
+
+        g.validateMove("use 01 as C/with m0.1 at m1 create U");
+        expect(g.parseMove("use 21 as 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
+        expect(g.parseMove("play 21 as 01 as C via 00/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
+        expect(g.parseMove("use 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
     });
     
     it ("Pickles", () =>  {
         const move = "use 9D/with l1.1 grow l1.1";
-        expect(g.pickleMove(g.parseMove(move))).to.equal(move);
         const move2 = "use 07/with m0.1 move m0.1 3 orient E/with j0.1 move j0.1 3 orient U";
+        const move3 = "use 09/with m0.1 fly m0.1 to o0";
+        const move4 = "use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U";
+        const move5 = "use 12/with m0.1 trade n0.1/with m0.1 shrink n0.1 1";
+        expect(g.pickleMove(g.parseMove(move))).to.equal(move);
         expect(g.pickleMove(g.parseMove(move2))).to.equal(move2);
+        expect(g.pickleMove(g.parseMove(move3))).to.equal(move3);
+        expect(g.pickleMove(g.parseMove(move4))).to.equal(move4);
+        expect(g.pickleMove(g.parseMove(move5))).to.equal(move5);
 
+        const move6 = "use 07/with m0.1 move m0.1 3 orient E/with j0.1 move j0.1 3 orient U";
+        const move7 = "use 11/with m0.1 trade n0.1/with m0.1 shrink n0.1 1";
+        const move8 = "use 20/with m0.2 draw KS 00";
+        const move9 = "play 21 as 01 as C via 00/with m0.1 at m1 create U";
+        const move10 = "use 21 as 01 as C/with m0.1 at m1 create U";
+        expect(g.pickleMove(g.parseMove(move6))).to.equal(move6);
+        expect(g.pickleMove(g.parseMove(move7))).to.equal(move7);
+        expect(g.pickleMove(g.parseMove(move8))).to.equal(move8);
+        expect(g.pickleMove(g.parseMove(move9))).to.equal(move9);
+        expect(g.pickleMove(g.parseMove(move10))).to.equal(move10);
     });
 
 });

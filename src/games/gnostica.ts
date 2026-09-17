@@ -824,7 +824,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const parsed = this.parseMove(m);
-        //console.log(JSON.stringify(parsed));
+        console.log(JSON.stringify(parsed));
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
@@ -1778,14 +1778,11 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pm.error !== undefined)
             pm.valid = false;
 
-        console.log(pm.steps);
+        //console.log(pm.steps);
             
         return pm;
     }
 
-    // "/" separates every segment - the head/card-uid from its first
-    // power step, and steps from each other (see parseMove). So a
-    // single-step move is "use <uid>/<step>", a chain "use <uid>/<s1>/<s2>".
     public pickleMove(p: IParsedMove): string {
         if (p.head === undefined) {
             return p.announceLast ? "last" : "";
