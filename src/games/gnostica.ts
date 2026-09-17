@@ -194,7 +194,7 @@ interface IStep {
     atCell?: string;
     card?: string; 
     cardList?: string[]; 
-    direction?: Direction;
+    direction?: string;
     targetPiece?: string;
     targetCell?: string;
     withPiece?: string;
@@ -1162,27 +1162,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
         const STEPWORDS = ["discard", "draw", "orient", "with"];
         const OTHERWORDS = ["as", "at", "create", "draw", "fly", "grow", "last", "move", "orient", "replace", "shrink", "to", "trade", "via"];
-        /*
-
-          //only some of these  (with, discard, draw, orient, replace, trade) can be a subhead/start a step 
-
-          last: no arguments
-          via: 00 or 02
-          as: cardUid or suitId  -- World and Magician
-          with: own minion ref
-          discard/draw: for High Priestess and Judgement (draw only)
-          create: <target cell> + ( new cardUid or enemy.minion.ref or just direction )  -- includes Wheel of Fortune
-          grow: (<target cell> to newcarduid ) or minion.ref  -- includes Star
-          shrink: (<target cell> + <number> to newcarduid ) or (minion.ref + <number>)  -- includes Death, Tower
-          move: (<carduid> + distance )  or ( minion.ref + distance) 
-          orient: minion.ref direction  -- the Devil, empress, emperor, tower, star
-          replace: Hierophant
-          fly: Hermit (minion ref OR target card) to target cell
-          trade: minionJustice and the Hanged Man
-
-          Stuff that isn't keywords:  pieceRefs, cell, cardUid, suitId, playerId, Direction, pip count
-          Special issues:  question mark for orients, previously floating terms like last and via  
-        */
 
         const CARD_UID_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
         const CELL_RE = /^[a-z]{1,2}-?\d+$/i;
@@ -1191,9 +1170,9 @@ export class GnosticaGame extends GameBaseSequenced {
         const MAJOR_ARCANA_RE = /^[0-1][0-9]|20|21$/i;
         const NUMBER_RE = /^[0-6]$/i; //Used for player Ids, card counts, bids, etc.
         const SUIT_RE = /^[CDRS]$/i;
-        // A trailing "?" is tolerated on any token but should be restricted to a create, place, or replace.
+        
+        // Deprecated.
         const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
-        // Comfortable headroom above the richest real step shape (High Priestess discarding a full 6-card hand: "discard" + 6 uids + "draw" + count, 9 tokens).
         const MAX_STEP_TOKENS = 12;
 
         let trimmed = m.trim();
@@ -1562,7 +1541,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if ( CARD_UID_RE.test(tempwhat) )
                     step.card = tempwhat;
                 else if ( DIRECTION_RE.test(tempwhat) )
-                    step.direction = tempwhat.substring(0, 1) as Direction;
+                    step.direction = tempwhat;
                 else if ( PIECE_REF_RE.test(tempwhat) )
                     step.targetPiece = tempwhat;
                 else {
@@ -1604,7 +1583,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "BAD_DIRECTION";
                         break;
                     } else
-                        step.direction = tempdirection.substring(0, 1) as Direction;
+                        step.direction = tempdirection;
                 } else {
                     // Sans direction it's a partial move.
                     if (!lastStep) {
@@ -1661,7 +1640,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "SURPLUS_STEP_CONTENT";
                         break;
                     } else
-                        step.direction = tempdirection.substring(0, 1) as Direction;
+                        step.direction = tempdirection;
 
                     //Must be at the end of the step now.
                     if (segment.length > 0) {
@@ -1759,7 +1738,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             pm.error = "BAD_DIRECTION";
                             break;
                         } else
-                            step.direction = tempdirection.substring(0, 1) as Direction;
+                            step.direction = tempdirection;
                     }
 
                     //Orient is our last otherword.

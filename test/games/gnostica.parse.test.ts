@@ -15,7 +15,7 @@ describe("Gnostica parsing", () => {
             rest: ["m0", "U?"],
             steps: [{
                 action: "place",
-                direction: "U",
+                direction: "U?",
                 targetCell: "m0"
             }],
             stepSegments: [],
@@ -127,6 +127,10 @@ describe("Gnostica parsing", () => {
         expect(g.pickleMove(g.parseMove(move8))).to.equal(move8);
         expect(g.pickleMove(g.parseMove(move9))).to.equal(move9);
         expect(g.pickleMove(g.parseMove(move10))).to.equal(move10);
+
+        const move11 = "use 21 as 01 as C/with m0.1 at m1 create U?";
+        expect(g.pickleMove(g.parseMove(move11))).to.equal(move11);
+
     });
 
 });

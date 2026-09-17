@@ -59,3 +59,24 @@ except High Priestess.
   token instead (World's own `as <uid>` already spent the head's one slot).
   See [TODO-gnostica](TODO-gnostica) #105 for replacing this with a chained
   `as <uid> as <suit>` form.
+
+Comments on new format:
+
+          only some of these  (with, discard, draw, orient, replace, trade) can be a subhead/start a step 
+
+          last: no arguments
+          via: 00 or 02
+          as: cardUid or suitId  -- World and Magician
+          with: own minion ref
+          discard/draw: for High Priestess and Judgement (draw only)
+          create: <target cell> + ( new cardUid or enemy.minion.ref or just direction )  -- includes Wheel of Fortune
+          grow: (<target cell> to newcarduid ) or minion.ref  -- includes Star
+          shrink: (<target cell> + <number> to newcarduid ) or (minion.ref + <number>)  -- includes Death, Tower
+          move: (<carduid> + distance )  or ( minion.ref + distance) 
+          orient: minion.ref direction  -- the Devil, empress, emperor, tower, star
+          replace: Hierophant
+          fly: Hermit (minion ref OR target card) to target cell
+          trade: minionJustice and the Hanged Man
+
+          Stuff that isn't keywords:  pieceRefs, cell, cardUid, suitId, playerId, Direction, pip count
+          Special issues:  question mark for orients, previously floating terms like last and via  
