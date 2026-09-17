@@ -76,3 +76,6 @@ Mark items done with @done(date) only as they're confirmed.
 - #106 - Implement change to enemy pieceref (to be more of a pieceref) in create path fully.
 - #107 - Tests should not assemble internal structures manually.
 - #108 - Rods must provide a target, not just a distance. @done(2026-09-17)
+- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.
+- #110 - Reattach last flag and the expected behavior of retaining the last flag don't seem to be working anymore.
+- #111 - handleClick(Core) should not involve a try/catch.

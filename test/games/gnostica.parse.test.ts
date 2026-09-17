@@ -129,7 +129,10 @@ describe("Gnostica parsing", () => {
         expect(g.pickleMove(g.parseMove(move10))).to.equal(move10);
 
         const move11 = "use 21 as 01 as C/with m0.1 at m1 create U?";
+        const move12 = "discard 21 AS";
+        //g.validateMove(move12);
         expect(g.pickleMove(g.parseMove(move11))).to.equal(move11);
+        expect(g.pickleMove(g.parseMove(move12))).to.equal(move12);
 
     });
 

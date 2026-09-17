@@ -824,7 +824,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const parsed = this.parseMove(m);
-        console.log(JSON.stringify(parsed));
+        
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
@@ -836,7 +836,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // that's each head's own validate* function's job, dispatched to
         // just below.
         if (!parsed.valid) {
-            return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: m });
+            return  { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: parsed.error ? parsed.error : "" }) };
         }
 
         const head = parsed.head;
@@ -1208,11 +1208,11 @@ export class GnosticaGame extends GameBaseSequenced {
         const segments2 = segments.slice();
         const rawStepSegments = segments2.slice(1).map(s => s.split(/\s+/));
         const stepSegments = rawStepSegments.map(raw => raw[0]?.toLowerCase() === "with" ? raw.slice(1) : raw);
-        let stepsWellFormed = true;
+        //let stepsWellFormed = true;
         for (let i = 0; i < rawStepSegments.length; i++) {
             const raw = rawStepSegments[i];
             if (raw.length === 0 || raw.length > MAX_STEP_TOKENS) {
-                stepsWellFormed = false;
+                //stepsWellFormed = false;
                 break;
             }
             if (raw[0]?.toLowerCase() === "draw" || raw[0]?.toLowerCase() === "discard"
@@ -1220,7 +1220,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 continue;
             }
             if (raw[0]?.toLowerCase() !== "with" && raw[0]?.toLowerCase() !== "orient") {
-                stepsWellFormed = false;
+                //stepsWellFormed = false;
                 break;
             }
             const tokens = stepSegments[i];
@@ -1229,19 +1229,17 @@ export class GnosticaGame extends GameBaseSequenced {
             const refIdx = tokens[0]?.toLowerCase() === "orient" ? 1 : 0;
             if (!tokens.every(t => STEP_TOKEN_RE.test(t))
                 || !(PIECE_REF_RE.test(tokens[refIdx]) || CARD_UID_RE.test(tokens[refIdx]))) {
-                stepsWellFormed = false;
+                //stepsWellFormed = false;
                 break;
             }
         }
 
         pm.stepSegments = stepSegments;
-        console.log("old analysis: ", stepsWellFormed);
+        //console.log("old analysis: ", stepsWellFormed);
 
 /* end deprecation */
 
-
         //Here we step through ALL segments.
-        //TODO: May need more checking for empty segments here.
 
         for (let s=0; s < segments.length; s++) {
             let segment = segments[s].split(/\s+/);
@@ -1478,12 +1476,13 @@ export class GnosticaGame extends GameBaseSequenced {
             
             if ( step.action === "discard" ) {
                 const drawIdx = segment.indexOf("draw");
-                if ( drawIdx < 0 && ! lastStep ) {
-                    //Discard requires draw or it's incomplete.
-                    pm.error = "DISCARD_NEEDS_DRAW";
-                    break;
-                }
-                if ( segment.length > drawIdx + 1 ) {
+                if ( drawIdx < 0 ) {
+                    if (! lastStep) {
+                        //Discard requires draw or it's incomplete.
+                        pm.error = "DISCARD_NEEDS_DRAW";
+                        break;
+                    }//Else partial move.
+                } else if ( segment.length > drawIdx + 1 ) { 
                     const tempamount = segment[drawIdx + 1];
                     if (! NUMBER_RE.test(tempamount) ) {
                         pm.error = "BAD_DRAW_COUNT";
@@ -1495,18 +1494,21 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "SURPLUS_STEP_CONTENT";
                         break;
                     }
-
                 }
-                if (drawIdx > -1)
+                
+                if (drawIdx > -1) {
+                    //Trim the segment.
                     segment.length = drawIdx;
+                }
 
                 step.cardList = segment.slice();
+                
                 //There are limits on how many cards can be discarded.
-                if (segment.length > 6) {
+                if (step.cardList.length > 6) {
                     pm.error = "TOO_MANY_DISCARDS";
                     break;
                 }
-                const allAreCards = segment.reduce((acc, curr) => acc && CARD_UID_RE.test(curr), true);
+                const allAreCards = step.cardList.reduce((acc, curr) => acc && CARD_UID_RE.test(curr), true);
                 if (!allAreCards) {
                     pm.error = "BAD_DISCARD_IDS";
                     break;
