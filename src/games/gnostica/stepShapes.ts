@@ -114,9 +114,11 @@ const fixedArity = (n: number) => (rest: string[]): StepShape =>
 // "enemy"/"new", "piece"/"tile" - not yet converted to the new grammar).
 // Cups alone carries no mode word: "at <cell> create <arg>..." infers
 // own/enemy/new from <arg>'s own shape once "at"/"create" are stripped -
-// an orientation letter (own), a bare 1-3 pip count (enemy, a victim
-// ref's own leading digit - see victimRefStr's own docs), or anything
-// else, trusted as a card uid the same way an explicit mode word always
+// an orientation letter (own), a full piece ref naming the victim (enemy -
+// see pieceRefStr's own docs; the "at <cell>" already named, cell and
+// all, for readability, not just its own trailing pips), or anything
+// else, (implementation of this was interrupted and is still pending)
+// trusted as a card uid the same way an explicit mode word always
 // was (new). Shared by every call site below that used to just
 // destructure `rest` directly - undefined here means "still building
 // or malformed enough that there's no real mode to report yet," which

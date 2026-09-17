@@ -75,4 +75,4 @@ Mark items done with @done(date) only as they're confirmed.
 - #105 - Replace the single asUid head slot with a real chain, so a nested meta-card borrow (World borrowing the Magician) writes "as 01 as C".  Also fix other issues with Magician picking up the suit.
 - #106 - Implement change to enemy pieceref (to be more of a pieceref) in create path fully.
 - #107 - Tests should not assemble internal structures manually.
-- #108 - Rods must provide a target, not just a distance.
+- #108 - Rods must provide a target, not just a distance. @done(2026-09-17)
