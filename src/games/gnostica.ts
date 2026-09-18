@@ -2581,30 +2581,13 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
 
-    // Spells a pending step's own head, shared by assembleStepMove (mid-
-    // click, still adding a segment) and pendingMoveString (echoing back
-    // the CURRENT state unmodified, e.g. on a rejected click) - both need
-    // the exact same verb / "as <x>" / "via <uid>" logic, so neither
-    // hand-rolls it separately. `pending.head` is always the true
-    // originating verb, `headArg` the root card - stable throughout: a
-    // World/Magician borrow is spelled with "as <x>", never by swapping
-    // in the borrowed card as the head arg.
+    // Spells a pending step's own head. `pending.head` is always the original verb, `headArg` the root card.
     private describePendingMove(pending: IPendingStep, steps: IStep[]): string {
-        // pickleMove's own step[0] carries the head verb/card itself (see
-        // its own docs) - built here from `pending`'s already-known head
-        // fields rather than re-deriving them, then prepended to whatever
-        // power-step IStep's the caller has. `pending.asUid`/`asSuit` are
-        // already the separate fields IParsedMove itself uses (see
-        // IPendingStep's own docs) - no re-splitting needed.
         const { asUid, asSuit } = pending;
         const base = { announceLast: false, valid: true, rest: [], stepSegments: [] };
-        // A genuine resume always carries a "via <root>" anchor for
-        // validateResumePendingPower's own mismatch check.
+        // A genuine resume always carries a "via <root>".
         if (this.continued.length > 0) {
-            // High Priestess's own step IS a discard/draw - "play 02" would
-            // be a lie (there's no card being played), so it resumes as a
-            // bare "discard <uids> draw <n> via 02", its own step becoming
-            // the head step itself (no separate use/play step in front).
+            // High Priestess's second step is a discard/draw.
             if (pending.special === "highPriestess") {
                 const step: IStep = { ...(steps[steps.length - 1] ?? { action: "discard" }), action: "discard" };
                 return this.pickleMove({ ...base, head: "discard", viaUid: this.getContinuedUid(), steps: [step] });
@@ -2616,31 +2599,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.pickleMove({ ...base, head: pending.head, asUid, asSuit, steps: [headStep, ...steps] });
     }
 
-    // Assembles a full move string from a pending step's own already-typed
-    // PRIOR power-step IStep's (verbatim) plus the current one - shared by
-    // every click helper below that builds/rebuilds a move, so a
-    // major-arcana chain's earlier steps are never lost while a LATER one
-    // is still being clicked together. For a minor card (priorSteps always
-    // []) this reduces to exactly what these helpers built before
-    // major-arcana chaining existed.
+    // Assembles a full move string from a pending step's own already-typed prior power-step IStep's plus the current one
     private assembleStepMove(pending: IPendingStep, currentStep: IStep): string {
         return this.describePendingMove(pending, [...pending.priorSteps, currentStep]);
     }
 
-    // Converts a Rods/Discs/Swords primitive's own (suitUid, mode, args) -
-    // the same shape deriveMinorMode/buildRdsTokens (stepShapes.ts) already
-    // use, and every click helper below already computes on its way to a
-    // move string - into the IStep fields pickleMove now reads. Shared so
-    // the suit/mode-to-IStep mapping lives in exactly one place rather
-    // than being reworked at every call site. `args` matches applyRods/
-    // applyDiscs/applySwords's own destructure exactly (see their own
-    // docs) - an empty/short `args` (a genuine choice not yet made) just
-    // leaves the corresponding IStep fields unset, same as the old bare
-    // "piece"/"tile" anchor token did.
-    // Shared (suitUid, mode, args) -> IStep entry point for callers outside
-    // this class that only know a suit's already-resolved mode+args (never
-    // raw tokens) - randomMove.ts's own candidate search.
+    // Converts a Rods/Discs/Swords primitive's own (suitUid, mode, args into the IStep fields pickleMove now reads.
     public buildSuitStep(suitUid: string, minionRef: string, mode: string, args: string[]): IStep {
+        // `args` matches applyRods/applyDiscs/applySwords's own destructure - an empty/short `args` leaves the IStep fields unset
         return suitUid === "C" ? this.buildCupsStep(minionRef, mode, args) : this.buildRdsStep(suitUid, mode, minionRef, args);
     }
 
@@ -2873,9 +2839,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.assembleStepMove(pending, step);
     }
 
-    // Hermit's own twin of buildTargetedStepMove - same "shape of the
-    // clicked target decides piece-vs-tile" inference, via
-    // buildHermitStepFromArgs instead of buildRdsStep.
+    // Hermit's version of buildTargetedStepMove, but using buildHermitStepFromArgs instead of buildRdsStep.
     private buildTargetedHermitMove(pending: IPendingStep, targetRef: string): string {
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         if (targetRef.includes(".")) {
@@ -2899,7 +2863,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Board-click handling once a minor-arcana power step's MODE is already chosen - cycling or switching whichever trailing arg(s) that mode's shape supports.
-    // Known simplifications: piece INDEX within a multi-piece facing cell always defaults to index 0; the optional trailing reorientation isn't click-driven either.
+    // ISSUES: piece INDEX within a multi-piece facing cell always defaults to index 0; the optional trailing reorientation isn't click-driven either.
     private handlePendingStepBoardClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
         if (pending.mode === undefined) {
             return undefined;
@@ -3000,7 +2964,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    // Supplies a hand-card uid for whichever minor-arcana mode is waiting on one (Cups "new", Discs/Swords "tile"); doesn't pre-validate point value, that's createTerritory/growTerritory/attackTerritory's own job.
+    // Supplies a hand-card uid for whichever minor-arcana mode is waiting on one without pre-validating point value.
     private supplyStepCardUid(pending: IPendingStep, uid: string): string | IClickResult | undefined {
         if (pending.mode === undefined) {
             return undefined;
@@ -3080,8 +3044,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.assembleStepMove(pending, { action: "orient", targetPiece: minionRef, direction: dir });
     }
 
-    // tradeHands: <minionRef> trade <targetRef> - a single self-or-facing-cell
-    // target pick, no further stage (no orientation involved).
+    // tradeHands: <minionRef> trade <targetRef> - a single self-or-facing-cell target pick, terminal.
     private handleTradeHandsClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
         const targetResult = this.pickPieceTargetClick(pending.minion, x, y, cell, pending);
         if (targetResult === undefined) {
@@ -3135,12 +3098,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.assembleStepMove(pending, { action: "orient", withPiece: minionRef, targetPiece: targetRef, direction: dir });
     }
 
-    // hermitTeleport: `<minionRef> fly <targetRef> to <destCell> [orient
-    // <direction>]` | `<minionRef> fly <cardUid> to <destCell>` - mode
-    // is chosen via a button (hermit_piece/hermit_tile in
-    // handleClickCore), which seeds a real target/cell immediately (see
-    // that handler's own docs), so deriveHermitMode always has a real
-    // shape to read by the time a board click can reach here at all.
+    // hermitTeleport: `<minionRef> fly <targetRef> to <destCell> [orient  <direction>]` | `<minionRef> fly <cardUid> to <destCell>` via a button.
     private handleHermitTeleportClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         const derived = deriveHermitMode(pending.rest);
@@ -3149,27 +3107,14 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const { mode, args } = derived;
         if (mode === "tile") {
-            // No self-vs-face CHOICE for a cell-shaped target - minorTargetCell
-            // already computes the one legal cell deterministically, same
-            // as Discs/Swords "tile" mode's own target - so any click here
-            // just sets/replaces the (unrestricted) destination. Identified
-            // by its own card uid, not the cell (see buildHermitStepFromArgs's
-            // own docs) - no territory there means nothing to teleport yet.
+            // No self-vs-face CHOICE for a cell-shaped target - so any click here just sets/replaces the (unrestricted) destination.
             const cardUid = this.board.get(...this.minorTargetCell(pending.minion))?.cardUid;
-            if (cardUid === undefined) {
+             if (cardUid === undefined) {
                 return undefined;
             }
             return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "tile", [cardUid, cell]));
         }
-        // "piece" mode: the target is a genuine self-or-facing-cell choice
-        // (mirrors Rods "piece" mode's own redirect) until a destination
-        // is picked - after that, further clicks only replace the
-        // destination. The destination itself is Hermit's one genuinely
-        // new click primitive: unrestricted, no adjacency limit at all,
-        // unlike every other click-to-target flow in this file (see
-        // checkHermitMovePiece's own docs on why). The optional trailing
-        // orientation stays hand-typed-only this pass - it's optional, so
-        // this doesn't block submission.
+        // "piece" mode: the target is a genuine self-or-facing-cell choice until a destination is picked, then further clicks only replace it.
         if (args.length < 2) {
             const targetResult = this.pickPieceTargetClick(pending.minion, x, y, cell, pending);
             if (typeof targetResult === "string") {
@@ -3189,22 +3134,13 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "piece", [args[0], cell]));
     }
 
-    // worldUseAny: a click on any major currently on the board (except
-    // World itself) picks it as the borrowed card, regardless of who has
-    // pieces there - unlike every other click-to-target flow above (all of
-    // which gate on piece presence at the clicked cell). checkWorldChoosePower
-    // is what actually enforces legality; a click on anything else just
-    // misses. The pick lands in the head as "as <uid>"; The World's own
-    // minion is chosen later, from the borrowed card's frame.
+    // worldUseAny: a click on any major currently on the board (except World itself) picks it as the borrowed card.
     private handleWorldChooseClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
         const t = this.board.get(x, y);
         if (t?.card === undefined) {
             return undefined; // not a card cell at all - not this handler's click
         }
-        // A card cell, but the wrong kind: a World target pick IS in
-        // progress here, so say what's actually needed rather than falling
-        // through to the generic "start a fresh use here" path (which would
-        // complain about a missing minion on that other territory).
+        // A card cell, but the wrong kind.
         if (t.card.uid === "21") {
             return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.WORLD_SELF_REFERENCE") };
         }
@@ -3214,30 +3150,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.describePendingMove({ ...pending, asUid: t.card.uid }, pending.priorSteps);
     }
 
-    // Click support for the top-level turn choice (via the button bar from
-    // getActionButtons()) plus the simple, single-segment actions - place,
-    // orient, use/play with its power skipped, and toggling hand cards
-    // into a discard's uid list. use/play's chained power steps are handled
-    // further down (parsePendingStep and friends).
-    //
-    // "Declare" is handled up front, separately from everything else -
-    // it's the one click that operates on the "last" flag directly
-    // (toggling it), rather than building/replacing the move's base
-    // action. Every OTHER click below is handled with "last" stripped
-    // off first (so none of that logic has to know it exists) and
-    // reattached to whatever move string comes back out - see
-    // reattachLastFlag - so the flag survives no matter what the player
-    // clicks next, including switching to a completely different action
-    // after already declaring.
-    // The single point every click-driven code path funnels through
-    // before a result ever leaves this class: everything below this
-    // (handleClickCore and its own many sub-handlers) returns either a
-    // bare candidate move STRING (still needs validateMove) or an
-    // already-fully-decided IClickResult (a flat rejection unrelated to
-    // move legality, like DEFAULT_HANDLER, or a deliberately-not-
-    // validated friendly seed like "use"'s own PICK_CARD_TO_ACTIVATE) -
-    // composed here exactly once, rather than at each of the many places
-    // that used to validate and attach `.move` independently.
+    // Click support for the top-level turn choice.  "Declare" is handled up front.
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         const parsed = this.parseMove(move);
         let outcome: string | IClickResult;
@@ -3451,11 +3364,8 @@ export class GnosticaGame extends GameBaseSequenced {
                         return this.buildViaMove([["decline"]]);
                     }
                     case "random":
-                        // Only ever offered for Wheel of Fortune's own
-                        // "new" step (see getActionButtons()'s own docs) -
-                        // supplies the literal "random" token exactly the
-                        // way a hand-card click supplies a specific uid
-                        // (see supplyStepCardUid's own docs).
+                        // Only ever offered for Wheel of Fortune's special option.
+                        //ISSUE: not implemented in the parser yet.
                         {
                             const pending = this.parsePendingStep(move);
                             if (pending === undefined || pending.suitUid !== "C" || pending.mode !== "new" || pending.opts.allowRandomDraw !== true) {
@@ -3469,29 +3379,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             }
 
-            // Only the head segment's own tokens are needed here; the
-            // pending-step helpers below (parsePendingStep etc.) do
-            // their own full parsing of the rest.
             const { head, steps: headSteps } = this.parseMove(move);
 
-            // Hand-card clicks (from the per-player AreaPieces built in
-            // render()) arrive as `piece`, independent of row/col - only
-            // the acting player's own hand can be touched. A card click
-            // means something different depending on what's already in
-            // progress: supplying a card uid for a pending minor-arcana
-            // power step in progress (Cups "new", Discs/Swords "tile"),
-            // playing the card outright ("play"), or toggling it into an
-            // already-selected discard's uid list. With no action
-            // selected yet, the click is rejected outright - the player
-            // needs to pick a button (Use/Play/Discard/etc.) first.
+            // Hand-card clicks arrive as `piece`, independent of row/col.  If no action is selected, the click is rejected.
             if (piece !== undefined && piece.startsWith("hand_")) {
-                // A just-drawn card's own rendered/clickable identifier
-                // carries a "_new" suffix (see newHandCardUids's own docs
-                // on the highlight this drives) distinct from its real
-                // uid - stripped here so a real click on one still
-                // resolves correctly. No real uid can end in "_new"
-                // itself (every uid is a bare rank+suit or 2-digit major
-                // code), so this is unambiguous.
+                // ISSUE: A just-drawn card's own rendered/clickable identifier has an unnecessary "_new" suffix which needs stripping.
                 const uid = piece.slice("hand_".length).replace(/_new$/, "");
                 const hand = this.hands[this.currplayer - 1] ?? [];
                 if (!hand.includes(uid)) {
@@ -3503,33 +3395,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (result !== undefined) {
                         return result;
                     }
-                    // Not a mode expecting a card uid right now - fall
-                    // through to the ordinary hand-card behaviour below.
+                    // Not a mode expecting a card uid right now - fall through.
                 }
                 if (pendingForCard?.special === "highPriestess") {
-                    // Same toggle-into-a-list mechanic as "discard"'s own
-                    // uid list below, just scoped to this in-progress
-                    // step's own token list (no minionRef prefix at all -
-                    // see IPendingStep's own docs) rather than the
-                    // top-level move's args. Checked BEFORE the
-                    // `head === "play"` case below, since resolving High
-                    // Priestess via "play" would otherwise misread this
-                    // click as "play this card" instead.
-                    //
-                    // Any already-chosen "draw <n>" tail is dropped before
-                    // toggling, exactly like "discard"'s own handling below -
-                    // the valid count range shifts with the discard list
-                    // itself, so changing which cards are discarded
-                    // re-solicits the count fresh. Without this, a card
-                    // toggled AFTER a count was already chosen would be
-                    // appended past the "draw" token and silently ignored
-                    // (never actually discarded) rather than added to the
-                    // list.
-                    // Leading "discard" (see resumeStepSegments' own
-                    // docs) may or may not be there yet depending on
-                    // whether this round's own very first click is
-                    // landing here - stripped before working the list,
-                    // always reattached when rebuilding it.
+                    // Special handling for the one of her discard/draw steps.
                     const body = pendingForCard.rest[0] === "discard" ? pendingForCard.rest.slice(1) : pendingForCard.rest;
                     const drawIdx = body.indexOf("draw");
                     let discards = drawIdx === -1 ? [...body] : body.slice(0, drawIdx);
@@ -3541,21 +3410,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     return this.assembleStepMove(pendingForCard, { action: "discard", cardList: discards });
                 }
                 if (head === "play") {
-                    // "play"'s own pool can span the whole board, unlike
-                    // "use" (always single-cell by construction) -
-                    // validateMove's own zero-step message for this state
-                    // already accounts for that (freshStepMessage's own
-                    // PICK_MINION_CELL check).
+                    // "play"'s own pool can span the whole board, unlike "use".
                     return `play ${uid}`;
                 }
                 if (head === "discard") {
-                    // Any already-chosen "draw <n>" tail is deliberately
-                    // dropped here rather than carried forward - the valid
-                    // count range shifts with the discard list itself, so
-                    // changing which cards are discarded re-solicits the
-                    // count fresh (via getActionButtons()'s own count-
-                    // picker) rather than silently keeping a now-possibly-
-                    // invalid number.
+                    // ISSUE: Any already-chosen "draw <n>" tail is deliberately dropped here, but where did it come from?
                     let discards = [...(headSteps[0]?.cardList ?? [])];
                     if (discards.includes(uid)) {
                         discards = discards.filter(u => u !== uid);
@@ -3753,15 +3612,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // "If you have no pieces on the board, you may only put a small piece
-    // [...]. Otherwise, do one of the following [...]" - place is the only
-    // legal action with zero board pieces; every other action requires
-    // this. Also true again the instant a wipeout leaves a player with
-    // none - no separate tracking needed for that case, since this always
-    // recomputes fresh from current board state. See move()'s and
-    // validateMove()'s own single top-level gate (both directions - "place"
-    // needs zero, every other head needs some), getActionButtons(), and
-    // randomMove().
+    // A check used for requiring "place", either initially or after a wipeout.
     public hasPiecesOnBoard(player: playerid): boolean {
         for (const [, , t] of this.board.entries()) {
             if (t.pieces.some(p => p.owner === player)) {
@@ -3783,30 +3634,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // The "bidding" variant's opening procedure
     // ============================================================
 
-    // "bid <n>" - n is the 1-based position of a card in the ACTING
-    // player's own current hand, deliberately not the card's own uid.
-    // Move strings are permanently public the instant they're submitted
-    // (this is a strict-turn, replay-reconstructed engine - there is no
-    // "hide this specific move from other players" mechanism anywhere),
-    // so a `bid <uid>` move would leak the real card to every viewer
-    // immediately, defeating the whole point of a blind bid. A bare
-    // position leaks nothing: an opponent's hand is already all-redacted
-    // to them (see render()'s own docs on that convention), so "player 3
-    // bid their 2nd card" tells them nothing they don't already not-know.
-    // The real card stays sitting untouched in `hands[]` - reusing the
-    // one field this codebase already has a proven per-viewer redaction
-    // convention for - until every player has committed a position, at
-    // which point resolveBidRound() reveals them all together.
-    // `partial` mirrors cmdDiscard's own contract (see move()'s own docs
-    // on what `partial` means): a live-preview call must validate the
-    // click exactly as normal, but stop BEFORE actually committing the
-    // bid - resolveBidRound() advances phase/currplayer/hands for real,
-    // which must never happen on move()'s disposable preview instance.
-    // There's nothing else worth rendering for an in-progress bid pick
-    // (the acting player's own hand doesn't change until the round
-    // actually resolves), so partial is a clean early return.
-    // Legality (a real position index into this player's own hand, not
-    // already bid) is validateBid's own job, not this one's.
+    // "bid <n>" - n is the 1-based position of a card in the current player's actual hand (not the sorted rendering).
     private cmdBid(step: IStep, partial = false): void {
         if (partial) {
             return;
@@ -3830,21 +3658,14 @@ export class GnosticaGame extends GameBaseSequenced {
         if (n < 1 || n > hand.length) {
             return this.invalid("apgames:validation.gnostica.BAD_BID_POSITION", { position: n, max: hand.length });
         }
-        // Defensive - unreachable in normal play, since a round resolves
-        // (and resets every slot to null) the instant the last player's
-        // slot is filled, so currplayer can never be asked to bid twice
-        // within the same still-open round.
+        // ISSUE: unreachable defensive checks should be removed.
         if (this.bidPositions![this.currplayer - 1] !== null) {
             return this.invalid("apgames:validation.gnostica.ALREADY_BID");
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
-    // Every bidPositions slot is filled - reveal them all together
-    // (splicing each named card out of its owner's hand into the shared
-    // biddingPool, real uids and all - safe now, since this is the exact
-    // moment the rules say everyone becomes entitled to see them) and
-    // resolve the round.
+    // When every bidPositions slot is filled, reveal them and move them into the shared biddingPool.
     private resolveBidRound(): void {
         const revealed: { player: playerid; card: TarotCard }[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
@@ -4088,10 +3909,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (piece.owner !== this.currplayer) {
             return this.invalid("apgames:validation.gnostica.NOT_YOUR_MINION");
         }
-        // The minion itself is chosen; its new facing is a genuinely
-        // separate decision that only the player's own click may make -
-        // never auto-assigned (see cmdOrient's/handleClickCore's own
-        // docs) - so this is still building, not an error.
+        // The minion itself is chosen but not the orientation.
         if (orientationStr === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
         }
@@ -4106,25 +3924,8 @@ export class GnosticaGame extends GameBaseSequenced {
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
-    // "discard [uid...] [draw <n>]" - discard the named hand cards, then
-    // draw back: exactly <n> if "draw <n>" is given (0 up to however much
-    // room is left in a 6-card hand - it's always legal to draw fewer than
-    // the max), or as many as possible if "draw <n>" is omitted entirely.
-    // Shares checkDiscardDraw/discardDraw (powers.ts) outright with High
-    // Priestess's own two rounds of the identical action - see their own
-    // docs.
-    //
-    // `partial` (set only by move()'s live-preview calls, never by a real
-    // submitted move) stops after the discard step, deliberately skipping
-    // the redraw - the player may still be clicking through more cards to
-    // discard or choosing a count, and drawing replacements prematurely
-    // would either reveal cards for a choice that isn't final yet, or
-    // require redrawing (and discarding the previous preview's draws back
-    // into the deck) on every subsequent click. The hand simply shows
-    // smaller while this is in progress; the real draw only happens once,
-    // on final submission.
-    // Legality (every named uid actually in hand, the draw count within
-    // range) is validateDiscard's own job, not this one's.
+    // "discard [uid...] [draw <n>]" - discard the named hand cards, then draw back.
+    // ISSUE:  this comment still talked about defaulting to  "as many as possible if "draw <n>" is omitted entirely", which should not occur.
     private cmdDiscard(step: IStep, partial = false): void {
         const discardUids = step.cardList ?? [];
         const drawCountStr = step.amount?.toString();
@@ -4133,6 +3934,8 @@ export class GnosticaGame extends GameBaseSequenced {
             this.discarded.push(...discardUids);
             this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
         }
+        // `partial` stops after the discard step, skipping the redraw for further discards.
+        //ISSUE:  this should not be a concern if "draw" was not found in the move.
         if (partial) {
             return;
         }
@@ -4140,8 +3943,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.cardsDrawn[this.currplayer - 1] = drawn;
     }
 
-    // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar,
-    // delegating to the same checkDiscardDraw primitive it uses.
+    // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar, using the same checkDiscardDraw primitive.
     private validateDiscard(parsed: IParsedMove): IValidationResult {
         const discardUids = parsed.steps[0]?.cardList ?? [];
         const drawCountStr = parsed.steps[0]?.amount?.toString();
@@ -4149,25 +3951,14 @@ export class GnosticaGame extends GameBaseSequenced {
         if (failure) {
             return this.failureResult(failure);
         }
-        // A missing "draw <n>" is never complete - the player must make
-        // an explicit draw-count choice, 0 included, rather than this
-        // silently completing on a default. parsed.steps[0] is the
-        // discard step itself (parseMove's own single entry for a
-        // "discard" head), so its already-parsed amount says this
-        // directly - no need to re-scan tokens for "draw" ourselves.
+        // A missing "draw <n>" is never complete - the player must make an explicit choice.
         if (parsed.steps[0]?.amount === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
-    // ============================================================
-    // Use / play a card - both minor and major arcana. Each minor card has
-    // exactly one suit power, always optional, used by exactly one minion.
-    // Major arcana can chain up to 3 power steps across several minions
-    // (see MAJOR_ARCANA in gnostica/majorArcana.ts).
-    // ============================================================
-
+    // Use / play a card - both minor and major arcana.
     private buildPowerContext(): PowerContext {
         return {
             board: this.board,
@@ -4179,13 +3970,7 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    // "use <cardUid>" targets a card by its own identity, not a cell - every
-    // card uid is unique across the whole 78-card deck, so this is
-    // unambiguous, and it matches "play <uid>"'s own by-identity targeting.
-    // Returns undefined for a uid that isn't currently on the board
-    // anywhere (whether or not it's a real card at all - that distinction
-    // is the caller's job to report separately, see cmdActivate/
-    // validateActivate's own UNKNOWN_CARD vs CARD_NOT_ON_BOARD split).
+    // "use <cardUid>" targets a card by its own identity, not a cell.  Cards are unique, so we can derive the cell.
     private findCardCell(uid: string): { x: number; y: number } | undefined {
         for (const [x, y, t] of this.board.entries()) {
             if (t.card?.uid === uid) {
@@ -4195,23 +3980,13 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    // A card's own display name for a message, falling back to its bare
-    // uid on the rare "not a real/known card" edge (never actually hit in
-    // practice - every caller already has a resolved card in hand - but
-    // keeps a message-building call site from needing its own `?? uid`).
-    // Shared by every place a message names "the card" (powerStepMessageKey,
-    // validateFrameStack's own skipped-step branch).
+    // Returns the card's display name, for messages.  
+    // ISSUE:  has an unnecessary fallback.
     private cardNameOrUid(uid: string): string {
         return allCards().find(c => c.uid === uid)?.name ?? uid;
     }
 
-    // "Activate a card on the board. All your pieces on that card are
-    // minions [...]"
-    // Every piece the acting player owns on the activated cell - the pool
-    // "activate" draws minions from. Returns [] (rather than throwing) for a
-    // cell with no card / no eligible piece, so click-time helpers can use
-    // this directly without their own duplicate error handling.
-    // The acting player's own pieces at one cell - shared by eligibleMinionsForActivate (also requires a card) and eligibleMinionsForOrient (no card requirement).
+    // Returns every piece the acting player owns on the activated cell, for the minion pool.
     private piecesOwnedAt(x: number, y: number): IMinionRef[] {
         const t = this.board.get(x, y);
         if (t === undefined) {
@@ -4453,16 +4228,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // The one decision walkFrameStack and validateFrameStack must never
-    // make independently: what KIND of step is currently on top, given
-    // the next not-yet-consumed segment. A decline segment always
-    // overrides world/fool - checked first, since isWorldStep/isFoolStep
-    // would otherwise force `tokens = []` and never even look at it -
-    // both the World-revealed-via-Fool decline bug and the Fool-reveals-
-    // Fool decline-button bug traced to one walker running this check in
-    // a different order (or with a different exclusion) than the other.
-    // Called once, up front, by both - neither one hand-derives
-    // isFoolStep/isWorldStep/decline-detection on its own anymore.
+    // Top step classification for walkFrameStack and validateFrameStack
     private static classifyStep(step: PowerStep, steps: IStep[], i: number): "decline" | "world" | "fool" | "step" {
         if (steps[i]?.action === "decline") {
             return "decline";
@@ -4485,10 +4251,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return { tokens };
     }
 
-    // The engine's one core stack-walker, shared by a fresh activation and a resume submission - both reduce to "consume segments until they run out or a step forces a pause".
-    // Ends either via forcePause (Fool's flip, High Priestess's first step), or segments running out and the current frame silently skipping/popping until the stack empties or pauses.
-    // Fool's step is unconditionally auto-taken (flipping is its only action, no Decline of its own) and always force-pauses, so an explicit Decline + Fool's remaining flip compose in ONE call.
-    // The only place this.continued is written - called once by move(), past the partial boundary, distilling the residual stack down to entries that still owe a step.
+    // The engine's one core stack-walker: "consume segments until they run out or a step forces a pause".
     private persistContinued(stack: readonly IPowerFrame[]): void {
         // Only genuine cross-submission obligations: a Fool/High Priestess frame that has taken at least one step ("00.1"/"00.2"/"02.1") and so owes a follow-up submission.
         this.continued = stack
@@ -4639,39 +4402,13 @@ export class GnosticaGame extends GameBaseSequenced {
         return step !== undefined && "special" in step && step.special === "worldUseAny";
     }
 
-    // Resumes a paused activation - does NOT re-enter applyMajorPower from
-    // the root, and (for a "play"-sourced obligation) does NOT repeat
-    // cmdPlay's own hand/discard-pile mutation, which already happened
-    // before the pause. A resume submission may supply MULTIPLE step
-    // segments, not just one - e.g. resuming into a card Fool revealed
-    // should let the player supply all of ITS steps in one go if they're
-    // already known (nothing about a revealed card's own power is hidden
-    // once the reveal has happened) - walkFrameStack handles this
-    // uniformly, re-pausing again if anything genuinely optional and
-    // still needing real input remains once segments run out.
-    //
-    // The frame stack a resume submission walks: the persisted Fool/HP
-    // obligation(s), plus - for a Fool obligation - a fresh frame for the
-    // ordinary card its last flip revealed, re-derived from the discard
-    // pile's top (see buildPendingFromContinued). Undefined when nothing
-    // is pending.
+    // The frame stack for a resumed turn is: the persisted Fool/HP obligation(s), plus (via Fool) a fresh frame for the drawn card.
     private resumeQueue(): IPowerFrame[] | undefined {
         const pending = this.buildPendingFromContinued();
         return pending?.stack.map(f => ({ ...f, minions: [...f.minions] }));
     }
 
-    // The step segments the frame-walk should see for a resume submission,
-    // derived from the head:
-    //  - "decline"  -> a lone ["decline"] segment (the walk pops the top
-    //    frame on that token; the head itself carries no segments)
-    //  - "discard"  -> the High Priestess round's own tokens, which sit
-    //    right after the head like the ordinary discard action's rather
-    //    than as a "/"-separated segment - folded back into one segment,
-    //    with the head word itself reattached as the step's own leading
-    //    token (validateHighPriestess/applyHighPriestess expect it there
-    //    the same way a fresh "use 02/discard ..." activation's own step
-    //    already carries it - see their own docs)
-    //  - anything else -> the segments as typed
+    // The step segments the frame-walk should see for a resume: decline/discard/"anything else".
     private resumeStepSegments(parsed: IParsedMove): string[][] {
         if (parsed.head === "decline") {
             return [["decline"]];
@@ -4907,63 +4644,31 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if ("special" in step && step.special === "highPriestess") {
             this.applyHighPriestess(istep, partial);
-            // Pause only if a LATER sibling step of THIS SAME card depends
-            // on this one's outcome - High Priestess's own first-of-two
-            // discard round. Unlike Fool's flip (see the "fool" case
-            // below), a card's OWN later step is a property of stepIndex/
-            // totalSteps, not something every occurrence of this special
-            // unconditionally needs.
+            // Pause only if a LATER sibling step of THIS SAME card depends on this one's outcome.
             return { forcePause: stepIndex + 1 < totalSteps };
         }
         if ("special" in step && step.special === "fool") {
-            // Unlike High Priestess's redraw (a real quantity that's merely
-            // cosmetic to preview early), which card gets flipped is hidden
-            // information - a partial preview must never actually flip,
-            // since move(partial:true) genuinely mutates this instance
-            // (see playground.js's fresh-per-click convention) and anything
-            // it reveals would leak to the client before a real Submit.
-            // So a partial call only reports that a pause is coming, with
-            // no pushFrame and nothing pushed to results; the real flip
-            // happens exactly once, on the actual non-partial commit.
+            // Fool's drawn card is hidden information.
             if (partial) {
                 return { forcePause: true };
             }
             const failure = checkFool(this.buildPowerContext());
             if (failure) {
-                // Validation is what stops a real player from getting here
-                // in the first place (see validatePowerStep's/validatePlay's
-                // own docs on the ROOT-only rejection) - apply's own job is
-                // just to do the thing, not re-litigate whether it should
-                // have been allowed. Finding nothing left to flip - for any
-                // reason, including a trusted caller that skipped
-                // validation entirely - just means the Fool's use is
-                // complete, gracefully, right here. Returning a plain (if
-                // empty) outcome rather than throwing lets walkFrameStack's
-                // own generic bookkeeping do the rest: nextStepIndex still
-                // advances, popExhaustedFrames still pops this frame (or
-                // the whole activation) once spent - no special-casing
-                // needed there at all.
+                // Validation stops a real player from getting here in the first place, so the Fool is complete.
                 return {};
             }
             const revealed = fool(this.buildPowerContext());
             this.results.push({ type: "deckDraw", what: revealed.uid, from: "fool" });
-            // Unlike High Priestess, EVERY flip forces a pause, regardless
-            // of whether Fool has another flip left - resolving what was
-            // just revealed always depends on knowing what it was, and
-            // that's never knowable before this step actually commits.
+            // Unlike High Priestess, EVERY draw forces a pause, regardless of whether Fool has another draw left.
             return { pushFrame: { cardUid: revealed.uid, minions, viaFool: true }, forcePause: true };
         }
-        // Legality beyond this point (minion ref present, well-formed
-        // step shape, a recognized special) is validatePowerStep's own
-        // job, not this one's. orientMinion's own "orient" subhead is the
-        // one kept literal by parseMove (see its own docs on why) rather
-        // than stripped like "with" - skipped here instead.
         const withoutOrient = "special" in step && step.special === "orientMinion" && tokens[0]?.toLowerCase() === "orient" ? tokens.slice(1) : tokens;
         const [minionRef] = withoutOrient;
         if (this.isMinionCellStillNarrowing(minionRef, minions)) {
             return undefined; // cell chosen, which minion there is still undecided - still skipped
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
+        // ISSUE:  Is any of the following code necessary?  The original uspicious comment follows.
         // A trusted commit can reach here with `istep` undefined - a
         // segment whose content parseMove's own strict grammar rejects
         // (Cups "new"'s own "random" token, say - see checkCreateTerritory's
@@ -4975,11 +4680,7 @@ export class GnosticaGame extends GameBaseSequenced {
         istep = istep ?? this.stepFromTokens(step, tokens, borrowedPower);
         if ("primitive" in step) {
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-            // "Still building" vs "ready to act on" is answered once,
-            // uniformly, by stepShapes.ts's own shared check (see its
-            // docs) - validate and the UI preview walker ask the SAME
-            // function, independently, for the SAME question; none of
-            // the three calls each other for it.
+            // "Still building" vs "ready to act on" is answered by stepShapes.ts's own shared check.
             const shape = primitiveStepShape(suitUid, istep!);
             if (shape.status === "incomplete") {
                 return undefined; // still skipped so far
@@ -4988,17 +4689,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.applySuitPrimitive(suitUid, minion, istep!, opts);
         }
         if (step.special === "magicianChoice") {
-            // The suit - fresh/Fool-revealed/World-pushed alike - is
-            // always named via a real "as <suit>" now (TODO-gnostica
-            // #105's chained "as <uid> as <suit>" for the World-pushed
-            // case), so the caller (walkFrameStack) always forwards it as
-            // `borrowedPower` once this step is reached (see its own
-            // `borrowedForThisStep` docs), the same way World's own borrow
-            // already does. The step's own OTHER fields need no splicing
-            // of their own, since "at m0 create U" parses identically no
-            // matter which suit turns out to govern it (see stepShapes.ts's
-            // own SPECIAL_STEP_SHAPES.magicianChoice docs on why that
-            // entry is otherwise dead now).
+            // Magician's suit is named with "as <suit>".
             const suitLetter = borrowedPower!;
             const shape = primitiveStepShape(suitLetter, istep!);
             if (shape.status === "incomplete") {
@@ -5010,8 +4701,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (shape.status === "incomplete") {
             return undefined; // still skipped so far
         }
-        // Every apply* method below can now assume complete, well-formed
-        // input - the shape check above already ruled out anything else.
+        // Every apply* method below can now assume complete, well-formed input after the shape check above.
         switch (step.special) {
             case "orientMinion":
                 return this.applyOrientMinion(minion, istep!);
@@ -5025,18 +4715,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.applyTradeHands(minion, istep!);
             case "judgementDraw":
                 this.applyJudgementDraw(minion, istep!);
-                // A real (if empty) outcome, not undefined - undefined is
-                // reserved exclusively for "still incomplete" now (see
-                // IStepOutcome's own docs and walkFrameStack's).
+                // A real (if empty) outcome, is not marked undefined.
                 return {};
             default:
                 throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_FOUND" }));
         }
     }
 
-    // Mirrors applyPowerStep's own "incomplete step, still skipped"
-    // tolerance (same rationale as validateMinorPower's) - see the inline
-    // comments below and applyPowerStep's own docs.
+    // Mirrors applyPowerStep's own "incomplete step, still skipped" tolerance.
     public validatePowerStep(
         step: PowerStep, minions: IMinionRef[], tokens: string[], istep: IStep | undefined, def: MajorArcanaDef, stepIndex: number, totalSteps: number,
         isFreshRootFool = false, borrowedPower?: string,
@@ -5323,25 +5009,19 @@ export class GnosticaGame extends GameBaseSequenced {
                 const orientationStr = step.direction;
                 const target = this.resolvePieceRefOrThrow(targetRef);
                 const newOrientation = orientationStr !== undefined ? this.parseOrientation(orientationStr) : undefined;
-                // Captured before the move mutates the board, to compute
-                // where the piece actually ends up for the result log and
-                // the minion-chaining check below.
+                // Captured before the move mutates the board, to compute where the piece ends up for the log and minion-chaining check.
                 const movedOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
                 const facing = (minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index]).orientation;
                 const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
                 const destX = target.x + dx * dist;
                 const destY = target.y + dy * dist;
-                // A genuine final landing (not a Chariot-relaxed waypoint)
-                // in the void destroys the piece instead of moving it -
-                // see movePiece's own docs.
+                // A genuine final landing (not a Chariot-relaxed waypoint) in the void destroys the piece instead of moving it.
                 const destroyedInVoid = opts.skipLandingCheck !== true && this.board.classify(destX, destY) === "void";
                 const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
                 movePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, newOrientation, opts);
                 if (destroyedInVoid) {
                     this.results.push({ type: "destroy", where: origin, what: this.getPipsFromRef(targetRef), who: movedOwner });
-                    // Still a real removeAt at target's old slot - see
-                    // chainMinion's own docs on why replacesMinion is
-                    // reported even with no newMinion.
+                    // Still a real removeAt at target's old slot.  replacesMinion is reported even with no newMinion.
                     return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
                 }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
@@ -5365,8 +5045,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             default:
-                // See applyCups's own matching comment - validateRods
-                // owns this legality, not this function.
+                // ISSUE:  are we expecting real errors here?
                 throw new Error(`Unknown Rods mode "${mode}".`);
         }
     }
@@ -5680,8 +5359,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
-        // See validateOrientMinion's own matching docs - reorienting the
-        // target IS the whole action here too, so a no-op is hard-rejected.
+        // reorienting the target IS the whole action here too, so a no-op is hard-rejected.
         const currentPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
         const noOp = this.checkOrientationChanges(currentPiece.orientation, parsed.orientation);
         if (noOp) {
@@ -5690,8 +5368,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (currentPiece.owner !== this.currplayer) {
             return { failed: false };
         }
-        // See validateOrientMinion's own matching docs on predicting the
-        // post-reorientation piece directly.
         const reoriented = new Piece(currentPiece.owner, currentPiece.size, parsed.orientation);
         const newMinion = { x: target.x, y: target.y, index: target.index, piece: reoriented };
         return { failed: false, outcome: { newMinion, replacesMinion: target } };
@@ -5714,7 +5390,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replaced[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
     }
 
-    // Orientation is mandatory, same as orientAny, but never a no-op check - replacing the piece is already the whole meaningful act. A default IS derivable (the captured piece's prior facing).
+    // Orientation is mandatory but without a no-op check. The default is the captured piece's prior orientation.
     public validateHierophantReplace(minion: IMinionRef, step: IStep): StepValidation {
         const targetRef = step.targetPiece!;
         const orientationToken = step.direction;
@@ -5744,8 +5420,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replacement }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: prepopulated } };
     }
 
-    // Hermit - <minionRef> fly <targetPieceRef> to <destCell> [orient <direction>]
-    //        | <minionRef> fly <cardUid> to <destCell>
+    // Hermit - <minionRef> fly <targetPieceRef> to <destCell> [orient <direction>] | <minionRef> fly <cardUid> to <destCell>
     private applyHermitStep(minion: IMinionRef, step: IStep): IStepOutcome {
         const mode = stepHermitMode(step)!;
         const ctx = this.buildPowerContext();
@@ -5898,11 +5573,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
-    // Turn order / scoring / win-elimination
-
-    // Always rotates, even on the move that just ended the game, since external consumers attribute move N to whichever player currplayer names in stack[N-1].
-    // Steps forward through turnOrder (not raw player-id arithmetic), since "tournament rules" means play order is whatever resolveBidRound() sets; undefined outside "bidding" falls back to plain ascending.
+    // Turn order / scoring / win-elimination.  Player always rotates, even on the move that just ended the game.
     private nextPlayer(): void {
+        // Step forward through turnOrder under in bidding variant ("tournament rules"), otherwise fall back to plain ascending.
         const order = this.turnOrder ?? [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid);
         const pos = order.indexOf(this.currplayer);
         let next = pos;
@@ -5951,14 +5624,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.scoreFor(player as playerid);
     }
 
-    // Position i is always player i+1's score - the framework-wide
-    // convention every other game's own sidebarScores() already follows
-    // (see e.g. magnate.ts), since the front end reads this array
-    // positionally with no other player label attached. Always plain
-    // player-number order, even for the bidding variant (where the
-    // FIRST mover isn't necessarily player 1) - reordering by turn order
-    // here would silently attribute the wrong score to the wrong
-    // player's own slot on the real site.
     public sidebarScores(): IScores[] {
         const scores: number[] = [];
         for (let p = 1; p <= this.numplayers; p++) {
@@ -5969,10 +5634,7 @@ export class GnosticaGame extends GameBaseSequenced {
         ];
     }
 
-    // Rules text: an eliminated player discards their hand. Their board
-    // pieces aren't addressed explicitly, but every other piece-removal
-    // path in this file (see powers.ts) returns the piece to its owner's
-    // stash rather than deleting it outright, so this follows suit.
+    // The rule is that an eliminated player discards their hand.  A decision: Pieces are returned to stash.
     private eliminatePlayer(player: playerid): void {
         const ctx = this.buildPowerContext();
         for (const [x, y, t] of this.board.entries()) {
@@ -5992,15 +5654,14 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     protected checkEOG(): GnosticaGame {
-        // Not explicit in the rules text (which assumes play continues
-        // until someone announces and wins), but if elimination ever
-        // leaves only one player standing, they've necessarily won.
+        // Not explicit in the rules text, but if elimination ever leaves only one player standing, he wins.
         if (this.eliminated.length === this.numplayers - 1) {
             this.gameover = true;
             const playarray = [...Array(this.numplayers)].map((_, index) => index + 1) as playerid[];
             this.winner = playarray.filter(item => ! this.eliminated.includes(item));
         }
-          
+        //Otherwise, gameover is set with a winner outside of checkEOG.
+        
         if (this.gameover) {
             this.results.push({ type: "eog" });
             this.results.push({ type: "winners", players: [...this.winner] });
@@ -6013,7 +5674,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return generateRandomMove(this);
     }
 
-    // Standard grid renderer over a window recomputed every call ("Knight Line" pattern - no fixed board size, so the visible window tracks wherever territories currently are).
+    //  ISSUE:  What does the following comment mean?
     // The actual, single-state render body, renamed so the public render() dispatcher can call it directly; a historical frame is built entirely from renderFrame() instead.
     private renderCurrent(opts?: IRenderOpts, suppressHands = false): APRenderRep {
         let altDisplay: string | undefined;
@@ -6243,7 +5904,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
-    // Builds a finished/historical chain's own intermediate frame DIRECTLY from FrameState's board/discardPile - no clone, and never builds hand/pool/button areas at all, none of which are per-step data.
+    // Builds a finished/historical chain's own intermediate frame DIRECTLY from FrameState's board/discardPile, without hand/pool/button areas.
     private renderFrame(frame: FrameState, stepIndex: number, opts?: IRenderOpts): APRenderRep {
         let altDisplay: string | undefined;
         if (opts !== undefined) {
@@ -6346,7 +6007,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
-    // A throwaway GnosticaGame reflecting `frame`'s own board instead of live state - extends cloneLive() with a field override. The clone's own `frames` stays empty, so callers must call .renderCurrent() directly.
+    // ISSUE:  What does the following comment mean?
+    // A throwaway GnosticaGame reflecting `frame`'s own board instead of live state - extends cloneLive() with a field override.
+    // The clone's own `frames` stays empty, so callers must call .renderCurrent() directly.
     private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
         // this.results holds one _group entry per step of the chain - pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
@@ -6373,7 +6036,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.frames.length === 0) {
             return this.renderCurrent(opts);
         }
-        // No live in-progress move means this is a fully committed move being reviewed later - build each frame directly with no buttons; mid-build needs renderFrameSnapshot's real buttons instead.
+        // No live in-progress move means this is a fully committed move being reviewed later - build each frame directly with no buttons;
+        // ISSUE: frames should never have buttons, but comment said "mid-build needs renderFrameSnapshot's real buttons instead."
         const historical = this.liveMove === undefined;
         const reps = historical
             ? this.frames.map((f, i) => this.renderFrame(f, i, opts))
@@ -6382,7 +6046,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return reps;
     }
 
-    // Every card whose identity is definitively known to the viewer: board territories, the face-up discard pile, and any non-redacted hand entry. Used to compute the draw-pile summary by elimination.
+    // Every card whose identity is definitively known to the viewer: the board, discards, and known hands, used to compute the draw-pile summary by elimination.
     private visibleCardUids(): Set<string> {
         const visible = new Set<string>();
         for (const [, , t] of this.board.entries()) {
@@ -6425,7 +6089,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return { majorUids, counts };
     }
 
-    // Builds a discard area straight from an already-summarized DiscardSummary - used only for a historical frame, with no "just discarded" cards to tint. Otherwise identical to buildDeckSummaryArea.
+    // Builds a discard area straight from a DiscardSummary - used only for historical frames. Otherwise identical to buildDeckSummaryArea.
     private buildAreaFromSummary(
         summary: DiscardSummary, keyPrefix: string, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string,
     ): AreaPieces | undefined {
@@ -6463,7 +6127,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return { type: "pieces", pieces: pieces as [string, ...string[]], label, spacing: 0.25, width: 10 };
     }
 
-    // Draw/discard piles can hold most of the 78-card deck at once - minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are unique and shown individually.
+    // Summary code because Draw/discard piles can be large. Minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are shown individually.
     private buildDeckSummaryArea(
         uids: string[], keyPrefix: string, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string,
         newUids: Set<string> = new Set(),
@@ -6544,11 +6208,7 @@ export class GnosticaGame extends GameBaseSequenced {
             type: "pieces",
             pieces: pieces as [string, ...string[]],
             label,
-            // Tighter and wider than the default auto-wrap - matches
-            // magnate.ts/emu.ts's own deck/discard sizing, and there's
-            // rarely more than ~30 distinct tokens (8 minor buckets + up to
-            // 22 majors) to lay out, so a wide fixed row keeps this to a
-            // couple of lines instead of wrapping narrowly.
+            // Tighter and wider than the default auto-wrap; there's no more than ~30 distinct tokens (8 buckets + 22 majors) to display.
             spacing: 0.25,
             width: 10,
         };
@@ -6557,8 +6217,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // A canonical string identifying this cell's exact visual contents
     // (card identity + every piece's owner/size/orientation) - the legend
     // only ever grows entries for combinations actually on the board, built
-    // fresh each render() call, matching Knight Line's encodePiece/
-    // createPiece pattern.
+    // fresh each render() call.
     private cellRenderKey(t: CellContents | undefined, cls: CellClass): string {
         const cardPart = t?.card !== undefined ? t.card.uid : (cls === "wasteland" ? "waste" : "void");
         // Piece.id() (owner+size+orientation, no punctuation) - legend keys
@@ -6568,32 +6227,11 @@ export class GnosticaGame extends GameBaseSequenced {
         return `k_${cardPart}_${piecesPart}`;
     }
 
-    // Gnostica's own card face, built from scratch rather than
-    // `card.toGlyph()`: a four-corner layout modelled on Decktet's own
-    // toGlyph() (rank/suit badges in the corners), not a tarot-deck fact,
-    // so it lives here rather than in the generic tarot module.
-    //   - top-left: the rank (minors) or major arcana numeral, plain text.
-    //   - top-right: a "piece" circle holding the suit icon (minors) or the
-    //     major's first power icon - always populated.
-    //   - bottom-left: nothing at all for minors; for majors, an empty
-    //     circle, except when the card has a 3rd icon (only the Devil,
-    //     currently), which populates it.
-    //   - bottom-right: nothing for pip minors (A-10); an empty circle for
-    //     court minors (P/N/Q/K); for majors, a circle populated with the
-    //     2nd icon if the card has one, else empty.
-    // `borderless` drops the card-square background (for tokens that
-    // summarize a category rather than depict an actual card - see
-    // buildDeckSummaryArea); `rankText` overrides the upper-left text
-    // (same purpose - a count like "3x" instead of a real rank/numeral).
-    // Every glyph EXCEPT the plain background square carries
-    // `orientation: "vertical"` - correction for rotation.
+    // Gnostica's own card face, rebuilt.  Also handles summary tokens.
     private buildCardFace(card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: ColourResolvable } = {}): Glyph[] {
+        // `borderless` drops the card-square background for summary tokens.
         const BOARD_TILE_GRID_CORNER = 650;
-        // Opacity 0 by default, matching Jacynth's own Card.toGlyph() - an
-        // ordinary card face has no filled square at all, so the theme's
-        // own board/background colour shows through it rather than a fixed
-        // white. The stroke/border stays drawn regardless (a separate,
-        // always-visible outline), so the cell boundary is still legible.
+        // Opacity 0 by default.
         const backdrop: Glyph = { name: opts.borderless ? "piece-square-borderless" : "piece-square", scale: 1, opacity: 0 };
         if (opts.background !== undefined) {
             backdrop.colour = opts.background;
@@ -6605,9 +6243,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const stack: Glyph[] = [backdrop];
 
-        // `spaced` (board tiles, which also have to fit up to 3+ pieces in
-        // the same small square) pushes the four corners further out and
-        // shrinks everything in them, versus the normal card layout.
+        //The `spaced` version for board tiles (to leave room for pyramids) shrinks all the card contents.
         let rankText = opts.rankText;
         if (rankText === undefined) {
             rankText = card.major ? card.romanNumeral : card.rank.uid;
@@ -6623,6 +6259,8 @@ export class GnosticaGame extends GameBaseSequenced {
             rankShiftX += spaced ? 675 : 250;
             rankShiftY += spaced ? -175 : -175;
         }
+
+        // top-left: the rank (minors) or major arcana numeral, plain text.
         const majorRotation = card.major ? -45 : 0;
         stack.push({
             text: rankText,
@@ -6649,23 +6287,22 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         };
 
-        // Top-right: always populated.
+        // Top-right: always populated with a "piece" circle holding the suit icon (minors) or the major's first power icon.
         pushCircle(1, -1, icons[0]);
 
+        //Bottom-left: nothing at all for minors; for majors, an empty circle except filled for the Devil.
+        //Bottom-right: nothing for pip minors (A-10); an empty circle for court minors (P/N/Q/K); for majors, populated with the 2nd power icon (or empty).
         if (card.major) {
             pushCircle(-1, 1, icons[2]);
             pushCircle(1, 1, icons[1]);
-        } else if (card.court) {
+        } else if (card.court) {            
             pushCircle(1, 1, undefined);
         }
 
         return stack;
     }
 
-    // A board tile has to show the card AND up to 3 pieces in the same
-    // small square, so it uses the spaced card face (smaller rank/circle
-    // sizing) rather than the roomier default meant for a card shown alone
-    // (e.g. a hand, once that's rendered).
+    // A board tile uses the spaced card face.  (There's a render option to use the card version when the territory is unpopulated.)
     private buildCellGlyph(t: CellContents | undefined, cls: CellClass, largerCards: boolean, owner?: number): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
         if (t?.card !== undefined) {
@@ -6688,7 +6325,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return stack as [Glyph, ...Glyph[]];
     }
 
-    // Pieces never visually stack, but a cell can hold more than 3 (some major powers bypass capacity), so this can't be a fixed 3-slot table.
     // Up to 5 pieces: each piece's orientation names its preferred cell in the 3x3 grid; a taken preferred cell bumps the piece into whatever's still free.
     private pieceGridSlots(pieces: Piece[]): { dx: number; dy: number; scale: number }[] {
         const PIECE_GRID_RADIUS = 380;
@@ -6697,7 +6333,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const CARDINAL_COS_SIN: Record<Exclude<Orientation, "U">, [number, number]> = {
     N: [1, 0], E: [0, 1], S: [-1, 0], W: [0, -1],
 };
-        // #48: a bumped piece tries the two perpendicular sides first, then dead centre, and only falls back to the OPPOSITE side (misleading, reads as facing the wrong way) as a last resort.
+        // a bumped piece tries the two perpendicular sides first, then the center, and only falls back to the remaining position as a last resort.
         const FALLBACK_ORDER: Record<Orientation, number[]> = {
             N: [2, 3, 4, 1], // E, W, U, S
             S: [2, 3, 4, 0], // E, W, U, N
@@ -6919,12 +6555,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             }
                             break;
                         case "move": {
-                            // Rods/Hermit "piece" mode can move ANY
-                            // player's piece, not just the acting minion's
-                            // own (see checkMovePiece/checkHermitMovePiece
-                            // - no owner restriction on the target) - name
-                            // whose it was, same _own/target split as
-                            // "destroy".
+                            // Rods/Hermit "piece" mode can move any piece, not just the acting player's own, so name whose it was.
                             const target = this.otherPlayerName(r.who, name, players);
                             switch (r.how) {
                                 case "rod-piece":
