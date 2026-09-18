@@ -3435,7 +3435,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     return `play ${uid}`;
                 }
                 if (head === "discard") {
-                    // TODO: delete this comment line
                     let discards = [...(headSteps[0]?.cardList ?? [])];
                     if (discards.includes(uid)) {
                         discards = discards.filter(u => u !== uid);
@@ -3679,10 +3678,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (n < 1 || n > hand.length) {
             return this.invalid("apgames:validation.gnostica.BAD_BID_POSITION", { position: n, max: hand.length });
         }
-        // TODO: remove these comment lines
-        //
-        //
-        //
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
@@ -3946,7 +3941,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "discard [uid...] [draw <n>]" - discard the named hand cards, then draw back.
-    // TODO: delete this comment line
     private cmdDiscard(step: IStep, partial = false): void {
         const discardUids = step.cardList ?? [];
         const drawCountStr = step.amount?.toString();
@@ -3954,11 +3948,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (discardUids.length > 0) {
             this.discarded.push(...discardUids);
             this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
-        }
-        // `partial` stops after the discard step, skipping the redraw for further discards.
-        //ISSUE:  this should not be a concern if "draw" was not found in the move.
-        if (partial) {
-            return;
         }
         this.results.push({ type: "deckDraw", count: drawn, from: "deck" });
         this.cardsDrawn[this.currplayer - 1] = drawn;
@@ -4002,7 +3991,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Returns the card's display name, for messages.  
-    // TODO: remove this comment line
     private cardNameOrUid(uid: string): string {
         return allCards().find(c => c.uid === uid)!.name;
     }
@@ -4689,7 +4677,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined; // cell chosen, which minion there is still undecided - still skipped
         }
         const minion = this.resolvePieceRefOrThrow(minionRef, minions, "NOT_AN_ELIGIBLE_MINION");
-        // ISSUE:  Is any of the following code necessary?  The original uspicious comment follows.
+        // TODO: remove the code described in the following comment once Wheel of Fortune parsing is finalized.
         // A trusted commit can reach here with `istep` undefined - a
         // segment whose content parseMove's own strict grammar rejects
         // (Cups "new"'s own "random" token, say - see checkCreateTerritory's
@@ -6028,9 +6016,8 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
-    // ISSUE:  What does the following comment mean?
-    // A throwaway GnosticaGame reflecting `frame`'s own board instead of live state - extends cloneLive() with a field override.
-    // The clone's own `frames` stays empty, so callers must call .renderCurrent() directly.
+    // A second, disposable GnosticaGame instance whose board is overridden to `frame.board` (one intermediate step's snapshot), not the real current board.
+    // Its own `.frames` is left empty (it isn't itself mid-chain), so call `.renderCurrent()` on it directly - never the public `.render()` - to always get one rep back.
     private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
         // this.results holds one _group entry per step of the chain - pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
@@ -6057,8 +6044,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.frames.length === 0) {
             return this.renderCurrent(opts);
         }
-        // No live in-progress move means this is a fully committed move being reviewed later - build each frame directly with no buttons;
-        // ISSUE: frames should never have buttons, but comment said "mid-build needs renderFrameSnapshot's real buttons instead."
+        // Historical (fully committed) frames get no buttons, via renderFrame(); a still-mid-build chain gets real ones instead, via renderCurrent() on a snapshot.
         const historical = this.liveMove === undefined;
         const reps = historical
             ? this.frames.map((f, i) => this.renderFrame(f, i, opts))
