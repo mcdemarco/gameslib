@@ -1492,6 +1492,25 @@ describe("Gnostica: piece grid fallback order (#48)", () => {
         expect(slots[0]).to.deep.equal([0, 0]); // U's own preferred slot
         expect(slots[1]).to.deep.equal([0, -380]); // first free slot (N), no ordering claim beyond that
     });
+
+    it("more than 5 pieces (only possible via an ignoreCapacity power) falls back to a dense, orientation-agnostic grid instead of the 5-slot layout", () => {
+        const g = new GnosticaGame(2);
+        // Orientation is irrelevant to densePieceGrid - all "U" here just keeps the setup simple.
+        const pieces = [0, 1, 2, 3, 4, 5].map(() => new Piece(1, 1, "U"));
+        const slots = gridSlots(g, pieces);
+        // 6 pieces -> a 3-column x 2-row grid (cols = ceil(sqrt(6)), rows = ceil(6/cols)), filled row-major by array order.
+        expect(slots.map(s => s.scale)).to.deep.equal(new Array(6).fill(0.48));
+        const dy = slots.map(s => s.dy);
+        expect(dy.slice(0, 3).every(v => Math.abs(v - dy[0]) < 0.001)).to.be.true; // row 0: same dy
+        expect(dy.slice(3, 6).every(v => Math.abs(v - dy[3]) < 0.001)).to.be.true; // row 1: same dy
+        expect(dy[3] - dy[0]).to.be.greaterThan(0); // row 1 sits below row 0
+        const dx = slots.map(s => s.dx);
+        expect(dx[0]).to.be.closeTo(dx[3], 0.001); // column 0 lines up between rows
+        expect(dx[1]).to.be.closeTo(dx[4], 0.001); // column 1 lines up between rows
+        expect(dx[2]).to.be.closeTo(dx[5], 0.001); // column 2 lines up between rows
+        expect(dx[0]).to.be.lessThan(dx[1]);
+        expect(dx[1]).to.be.lessThan(dx[2]);
+    });
 });
 
 describe("Gnostica: render", () => {

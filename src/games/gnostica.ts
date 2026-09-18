@@ -2932,7 +2932,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Board-click handling once a minor-arcana power step's MODE is already chosen - cycling or switching whichever trailing arg(s) that mode's shape supports.
-    // ISSUES: piece INDEX within a multi-piece facing cell always defaults to index 0; the optional trailing reorientation isn't click-driven either.
     private handlePendingStepBoardClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
         if (pending.mode === undefined) {
             return undefined;
