@@ -4323,6 +4323,56 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(selfClick.move).eq(cellClick.move); // the move string never advances into the doomed state
     });
 
+    it("orientAny (Devil): 2+ distinguishable pieces at the facing cell offer a button-based target picker, self included", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(15)); // The Devil
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U"), new Piece(2, 2, "U")]; // two distinguishable enemy pieces at n0
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        const values = buttonValues(g);
+        expect(values).to.include.members(["target_m0.1", "target_n0.1", "target_n0.2"]);
+        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.2");
+        expect(picked.move).eq(`use ${major(15).uid}/with m0.1 orient n0.2`);
+        expect(picked.valid).to.be.true;
+    });
+
+    it("orientAny (Devil): a single candidate at the facing cell offers no target picker - the plain click flow keeps working", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(15)); // The Devil
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // one enemy piece at n0
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        const values = buttonValues(g);
+        expect(values.some(v => v?.startsWith("target_"))).to.be.false;
+    });
+
+    it("tradeHands (Justice): 2+ enemy pieces at the facing cell offer a button-based target picker, self excluded", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(11)); // Justice
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U"), new Piece(2, 2, "U")]; // two distinguishable enemy pieces at n0
+        const handsBefore = [g.hands[0].slice(), g.hands[1].slice()];
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, row, col);
+        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        const values = buttonValues(g);
+        expect(values).to.include.members(["target_n0.1", "target_n0.2"]);
+        expect(values).to.not.include("target_m0.1"); // self is never a legal tradeHands target
+        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.2");
+        expect(picked.move).eq(`use ${major(11).uid}/with m0.1 trade n0.2`);
+        expect(picked.valid).to.be.true;
+        g.move(picked.move, { trusted: true }); // skips step 2 (attack)
+        expect(g.hands[0]).to.deep.equal(handsBefore[1]);
+        expect(g.hands[1]).to.deep.equal(handsBefore[0]);
+    });
+
     it("orientAny (Devil): target pick never assigns a default orientation; a further click near the TARGET sets it", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(15)); // The Devil
