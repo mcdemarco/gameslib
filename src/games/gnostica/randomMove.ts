@@ -98,9 +98,20 @@ export function generateRandomMove(game: GnosticaGame): string {
             } else if (revealedCard.uid === "21") {
                 const borrowedUid = randomWorldBorrowUid(game);
                 if (borrowedUid !== undefined) {
-                    const borrowedCard = allCards().find(c => c.uid === borrowedUid)!;
-                    const chain = buildRandomChain(game, borrowedCard, game.eligibleMinionsForPlay());
-                    candidate = game.buildViaMove(chain, borrowedUid);
+                    // See buildRandomWorldMove's own docs on why a
+                    // borrowed Magician needs its own suit chained on as
+                    // a second "as <suit>" instead of buildRandomChain's
+                    // plain token segments.
+                    if (borrowedUid === "01") {
+                        const found = findRandomMagicianChain(game, game.eligibleMinionsForPlay());
+                        if (found !== undefined) {
+                            candidate = game.buildViaMove(found.chain, borrowedUid, found.suitUid);
+                        }
+                    } else {
+                        const borrowedCard = allCards().find(c => c.uid === borrowedUid)!;
+                        const chain = buildRandomChain(game, borrowedCard, game.eligibleMinionsForPlay());
+                        candidate = game.buildViaMove(chain, borrowedUid);
+                    }
                 }
             } else if (revealedCard.uid === "01") {
                 // Fool's own reveal never spends asUid (unlike World's
@@ -470,11 +481,23 @@ function randomWorldBorrowUid(game: GnosticaGame): string | undefined {
 // borrowed card's own steps are built via buildRandomChain exactly like
 // a fresh activation would build them for itself, using World's own
 // eligible pool - the acting minion World's own step inherits into the
-// pushed frame (see applyPowerStep's own "worldUseAny" case).
+// pushed frame (see applyPowerStep's own "worldUseAny" case). A borrowed
+// Magician is the one exception: its own suit now chains onto the same
+// head as a second "as <suit>" (TODO-gnostica #105) rather than living in
+// its own step token, so it needs findRandomMagicianChain's own two-part
+// {suitUid, chain} instead of buildRandomChain's plain token segments.
 function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible: IMinionRef[]): string | undefined {
     const borrowedUid = randomWorldBorrowUid(game);
     if (borrowedUid === undefined) {
         return undefined;
+    }
+    if (borrowedUid === "01") {
+        const found = findRandomMagicianChain(game, eligible);
+        if (found === undefined) {
+            return `${head} 21 as ${borrowedUid}`;
+        }
+        const steps = found.chain.map(tokens => tokens.join(" "));
+        return `${head} 21 as ${borrowedUid} as ${found.suitUid}/${steps.join("/")}`;
     }
     const borrowedCard = allCards().find(c => c.uid === borrowedUid)!;
     const chain = buildRandomChain(game, borrowedCard, eligible);
@@ -959,31 +982,6 @@ function buildRandomHighPriestessResumeTokens(game: GnosticaGame): string[] {
     return discards;
 }
 
-// Only ever reached with a World-pushed Magician frame - a fresh root
-// Magician activation is intercepted earlier by buildRandomMagicianMove,
-// which puts the suit in the head's "as <suit>" instead. World's own
-// borrow already spent that one asUid slot naming which card to push, so
-// the pushed Magician frame's own suit has nowhere to go but its own step
-// token (see gnostica.ts's deriveStepTokens/walkFrameStack for the
-// matching real-commit rule) - reuse findRandomPrimitiveChoice directly
-// rather than re-deriving mode/arg legality, then verify the doubly-
-// wrapped shape via validateMagicianChoice as this step's own final check.
-function buildRandomMagicianChoiceTokens(game: GnosticaGame, minions: IMinionRef[]): string[] | undefined {
-    for (const suit of shuffle([...ALL_SUITS]) as typeof ALL_SUITS) {
-        const choice = findRandomPrimitiveChoice(game, suit.uid, minions, {});
-        if (choice === undefined) {
-            continue;
-        }
-        const suitTokens = suitStepTokens(suit.uid, choice.mode, choice.args);
-        const check = game.validateMagicianChoice(choice.minion, [suit.uid, ...suitTokens]);
-        if (!check.failed) {
-            const ref = game.pieceRefStr(choice.minion, minions);
-            return [ref, suit.uid, ...suitTokens];
-        }
-    }
-    return undefined;
-}
-
 function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower, minions: IMinionRef[]): string[] | undefined {
     switch (special) {
         case "orientMinion": return buildRandomOrientMinionTokens(game, minions);
@@ -998,11 +996,12 @@ function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower,
         // that one already prepends "discard" itself for the resume's
         // own head word.
         case "highPriestess": return ["discard", ...buildRandomHighPriestessTokens(game)];
-        // A root magicianChoice never reaches here (buildRandomMagicianMove
-        // intercepts it earlier) - only a World-pushed one does.
-        case "magicianChoice": return buildRandomMagicianChoiceTokens(game, minions);
-        // fool/worldUseAny - never reached; buildRandomChain filters
-        // Fool/World out by uid before any step is ever attempted.
+        // fool/worldUseAny/magicianChoice - never reached; every caller of
+        // buildRandomChain intercepts Fool/World/Magician by uid before
+        // any step is ever attempted (see buildRandomWorldMove's/
+        // generateRandomMove's own docs on why a World-pushed Magician
+        // frame is no exception now that its own suit goes through a
+        // chained "as <uid> as <suit>" instead of a step token).
         default: return undefined;
     }
 }
