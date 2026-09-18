@@ -6415,39 +6415,42 @@ export class GnosticaGame extends GameBaseSequenced {
         if (n === 0) {
             return [];
         }
-        if (n > PIECE_GRID_SLOTS.length) {
-            return this.densePieceGrid(n);
-        }
-        const claimed = new Set<number>();
-        const chosenIdx: number[] = new Array(n);
-        pieces.forEach((p, i) => {
-            const idx = PIECE_GRID_PREFERRED_INDEX[p.orientation];
-            if (!claimed.has(idx)) {
-                claimed.add(idx);
-                chosenIdx[i] = idx;
+        const raw: { dx: number; dy: number; scale: number }[] = (() => {
+            if (n > PIECE_GRID_SLOTS.length) {
+                return this.densePieceGrid(n);
             }
-        });
-        for (let i = 0; i < n; i++) {
-            if (chosenIdx[i] === undefined) {
-                const fallback = FALLBACK_ORDER[pieces[i].orientation].find(idx => !claimed.has(idx))!;
-                claimed.add(fallback);
-                chosenIdx[i] = fallback;
+            const claimed = new Set<number>();
+            const chosenIdx: number[] = new Array(n);
+            pieces.forEach((p, i) => {
+                const idx = PIECE_GRID_PREFERRED_INDEX[p.orientation];
+                if (!claimed.has(idx)) {
+                    claimed.add(idx);
+                    chosenIdx[i] = idx;
+                }
+            });
+            for (let i = 0; i < n; i++) {
+                if (chosenIdx[i] === undefined) {
+                    const fallback = FALLBACK_ORDER[pieces[i].orientation].find(idx => !claimed.has(idx))!;
+                    claimed.add(fallback);
+                    chosenIdx[i] = fallback;
+                }
             }
-        }
-        return chosenIdx.map((idx, i) => {
-            const [dirX, dirY] = PIECE_GRID_SLOTS[idx];
-            const targetX = dirX * PIECE_GRID_RADIUS;
-            const targetY = dirY * PIECE_GRID_RADIUS;
+            return chosenIdx.map(idx => {
+                const [dirX, dirY] = PIECE_GRID_SLOTS[idx];
+                return { dx: dirX * PIECE_GRID_RADIUS, dy: dirY * PIECE_GRID_RADIUS, scale: 0.48 };
+            });
+        })();
+        // The renderer applies nudge pre-rotation, so every non-U piece's raw offset must be counter-rotated by its own facing here, whichever branch produced it.
+        return raw.map((slot, i) => {
             const orientation = pieces[i].orientation;
             if (orientation === "U") {
-                // No rotate on this glyph at all - nudge is applied in plain screen space, no compensation needed.
-                return { dx: targetX, dy: targetY, scale: 0.48 };
+                return slot;
             }
             const [cos, sin] = CARDINAL_COS_SIN[orientation];
             return {
-                dx: targetX * cos + targetY * sin,
-                dy: -targetX * sin + targetY * cos,
-                scale: 0.48,
+                dx: slot.dx * cos + slot.dy * sin,
+                dy: -slot.dx * sin + slot.dy * cos,
+                scale: slot.scale,
             };
         });
     }
