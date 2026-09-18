@@ -5,38 +5,26 @@ import { CellContents, cardPointValue } from "./cell";
 import { Piece, Pips, Orientation } from "./piece";
 import { PrimitiveOpts, MAJOR_ARCANA, MajorArcanaDef } from "./majorArcana";
 
-// Per-size counts of pieces still in reserve (not on the board), indexed
-// [small, medium, large]. There's no dedicated Stash class - it's a plain
-// tuple, mutated in place by takeFromStash/returnToStash below.
+// Per-size counts of pieces still in reserve [small, medium, large]; mutated in place by takeFromStash/returnToStash below.
 export type Stash = [number, number, number];
 
 export interface PowerContext {
     board: GnosticaBoard;
     currplayer: number;
     stashes: Map<number, Stash>;
-    // Card uids. Mutated in place as cards move between piles - callers that
-    // need to preserve the pre-call state should clone first.
+    // Card uids, mutated in place as cards move between piles - callers that need to preserve pre-call state should clone first.
     hand: string[];
     discardPile: string[];
     drawPile: string[];
 }
 
-// A legality-check failure: an i18next key suffix (apgames:validation.gnostica.<key>)
-// plus whatever interpolation params that message needs. Every checkX
-// function below returns `undefined` for "legal" or one of these for
-// "illegal, and here's why" - the single source of truth both the
-// non-mutating validator (gnostica.ts's validateX tree) and the real
-// mutating functions here are built on, so the two can never drift out
-// of sync with each other.
+// An i18next key suffix + params; every checkX function returns undefined ("legal") or one of these, shared by validate and apply so they can't drift.
 export interface PowerFailure {
     key: string;
     params?: Record<string, unknown>;
 }
 
-// Thrown only when a `trusted: true` caller skipped validation and the
-// move turns out to be illegal anyway - never player-facing, so never
-// routed through i18next/apgames.json. The message is a plain hardcoded
-// string for whoever debugs the integration bug, not a translation key.
+// Thrown only when a `trusted: true` caller skipped validation and the move turns out illegal anyway - never player-facing.
 export class GnosticaRulesError extends Error {}
 
 const cardByUid = (uid: string): TarotCard => {
@@ -56,13 +44,7 @@ const takeFromPile = (pile: string[], uid: string): TarotCard => {
     return cardByUid(uid);
 };
 
-// Reshuffles the discard pile into the draw pile in place whenever the
-// draw pile is empty. - mirrors cmdDraw's own
-// reshuffle in gnostica.ts. Mutates the arrays in place (push/splice)
-// rather than reassigning ctx.drawPile/ctx.discardPile, since those are
-// the same array instances GnosticaGame's this.drawPile/this.discardPile
-// point to - a reassignment here wouldn't be visible there. No-op if the
-// draw pile isn't actually empty, or if there's nothing to reshuffle.
+// Reshuffles discard into draw whenever draw is empty, in place (mirrors cmdDraw) since ctx.drawPile/discardPile alias GnosticaGame's own arrays.
 const reshuffle = (ctx: PowerContext): void => {
     if (ctx.drawPile.length > 0 || ctx.discardPile.length === 0) {
         return;
@@ -79,9 +61,7 @@ const stashOf = (ctx: PowerContext, player: number): Stash => {
     return s;
 };
 
-// Exported: the engine also needs this directly for the base "place" turn
-// action (your first piece comes from your own stash, same as every other
-// piece that ever enters play).
+// Exported: the engine needs this directly for the base "place" turn action too.
 export const takeFromStash = (ctx: PowerContext, player: number, size: Pips): void => {
     const s = stashOf(ctx, player);
     if (s[size - 1] <= 0) {
@@ -94,13 +74,7 @@ export const returnToStash = (ctx: PowerContext, player: number, size: Pips): vo
     stashOf(ctx, player)[size - 1] += 1;
 };
 
-// Non-mutating: true iff the acting player currently has at least one
-// size-`size` piece left in their own reserve. Used by checkX functions
-// that need to confirm a grow/replace is possible before the mutating
-// function commits to it (its own takeFromStash call is the enforcement
-// backstop).
-// Exported: the engine's own validatePlace needs it too, for the same
-// reason cmdPlace's takeFromStash call needs a non-throwing twin.
+// Non-mutating check used by checkX functions and validatePlace before their mutating twins commit (takeFromStash is the enforcement backstop).
 export const hasStashAvailable = (ctx: PowerContext, player: number, size: Pips): boolean => {
     const s = ctx.stashes.get(player);
     return s !== undefined && s[size - 1] > 0;
@@ -123,8 +97,7 @@ const getPiece = (ctx: PowerContext, x: number, y: number, index: number): Piece
     return p;
 };
 
-// A cell "has an enemy" if any piece there belongs to someone other than
-// `player` - used by every "not occupied by enemy pieces" rule in the text.
+// A cell "has an enemy" if any piece there belongs to someone other than `player`.
 const hasEnemyPieces = (ctx: PowerContext, x: number, y: number, player: number): boolean => {
     const t = ctx.board.get(x, y);
     if (t === undefined) {
@@ -133,11 +106,7 @@ const hasEnemyPieces = (ctx: PowerContext, x: number, y: number, player: number)
     return t.pieces.some(p => p.owner !== player);
 };
 
-// Icehouse pieces are never removed from the game outright - anything a
-// territory-level mutation (destroyTerritory/pushTerritory) leaves stranded
-// in the void is simply returned to its owner's stash, same as any other
-// piece that ends up in the void. Shared by Rods' push-territory and Swords'
-// attack-territory, the only two board.ts mutations that can strand pieces.
+// Pieces stranded in the void by destroyTerritory/pushTerritory return to their owner's stash; shared by Rods' push and Swords' attack-territory.
 const returnEvictedPieces = (ctx: PowerContext, evictions: IEvicted[]): void => {
     for (const ev of evictions) {
         for (const p of ev.pieces) {
@@ -153,11 +122,7 @@ const checkOwnMinion = (minion: Piece, player: number): PowerFailure | undefined
     return undefined;
 };
 
-// Every suit power targets either the minion's own cell (orientation "U")
-// or the single cell it's pointing at (orientation N/E/S/W) - see the rules'
-// "Orientation and targeting" section. This is the shared legality check for
-// a CELL-level target (a territory/wasteland as a whole, not a specific
-// piece in it).
+// Shared legality check for a CELL-level target: the minion's own cell ("U") or the single cell it's pointing at.
 const checkValidCellTarget = (
     ctx: PowerContext, minion: Piece, minionX: number, minionY: number, targetX: number, targetY: number,
 ): PowerFailure | undefined => {
@@ -174,8 +139,7 @@ const checkValidCellTarget = (
     return { key: "MUST_TARGET_FACING", params: { facing: minion.orientation } };
 };
 
-// Same, but for a specific PIECE target - a minion may always target itself
-// regardless of orientation, on top of the cell-level rule above.
+// Same, but for a specific PIECE target - a minion may always target itself regardless of orientation.
 const checkValidPieceTarget = (
     ctx: PowerContext, minion: Piece, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number,
@@ -187,9 +151,7 @@ const checkValidPieceTarget = (
     return checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
 };
 
-// ============================================================
 // Cups - Create
-// ============================================================
 
 // Add one of the acting player's own small pieces to the target cell.
 export const checkCreateOwn = (
@@ -244,8 +206,7 @@ export const createOwn = (
     t.add(new Piece(ctx.currplayer, 1, orientation), opts.ignoreCapacity);
 };
 
-// Add one of the TARGETED enemy's own small pieces to the same cell,
-// matching that enemy piece's orientation, drawn from the enemy's stash.
+// Add one of the TARGETED enemy's own small pieces to the same cell, matching its orientation, drawn from the enemy's stash.
 export const checkCreateEnemy = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
@@ -255,11 +216,7 @@ export const checkCreateEnemy = (
     if (ownErr) return ownErr;
     const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
     if (targetErr) return targetErr;
-    // A genuinely void cell can never legitimately have a victim piece
-    // there (a real victim already rules this out below), but check
-    // explicitly anyway - see checkCreateOwn's own docs on why creation,
-    // unlike movement, has no other cleanup path for a piece stranded in
-    // the void.
+    // A void cell can never legitimately have a victim, but check explicitly anyway - creation has no cleanup path for a stranded piece.
     if (ctx.board.classify(targetX, targetY) === "void") {
         return { key: "TARGET_IS_VOID" };
     }
@@ -294,11 +251,7 @@ export const createEnemy = (
     t.add(new Piece(victim.owner, 1, victim.orientation), opts.ignoreCapacity);
 };
 
-// Create a new territory on a targeted wasteland, playing a spot (1-point)
-// card from hand - or, with opts.allowRandomDraw (Wheel of Fortune), drawing
-// the top of the draw pile instead, whatever it turns out to be (no point-
-// value restriction on the random draw - unlike the hand-card path, the
-// player never chose it, so there's nothing to restrict against).
+// Create a territory on a wasteland with a spot card from hand, or (Wheel of Fortune's allowRandomDraw) an unrestricted draw-pile card instead.
 export const checkCreateTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts = {},
@@ -354,9 +307,7 @@ export const createTerritory = (
     ctx.board.createTerritory(targetX, targetY, card);
 };
 
-// ============================================================
 // Rods - Move
-// ============================================================
 
 const checkCanUseRod = (minion: Piece): PowerFailure | undefined => {
     if (minion.orientation === "U") {
@@ -365,8 +316,7 @@ const checkCanUseRod = (minion: Piece): PowerFailure | undefined => {
     return undefined;
 };
 
-// Move the minion itself, or push a targeted piece (self or the cell the
-// minion is pointing at), `dist` spaces in the minion's own direction.
+// Move the minion itself, or push a targeted piece, `dist` spaces in the minion's own direction.
 export const checkMovePiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, dist: number,
@@ -434,20 +384,11 @@ export const movePiece = (
         destT = new CellContents(undefined);
         ctx.board.store.set(destX, destY, destT);
     }
-    // A relaxed landing (Chariot's waypoint) must bypass CellContents.add()'s
-    // own capacity enforcement too, not just the pre-check above - passing
-    // "through" a 3+ piece cell means briefly exceeding it, transiently.
+    // A relaxed landing (Chariot's waypoint) must also bypass CellContents.add()'s own capacity enforcement, briefly exceeding it.
     destT.add(moved, opts.ignoreCapacity || opts.skipLandingCheck);
 };
 
-// Push the territory at (srcX, srcY) - always the cell the minion is
-// pointing at (never the minion's own cell - a rod can't push "itself";
-// checkCanUseRod already forbids facing "U") - `dist` spaces further in
-// that same direction. `srcX/srcY` are an explicit, caller-supplied
-// target (checked against the minion's own facing via
-// checkValidCellTarget, same as every other suit's "tile" mode) rather
-// than silently re-derived here, so the move string itself always names
-// the territory being pushed instead of leaving it implicit.
+// Push the territory at the minion-facing (srcX, srcY) `dist` spaces further, same direction; srcX/srcY are caller-supplied so the move string names it.
 export const checkMoveTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     srcX: number, srcY: number, dist: number,
@@ -495,20 +436,16 @@ export const moveTerritory = (
     const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
     const destX = srcX + dx * dist;
     const destY = srcY + dy * dist;
-    // Pushing the card out from under the departure cell can strand any
-    // pieces left there if nothing else keeps it adjacent to a territory.
+    // Pushing the card out can strand pieces left at the departure cell if nothing else keeps it adjacent to a territory.
     const evictions = ctx.board.pushTerritory(srcX, srcY, destX, destY);
     returnEvictedPieces(ctx, evictions);
 };
 
-// ============================================================
 // Discs - Grow
-// ============================================================
 
 const nextSize = (size: Pips): Pips => (size + 1) as Pips;
 
-// Replace the minion (or a targeted piece) with one exactly one size larger,
-// same owner, drawn from that owner's own stash.
+// Replace the minion (or a targeted piece) with one exactly one size larger, same owner, drawn from that owner's own stash.
 export const checkGrowPiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number,
@@ -550,10 +487,7 @@ export const growPiece = (
     t.add(new Piece(target.owner, grownSize, orientation));
 };
 
-// Grow the targeted territory by exactly one point of value (or two, with
-// opts.skipLadder - Strength growing the same territory twice), replacing
-// its card from hand (default) or the discard pile (opts.replacementSource,
-// Star).
+// Grow the targeted territory by one point of value (or two, opts.skipLadder), replacing its card from hand or discard (opts.replacementSource).
 export const checkGrowTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
@@ -602,15 +536,9 @@ export const growTerritory = (
     ctx.board.growTerritory(targetX, targetY, newCard);
 };
 
-// ============================================================
 // Swords - Attack
-// ============================================================
 
-// Shrink a targeted piece (self or the cell the minion is pointing at) by up
-// to `pips` (capped at the minion's size), replacing it with the
-// appropriately smaller piece from the VICTIM's own stash - or, if the
-// result is 0 pips, destroying it outright (its full size returns to the
-// victim's stash, no replacement piece is placed).
+// Shrink a targeted piece by up to `pips`, replacing it from the VICTIM's own stash - or destroying it outright if the result is 0 pips.
 export const checkAttackPiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, pips: number,
@@ -665,9 +593,7 @@ export const attackPiece = (
     t.add(new Piece(victim.owner, resultSize as Pips, orientation));
 };
 
-// Shrink the targeted territory's value by up to `pips`, replacing its card
-// from hand (default) or the discard pile (opts.replacementSource, Tower) -
-// or, if `newCardUid` is omitted, destroying the territory outright.
+// Shrink the targeted territory's value by up to `pips`, replacing its card, or destroying it outright if `newCardUid` is omitted.
 export const checkAttackTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
@@ -742,49 +668,15 @@ export const attackTerritory = (
     ctx.board.shrinkTerritory(targetX, targetY, newCard);
 };
 
-// ============================================================
-// Special powers - the major arcana abilities that don't reduce to one of
-// the four suit primitives. Each function here mirrors the primitives'
-// contract: given fully-specified parameters, either report why it can't be
-// applied (checkX) or mutate ctx/board correctly for that one step (the
-// matching mutating function). Chaining these together across a card's
-// multi-step power list (walking a MajorArcanaDef.powers array, tracking
-// which of the acting player's pieces have become minions this turn, etc.)
-// is the move parser's job in the GameBase engine (src/games/gnostica.ts),
-// not this file's.
-//
-// Two of the twenty-two majors need no dedicated function here at all:
-// - Magician ({special: "magicianChoice"}) just means "the acting player
-//   picks any one of the eight primitive functions above for this step" -
-//   there's no distinct behaviour to implement, only a choice at dispatch
-//   time.
-// - every other major that decomposes into primitives (Lovers, Chariot,
-//   Strength, Temperance, Empress, Emperor, Justice's sword half, Hanged
-//   Man's rod half, Tower, Star, Moon, Sun, Death) is already fully covered
-//   by the primitives above plus their opts flags.
-//
-// Fool ({special:"fool"}) and World ({special:"worldUseAny"}) both hand
-// off to a DIFFERENT card's own power array rather than doing something
-// self-contained - the flipped card, for Fool; the player-chosen on-board
-// card, for World. fool()/worldChoosePower() below resolve/validate only
-// their OWN half (flipping; naming a legal target); actually dispatching
-// the resulting card's own power steps is gnostica.ts's job (see
-// resolveFrameDef/walkFrameStack there).
-// ============================================================
+// Special powers: the major arcana abilities that don't reduce to a suit primitive; chaining a card's own multi-step power list is gnostica.ts's job.
 
-// Orient one of the acting player's own minions. Unlike the suit
-// primitives, there's no adjacency/self targeting restriction here - any of
-// the player's current minions may be the one reoriented (Empress/
-// Emperor's first step, Tower/Star's first step).
+// Orient one of the acting player's own minions - unlike suit primitives, no adjacency/self targeting restriction here.
 export const checkOrientMinion = (ctx: PowerContext, x: number, y: number, index: number): PowerFailure | undefined => {
     const p = getPiece(ctx, x, y, index);
     return checkOwnMinion(p, ctx.currplayer);
 };
 
-// The one place any orientation actually gets written - orientMinion,
-// orientAny, and the standalone "orient" command (which reuses orientMinion
-// directly, its own legality being identical: reorient one of your own
-// minions) all funnel through here.
+// The one place any orientation actually gets written - orientMinion, orientAny, and the standalone "orient" command all funnel through here.
 const setPieceOrientation = (
     ctx: PowerContext, x: number, y: number, index: number, newOrientation: Orientation,
 ): void => {
@@ -801,11 +693,7 @@ export const orientMinion = (
     setPieceOrientation(ctx, x, y, index, newOrientation);
 };
 
-// Devil only: orient ANY piece, even an opponent's - still subject to the
-// normal self/adjacent-cell targeting rule, since the minion doing the
-// orienting is still bound by its own facing. Reorienting the acting minion
-// itself changes what it can subsequently target with the Devil's other two
-// steps, which is the card's signature trick.
+// Devil only: orient ANY piece, even an opponent's, still subject to the normal self/adjacent-cell targeting rule.
 export const checkOrientAny = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number,
@@ -832,10 +720,7 @@ export const orientAny = (
     setPieceOrientation(ctx, targetX, targetY, targetIndex, newOrientation);
 };
 
-// Hierophant: replace the target piece (anyone's) with one of the acting
-// player's own, same size, drawn from the acting player's stash - the
-// displaced piece returns to its own owner's stash, same as any other
-// removal.
+// Hierophant: replace the target piece with one of the acting player's own, same size; the displaced piece returns to its owner's stash.
 export const checkHierophantReplace = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number,
@@ -849,12 +734,7 @@ export const checkHierophantReplace = (
     if (target === undefined) {
         return { key: "NO_PIECE_THERE" };
     }
-    // Replacing one of your own pieces with another of your own achieves
-    // nothing a real opponent-facing use of the power would - the
-    // "meaningful step" rule (#49) that already forbids skipping a
-    // card's power outright forbids this too, rather than let it stand in
-    // as an equivalent no-op. Skipping this step (leaving the chain's own
-    // tail unaddressed) stays legal, same as any other power.
+    // Replacing your own piece with another of your own is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
     if (target.owner === ctx.currplayer) {
         return { key: "HIEROPHANT_MUST_TARGET_ENEMY" };
     }
@@ -880,9 +760,7 @@ export const hierophantReplace = (
     t.add(new Piece(ctx.currplayer, target.size, newOrientation));
 };
 
-// Hermit, piece variant: move a targeted piece to ANY completely empty
-// territory or wasteland on the board, ignoring the normal
-// adjacency/distance limits every Rod is bound by.
+// Hermit, piece variant: move a targeted piece to ANY completely empty territory or wasteland, ignoring adjacency/distance limits.
 export const checkHermitMovePiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, destX: number, destY: number,
@@ -925,10 +803,7 @@ export const hermitMovePiece = (
     dt.add(moved);
 };
 
-// Hermit, territory variant: move a targeted (non-enemy-occupied) territory
-// to ANY wasteland on the board not occupied by enemy pieces - the same
-// card-only-moves mechanic as a Rod's tile push, just without the
-// direction/distance limits.
+// Hermit, territory variant: move a targeted territory to ANY non-enemy-occupied wasteland - a Rod's tile push without direction/distance limits.
 export const checkHermitMoveTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, destX: number, destY: number,
@@ -962,11 +837,7 @@ export const hermitMoveTerritory = (
     returnEvictedPieces(ctx, evictions);
 };
 
-// Justice / Hanged Man: swap hands with the owner of the targeted piece.
-// PowerContext only ever carries the acting player's own hand, so the
-// caller (which owns the full per-player hand map) must pass in the other
-// player's live hand array by reference - both arrays are mutated in place,
-// matching every other pile mutation in this file.
+// Justice / Hanged Man: swap hands with the owner of the targeted piece; caller must pass the other player's live hand array by reference.
 export const checkTradeHands = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number,
@@ -980,19 +851,14 @@ export const checkTradeHands = (
     if (target === undefined) {
         return { key: "NO_PIECE_THERE" };
     }
-    // Swapping hands with yourself is a no-op wearing the shape of a real
-    // step - the "meaningful step" rule (#49) forbids it the same way it
-    // forbids skipping a card's power outright. Skipping this step
-    // (leaving the chain's own tail unaddressed) stays legal, same as any
-    // other power.
+    // Swapping hands with yourself is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
     if (target.owner === ctx.currplayer) {
         return { key: "TRADEHANDS_MUST_TARGET_ENEMY" };
     }
     return undefined;
 };
 
-// Returns the target's owner so the caller can double-check it passed the
-// right array.
+// Returns the target's owner so the caller can double-check it passed the right array.
 export const tradeHands = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, otherHand: string[],
@@ -1010,15 +876,7 @@ export const tradeHands = (
     return target.owner;
 };
 
-// Judgement: draw specific cards (chosen by the acting player, "from
-// anywhere in the discard pile") into hand, up to one per pip of the acting
-// minion, capped by the 6-card hand limit - drawing fewer than the minion's
-// full pip count is always allowed, per the general "all powers are
-// optional" rule. Every named uid is checked up front (including rejecting
-// the same uid named twice, which would otherwise silently succeed on its
-// first occurrence and only fail on retrying an already-drawn card) so
-// judgementDraw can't partially mutate hand/discardPile before
-// hitting an invalid later uid in the same list.
+// Judgement: draw chosen cards from the discard pile into hand, up to one per pip of the acting minion, capped by the 6-card hand limit.
 export const checkJudgementDraw = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number, cardUids: string[],
 ): PowerFailure | undefined => {
@@ -1056,15 +914,7 @@ export const judgementDraw = (
     }
 };
 
-// The shared "discard any or none, then draw" primitive - one round of
-// it is the ordinary end-of-turn discard/draw action (cmdDiscard/
-// validateDiscard, gnostica.ts); the High Priestess grants two rounds of
-// the exact same thing in a row (MAJOR_ARCANA["02"]) by calling this
-// twice. No minion/targeting is involved; this is pure hand/pile
-// manipulation. The rules never mandate refilling all the way to 6 - the
-// draw count is the player's own choice; omitting it defaults to the
-// max. Every named discard uid is checked up front for the same reason
-// as Judgement above.
+// Shared "discard any or none, then draw" primitive - one round is the ordinary end-of-turn action; High Priestess calls this twice.
 export const checkDiscardDraw = (ctx: PowerContext, discardUids: string[], drawCountStr?: string): PowerFailure | undefined => {
     const seen = new Set<string>();
     for (const uid of discardUids) {
@@ -1086,14 +936,7 @@ export const checkDiscardDraw = (ctx: PowerContext, discardUids: string[], drawC
     return undefined;
 };
 
-// `partial` mirrors cmdDiscard's own convention: the discard half happens
-// eagerly either way (so a click-driven preview correctly shows the named
-// cards leaving hand), but the draw half - genuinely random once a
-// reshuffle is needed, and otherwise just premature - is skipped during a
-// partial preview and only actually happens on a real commit. Returns the
-// number of cards actually drawn, so the caller can log the real count
-// rather than the discard count or the requested one (a reshuffle-starved
-// deck can still fall short of what was asked for).
+// `partial` mirrors cmdDiscard: discard happens eagerly, but draw (genuinely random) is skipped in preview; returns the actual count drawn.
 export const discardDraw = (ctx: PowerContext, discardUids: string[], drawCountStr: string | undefined, partial: boolean): number => {
     const failure = checkDiscardDraw(ctx, discardUids, drawCountStr);
     if (failure) {
@@ -1124,13 +967,7 @@ export const discardDraw = (ctx: PowerContext, discardUids: string[], drawCountS
 export const checkFool = (ctx: PowerContext): PowerFailure | undefined =>
     (ctx.drawPile.length === 0 && ctx.discardPile.length === 0) ? { key: "DRAW_PILE_EMPTY" } : undefined;
 
-// Fool: flip the top card of the draw pile and "play" it - i.e. it goes
-// straight to the discard pile, same as any other played card, and is
-// returned here so the caller can resolve whichever power it grants (the
-// card grants two flips - see MAJOR_ARCANA["00"] - by calling this twice).
-// Actually dispatching the flipped card's own power is the caller's job,
-// same scope boundary as World below - only the engine has the full
-// per-card power dispatcher.
+// Fool: flip the top draw-pile card straight to discard; dispatching its power is the caller's job (the engine's full per-card dispatcher).
 export const fool = (ctx: PowerContext): TarotCard => {
     const failure = checkFool(ctx);
     if (failure) {
@@ -1161,11 +998,7 @@ export const checkWorldChoosePower = (ctx: PowerContext, chosenUid: string): Pow
     return undefined;
 };
 
-// World: validates that `chosenUid` names a major arcana card currently
-// present somewhere on the board (and isn't World itself), and returns its
-// MajorArcanaDef so the caller can resolve that card's power(s) exactly as
-// if it had been activated directly - the actual multi-step dispatch is
-// the engine's job.
+// World: validates `chosenUid` names a major arcana card on the board (not World itself) and returns its MajorArcanaDef for the engine to dispatch.
 export const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArcanaDef => {
     const failure = checkWorldChoosePower(ctx, chosenUid);
     if (failure) {

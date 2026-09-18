@@ -12,8 +12,7 @@ export interface IEvicted {
     pieces: Piece[];
 }
 
-// Internal absolute coordinates: y increases downward, matching
-// UnboundedSquareBoard's own convention (see its header comment).
+// Internal absolute coordinates: y increases downward, matching UnboundedSquareBoard's own convention.
 const DELTAS: Record<DirectionCardinal, [number, number]> = {
     N: [0, -1],
     S: [0, 1],
@@ -24,14 +23,7 @@ const DELTAS: Record<DirectionCardinal, [number, number]> = {
 const colLabels = "abcdefghijklmnopqrstuvwxyz".split("");
 const revColLabels = [...colLabels].reverse();
 
-// Wraps UnboundedSquareBoard<CellContents> and adds Gnostica's board concepts
-// on top of its existing set/get/delete primitives: territory vs. wasteland
-// vs. void classification (derived, not stored), and the create/destroy/
-// grow/shrink/push mutations, each responsible for evicting any pieces left
-// stranded in a newly-void cell (general rule: they're returned to the
-// owner's stash - see docs on destroyTerritory/pushTerritory below for the
-// one documented exception, which is applied by the caller in
-// src/games/gnostica/powers.ts, not here).
+// Wraps UnboundedSquareBoard<CellContents> with territory/wasteland/void classification and create/destroy/grow/shrink/push mutations.
 export class GnosticaBoard {
     private cells: UnboundedSquareBoard<CellContents>;
 
@@ -39,9 +31,7 @@ export class GnosticaBoard {
         this.cells = cells ?? new UnboundedSquareBoard<CellContents>();
     }
 
-    // The live UnboundedSquareBoard this wraps. This is what actually gets
-    // stored in IMoveState (never a GnosticaBoard instance) - see
-    // GnosticaBoard.rehydrate() for why.
+    // What actually gets stored in IMoveState - never a GnosticaBoard instance (see rehydrate()).
     public get store(): UnboundedSquareBoard<CellContents> {
         return this.cells;
     }
@@ -78,10 +68,7 @@ export class GnosticaBoard {
         return DELTAS[dir];
     }
 
-    // Territory-ness/wasteland-ness/void-ness is derived from live board
-    // contents every time, never stored. Adjacency is checked only against
-    // immediate neighbours that themselves carry a card - it does NOT chain
-    // through neighbouring wastelands.
+    // Derived from live board contents every time, never stored; adjacency does NOT chain through neighbouring wastelands.
     public classify(x: number, y: number): CellClass {
         const here = this.cells.get(x, y);
         if (here !== undefined && here.card !== undefined) {
@@ -96,19 +83,7 @@ export class GnosticaBoard {
         return "void";
     }
 
-    // Deletes {x,y}'s own stored CellContents once it's become empty (no
-    // card, no pieces) - the invariant this class's own header comment
-    // promises ("a wasteland with no pieces on it is never actually
-    // stored on the board"). A wasteland cell (one still adjacent to a
-    // card-bearing neighbour) that loses its last piece never reclassifies
-    // to "void", so an empty CellContents left behind there would stay in
-    // the map forever, artificially inflating minX/maxX/minY/maxY (and so
-    // the rendered window) even though nothing is actually there anymore -
-    // deliberately classify()-agnostic, since emptiness alone is what
-    // matters here. Every caller that removes a piece from a cell without
-    // immediately adding a different one back to that same cell needs to
-    // call this afterward (see movePiece/attackPiece/hermitMovePiece in
-    // powers.ts, and eliminatePlayer in gnostica.ts).
+    // Deletes {x,y}'s stored CellContents once empty - a lingering wasteland cell would never reclassify to void and inflate the bounding box forever.
     public pruneIfEmpty(x: number, y: number): void {
         const t = this.cells.get(x, y);
         if (t !== undefined && t.card === undefined && t.pieces.length === 0) {
@@ -116,9 +91,7 @@ export class GnosticaBoard {
         }
     }
 
-    // Only {x,y} and its four neighbours can possibly change classification
-    // as a result of a mutation at {x,y}, since classify() only ever looks
-    // one step away.
+    // Only {x,y} and its four neighbours can possibly change classification, since classify() only looks one step away.
     private evictVoidPieces(x: number, y: number): IEvicted[] {
         const evicted: IEvicted[] = [];
         for (const [cx, cy] of [[x, y] as [number, number], ...this.neighbors(x, y)]) {
@@ -134,8 +107,7 @@ export class GnosticaBoard {
         return evicted;
     }
 
-    // Only legal on a wasteland. Never strands anyone - adding a card can
-    // only ever promote void neighbours to wasteland, not the reverse.
+    // Only legal on a wasteland. Never strands anyone - adding a card only ever promotes void neighbours.
     public createTerritory(x: number, y: number, card: TarotCard): void {
         if (this.classify(x, y) !== "wasteland") {
             throw new Error(`Cannot create a territory at (${x},${y}): not a wasteland.`);
@@ -148,13 +120,7 @@ export class GnosticaBoard {
         }
     }
 
-    // Removes the card at {x,y} (the cell may still hold pieces afterwards).
-    // Returns every cell (this one, or a neighbour) that consequently
-    // collapsed into the void, with the pieces evicted from it. Icehouse
-    // pieces are never removed from the game outright - by the general void
-    // rule, every evicted piece (including the destroyed cell's own) is
-    // returned to its owner's stash; the caller in powers.ts is responsible
-    // for actually crediting the stash.
+    // Removes the card; returns every cell that consequently collapsed into the void, with its evicted pieces (crediting the stash is powers.ts's job).
     public destroyTerritory(x: number, y: number): IEvicted[] {
         const t = this.cells.get(x, y);
         if (t === undefined || t.card === undefined) {
@@ -167,8 +133,7 @@ export class GnosticaBoard {
         return this.evictVoidPieces(x, y);
     }
 
-    // In-place value change; the cell still has *a* card throughout, so this
-    // can never change any cell's classification and never strands anyone.
+    // In-place value change; the cell still has a card throughout, so this never changes classification.
     public growTerritory(x: number, y: number, newCard: TarotCard): void {
         const t = this.cells.get(x, y);
         if (t === undefined || t.card === undefined) {
@@ -177,20 +142,12 @@ export class GnosticaBoard {
         t.card = newCard;
     }
 
-    // Same in-place swap as growTerritory; shrinking all the way to nothing
-    // is destroyTerritory, not this method.
+    // Same in-place swap as growTerritory; shrinking all the way to nothing is destroyTerritory, not this method.
     public shrinkTerritory(x: number, y: number, newCard: TarotCard): void {
         this.growTerritory(x, y, newCard);
     }
 
-    // Moves only the CARD from (fromX,fromY) to (toX,toY) - per the rules,
-    // pieces never travel with a pushed territory, they stay exactly where
-    // they were. The destination is always wasteland (the caller already
-    // enforced that), so it may already hold pieces of its own, stored as
-    // a cardless CellContents object - the incoming card slides in under
-    // them by attaching to that SAME object, not a fresh one. Returns the
-    // same "evicted at the departure side" list as destroyTerritory
-    // (arrival can only promote cells, never strand anyone there).
+    // Moves only the CARD; pieces stay put. Destination is always wasteland, possibly already holding pieces of its own.
     public pushTerritory(fromX: number, fromY: number, toX: number, toY: number): IEvicted[] {
         const src = this.cells.get(fromX, fromY);
         if (src === undefined || src.card === undefined) {
@@ -198,11 +155,7 @@ export class GnosticaBoard {
         }
         const card = src.card;
 
-        // Place the card at its destination FIRST. If the destination is
-        // adjacent to the source (the common case), the source cell's
-        // classification legitimately depends on the card already having
-        // arrived next door - evicting before it lands would wrongly treat
-        // that in-between state as void.
+        // Card must land FIRST - evicting before it arrives would wrongly treat the in-between state as void.
         let dest = this.cells.get(toX, toY);
         if (dest === undefined) {
             dest = new CellContents(card);
@@ -226,15 +179,7 @@ export class GnosticaBoard {
         return new GnosticaBoard(cloned);
     }
 
-    // Rehydration after JSON.parse(str, reviver). GnosticaBoard itself is
-    // never serialized/deserialized - IMoveState.board stores the raw
-    // UnboundedSquareBoard<CellContents> directly (mirrors homeworlds.ts's
-    // System[] and trax.ts/knightline.ts's own board field), and the game
-    // class is expected to call this on that field before use. Two rounds of
-    // fix-up are needed: UnboundedSquareBoard.from() only restores the Map
-    // wrapper itself, so every stored CellContents value still comes back as
-    // a plain object and needs its own CellContents.deserialize() pass to
-    // become a real instance with methods again.
+    // Rehydration after JSON.parse: GnosticaBoard itself is never serialized, only the raw UnboundedSquareBoard, so cell contents need their own fix-up pass.
     public static rehydrate(raw: UnboundedSquareBoard<ICellContents>): UnboundedSquareBoard<CellContents> {
         const wrapped = UnboundedSquareBoard.from(raw);
         const fixed = new UnboundedSquareBoard<CellContents>();
@@ -244,12 +189,7 @@ export class GnosticaBoard {
         return fixed;
     }
 
-    /* Algebraic notation: a stable letter+number scheme (mirrors
-     * src/games/knightline.ts) so move strings and cell references stay
-     * meaningful even as the board's live bounding box drifts under pushes,
-     * growth, and destruction. The origin (0,0) is "m0" - centred in the
-     * alphabet, like Knight Line, so early growth in either x direction
-     * stays single-letter for longer. */
+    // Algebraic notation (mirrors knightline.ts): stable even as the board's bounding box drifts; origin (0,0) is "m0".
     private static absXCoord2algebraic(x: number): string {
         let xval: string;
         if (x > 12) {

@@ -1,24 +1,18 @@
 import { Card } from "../../common/tarot";
 
-// The four suit primitives every minor-arcana card (and most major arcana
-// powers) reduce to. Behaviour lives in powers.ts; this file only says which
-// primitive(s), in which order, each major arcana card grants.
+// The four suit primitives every minor-arcana card (and most major powers) reduce to; behaviour lives in powers.ts.
 export type SuitPrimitive = "create" | "move" | "grow" | "attack";
 
 export interface PrimitiveOpts {
     // Empress/Emperor: bypass the normal 3-piece-per-territory cap.
     ignoreCapacity?: boolean;
-    // Tower/Star: the replacement card for a shrunk/grown territory may come
-    // from anywhere in the discard pile, not just the hand. Every other
-    // primitive that touches a territory's card is hand-only.
+    // Tower/Star: the replacement card may come from anywhere in the discard pile, not just the hand.
     replacementSource?: "hand" | "discard";
-    // Wheel of Fortune: when creating a territory, the new card may be drawn
-    // randomly from the top of the draw pile instead of played from hand.
+    // Wheel of Fortune: the new territory's card may be drawn randomly from the draw pile instead of played from hand.
     allowRandomDraw?: boolean;
 }
 
-// Powers that don't reduce to one of the four suit primitives - each is
-// bespoke logic implemented directly in powers.ts.
+// Powers that don't reduce to a suit primitive - each is bespoke logic implemented directly in powers.ts.
 export type SpecialPower =
     | "fool"              // flip and optionally play the top card of the draw pile
     | "magicianChoice"    // this step IS one of sword/rod/cup/disc, chosen at resolution time
@@ -39,22 +33,12 @@ export interface MajorArcanaDef {
     uid: string;
     name: string;
     seq: number;
-    // Which suit-power icon(s) are printed on the card, in power order -
-    // Gnostica's interpretation of the card, not a fact about a real tarot
-    // deck, which is why it's not on the shared tarot Card.
+    // Which suit-power icon(s) are printed on the card, in power order - Gnostica's own interpretation, not real tarot.
     icons: string[];
     powers: PowerStep[];
-    // Strength/Death/Sun: when both steps end up targeting the same
-    // piece/territory, the ladder-climb may skip its intermediate rung (e.g.
-    // grow a spot card straight to a major arcana without passing through a
-    // royalty card). Chariot: when both move steps move the same piece, the
-    // first move may pass *through* a void/full cell as a waypoint, as long
-    // as it doesn't come to rest there. "Same target" and what shortcutting
-    // means are both primitive-specific, so this is just a yes/no flag -
-    // powers.ts interprets it per primitive.
+    // Strength/Death/Sun/Chariot: same-target step pairs may shortcut (skip a rung / pass through); powers.ts interprets per primitive.
     sameTargetShortcut?: boolean;
-    // Moon only: its move step may enter a territory that already holds 3
-    // pieces, as long as the follow-up attack step leaves at most 3 there.
+    // Moon only: its move step may enter a 3-piece territory, as long as the follow-up attack leaves at most 3 there.
     moonCapacityExemption?: boolean;
 }
 
@@ -178,8 +162,7 @@ export const MAJOR_ARCANA: Record<string, MajorArcanaDef> = {
 
 export const getMajorArcanaDef = (card: Card): MajorArcanaDef => MAJOR_ARCANA[card.uid];
 
-// Kept as a separate accessor (rather than requiring every caller to reach
-// into .icons) since rendering code only ever wants the icon list.
+// Separate accessor since rendering code only ever wants the icon list.
 export const MAJOR_ARCANA_ICONS: Record<string, string[]> = Object.fromEntries(
     Object.entries(MAJOR_ARCANA).map(([uid, def]) => [uid, def.icons])
 );

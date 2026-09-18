@@ -3,9 +3,7 @@ import { Piece } from "./piece";
 
 export type CellPointValue = 0 | 1 | 2 | 3;
 
-// Standalone so powers.ts can evaluate a candidate replacement card (from
-// hand or discard) before it's ever placed on the board, not just a card
-// already sitting in a cell's CellContents.
+// Standalone so powers.ts can evaluate a candidate card before it's placed, not just one already in a cell.
 export const cardPointValue = (card?: TarotCard): CellPointValue => {
     if (card === undefined) {
         return 0;
@@ -16,32 +14,10 @@ export const cardPointValue = (card?: TarotCard): CellPointValue => {
     return card.court ? 2 : 1;
 };
 
-// The serialized shape: a bare array, no key names at all (repeated per
-// cell, per historical stack entry, so they add up) - element 0 is the
-// card's uid, or "" if there's no card; every element after that is one
-// piece's own compact id() string (see Piece's own docs - always exactly
-// 3 characters, so no delimiter is needed between them either).
+// Bare array, no key names (repeated per cell/history entry): [cardUid or "", ...piece id() strings].
 export type ICellContents = string[];
 
-// Whatever's currently at a single board cell - a card and/or pieces, or
-// (as a fresh instance about to be stored) neither yet. A "wasteland"
-// (adjacent-to-a-territory empty space) with no pieces on it is never
-// actually stored on the board - see GnosticaBoard.classify() - so every
-// stored CellContents instance has a card, at least one piece, or both.
-// Deliberately NOT named "Territory": a cardless instance holding only
-// pieces (a wasteland cell someone's minion is standing on) isn't a
-// territory at all by this game's own rules - see GnosticaBoard.classify()'s
-// three-way territory/wasteland/void split.
-//
-// In memory this stays a real object (`cardUid` + a real Piece[] `pieces`,
-// mutated in place via normal array methods everywhere) - only toJSON()'s
-// own output (an ICellContents) is ever actually serialized. `card` stays
-// available as a getter/setter for every existing call site's convenience
-// (construct/read/write with a real TarotCard, exactly as before) - it
-// just resolves against allCards() on the fly instead of storing the
-// object itself. Safe because TarotCard instances are treated as immutable
-// value objects throughout this file (uid identifies a card uniquely;
-// nothing ever mutates one of its own sub-properties in place).
+// A board cell's card and/or pieces - not named "Territory" since a cardless/pieces-only wasteland cell isn't one.
 export class CellContents {
     public cardUid?: string;
     public pieces: Piece[];
@@ -71,9 +47,7 @@ export class CellContents {
         return this;
     }
 
-    // Removes and returns the piece at the given array index (the caller is
-    // responsible for having identified *which* same-id piece it means, when
-    // there's more than one candidate).
+    // Caller is responsible for having identified which same-id piece it means, if more than one.
     public removeAt(idx: number): Piece {
         const found = this.pieces[idx];
         if (found === undefined) {
@@ -87,8 +61,7 @@ export class CellContents {
         return new Set(this.pieces.map(p => p.owner));
     }
 
-    // Scoring rule: a territory counts for `player` only if it holds at
-    // least one of their pieces and nobody else's.
+    // A territory counts for `player` only if it holds at least one of their pieces and nobody else's.
     public isUncontestedBy(player: number): boolean {
         const players = this.playersPresent();
         return players.size === 1 && players.has(player);
@@ -104,9 +77,7 @@ export class CellContents {
         return cloned;
     }
 
-    // JSON.stringify calls this automatically wherever a CellContents
-    // appears - see this class's own docs on why the wire shape is a bare
-    // array rather than the object this class actually is in memory.
+    // JSON.stringify calls this automatically; see the class's own docs for why the wire shape is a bare array.
     public toJSON(): ICellContents {
         return [this.cardUid ?? "", ...this.pieces.map(p => p.id())];
     }
