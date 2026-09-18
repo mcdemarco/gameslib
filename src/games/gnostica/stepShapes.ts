@@ -1,12 +1,16 @@
 // Pure, side-effect-free description of each major-arcana power step
-// kind's own token grammar. Answers ONLY "given these tokens (after any
-// leading minionRef has already been stripped), is this step's segment
-// complete enough to act on yet" - never touches game state, never
-// checks whether a target is actually LEGAL (that's powers.ts's checkX
-// job, run separately by apply/validate once this says "complete").
+// kind's own grammar. Answers ONLY "given this step's own IStep fields,
+// is it complete enough to act on yet" (primitiveStepShape/
+// SPECIAL_STEP_SHAPES) - never touches game state, never checks whether a
+// target is actually LEGAL (that's powers.ts's checkX job, run separately
+// by apply/validate once this says "complete"). The token-based
+// deriveMinorMode/deriveHermitMode below answer a related but distinct
+// question - "what mode+args does this ALREADY-COMPLETE raw token list
+// mean" - for the click-building/message side, which still works in
+// tokens rather than a parsed IStep.
 //
-// Before this file existed, that question was answered independently -
-// with the same MINOR_MODES.minArgs/SPECIAL_MIN_TOKENS numbers, but a
+// Before this file existed, the completeness question was answered
+// independently - with the same MINOR_MODES.minArgs numbers, but a
 // separate hand-written if-statement each time - in six-plus places
 // across gnostica.ts: applyPowerStep's primitive branch, its shared
 // 4-special pre-check, its own inline hermitTeleport/worldUseAny cases,
@@ -19,11 +23,17 @@
 // independently - none of the three calls another to answer this
 // question.
 import { SpecialPower } from "./majorArcana";
+import type { IStep } from "../gnostica";
 
 export interface MinorModeConfig {
     label: string;
     shape: "cell" | "piece";
     minArgs: number;
+    // The IStep-field-presence equivalent of minArgs, used by the shared
+    // apply/validate/parsePendingStep completeness check (primitiveStepShape
+    // below) - minArgs itself stays in use separately, for click-handling's
+    // own positional pending.rest slicing (gnostica.ts, unaffected by this).
+    isComplete: (step: IStep) => boolean;
 }
 
 // Click support for minor arcana's single suit-power step (major
@@ -50,21 +60,21 @@ export const ALL_SUITS: { uid: string; label: string }[] = [
 
 export const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
     C: {
-        own: { label: "Create Minion", shape: "cell", minArgs: 2 },
-        enemy: { label: "Create Enemy", shape: "cell", minArgs: 2 },
-        new: { label: "Create Territory", shape: "cell", minArgs: 2 },
+        own: { label: "Create Minion", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.direction !== undefined },
+        enemy: { label: "Create Enemy", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.targetPiece !== undefined },
+        new: { label: "Create Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.card !== undefined },
     },
     R: {
-        piece: { label: "Move Piece", shape: "piece", minArgs: 2 },
-        tile: { label: "Push Territory", shape: "cell", minArgs: 2 },
+        piece: { label: "Move Piece", shape: "piece", minArgs: 2, isComplete: (s) => s.targetPiece !== undefined && s.amount !== undefined },
+        tile: { label: "Push Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.targetCell !== undefined && s.amount !== undefined },
     },
     D: {
-        piece: { label: "Grow Piece", shape: "piece", minArgs: 1 },
-        tile: { label: "Grow Territory", shape: "cell", minArgs: 2 },
+        piece: { label: "Grow Piece", shape: "piece", minArgs: 1, isComplete: (s) => s.targetPiece !== undefined },
+        tile: { label: "Grow Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.targetCell !== undefined && s.card !== undefined },
     },
     S: {
-        piece: { label: "Attack Piece", shape: "piece", minArgs: 2 },
-        tile: { label: "Attack Territory", shape: "cell", minArgs: 2 },
+        piece: { label: "Attack Piece", shape: "piece", minArgs: 2, isComplete: (s) => s.targetPiece !== undefined && s.amount !== undefined },
+        tile: { label: "Attack Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.targetCell !== undefined && s.amount !== undefined },
     },
 };
 
@@ -78,23 +88,6 @@ export const HERMIT_MODES: Record<string, { label: string }> = {
     tile: { label: "Push Territory" },
 };
 
-// Minimum token count (including the leading minionRef, except highPriestess which has none) for a `special` step to be complete - fixedArity's own "at least N" semantics tolerate extra trailing tokens too.
-// The rest (Infinity here) have variable-length grammars with their own SPECIAL_STEP_SHAPES entry answering this directly instead.
-export const SPECIAL_MIN_TOKENS: Record<SpecialPower, number> = {
-    orientMinion: 2,      // minionRef + orientation
-    tradeHands: 3,        // minionRef + "trade" + targetRef
-    orientAny: 4,         // minionRef + "orient" + targetRef + orientation
-    hierophantReplace: 4, // minionRef + "replace" + targetRef + orientation (mandatory, seeded "?" - matches Cups "own")
-    magicianChoice: Infinity,
-    hermitTeleport: Infinity,
-    judgementDraw: Infinity,
-    highPriestess: Infinity,
-    fool: Infinity,
-    // The borrowed card is named "as <uid>" in the head - worldUseAny's
-    // own step segment carries nothing, so it never consults this.
-    worldUseAny: Infinity,
-};
-
 // The result of asking "is this step's own token grammar complete
 // enough to act on" - three-way, not a boolean, because an
 // already-given token can be actively WRONG (a bad mode name, a bad
@@ -106,9 +99,6 @@ export type StepShape =
     | { status: "incomplete" }
     | { status: "malformed"; key: string; params?: Record<string, unknown> }
     | { status: "complete" };
-
-const fixedArity = (n: number) => (rest: string[]): StepShape =>
-    rest.length < n ? { status: "incomplete" } : { status: "complete" };
 
 // Every OTHER suit still spells its mode explicitly as rest[0] ("own"/
 // "enemy"/"new", "piece"/"tile" - not yet converted to the new grammar).
@@ -276,56 +266,92 @@ export function buildHermitTokens(args: string[]): string[] {
     return ["fly", args[0], "to", args[1], "orient", args[2]];
 }
 
-// A primitive suit step's own grammar: <mode> <args...>. Shared by an
-// ordinary minor-arcana card's single step, a major-arcana card's own
-// primitive step, AND magicianChoice's stage-2 grammar once its suit
-// letter is known - see SPECIAL_STEP_SHAPES.magicianChoice below.
-export function primitiveStepShape(suitUid: string, rest: string[]): StepShape {
-    const derived = deriveMinorMode(suitUid, rest);
-    if (derived === undefined) {
+// The IStep-field-based twin of deriveMinorMode above - mode only, no
+// args, since apply/validate/parsePendingStep all read fields off the
+// IStep directly now rather than re-deriving positional args from it.
+// Rods/Discs/Swords: piece vs tile is just whichever of targetPiece/
+// targetCell parseMove itself already populated (no more shape-testing a
+// raw token - PIECE_WITH_PIPS_RE stays deriveMinorMode's own tool, for
+// its own token-based callers only). Cups: own/enemy/new is direction/
+// targetPiece/neither, identical in spirit to deriveMinorMode's own
+// shape-test, just reading the field parseMove already resolved it into
+// instead of re-testing the raw token's own shape.
+export function stepMinorMode(suitUid: string, step: IStep): string | undefined {
+    const verb = RDS_VERBS[suitUid];
+    if (verb !== undefined) {
+        if (step.action !== verb) {
+            return undefined;
+        }
+        return step.targetPiece !== undefined ? "piece" : step.targetCell !== undefined ? "tile" : undefined;
+    }
+    if (suitUid !== "C" || step.action !== "create") {
+        return undefined;
+    }
+    if (step.direction !== undefined) {
+        return "own";
+    }
+    if (step.targetPiece !== undefined) {
+        return "enemy";
+    }
+    // Nothing after "create" yet (or a card uid already chosen) - "own"/
+    // "enemy" have no empty-field reading at all, so this is "new" either
+    // way, same as deriveMinorMode's own identical fallback.
+    return "new";
+}
+
+// The IStep-field-based twin of deriveHermitMode above. Hermit's own
+// source is a piece ref (targetPiece) in "piece" mode, or the moved
+// tile's own card uid (`card` - see buildHermitStepFromArgs's own docs on
+// why "tile" mode's source is never a bare cell) in "tile" mode;
+// `targetCell` is reserved exclusively for the destination in both.
+export function stepHermitMode(step: IStep): string | undefined {
+    if (step.action !== "fly") {
+        return undefined;
+    }
+    return step.targetPiece !== undefined ? "piece" : step.card !== undefined ? "tile" : undefined;
+}
+
+// A primitive suit step's own grammar. Shared by an ordinary minor-arcana
+// card's single step, a major-arcana card's own primitive step, AND a
+// Magician-borrowed suit's step (once its suit letter - "as <suit>" in
+// the head, resolved before this is ever called - decides `suitUid`; the
+// step's own fields need no splicing, since "at m0 create U" parses
+// identically regardless of which suit turns out to be borrowed).
+export function primitiveStepShape(suitUid: string, step: IStep): StepShape {
+    const mode = stepMinorMode(suitUid, step);
+    if (mode === undefined) {
         return { status: "incomplete" };
     }
-    const { mode, args } = derived;
     const config = MINOR_MODES[suitUid]?.[mode];
     if (config === undefined) {
         return { status: "malformed", key: "BAD_MODE", params: { mode, suit: suitUid } };
     }
-    if (args.length < config.minArgs) {
-        return { status: "incomplete" };
-    }
-    return { status: "complete" };
+    return config.isComplete(step) ? { status: "complete" } : { status: "incomplete" };
 }
 
-// One shape function per SpecialPower, covering every special step's
-// own grammar after its leading minionRef (already stripped by the
-// caller) - highPriestess/fool have no minionRef to strip in the first
-// place, but their own callers pass tokens unmodified either way since
-// both shape functions accept anything.
-export const SPECIAL_STEP_SHAPES: Record<SpecialPower, (rest: string[]) => StepShape> = {
-    orientMinion: fixedArity(SPECIAL_MIN_TOKENS.orientMinion - 1),
-    tradeHands: fixedArity(SPECIAL_MIN_TOKENS.tradeHands - 1),
-    orientAny: fixedArity(SPECIAL_MIN_TOKENS.orientAny - 1),
-    hierophantReplace: fixedArity(SPECIAL_MIN_TOKENS.hierophantReplace - 1),
-    hermitTeleport: (rest) => {
-        const derived = deriveHermitMode(rest);
-        if (derived === undefined) {
+// One shape function per SpecialPower, covering every special step's own
+// grammar - highPriestess/fool have no minionRef of their own, but their
+// own shape functions accept anything regardless.
+export const SPECIAL_STEP_SHAPES: Record<SpecialPower, (step: IStep) => StepShape> = {
+    orientMinion: (step) => step.direction !== undefined ? { status: "complete" } : { status: "incomplete" },
+    tradeHands: (step) => step.targetPiece !== undefined ? { status: "complete" } : { status: "incomplete" },
+    orientAny: (step) => step.targetPiece !== undefined && step.direction !== undefined ? { status: "complete" } : { status: "incomplete" },
+    hierophantReplace: (step) => step.targetPiece !== undefined && step.direction !== undefined ? { status: "complete" } : { status: "incomplete" },
+    hermitTeleport: (step) => {
+        const mode = stepHermitMode(step);
+        if (mode === undefined) {
             return { status: "incomplete" };
         }
-        return derived.args.length < 2 ? { status: "incomplete" } : { status: "complete" };
+        return step.targetCell !== undefined ? { status: "complete" } : { status: "incomplete" };
     },
-    magicianChoice: (rest) => {
-        const [suitLetter, ...moreRest] = rest;
-        if (suitLetter === undefined) {
-            return { status: "incomplete" };
-        }
-        if (MINOR_MODES[suitLetter] === undefined) {
-            return { status: "malformed", key: "BAD_SUIT_LETTER", params: { suitLetter } };
-        }
-        // The suit's own grammar, one token in - magicianChoice's suit
-        // choice is really just an extra leading token in front of that
-        // suit's ordinary primitive grammar.
-        return primitiveStepShape(suitLetter, moreRest);
-    },
+    // Dead in practice now - a Magician borrow resolves its suit via the
+    // head's own "as <suit>" before apply/validate ever reach the shared
+    // dispatch (see applyPowerStep/validatePowerStep's own docs), so a
+    // magicianChoice step is handled there exactly like an ordinary suit
+    // primitive (primitiveStepShape with suitUid = the borrowed suit) and
+    // this entry is never actually consulted. Kept only for
+    // Record<SpecialPower> exhaustiveness.
+    magicianChoice: () => ({ status: "complete" }),
     // worldUseAny takes no segment of its own now (the borrowed card is
     // "as <uid>" in the head), so apply/validate handle it before this
     // table is ever consulted. Kept for Record<SpecialPower> exhaustiveness
@@ -334,13 +360,13 @@ export const SPECIAL_STEP_SHAPES: Record<SpecialPower, (rest: string[]) => StepS
     // walk step cleanly past it (the submit is rejected anyway).
     worldUseAny: () => ({ status: "complete" }),
     // The literal "draw" keyword is mandatory (same as "with" itself);
-    // once present, any further token count (including zero - drawing
-    // nothing is a legal choice) is complete enough to ATTEMPT - the
-    // real semantics live entirely in checkJudgementDraw. This function
-    // IS consulted at apply/validate time for judgementDraw (unlike the
-    // two below): "complete" just means "ready to check for real," not
-    // "no more tokens could ever follow."
-    judgementDraw: (rest) => rest[0]?.toLowerCase() === "draw" ? { status: "complete" } : { status: "incomplete" },
+    // once present, any further count (including zero - drawing nothing
+    // is a legal choice) is complete enough to ATTEMPT - the real
+    // semantics live entirely in checkJudgementDraw. This function IS
+    // consulted at apply/validate time for judgementDraw (unlike the two
+    // below): "complete" just means "ready to check for real," not "no
+    // more tokens could ever follow."
+    judgementDraw: (step) => step.action === "draw" ? { status: "complete" } : { status: "incomplete" },
     // Unlike judgementDraw, applyPowerStep/validatePowerStep both
     // special-case highPriestess and fool EARLY, before ever reaching
     // the generic dispatch that consults this table - so these two
@@ -353,7 +379,7 @@ export const SPECIAL_STEP_SHAPES: Record<SpecialPower, (rest: string[]) => StepS
     // primitive step's fixed args are. fool is unreachable in practice
     // regardless (every caller short-circuits on a fool step before ever
     // asking its shape - see walkFrameStack's own docs) - "incomplete"
-    // here purely for consistency with its own SPECIAL_MIN_TOKENS entry.
+    // here purely for consistency.
     highPriestess: () => ({ status: "incomplete" }),
     fool: () => ({ status: "incomplete" }),
 };
