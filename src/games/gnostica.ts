@@ -102,6 +102,7 @@ export interface IStep {
     atCell?: string;
     card?: string; 
     cardList?: string[]; 
+    complete?: number;
     direction?: string;
     targetPiece?: string;
     targetCell?: string;
@@ -918,6 +919,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (segment.length === 0) {
                 if (lastStep) {
                     //Partial move.
+                    step.complete = -1;
                     pm.steps.push(step);
                     break;
                 } else {
@@ -937,6 +939,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (segment.length === 0) {
                     if (lastStep) {
                         //Partial move.
+                        step.complete = -1;
                         pm.steps.push(step);
                      } else {
                         pm.error = "STEP_TOO_SHORT";
@@ -953,6 +956,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (segment.length === 0) {
                         if (lastStep) {
                             //Partial move.
+                            step.complete = -1;
                             pm.steps.push(step);
                         } else {
                             pm.error = "MISSING_STEP_CONTENTS";
@@ -973,6 +977,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (segment.length === 0) {
                     if (lastStep) {
                         //Partial move.
+                        step.complete = -1;
                         pm.steps.push(step);
                     } else {
                         pm.error = "STEP_TOO_SHORT";
@@ -988,6 +993,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (segment.length === 0) {
                         if (lastStep) {
                             //Partial move.
+                            step.complete = -1;
                             pm.steps.push(step);
                         } else {
                             pm.error = "MISSING_STEP_CONTENTS";
@@ -1014,6 +1020,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "BAD_CARD_IDS";
                     break;
                 } else {
+                    step.complete = 0;
                     pm.steps.push(step);
                     continue;
                 }
@@ -1026,7 +1033,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         //Discard requires draw or it's incomplete.
                         pm.error = "DISCARD_NEEDS_DRAW";
                         break;
-                    }//Else partial move.
+                    } else {
+                        //Else partial move.
+                        step.complete = -1;
+                    }
                 } else if ( segment.length > drawIdx + 1 ) { 
                     const tempamount = segment[drawIdx + 1];
                     if (! NUMBER_RE.test(tempamount) ) {
@@ -1038,7 +1048,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (segment.length > drawIdx + 2) {
                         pm.error = "SURPLUS_STEP_CONTENT";
                         break;
-                    }
+                    } else
+                        step.complete = 1;
                 }
                 
                 if (drawIdx > -1) {
@@ -1078,7 +1089,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (segment.length > 0) {
                     pm.error = "SURPLUS_STEP_CONTENT";
                     break;
-                } 
+                }
+                step.complete = 1;
                 pm.steps.push(step);
                 break;
             }
@@ -1101,12 +1113,13 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "SURPLUS_STEP_CONTENT";
                     break;
                 } else {
+                    step.complete = 1;
                     pm.steps.push(step);
                     continue;
                 }
             }
 
-            //Note that terminal orients don't become step actions, so must be a full orient.
+            //Note that terminal orients don't become step actions, so this must be a full orient.
             if ( step.action === "place" || step.action === "orient" ) {
                 if ( step.action === "place" ) {
                     if (! CELL_RE.test(tempwhat) ) {
@@ -1131,8 +1144,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         //This is not a place where the ? is allowed.
                         pm.error = "AMBIGUOUS_DIRECTION";
                         break;
-                    } else
-
+                    } else 
                         step.direction = tempdirection;
                 } else {
                     // Sans direction it's a partial move.
@@ -1140,6 +1152,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "STEP_NEEDS_CONTENT";
                         break;
                     }
+                    step.complete = -1;
                     pm.steps.push(step);
                     break;
                 }
@@ -1148,7 +1161,14 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "SURPLUS_STEP_CONTENT";
                     break;
                 }
+
+                if ( step.action === "place" && step.direction.length > 1 ) 
+                    step.complete = 0;
+                else
+                    step.complete = 1;
+
                 pm.steps.push(step);
+
                 if ( step.action === "place" ) {
                     //Place is terminal to the move.
                     break;
@@ -1169,6 +1189,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "SURPLUS_STEP_CONTENT";
                     break;
                 } else {
+                    step.complete = 1;
                     pm.steps.push(step);
                     continue;
                 }
@@ -1197,6 +1218,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "SURPLUS_STEP_CONTENT";
                         break;
                     } else {
+                        step.complete = 1;
                         pm.steps.push(step);
                         continue;
                     }
@@ -1219,10 +1241,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (segment.length === 0) {
                     //More is needed for these actions, except grow *can* end with a piece.
                     if ( step.action === "grow" && step.targetPiece !== undefined ) {
+                        step.complete = 1;
                         pm.steps.push(step);
                         continue;
                     } else if (lastStep) {
                         //Partial move.
+                        step.complete = -1;
                         pm.steps.push(step);
                         break;
                     } else  {
@@ -1240,6 +1264,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         nextseg = segment.shift()!;
                     else {
                         //Can end with a number.
+                        step.complete = 0;
                         pm.steps.push(step);
                         continue;
                     }
@@ -1247,9 +1272,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 
                 if (nextseg === "to") {
                     if (segment.length === 0) {
-                        if (lastStep)
+                        if (lastStep) {
+                            step.complete = -1;
                             pm.valid = true;
-                        else {
+                        } else {
                             pm.error = "MISSING_STEP_CONTENT";
                         }
                         pm.steps.push(step);
@@ -1270,6 +1296,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         nextseg = segment.shift()!;
                     else {
                         //Can end with the replacement card.
+                        step.complete = 0;
                         pm.steps.push(step);
                         continue;
                     }
@@ -1278,7 +1305,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (nextseg === "orient") {
                     if (segment.length === 0) {
                         if (! lastStep) {
-                            pm.valid = true;pm.error = "MISSING_STEP_CONTENT";
+                            step.complete = -1;
+                            pm.valid = true;
+                        } else {
+                            pm.error = "MISSING_STEP_CONTENT";
                         }
                         pm.steps.push(step);
                         break;
@@ -1298,7 +1328,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                 }
 
-                //Otherwise pass through to the push and end of loop.
+                //I think we can assume completeness here.
+                step.complete = 1;
             }
 
             pm.steps.push(step);  

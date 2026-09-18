@@ -12,6 +12,7 @@ describe("Gnostica parsing", () => {
             head: "place",
             steps: [{
                 action: "place",
+                complete: 0,
                 direction: "U?",
                 targetCell: "m0"
             }],
@@ -24,7 +25,8 @@ describe("Gnostica parsing", () => {
             head: "decline",
             steps: [{
                 action: "decline",
-                card: "00"
+                card: "00",
+                complete: 1
             }],
             stepSegments: [],
             valid: true,
@@ -36,6 +38,7 @@ describe("Gnostica parsing", () => {
             head: "orient",
             steps: [{
                 action: "orient",
+                complete: 1,
                 targetPiece: "n0.1",
                 direction: "N"
             }],
@@ -47,7 +50,17 @@ describe("Gnostica parsing", () => {
             "announceLast":false,
             "head":"use",
             "valid":true,
-            "steps":[{"action":"use","card":"9D"},{"action":"grow","withPiece":"l1.1","targetPiece":"l1.1"}],
+            "steps":[
+                {"action":"use",
+                 "card":"9D",
+                 "complete":1
+                },
+                {"action":"grow",
+                 "complete":1,
+                 "withPiece":"l1.1",
+                 "targetPiece":"l1.1"
+                }
+            ],
             "stepSegments":[["l1.1","grow","l1.1"]]
             });
 
