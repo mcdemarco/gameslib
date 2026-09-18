@@ -574,7 +574,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
     
     // Move parsing: "/"-delimited segments (action, then 0+ power steps); parseMove/pickleMove below are the grammar's single structural parser/serializer pair.
-
     public move(m: string, {trusted = false, partial = false, emulation = false} = {}): GnosticaGame {
         if (this.gameover) {
             throw new UserFacingError("MOVES_GAMEOVER", i18next.t("apgames:MOVES_GAMEOVER"));
@@ -1485,15 +1484,20 @@ export class GnosticaGame extends GameBaseSequenced {
         const steps = declining ? [] : stepSegments;
         // Assembled as plain words, matching what a player would type by hand; "via <uid>" sits in the HEAD (same slot as "as"), not trailing the string.
         if (activeUid === "02") {
+            // High Priestess can never decline (validateHighPriestess only accepts "discard"; no Decline button is ever offered for it), so there's no decline shape to build here.
             const tokens = steps.length > 0 ? steps[0] : [];
-            return declining ? `decline via ${activeUid}` : ["discard", ...tokens, "via", activeUid].join(" ");
+            return ["discard", ...tokens, "via", activeUid].join(" ");
         }
-        // Unlike High Priestess, a Fool decline still names the REVEALED card ("decline AC via 00") - "via 00" only ever names the Fool itself.
-        const revealed = this.activeCardUid();
-        const headWords = [declining ? "decline" : "play", ...(revealed !== undefined ? [revealed] : []),
-            ...(!declining && asUid !== undefined ? ["as", asUid] : []),
-            ...(!declining && asSuit !== undefined ? ["as", asSuit] : []), "via", activeUid];
-        return [headWords.join(" "), ...steps.map(s => s.join(" "))].join("/");
+        // "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
+        const head: IParsedMove = {
+            announceLast: false, valid: true, stepSegments: [],
+            head: declining ? "decline" : "play",
+            asUid: declining ? undefined : asUid,
+            asSuit: declining ? undefined : asSuit,
+            viaUid: activeUid,
+            steps: [{ action: declining ? "decline" : "play", card: this.activeCardUid() }],
+        };
+        return [this.pickleMove(head), ...steps.map(s => s.join(" "))].join("/");
     }
 
     // Builds the resume seed plus whatever step segments this.liveMove has typed against the same obligation, always starting fresh from this.continued.
