@@ -5873,6 +5873,45 @@ describe("Gnostica: Fool and World", () => {
         expect(g.continued).to.deep.equal(["00.1"]);
     });
 
+    it("Fool suicide: self-destroying your only minion mid-chain still leaves Decline available, not blocked by MUST_PLACE_FIRST", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfCups());
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")]; // player 1's ONLY minion
+        pluckCard(g, "00");
+        for (const [, , t] of g.board.entries()) {
+            if (t.card?.uid === "00") t.card = undefined;
+        }
+        g.hands[0].push("00");
+        pluckCard(g, "AS");
+        pluckCard(g, "2S");
+        g.drawPile.unshift("AS", "2S"); // first flip reveals AS, second reveals 2S
+
+        g.move("play 00", { trusted: true });
+        expect(g.continued).to.deep.equal(["00.1"]);
+
+        // Resolving AS by self-attacking the last minion to 0 also auto-fires
+        // Fool's mandatory second flip (revealing 2S) within this same call.
+        g.move(`play ${aceOfSwords().uid} via 00/with m0.1 shrink m0.1 1`, { trusted: true });
+        expect(g.continued).to.deep.equal(["00.2"]);
+        expect(g.eligibleMinionsForPlay()).to.deep.equal([]);
+
+        // The player now has zero minions and a pending reveal (2S) that
+        // needs one - reusing the destroyed piece's stale ref is rejected,
+        // not silently accepted.
+        const badAttempt = g.validateMove(`play 2S via 00/with m0.1 shrink m0.1 1`);
+        expect(badAttempt.valid).to.be.false;
+
+        // Declining the unresolvable reveal must still work - MUST_PLACE_FIRST
+        // (which fires for a fresh, non-resume head once hasPieces is false)
+        // must not leak into this resume path.
+        const declineResult = g.validateMove("decline 2S via 00");
+        expect(declineResult.valid).to.be.true;
+        expect(declineResult.complete).to.equal(1);
+        g.move("decline 2S via 00", { trusted: true });
+        expect(g.continued).to.deep.equal([]);
+        expect(g.currplayer).to.equal(2);
+    });
+
     it("World targets Fool: a nested pause, and declining the reveal auto-continues into Fool's own mandatory second flip", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());

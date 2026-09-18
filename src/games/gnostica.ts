@@ -552,7 +552,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         
         if (head !== "place" && !hasPieces) {
-            //ISSUE: This does not yet cover the Fool suicide corner case.
+            //The Fool suicide corner case can be escaped by declining, above.
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
         }
         if (head === "place" && hasPieces) {
@@ -569,7 +569,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "use": return this.validateActivate(parsed);
             case "play": return this.validatePlay(parsed);
         }
-        // ISSUE: Unreachable: head was confirmed recognized above, and bid/redraw/pass/resume are all handled before here.
+        // Unreachable: head was confirmed recognized above, and bid/redraw/pass/resume are all handled before here.
         return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: m });
     }
     
@@ -3386,7 +3386,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     case "random":
                         // Only ever offered for Wheel of Fortune's special option.
-                        //ISSUE: not implemented in the parser yet.
+                        // TODO: not implemented in the parser yet.
                         {
                             const pending = this.parsePendingStep(move);
                             if (pending === undefined || pending.suitUid !== "C" || pending.mode !== "new" || pending.opts.allowRandomDraw !== true) {
@@ -3404,7 +3404,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
             // Hand-card clicks arrive as `piece`, independent of row/col.  If no action is selected, the click is rejected.
             if (piece !== undefined && piece.startsWith("hand_")) {
-                // ISSUE: A just-drawn card's own rendered/clickable identifier has an unnecessary "_new" suffix which needs stripping.
+                // TODO: render these cards as desired WITHOUT adding an unnecessary "_new" suffix which needs stripping.
                 const uid = piece.slice("hand_".length).replace(/_new$/, "");
                 const hand = this.hands[this.currplayer - 1] ?? [];
                 if (!hand.includes(uid)) {
@@ -3435,7 +3435,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return `play ${uid}`;
                 }
                 if (head === "discard") {
-                    // ISSUE: Any already-chosen "draw <n>" tail is deliberately dropped here, but where did it come from?
+                    // TODO: delete this comment line
                     let discards = [...(headSteps[0]?.cardList ?? [])];
                     if (discards.includes(uid)) {
                         discards = discards.filter(u => u !== uid);
@@ -3679,10 +3679,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (n < 1 || n > hand.length) {
             return this.invalid("apgames:validation.gnostica.BAD_BID_POSITION", { position: n, max: hand.length });
         }
-        // ISSUE: unreachable defensive checks should be removed.
-        if (this.bidPositions![this.currplayer - 1] !== null) {
-            return this.invalid("apgames:validation.gnostica.ALREADY_BID");
-        }
+        // TODO: remove these comment lines
+        //
+        //
+        //
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
@@ -3946,7 +3946,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "discard [uid...] [draw <n>]" - discard the named hand cards, then draw back.
-    // ISSUE:  this comment still talked about defaulting to  "as many as possible if "draw <n>" is omitted entirely", which should not occur.
+    // TODO: delete this comment line
     private cmdDiscard(step: IStep, partial = false): void {
         const discardUids = step.cardList ?? [];
         const drawCountStr = step.amount?.toString();
@@ -4002,9 +4002,9 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Returns the card's display name, for messages.  
-    // ISSUE:  has an unnecessary fallback.
+    // TODO: remove this comment line
     private cardNameOrUid(uid: string): string {
-        return allCards().find(c => c.uid === uid)?.name ?? uid;
+        return allCards().find(c => c.uid === uid)!.name;
     }
 
     // Returns every piece the acting player owns on the activated cell, for the minion pool.
@@ -5066,7 +5066,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             default:
-                // ISSUE:  are we expecting real errors here?
+                // Not reachable.
                 throw new Error(`Unknown Rods mode "${mode}".`);
         }
     }
@@ -5695,7 +5695,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return generateRandomMove(this);
     }
 
-    //  ISSUE:  What does the following comment mean?
+    //TODO: reword the following comment.
     // The actual, single-state render body, renamed so the public render() dispatcher can call it directly; a historical frame is built entirely from renderFrame() instead.
     private renderCurrent(opts?: IRenderOpts, suppressHands = false): APRenderRep {
         let altDisplay: string | undefined;
