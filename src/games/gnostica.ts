@@ -945,9 +945,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 } else {
                     //"with" is not really the step action, so move on.
                     step.action = segment.shift()!;
-                    //We're past the step headword,
-                    //though not necessarily at the real action yet,
-                    //so check OTHERWORDS.
+                    //We're past the step headword, but maybe not at the real action, so test.
                     if (! OTHERWORDS.includes(step.action) ) {
                         pm.error = "BAD_OTHERWORD";
                         break;
@@ -1108,8 +1106,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             }
 
-            //Note that terminal orients don't become the step action,
-            //so this is only full orients.
+            //Note that terminal orients don't become step actions, so must be a full orient.
             if ( step.action === "place" || step.action === "orient" ) {
                 if ( step.action === "place" ) {
                     if (! CELL_RE.test(tempwhat) ) {
@@ -1803,15 +1800,10 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const head = this.liveMove.head;
         if (head === "discard" && this.isPassEquivalent(this.liveMove.steps[0])) {
-            // "discard draw 0" is Pass's own bare seed (see the Pass
-            // button's own click handler) - bold Pass instead of
-            // Discard/Draw, regardless of whether the player got there by
-            // clicking Pass or by hand-building an equivalent Discard/Draw
-            // move (0 discards, explicit draw 0).
+            // "discard draw 0" is the user-facing pass, so bold Pass.
             found.add("pass");
         } else if (this.continued.length > 0) {
-            // The top-level button matching how the active card resumes -
-            // "Discard/Draw" for the High Priestess, "Play Card" otherwise.
+            // The top-level button matches the resume: "Discard/Draw" for High Priestess, "Play Card" for Fool.
             found.add(this.continued[this.continued.length - 1].split(".")[0] === "02" ? "discard" : "play");
         } else if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
@@ -1878,9 +1870,7 @@ export class GnosticaGame extends GameBaseSequenced {
         });
     }
 
-    // Shared by the minion-ambiguity button set and its own "minion_"
-    // click dispatch - a Rod can never act while upright, so an upright
-    // candidate is always a doomed choice (see checkCanUseRod, powers.ts).
+    // Rod can never act while upright, so doom an upright candidate.
     private rodNeedsFacingReason(suitUid: string | undefined, piece: Piece): { key: string } | undefined {
         return suitUid === "R" && piece.orientation === "U" ? { key: "ROD_NEEDS_FACING" } : undefined;
     }
@@ -1895,8 +1885,7 @@ export class GnosticaGame extends GameBaseSequenced {
         ];
     }
 
-    // Shared by the ordinary end-of-turn discard/draw count-picker and
-    // High Priestess's own identical-shaped one.
+    // Shared by all end-of-turn discard/draw count-pickers. 
     private drawCountOptions(maxDraw: number): ChoiceOption[] {
         const options: ChoiceOption[] = [];
         for (let n = maxDraw; n >= 0; n--) {
@@ -2195,10 +2184,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return primitive === "create" ? "C" : primitive === "move" ? "R" : primitive === "grow" ? "D" : "S";
     }
 
-    // Reconstructs the in-progress power step (if any) purely from a move string - same "recompute, don't persist" approach as isPendingFirstPlacement.
-    // Walks every step segment already typed, checking only STRUCTURAL completeness, stopping (undefined) at the first short segment or a Fool/World card.
-    // Deliberately does NOT re-check validatePowerStep's own board-state legality - the board may already reflect an earlier segment's real effect.
-    // `callOpts.preferCurrent` keeps refining the last-typed segment (board clicks/hand-card supply) instead of silently advancing to the next step.
+    // Reconstructs the in-progress power step (if any) purely from a move string.  Checks step segments for STRUCTURAL completeness,  also stopping at Fool or World.
     private parsePendingStep(moveStr: string, callOpts: { preferCurrent?: boolean } = {}): IPendingStep | undefined {
         const parsed = this.parseMove(moveStr);
         // A "via <uid>" marker dispatches from the Fool/HP anchor for a genuine resume; otherwise the front card token. "as <x>" never moves the head arg.
@@ -2336,32 +2322,15 @@ export class GnosticaGame extends GameBaseSequenced {
                     shape = SPECIAL_STEP_SHAPES[step.special](istepSoFar);
                 }
                 if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
-                    // Same "still building, or the caller wants it treated
-                    // as current regardless" rule as the primitive branch
-                    // above - see this function's own docs and
-                    // buildSpecialPending's.
+                    // Same "still building, or the caller wants it treated as current regardless" rule as the primitive branch.
                     return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, tokens, asUid, asSuit);
                 }
                 completedStep = istepSoFar!;
             }
-            // Walking past this segment (primitive-and-complete, or
-            // special-and-complete) is what lets a LATER step of the SAME
-            // frame (e.g. Tower's own attack, after its special
-            // orientMinion step 1) become click-driven - replaying it
-            // against a lazily-created clone (never `this`) keeps
-            // `top.minions` genuinely current, not just positionally
-            // chained: a real commit's own walkFrameStack/validateFrameStack
-            // already replay every step this way (see their own docs) -
-            // this mirrors it for the click-preview path, so a LATER
-            // step's own default/target (e.g. minorTargetCell reading an
-            // EARLIER orientMinion step's new facing) sees the actual
-            // post-step state instead of whatever `this.board` still
-            // holds before a real partial commit.
+            // Walking past this segment lets a LATER step of the SAME frame become click-driven, via a clone.
             priorSteps.push(completedStep!);
             clone ??= this.cloneLive();
-            // See applyPowerStep's own docs on why a magicianChoice step
-            // needs its suit passed as `borrowedPower` here, not spliced
-            // into the tokens it replays with.
+            // A magicianChoice step needs its suit passed as `borrowedPower` here.
             const magicianAs = "special" in step && step.special === "magicianChoice" && asSuit !== undefined;
             try {
                 const outcome = clone.applyPowerStep(step, top.minions, tokens, completedStep, frameDef, stepIndex, frameDef.powers.length, true, magicianAs ? asSuit : undefined);
@@ -2375,16 +2344,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 GnosticaGame.popExhaustedFrames(clone, stack);
             } catch {
-                // Every other step's tokens failing to resolve against a
-                // clone seeded from `this.board` means `this.board` has
-                // already advanced past this step for real - render()'s
-                // own frame-stepping reuses this same walk against an
-                // already-historical board to compute each frame's own
-                // button bar (see its own docs), where re-applying an
-                // already-applied step is expected to fail exactly this
-                // way. Nothing to replay there - keep walking with
-                // `top.minions` unchanged, same as before this replay
-                // existed.
+                // Every other step's tokens failing to resolve against a clone seeded from `this.board` means `this.board` has advanced past this step.
                 top.nextStepIndex++;
             }
         }
@@ -2407,33 +2367,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, [], asUid, asSuit);
     }
 
-    // Builds the `special`-flavored branch of IPendingStep - `tokens` is
-    // this step's own already-typed segment (or [] for a brand new one),
-    // still including its own leading minionRef (except highPriestess,
-    // which has none at all - see IPendingStep's own docs). highPriestess
-    // never targets a specific minion at all (its own click handler
-    // ignores `pending.minion` entirely), so it's hardcoded to
-    // {minion: minions[0], ambiguous: false} regardless of pool size -
-    // resolveStepMinion would otherwise misread tokens[0] there (a
-    // hand-card uid, not a piece ref) as an unresolved minionRef and
-    // wrongly report ambiguity.
-    //
-    // magicianChoice is the one exception: once a suit letter is known,
-    // the rest of its own grammar (<mode> <args...>) is identical to that
-    // suit's own primitive step - rather than building a second, parallel
-    // implementation of minorModeAvailability/buildStepModeMove/
-    // handlePendingStepBoardClick/supplyStepCardUid for it, this returns
-    // an ordinary SUIT-shaped pending instead, letting that entire
-    // existing machinery drive stage 2 completely unmodified. The suit
-    // reaches here two ways: "as <suit>" in the head (`asSuit`, the plain
-    // case - also true for a World-pushed frame once TODO #105's own
-    // chained `as <uid> as <suit>` is typed), or an inline suit-letter
-    // token (`tokens[1]`, the older World-pushed-Magician spelling with
-    // no `asSuit` of its own - see MOVE-STRINGS-gnostica.md's own notes).
-    // `asSuit` itself (not `suitUid`, which may have come from the token
-    // instead) is what's echoed back into the returned pending, so
-    // describePendingMove only ever writes a head "as <suit>" when one
-    // was genuinely typed.
+    // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice which can be treated as non-special.
     private buildSpecialPending(
         special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
         eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], tokens: string[], asUid?: string, asSuit?: string,
@@ -2472,11 +2406,11 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Whether `step` is a piece-target special (tradeHands/hierophantReplace, the only two requiring an ENEMY on the self-or-facing cell) with NO legal candidate right now.
-    // Checked against EVERY minion in `minions` (chainMinion may leave 2+ live candidates); `ctx` matters because validateFrameStack applies to a CLONE, not `this`.
     private specialStepHasNoLegalTarget(ctx: GnosticaGame, step: PowerStep, minions: readonly IMinionRef[]): boolean {
         if (!("special" in step) || (step.special !== "tradeHands" && step.special !== "hierophantReplace")) {
             return false;
         }
+        // Checked against EVERY minion in `minions` (chainMinion may leave 2+ live candidates); `ctx` matters because validateFrameStack applies to a CLONE, not `this`.
         return minions.every(m => {
             const [faceX, faceY] = ctx.minorTargetCell(m);
             const t = ctx.board.get(faceX, faceY);
@@ -2503,7 +2437,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Inverse of resolvePieceRef: the shortest ref that resolves back to this exact piece in the pool. Tries pips, then pips+orientation, then pips+player, then all three.
-    // #98/#100: takes the minion itself (not loose x/y/index) so its own `.piece`, when the caller already has one, is never lost to a stale `pieces[index]` read.
     public pieceRefStr(minion: IMinionRef, pool?: IMinionRef[]): string {
         const { x, y, index } = minion;
         const piece = minion.piece ?? this.board.get(x, y)!.pieces[index];
