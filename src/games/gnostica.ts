@@ -1306,6 +1306,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (! DIRECTION_RE.test(tempdirection) ) {
                             pm.error = "BAD_DIRECTION";
                             break;
+                        } else if ( tempdirection.length > 1 ) {
+                            //This is not a place where the ? is allowed.
+                            pm.error = "AMBIGUOUS_DIRECTION";
+                            break;
                         } else
                             step.direction = tempdirection;
                     }
@@ -1591,7 +1595,8 @@ export class GnosticaGame extends GameBaseSequenced {
         let orientation: Orientation | undefined;
         let player: number | undefined;
         for (const tok of rest) {
-            const asOrientation = this.tryParseOrientation(tok);
+            const upper = tok.toUpperCase();
+            const asOrientation = (allOrientations as string[]).includes(upper) ? upper as Orientation : undefined;
             if (asOrientation !== undefined) {
                 if (orientation !== undefined || player !== undefined) {
                     return { kind: "malformed" };
@@ -5384,23 +5389,20 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     public validateOrientMinion(minion: IMinionRef, step: IStep): StepValidation {
-        const orientationStr = step.direction!;
-        const parsed = this.parseOrientationOrFail(orientationStr);
-        if ("key" in parsed) {
-            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
-        }
+        // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
+        const orientation = step.direction! as Orientation;
         const failure = checkOrientMinion(this.buildPowerContext(), minion.x, minion.y, minion.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
         // Same hard rejection as the standalone "orient" command's own ORIENT_NO_OP - reorienting IS the whole action here too, so a no-op achieves nothing.
         const currentPiece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
-        const noOp = this.checkOrientationChanges(currentPiece.orientation, parsed.orientation);
+        const noOp = this.checkOrientationChanges(currentPiece.orientation, orientation);
         if (noOp) {
             return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
         }
         // Reorienting doesn't move the piece (same x,y,index) - only its facing changes, so predict that directly rather than reusing the pre-mutation `.piece`.
-        const reoriented = new Piece(currentPiece.owner, currentPiece.size, parsed.orientation);
+        const reoriented = new Piece(currentPiece.owner, currentPiece.size, orientation);
         const newMinion = { x: minion.x, y: minion.y, index: minion.index, piece: reoriented };
         return { failed: false, outcome: { newMinion, replacesMinion: minion } };
     }
@@ -5426,24 +5428,22 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
-        const parsed = this.parseOrientationOrFail(orientationStr);
-        if ("key" in parsed) {
-            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${parsed.key}`, parsed.params) };
-        }
+        // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
+        const orientation = orientationStr as Orientation;
         const failure = checkOrientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
         // reorienting the target IS the whole action here too, so a no-op is hard-rejected.
         const currentPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
-        const noOp = this.checkOrientationChanges(currentPiece.orientation, parsed.orientation);
+        const noOp = this.checkOrientationChanges(currentPiece.orientation, orientation);
         if (noOp) {
             return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
         }
         if (currentPiece.owner !== this.currplayer) {
             return { failed: false };
         }
-        const reoriented = new Piece(currentPiece.owner, currentPiece.size, parsed.orientation);
+        const reoriented = new Piece(currentPiece.owner, currentPiece.size, orientation);
         const newMinion = { x: target.x, y: target.y, index: target.index, piece: reoriented };
         return { failed: false, outcome: { newMinion, replacesMinion: target } };
     }
