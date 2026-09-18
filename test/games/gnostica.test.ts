@@ -5370,18 +5370,53 @@ describe("Gnostica: Fool and World", () => {
         expect(flat.some(r => r.type === "use" && (r as { what?: string; count?: number }).what === major(6).uid && (r as { count?: number }).count === 21)).eq(true);
     });
 
-    // World's own "as <uid>" already spent the head's one asUid slot
-    // naming which card to push - a pushed Magician frame's own suit
-    // choice has nowhere else to go but its own step token (unlike a
-    // fresh/Fool-revealed Magician, which uses "as <suit>" directly - see
-    // gnostica.ts's deriveStepTokens/walkFrameStack for the matching rule).
-    it("World -> Magician: the pushed Magician frame reads its suit from its own step token, not a second 'as'", () => {
+    // TODO-gnostica #105: asUid and asSuit are separate IParsedMove fields
+    // that chain correctly ("as <uid> as <suit>") - MOVE-STRINGS-gnostica.md's
+    // own catalogue lists this chained spelling as the intended form for a
+    // World-borrowed Magician. (The older inline-suit-letter-as-first-token
+    // spelling this test used to exercise still parses and still works as
+    // a fallback - see gnostica.ts's applyPowerStep own docs - but is no
+    // longer the primary path once the chain is available.)
+    it("World -> Magician: the pushed Magician frame's own suit chains via a second 'as', not its own step token", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => theWorld());
         forceCardAt(g, 3, 0, () => major(1)); // The Magician, World's own target
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        g.move(`use ${theWorld().uid} as ${major(1).uid}/with m0.1 C at m0 create U`, { trusted: true });
+        g.move(`use ${theWorld().uid} as ${major(1).uid} as C/with m0.1 at m0 create U`, { trusted: true });
+        expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode via the borrowed Magician
+    });
+
+    // Regression (#105): the magician_<suit> button handler used to spread
+    // {...pending, asUid: suitUid}, overwriting World's own already-picked
+    // card uid instead of setting a separate suit field - so clicking a
+    // suit button after "use 21 as 01" produced the corrupted "use 21 as
+    // C", losing the borrow entirely. This click path had no test coverage
+    // at all before this fix.
+    it("World -> Magician via clicks: the suit button preserves World's own borrowed uid instead of overwriting it", () => {
+        const g = new GnosticaGame(2);
+        clearBoard(g);
+        forceCardAt(g, 0, 0, () => theWorld());
+        forceCardAt(g, 3, 0, () => major(1)); // The Magician, World's own target
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+
+        const seed = g.handleClick("", -1, -1, "_btn_use");
+        const [rowM, colM] = rowColFor(g, 0, 0);
+        const cellClick = g.handleClick(seed.move, rowM, colM);
+        expect(cellClick.move).eq(`use ${theWorld().uid}`);
+
+        const [rowP, colP] = rowColFor(g, 3, 0);
+        const targetClick = g.handleClick(cellClick.move, rowP, colP);
+        expect(targetClick.move).eq(`use ${theWorld().uid} as ${major(1).uid}`);
+
+        const suitClick = g.handleClick(targetClick.move, -1, -1, "_btn_magician_C");
+        // Before the fix, this corrupted World's own borrow: "use 21 as C".
+        expect(suitClick.move).eq(`use ${theWorld().uid} as ${major(1).uid} as C`);
+        expect(suitClick.valid).to.be.true; // suit chosen, mode not yet - still skipped
+
+        const modeClick = g.handleClick(suitClick.move, -1, -1, "_btn_target_own");
+        expect(modeClick.move).eq(`use ${theWorld().uid} as ${major(1).uid} as C/with m0.1 at m0 create U?`);
+        g.move(modeClick.move, { trusted: true });
         expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode via the borrowed Magician
     });
 
