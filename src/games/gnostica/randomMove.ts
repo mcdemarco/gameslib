@@ -933,7 +933,7 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
 function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
     const hand = game.hands[game.currplayer - 1];
     const discards = hand.filter(() => Math.random() < 0.3);
-    return game.validateHighPriestess(["discard", ...discards]).valid ? discards : [];
+    return game.validateHighPriestess({ action: "discard", cardList: discards }).valid ? discards : [];
 }
 
 // Round 2's own resume, reusing round 1's exact discard-uid randomization
