@@ -6,7 +6,7 @@ Mark items done with @done(date) only as they're confirmed.
 - #7 - i18n/moveresults work @done(26-08-20)
 - #25 - Implement Fool/World/High Priestess major arcana powers using new GameBase. @done(26-08-25)
 - #29 - reduce test count
-- #30 - reduce comments
+- #30 - reduce comments @done(2026-09-18)
 - #31 - board rotation view @done(26-08-20)
 - #32 - fixed the stale-preview click bug: handleClick() wasn't setting `canrender` on valid-but-incomplete clicks. @done(26-08-22)
 - #38 - tournament rules: turnOrder now reflects bid rank, used by nextPlayer()/redrawOrder. @done(26-08-20)
@@ -76,7 +76,7 @@ Mark items done with @done(date) only as they're confirmed.
 - #106 - Implement change to enemy pieceref (to be more of a pieceref) in create path fully. @done(2026-09-17)
 - #107 - Tests should not assemble internal structures manually.
 - #108 - Rods must provide a target, not just a distance. @done(2026-09-17)
-- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.
+- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
 - #110 - Reattach last flag and the expected behavior of retaining the last flag don't seem to be working anymore. @done(2026-09-17)
 - #111 - handleClick(Core) should use the parsed move, not the old strings
 - #112 - Fix trailing orientation direction duplication issue. @done(2026-09-17)
