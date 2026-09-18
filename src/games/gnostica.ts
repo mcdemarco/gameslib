@@ -6898,7 +6898,12 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (parsed.head === "discard" && parsed.viaUid !== undefined) {
             const step = parsed.steps[0];
-            return step?.cardList !== undefined || step?.amount !== undefined ? [["discard", ...parsed.rest]] : [];
+            if (step?.cardList === undefined && step?.amount === undefined) {
+                return [];
+            }
+            // Mirrors pickleMove's own "discard" token order exactly.
+            const tokens = ["discard", ...(step.cardList ?? []), ...(step.amount !== undefined ? ["draw", step.amount.toString()] : [])];
+            return [tokens];
         }
         return parsed.stepSegments;
     }
