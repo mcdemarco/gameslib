@@ -519,10 +519,8 @@ export class GnosticaGame extends GameBaseSequenced {
             if (! allowed.includes(parsed.head!))
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "WRONG_CONTINUED_ACTION"});
             return this.validateResumePendingPower(parsed);
-        }
-        
-        // "decline" can only appear when continued is populated.
-        if (head === "decline") {
+        } else if (head === "decline") {
+            // "decline" can only appear when continued is populated.
             return this.invalid("apgames:validation.gnostica.NOTHING_TO_DECLINE");
         }
 
@@ -549,21 +547,16 @@ export class GnosticaGame extends GameBaseSequenced {
                     return this.invalid("apgames:validation.gnostica.BAD_PASS");
                 }
             }
-        }
-
-        if (this.phase !== "main") {
+        } else if (this.phase !== "main") {
             return this.invalid("apgames:validation.gnostica.WRONG_PHASE", { move: head });
         }
         
         if (head !== "place" && !hasPieces) {
-            //This does not yet cover the Fool suicide corner case.
+            //ISSUE: This does not yet cover the Fool suicide corner case.
             return this.invalid("apgames:validation.gnostica.MUST_PLACE_FIRST");
         }
         if (head === "place" && hasPieces) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
-        }
-        if ((head === "place" || head === "orient" || head === "discard") && parsed.steps.length > 1) {
-            return this.invalid("apgames:validation.gnostica.NO_POWER_STEPS_HERE", { move: head });
         }
         // Concurrent lastTurners aren't allowed, so no need to check *who* it is.
         if (parsed.announceLast && this.lastTurner !== undefined) {
@@ -576,7 +569,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "use": return this.validateActivate(parsed);
             case "play": return this.validatePlay(parsed);
         }
-        // Unreachable: head was confirmed recognized above, and bid/redraw/pass/resume are all handled before here.
+        // ISSUE: Unreachable: head was confirmed recognized above, and bid/redraw/pass/resume are all handled before here.
         return this.invalid("apgames:validation._general.UNRECOGNIZED_MOVE", { move: m });
     }
     
@@ -890,19 +883,16 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 
                 segment = headTokens.slice();
+
+                // Reject if an inappropriate head has further steps (not use or play).
+                if ( pm.head !== "use" && pm.head !== "play" && segments.length > 1 ) {
+                    pm.error = "TOO_MANY_STEPS_FOR_HEADWORD";
+                    break;
+                }
                 //End of special head treatment.
                 
-            } else {
-                //Head is set in step 0.
-                if (s === 1) {
-                    // Test that our head has further steps (use or play).
-                    if ( pm.head !== "use" && pm.head !== "play" ) {
-                        pm.error = "TOO_MANY_STEPS_FOR_HEADWORD";
-                        break;
-                    }
-                }
-                
-                //If it's not the head, we must validate the step headword.
+            } else {//s > 0
+                //Need to validate the step headword.
                 if (! STEPWORDS.includes(segment[0]) ) {
                     pm.error = "BAD_STEPWORD";
                     break;
@@ -3871,7 +3861,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (orientationToken === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_DIRECTION_REQUIRED") };
         }
-        // A trailing "?" marks the click flow's own seeded default as not yet deliberate - complete:0 (submittable but soft); a hand-typed "place l0 U" is correctly complete:1.
+        // A trailing "?" marks the click flow's own seeded default as not yet deliberate - complete:0; a hand-typed "place l0 U" is complete:1.
         const prepopulated = orientationToken.endsWith("?");
         const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
         const resolved = this.resolveTrailingOrientation(orientationStr, undefined);

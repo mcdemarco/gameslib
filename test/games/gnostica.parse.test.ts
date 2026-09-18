@@ -140,4 +140,12 @@ describe("Gnostica parsing", () => {
 
     });
 
+    it ("Obviates old validation rules", () =>  {
+        expect(g.parseMove("place m0 U/with l1.1 grow l1.1")).to.have.deep.property("valid", false);
+        expect(g.parseMove("place m0 U/blah blah blah")).to.have.deep.property("valid", false);
+        expect(g.parseMove("discard draw 0/blah blah blah")).to.have.deep.property("valid", false);
+        expect(g.parseMove("discard AC draw 3/blah blah blah")).to.have.deep.property("valid", false);
+        expect(g.parseMove("orient m0 U/blah blah blah")).to.have.deep.property("valid", false);
+    });
+
 });
