@@ -10,7 +10,6 @@ describe("Gnostica parsing", () => {
          expect(g.parseMove("place m0 U?")).to.deep.equal({
             announceLast: false,
             head: "place",
-            rest: ["m0", "U?"],
             steps: [{
                 action: "place",
                 direction: "U?",
@@ -23,7 +22,6 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("decline 00 via 00")).to.deep.equal({
             announceLast: false,
             head: "decline",
-            rest: ["00"],
             steps: [{
                 action: "decline",
                 card: "00"
@@ -36,7 +34,6 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("orient n0.1 N")).to.deep.equal({
             announceLast: false,
             head: "orient",
-            rest: ["n0.1", "N"],
             steps: [{
                 action: "orient",
                 targetPiece: "n0.1",
@@ -51,7 +48,6 @@ describe("Gnostica parsing", () => {
             "head":"use",
             "valid":true,
             "steps":[{"action":"use","card":"9D"},{"action":"grow","withPiece":"l1.1","targetPiece":"l1.1"}],
-            "rest":["9D"],
             "stepSegments":[["l1.1","grow","l1.1"]]
             });
 

@@ -183,8 +183,7 @@ interface IParsedMove {
     steps: IStep[];
     valid: boolean;
     viaUid?: string; //for Fool and High Priestess
-    //Deprecated attributes.
-    rest: string[];
+    //Deprecated attribute.
     stepSegments: string[][];
 }
 
@@ -1179,7 +1178,6 @@ export class GnosticaGame extends GameBaseSequenced {
             head: undefined,
             valid: true,
             steps: [],
-            rest: [],
             stepSegments: []
         };
 
@@ -1336,7 +1334,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                 }
                 
-                pm.rest = headTokens.slice();
                 segment = headTokens.slice();
                 //End of special head treatment.
                 
@@ -1771,21 +1768,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (p.steps === undefined || p.steps.length === 0) {
             return p.head + ( p.announceLast ? " last" : "");
         }
-       
-        /* old version
-        const headPart = [p.head, ...p.rest, ...(p.asUid !== undefined ? ["as", p.asUid] : []), ...(p.viaUid !== undefined ? ["via", p.viaUid] : [])].join(" ");
-        // p.stepSegments are already "with"-stripped (see parseMove's own
-        // docs) - re-add it here so a round-trip through parseMove then
-        // pickleMove doesn't silently drop it. orientMinion's own bare
-        // "orient" subhead, and the minionRef-less "discard"/"draw"/
-        // "decline" segments, are left exactly as typed instead.
-        const WITH_EXEMPT = ["orient", "discard", "draw", "decline"];
-        const stepsPart = p.stepSegments.map(s =>
-            (s.length === 0 || WITH_EXEMPT.includes(s[0]?.toLowerCase())) ? s.join(" ") : ["with", ...s].join(" "),
-        ).join("/");
-        const base = stepsPart.length === 0 ? headPart : `${headPart}/${stepsPart}`;
-        return p.announceLast ? (base.length === 0 ? "last" : `${base} last`) : base;
-        */
         
         const pparts: string[] = [];
         for (let s = 0; s < p.steps.length; s++) {
@@ -1923,8 +1905,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (active !== "00") {
             return active;
         }
-        if (this.liveMove?.viaUid === "00" && this.liveMove.rest[0] !== undefined) {
-            return this.liveMove.rest[0];
+        if (this.liveMove?.viaUid === "00" && this.liveMove.steps[0]?.card !== undefined) {
+            return this.liveMove.steps[0].card;
         }
         return this.discardPile[this.discardPile.length - 1];
     }
@@ -2550,7 +2532,7 @@ export class GnosticaGame extends GameBaseSequenced {
             found.add("declare");
         }
         const head = this.liveMove.head;
-        if (head === "discard" && this.isPassEquivalent(this.liveMove.rest)) {
+        if (head === "discard" && this.isPassEquivalent(this.liveMove.steps[0])) {
             // "discard draw 0" is Pass's own bare seed (see the Pass
             // button's own click handler) - bold Pass instead of
             // Discard/Draw, regardless of whether the player got there by
@@ -2571,10 +2553,8 @@ export class GnosticaGame extends GameBaseSequenced {
     // discards nothing AND explicitly draws zero - an omitted "draw <n>"
     // defaults to drawing the max at commit time (see cmdDiscard's own
     // docs), so that's a real draw, not a pass.
-    private isPassEquivalent(rest: string[]): boolean {
-        const drawIdx = rest.indexOf("draw");
-        const discardUids = drawIdx === -1 ? rest : rest.slice(0, drawIdx);
-        return discardUids.length === 0 && drawIdx !== -1 && rest[drawIdx + 1] === "0";
+    private isPassEquivalent(step: IStep | undefined): boolean {
+        return (step?.cardList === undefined || step.cardList.length === 0) && step?.amount === 0;
     }
 
     // Wraps computeActionButtons() (the real logic - see its own docs)
@@ -2907,7 +2887,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // just 6 minus the CURRENT hand length, no separate subtraction of the
     // discard list needed.
     private discardCountBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "discard" || this.liveMove.rest.includes("draw")) {
+        if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "discard" || this.liveMove.steps[0]?.amount !== undefined) {
             return undefined;
         }
         const hand = this.hands[this.currplayer - 1] ?? [];
@@ -2923,11 +2903,12 @@ export class GnosticaGame extends GameBaseSequenced {
     // orient's own (non-IPendingStep) pool/dispatch since orient has no
     // card/suit-mode machinery to piggyback on.
     private orientAmbiguityBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        const step = this.liveMove?.steps[0];
         if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "orient"
-            || this.liveMove.rest.length !== 1 || this.liveMove.rest[0].includes(".")) {
+            || step?.targetPiece === undefined || step.direction !== undefined || step.targetPiece.includes(".")) {
             return undefined;
         }
-        const coords = this.tryAlgebraic2coords(this.liveMove.rest[0]);
+        const coords = this.tryAlgebraic2coords(step.targetPiece);
         if (coords === undefined) {
             return undefined;
         }
@@ -4837,8 +4818,8 @@ export class GnosticaGame extends GameBaseSequenced {
             if (!this.biddingPool!.includes(uid)) {
                 return { move, valid: false, message: i18next.t("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid }) };
             }
-            const { head, rest: args } = this.parseMove(move);
-            let picks = head?.toLowerCase() === "redraw" ? [...args] : [];
+            const { head, steps } = this.parseMove(move);
+            let picks = head?.toLowerCase() === "redraw" ? [...(steps[0]?.cardList ?? [])] : [];
             if (picks.includes(uid)) {
                 picks = picks.filter(u => u !== uid);
             } else {
@@ -5112,7 +5093,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // Only the head segment's own tokens are needed here; the
             // pending-step helpers below (parsePendingStep etc.) do
             // their own full parsing of the rest.
-            const { head, rest: args } = this.parseMove(move);
+            const { head, steps: headSteps } = this.parseMove(move);
 
             // Hand-card clicks (from the per-player AreaPieces built in
             // render()) arrive as `piece`, independent of row/col - only
@@ -5196,8 +5177,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     // count fresh (via getActionButtons()'s own count-
                     // picker) rather than silently keeping a now-possibly-
                     // invalid number.
-                    const drawIdx = args.indexOf("draw");
-                    let discards = drawIdx === -1 ? [...args] : args.slice(0, drawIdx);
+                    let discards = [...(headSteps[0]?.cardList ?? [])];
                     if (discards.includes(uid)) {
                         discards = discards.filter(u => u !== uid);
                     } else {
@@ -5329,7 +5309,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // trailing "?" marking it as not yet a deliberate choice
                 // (see validatePlace's own docs) - any further click,
                 // confirming or correcting, drops it.
-                const [prevCell] = args;
+                const prevCell = headSteps[0]?.targetCell;
                 let dir: Orientation | undefined;
                 if (prevCell !== undefined) {
                     const [px, py] = GnosticaBoard.algebraic2coords(prevCell);
@@ -5350,7 +5330,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // own piece instead, click a non-adjacent cell first, or
                 // just submit and start over - re-selecting rarely matters
                 // once a piece is already picked).
-                const [prevRef] = args;
+                const prevRef = headSteps[0]?.targetPiece;
                 let dir: Orientation | undefined;
                 let prevLoc: { x: number; y: number; index: number } | undefined;
                 // A bare cell token (2+ own pieces there, none picked yet -
