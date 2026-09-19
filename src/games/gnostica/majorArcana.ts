@@ -10,6 +10,8 @@ export interface PrimitiveOpts {
     replacementSource?: "hand" | "discard";
     // Wheel of Fortune: the new territory's card may be drawn randomly from the draw pile instead of played from hand.
     allowRandomDraw?: boolean;
+    // Sun/Strength: a same-target shortcut's intermediate size is only ever transient, so its own step doesn't need a real stash piece.
+    skipStashCheck?: boolean;
 }
 
 // Powers that don't reduce to a suit primitive - each is bespoke logic implemented directly in powers.ts.

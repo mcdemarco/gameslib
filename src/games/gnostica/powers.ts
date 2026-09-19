@@ -183,7 +183,7 @@ export const checkCreateOwn = (
     if (!opts.ignoreCapacity && pieceCount >= 3) {
         return { key: "CELL_FULL" };
     }
-    if (!hasStashAvailable(ctx, ctx.currplayer, 1)) {
+    if (!opts.skipStashCheck && !hasStashAvailable(ctx, ctx.currplayer, 1)) {
         return { key: "STASH_EMPTY", params: { player: ctx.currplayer, size: 1 } };
     }
     return undefined;
@@ -197,7 +197,10 @@ export const createOwn = (
     if (failure) {
         throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
     }
-    takeFromStash(ctx, ctx.currplayer, 1);
+    // Sun's own shortcut: the size-1 form is only ever transient, so skip taking a real stash piece for it.
+    if (!opts.skipStashCheck) {
+        takeFromStash(ctx, ctx.currplayer, 1);
+    }
     let t = ctx.board.get(targetX, targetY);
     if (t === undefined) {
         t = new CellContents(undefined);
@@ -449,6 +452,7 @@ const nextSize = (size: Pips): Pips => (size + 1) as Pips;
 export const checkGrowPiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number,
+    opts: { skipStashCheck?: boolean } = {},
 ): PowerFailure | undefined => {
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const ownErr = checkOwnMinion(minion, ctx.currplayer);
@@ -462,7 +466,7 @@ export const checkGrowPiece = (
     if (target.size >= 3) {
         return { key: "ALREADY_MAX_SIZE" };
     }
-    if (!hasStashAvailable(ctx, target.owner, nextSize(target.size))) {
+    if (!opts.skipStashCheck && !hasStashAvailable(ctx, target.owner, nextSize(target.size))) {
         return { key: "STASH_EMPTY", params: { player: target.owner, size: nextSize(target.size) } };
     }
     return undefined;
@@ -471,17 +475,23 @@ export const checkGrowPiece = (
 export const growPiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number,
-    newOrientation: Orientation | undefined,
+    newOrientation: Orientation | undefined, opts: { skipStashCheck?: boolean; skipStashReturn?: boolean } = {},
 ): void => {
-    const failure = checkGrowPiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+    const failure = checkGrowPiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex, opts);
     if (failure) {
         throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
     }
     const t = getCellContents(ctx, targetX, targetY);
     const target = t.pieces[targetIndex];
     const grownSize = nextSize(target.size);
-    takeFromStash(ctx, target.owner, grownSize);
-    returnToStash(ctx, target.owner, target.size);
+    // A same-target shortcut's intermediate size is only ever transient - skip taking a real stash piece for it, mirroring attackPiece's own skipStashCheck.
+    if (!opts.skipStashCheck) {
+        takeFromStash(ctx, target.owner, grownSize);
+    }
+    // Symmetric case: if THIS piece's own current size was itself never really taken (an earlier step in the same chain skipped it), returning it now would over-credit the stash.
+    if (!opts.skipStashReturn) {
+        returnToStash(ctx, target.owner, target.size);
+    }
     const orientation = target.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
     t.removeAt(targetIndex);
     t.add(new Piece(target.owner, grownSize, orientation));
@@ -569,7 +579,7 @@ export const checkAttackPiece = (
 export const attackPiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, pips: number,
-    newOrientation: Orientation | undefined, opts: { skipStashCheck?: boolean } = {},
+    newOrientation: Orientation | undefined, opts: { skipStashCheck?: boolean; skipStashReturn?: boolean } = {},
 ): void => {
     const failure = checkAttackPiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex, pips, opts);
     if (failure) {
@@ -579,7 +589,10 @@ export const attackPiece = (
     const victim = t.pieces[targetIndex];
     const resultSize = victim.size - pips;
     if (resultSize === 0) {
-        returnToStash(ctx, victim.owner, victim.size);
+        // Symmetric case: if THIS piece's own current size was itself never really taken (an earlier step in the same chain skipped it), returning it now would over-credit the stash.
+        if (!opts.skipStashReturn) {
+            returnToStash(ctx, victim.owner, victim.size);
+        }
         t.removeAt(targetIndex);
         ctx.board.pruneIfEmpty(targetX, targetY);
         return;
@@ -587,7 +600,9 @@ export const attackPiece = (
     if (!opts.skipStashCheck) {
         stashOf(ctx, victim.owner)[resultSize - 1] -= 1;
     }
-    returnToStash(ctx, victim.owner, victim.size);
+    if (!opts.skipStashReturn) {
+        returnToStash(ctx, victim.owner, victim.size);
+    }
     const orientation = victim.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
     t.removeAt(targetIndex);
     t.add(new Piece(victim.owner, resultSize as Pips, orientation));

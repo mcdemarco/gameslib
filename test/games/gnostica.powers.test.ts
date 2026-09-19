@@ -55,6 +55,17 @@ describe("Gnostica powers: Cups (create)", () => {
         expect(b.get(0, 0)!.pieces.length).eq(4);
     });
 
+    it("Sun's shortcut skips the created piece's own stash check when followed by a grow step", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
+        const ctx = makeCtx(b, { stashes: new Map([[1, [0, 5, 5] as Stash]]) }); // zero size-1 pieces left
+        expect(() => createOwn(ctx, 0, 0, 0, 0, 0, "N")).to.throw();
+        createOwn(ctx, 0, 0, 0, 0, 0, "N", { skipStashCheck: true });
+        const t = b.get(0, 0)!;
+        expect(t.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "N" });
+        expect(ctx.stashes.get(1)!).to.deep.equal([0, 5, 5]); // the transient size-1 was never actually taken from stash
+    });
+
     it("only targets its own cell (up) or the pointed-at adjacent cell", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "N")]));
@@ -327,6 +338,16 @@ describe("Gnostica powers: Discs (grow)", () => {
         expect(() => growPiece(ctx2, 0, 0, 0, 0, 0, 0, undefined)).to.throw();
     });
 
+    it("Strength's shortcut skips the intermediate size's own stash check, e.g. 1->2 with zero size-2 available", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
+        const ctx = makeCtx(b, { stashes: new Map([[1, [5, 0, 5] as Stash], [2, fullStash()]]) });
+        expect(() => growPiece(ctx, 0, 0, 0, 0, 0, 0, undefined)).to.throw();
+        growPiece(ctx, 0, 0, 0, 0, 0, 0, undefined, { skipStashCheck: true });
+        expect(b.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2 });
+        expect(ctx.stashes.get(1)!).to.deep.equal([6, 0, 5]); // the transient size-2 was never actually taken from stash
+    });
+
     it("grows an enemy's piece from THEIR stash, not the acting player's own", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 1, "N")]));
@@ -417,6 +438,19 @@ describe("Gnostica powers: Swords (attack)", () => {
         expect(() => attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined)).to.throw();
         attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined, { skipStashCheck: true }); // Death's shortcut
         expect(b.get(0, 0)!.pieces[1].size).eq(2);
+    });
+
+    it("Death's own shortcut doesn't double-credit stash across a same-target double-attack", () => {
+        const b = new GnosticaBoard();
+        b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 3, "N")]));
+        const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, [0, 0, 5] as Stash]]) });
+        // Step 1 of 2 (3->2): its own take is skipped (mirrors the always-skipped shortcut), but its input (size 3) was real, so returning it is correct.
+        attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined, { skipStashCheck: true });
+        expect(ctx.stashes.get(2)!).to.deep.equal([0, 0, 6]); // the real size-3 came back; the transient size-2 was never taken
+        // Step 2 of 2 (2->1): its own input (size 2) was itself the FIRST step's transient output, so returning it now must be skipped too.
+        attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined, { skipStashCheck: true, skipStashReturn: true });
+        expect(b.get(0, 0)!.pieces[1].size).eq(1);
+        expect(ctx.stashes.get(2)!).to.deep.equal([0, 0, 6]); // unchanged - the transient size-2 was never taken OR returned
     });
 
     it("may not attack for more pips than the victim has, or for zero", () => {

@@ -5811,6 +5811,7 @@
             "LABEL_HAND": "Player {{playerNum}}'s hand {{declared}}",
             "LABEL_WARNING": "This is a declaration round!",
             "MAGICIAN_NEEDS_AS": "The Magician (I) must choose its suit using the \"as\" keyword.",
+            "MOON_MUST_RESTORE_CAPACITY": "The Moon (XVIII) moved a piece into an already-full territory, so its attack must destroy a piece there to bring it back within the 3-piece limit.",
             "MUST_BE_SPOT_CARD": "A newly created territory must be a spot card (ranks A through 10).",
             "MUST_PASS": "The only move available to you is to pass.",
             "MUST_PLACE_FIRST": "You have no pieces on the board, so you are required to use your entire turn to place one 1-pip pyramid onto the board.",

@@ -9,6 +9,7 @@ import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 import { randomUseOrPlayMove } from "../../src/games/gnostica/randomMove";
+import { MAJOR_ARCANA } from "../../src/games/gnostica/majorArcana";
 
 const theWorld = () => majorCards.find(c => c.rank.seq === 21)!;
 const major = (seq: number) => majorCards.find(c => c.rank.seq === seq)!;
@@ -1234,6 +1235,58 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         g.hands[0].push("00"); // The Fool, worth 3 - injected regardless of the random deal
         g.move(`use ${major(8).uid}/with m0.1 grow n0 to 00`, { trusted: true }); // only ONE of Strength's two grow steps needed
         expect(g.board.get(1, 0)!.card?.uid).eq("00");
+    });
+
+    it("Strength: growing the same piece 1->3 works even with zero size-2 pieces in stash", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(8)); // Strength
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        g.stashes.get(1)![1] = 0; // zero size-2 pieces left in stash
+        g.move(`use ${major(8).uid}/with m0.1 grow m0.1/with m0.2 grow m0.2`, { trusted: true });
+        expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 3 });
+        expect(g.stashes.get(1)!).to.deep.equal([6, 0, 4]); // the transient size-2 was never taken OR returned - net effect is just the real size-3 draw
+    });
+
+    it("Sun: creating then growing to size 2 works even with zero size-1 pieces in stash", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(19)); // The Sun
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        g.stashes.get(1)![0] = 0; // zero size-1 pieces left in stash
+        g.move(`use ${major(19).uid}/with m0.1 at n0 create U/with n0.1 grow n0.1`, { trusted: true });
+        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2 });
+        expect(g.stashes.get(1)!).to.deep.equal([0, 4, 5]); // the transient size-1 was never taken OR returned - net effect is just the real size-2 draw
+    });
+
+    it("Death's own shortcut only relaxes the stash check for its non-final attack step, not the final one", () => {
+        const g = new GnosticaGame(2);
+        const def = MAJOR_ARCANA["13"]; // Death
+        expect(g.computeShortcutOpts(def, "attack", 0, 2, undefined).skipStashCheck).to.be.true; // step 1 of 2 - relaxed
+        expect(g.computeShortcutOpts(def, "attack", 1, 2, undefined).skipStashCheck).to.be.undefined; // step 2 of 2 - real check
+    });
+
+    it("Moon: a move that pushes a territory to 4 pieces stays incomplete until the attack destroys one there, restoring the cap", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(18)); // The Moon
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // acting minion, facing n0
+        forceCardAt(g, 1, 0, () => card("AC"));
+        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "N"), new Piece(2, 2, "N"), new Piece(2, 3, "N")]; // already at the 3-piece cap
+
+        // Move alone pushes n0 to 4 pieces - not yet submittable, since nothing has restored the cap.
+        const moveOnly = `use ${major(18).uid}/with m0.1 move m0.1 1`;
+        expect(g.validateMove(moveOnly).complete).to.equal(-1);
+
+        // Shrinking (not destroying) the victim doesn't satisfy the restoration either.
+        const shrinkOnly = `use ${major(18).uid}/with m0.1 move m0.1 1 orient U/with n0.1.1 shrink n0.3 1`;
+        expect(g.validateMove(shrinkOnly).valid).to.be.false;
+
+        // Destroying one of the four pieces at n0 (not necessarily the moved one, or the same minion) restores the cap and completes the move.
+        const full = `use ${major(18).uid}/with m0.1 move m0.1 1 orient U/with n0.1.1 shrink n0.1.2 1`;
+        const result = g.validateMove(full);
+        expect(result.valid).to.be.true;
+        expect(result.complete).to.equal(1);
+        g.move(full, { trusted: true });
+        expect(g.board.get(1, 0)!.pieces.length).eq(3);
+        expect(g.board.get(1, 0)!.pieces.some(p => p.owner === 2 && p.size === 1)).to.be.false; // the victim is gone
     });
 
     it("Chariot: two rod steps on the same piece may pass through the void mid-chain", () => {
