@@ -4297,7 +4297,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private walkFrameStack(stack: IPowerFrame[], stepSegments: string[][], steps: IStep[], partial: boolean, asUid?: string, asSuit?: string): IPowerFrame[] | undefined {
         // asUid/asSuit are separate fields, each consumed by exactly one step in the whole walk and never reused once read, so neither needs "clearing".
         const worldBorrow = asUid !== undefined;
-        const chained = stepSegments.length + (worldBorrow ? 1 : 0) > 1;
+        const chained = steps.length + (worldBorrow ? 1 : 0) > 1;
         let i = 0;
         let stepsProcessed = 0;
         for (;;) {
@@ -4334,7 +4334,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // The flip consumes no segment - it's the only possible action for this step, so there is nothing to type.
                 tokens = [];
             } else {
-                if (i >= stepSegments.length) {
+                if (i >= steps.length) {
                     // Segments exhausted: silently skip whatever's left of the CURRENT frame - same pop + cascade as an explicit "decline", so a mandatory Fool flip still fires this call.
                     GnosticaGame.popFrame(stack);
                     GnosticaGame.popExhaustedFrames(this, stack);
@@ -4457,7 +4457,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         const worldSeed = asUid !== undefined && this.topStepIsWorld(stack);
-        if (stepSegments.length === 0 && !this.topStepIsFool(stack) && !worldSeed) {
+        if (steps.length === 0 && !this.topStepIsFool(stack) && !worldSeed) {
             // A bare resume seed, no step typed yet - nothing to process. Fool's step and a known World borrow are exempt, both auto-resolving regardless of segment count.
             return undefined;
         }
@@ -4483,7 +4483,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const poppedViaDecline = justDeclined;
             justDeclined = false;
             if (top === undefined) {
-                if (i < stepSegments.length) {
+                if (i < steps.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
                 }
                 if (hpDrawNotChosen) {
@@ -4508,7 +4508,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 GnosticaGame.popFrame(stack);
                 // Popping can expose an already-exhausted buried frame (e.g. World's own spent frame), which a later segment must not be validated against.
                 GnosticaGame.popExhaustedFrames(this, stack);
-                if (i < stepSegments.length) {
+                if (i < steps.length) {
                     clone ??= this.cloneLive();
                 }
                 justDeclined = true;
@@ -4524,7 +4524,7 @@ export class GnosticaGame extends GameBaseSequenced {
             } else if (kind === "fool") {
                 tokens = []; // the flip consumes no segment
             } else {
-                if (i >= stepSegments.length) {
+                if (i >= steps.length) {
                     // Nothing more given - a step past the frame's own first stays optional and is silently skipped, UNLESS provably impossible right now (no legal target at all).
                     if (this.specialStepHasNoLegalTarget(clone ?? this, step, top.minions)) {
                         const cardName = this.cardNameOrUid(top.cardUid);
@@ -4566,7 +4566,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return stepResult.result;
             }
             if (stepResult.complete === false) {
-                if (i >= stepSegments.length) {
+                if (i >= steps.length) {
                     if (this.isMinionCellStillNarrowing(tokens[0], top.minions)) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
                     }
@@ -4583,7 +4583,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (stepResult.outcome?.forcePause === true) {
                 // A forced-pause step can never legally be followed by more segments - the player couldn't have known what to put there (Fool's flip is hidden).
-                if (i < stepSegments.length) {
+                if (i < steps.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "STEPS_AFTER_FORCED_PAUSE" });
                 }
                 // The move is already complete, but submitting will ALSO trigger this step's own hidden continuation; named via forcePauseReadyMessage, not the generic VALID_MOVE fallback.
@@ -4627,7 +4627,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 stack.push({ cardUid: stepResult.outcome.pushFrame.cardUid, nextStepIndex: 0, minions: stepResult.outcome.pushFrame.minions, viaFool: stepResult.outcome.pushFrame.viaFool === true });
             }
             GnosticaGame.popExhaustedFrames(this, stack);
-            if (i < stepSegments.length || stack.length > 0) {
+            if (i < steps.length || stack.length > 0) {
                 clone ??= this.cloneLive();
                 clone.applyPowerStep(step, minionsForReplay, tokens, istep, frameDef, stepIndex, frameDef.powers.length, true, borrowedForStep);
             }
@@ -4639,7 +4639,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const stack: IPowerFrame[] = [{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }];
         // A World borrow with nothing else typed still has a real step to choose (falls through to the walk); a Magician borrow pushes no frame, so it wants the same fresh-step wording.
         const worldBorrow = asUid !== undefined;
-        if (stepSegments.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
+        if (steps.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
             const msg = this.freshStepMessage(def.uid, 0, eligible);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
@@ -4655,7 +4655,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const stepSegments = this.resumeStepSegments(parsed);
         const steps = this.resumeSteps(parsed);
         const worldBorrow = parsed.asUid !== undefined;
-        if (stepSegments.length === 0 && !this.topStepIsFool(queue) && !worldBorrow) {
+        if (steps.length === 0 && !this.topStepIsFool(queue) && !worldBorrow) {
             // Same bare seed as resumePendingPower - valid but incomplete, matching the "still building" complete:-1 pattern; Fool's step is exempt.
             const activeTop = queue[queue.length - 1];
             const msg = this.freshStepMessage(activeTop.cardUid, activeTop.nextStepIndex, activeTop.minions);

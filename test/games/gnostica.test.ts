@@ -5256,10 +5256,10 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     it("getPlies()/getRounds(): two same-seat plies, no synthetic pass, sharing one round until the cycle genuinely wraps", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use 02/5C`, { trusted: true }); // step 1: discard 5C, redraw to 6, pauses
+        g.move(`use 02/discard 5C`, { trusted: true }); // step 1: discard 5C, redraw to 6, pauses
         expect(g.continued).to.not.be.empty;
         expect(g.currplayer).eq(1); // same seat still owes step 2
-        g.move(`use 02/decline`, { trusted: true }); // step 2: decline
+        g.move(`discard draw 0 via 02`, { trusted: true }); // step 2: decline (discard nothing)
         expect(g.continued).to.be.empty;
         expect(g.currplayer).eq(2); // now advances normally
 
@@ -5354,7 +5354,7 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     it("buildViaMove's own High Priestess resume round-trips through validateMove/move cleanly", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use 02/5C`, { trusted: true });
+        g.move(`use 02/discard 5C`, { trusted: true });
         expect(g.continued).to.deep.equal(["02.1"]);
 
         const built = g.buildViaMove([["AR", "draw", "1"]]);
