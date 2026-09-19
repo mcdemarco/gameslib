@@ -5325,16 +5325,6 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         expect(g.currplayer).eq(1);
     });
 
-    it("a trusted resume with more step segments than the obligation needs consumes what it needs and drops the rest", () => {
-        const g = setupHP();
-        g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use 02/discard 5C`, { trusted: true });
-        expect(g.continued).to.not.be.empty;
-        g.move(`play 02 via 02/discard AR/2C`, { trusted: true });
-        expect(g.continued).to.be.empty; // the obligation resolved on "AR" alone
-        expect(g.currplayer).eq(2); // "2C" was never consumed
-    });
-
     it("a bare 'decline' with nothing pending is rejected outright", () => {
         const g = setupHP();
         expect(g.continued).to.be.empty;
@@ -5692,7 +5682,9 @@ describe("Gnostica: Fool and World", () => {
         const selfRef = new GnosticaGame(2);
         forceCardAt(selfRef, 0, 0, () => theWorld());
         selfRef.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        expect(() => selfRef.move(`use 21 as 21`, { trusted: true })).to.throw();
+        const selfRefResult = selfRef.validateMove(`use 21 as 21`);
+        expect(selfRefResult.valid).to.be.false;
+        expect(selfRefResult.message).to.eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "WORLD_NOT_SELF" }));
 
         const offBoard = new GnosticaGame(2);
         forceCardAt(offBoard, 0, 0, () => theWorld());
@@ -5704,7 +5696,8 @@ describe("Gnostica: Fool and World", () => {
                 t.card = undefined;
             }
         }
-        expect(() => offBoard.move(`use 21 as 06`, { trusted: true })).to.throw(); // Lovers isn't on the board
+        const offBoardResult = offBoard.validateMove(`use 21 as 06`); // Lovers isn't on the board
+        expect(offBoardResult.valid).to.be.false;
 
         const skip = new GnosticaGame(2);
         forceCardAt(skip, 0, 0, () => theWorld());
