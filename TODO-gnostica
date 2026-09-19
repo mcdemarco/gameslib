@@ -66,7 +66,7 @@ Mark items done with @done(date) only as they're confirmed.
 - #96 - WORLD_CHOOSE_TARGET no longer tells the player to "click Decline" - a fresh World activation has no Decline button (#49). @done(26-09-10)
 - #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
 - #98 - Eliminate fall-throughs to the default handler error from informative button-bar buttons.
-- #99 - Remove one-liner wrappers like invalid().
+- #99 - Remove one-liner wrappers like invalid() and failureResult().
 - #100 - The message for distance moving a piece should not specify "your" piece. @done(2026-09-14)
 - #101 - In Hierophant, the new piece should inherit the enemy piece's orientation, not start as U. @done(2026-09-14)
 - #102 - Add structural testing of more steps to parseMove(). @done(2026-09-18)
@@ -80,5 +80,6 @@ Mark items done with @done(date) only as they're confirmed.
 - #110 - Reattach last flag and the expected behavior of retaining the last flag don't seem to be working anymore. @done(2026-09-17)
 - #111 - handleClick(Core) should use the parsed move, not the old strings
 - #112 - Fix trailing orientation direction duplication issue. @done(2026-09-17)
-- #113 - We should not need both Direction and Orientation types.
+- #113 - Direction is used somewhere, so not removing after all. @done(2026-09-18)
 - #114 - Wheel of Fortune has its own create keyword "random" not currently in parseMove.
+- #115 - The question of case-sensitivity of directions.

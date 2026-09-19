@@ -924,6 +924,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "WITH_BAD_PIECE_REF";
                     break;
                 }
+                step.withPiece = step.withPiece.toLowerCase();
 
                 if (segment.length === 0) {
                     if (lastStep) {
@@ -962,6 +963,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "BAD_AT_CELL";
                     break;
                 }
+                step.atCell = step.atCell.toLowerCase();
 
                 if (segment.length === 0) {
                     if (lastStep) {
@@ -1091,7 +1093,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 else if ( DIRECTION_RE.test(tempwhat) )
                     step.direction = tempwhat;
                 else if ( PIECE_REF_RE.test(tempwhat) )
-                    step.targetPiece = tempwhat;
+                    step.targetPiece = tempwhat.toLowerCase();
                 else {
                     pm.error = "BAD_CREATE_CONTENT";
                     break;
@@ -1115,13 +1117,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "BAD_PLACEMENT_CELL";
                         break;
                     }
-                    step.targetCell = tempwhat;
-                } else { //step.action === "orient" 
+                    step.targetCell = tempwhat.toLowerCase();
+                } else { //step.action === "orient"
                     if (! PIECE_REF_RE.test(tempwhat) ) {
                         pm.error = "BAD_PIECE_REF_FOR_ORIENT";
                         break;
                     }
-                    step.targetPiece = tempwhat;
+                    step.targetPiece = tempwhat.toLowerCase();
                 }
 
                 if ( segment.length > 0 ) {
@@ -1190,6 +1192,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "BAD_PIECE_REF";
                     break;
                 }
+                step.targetPiece = step.targetPiece.toLowerCase();
 
                 if (segment.length > 0) {
                     const tempdirection = segment.shift()!;
@@ -1217,11 +1220,11 @@ export class GnosticaGame extends GameBaseSequenced {
             if ( step.action === "grow" || step.action === "move" || step.action === "shrink" || step.action === "fly" ) {
                 //Test tempwhat.
                 if ( CELL_RE.test(tempwhat) )
-                    step.targetCell = tempwhat;
+                    step.targetCell = tempwhat.toLowerCase();
                 else if ( CARD_UID_RE.test(tempwhat) )
                     step.card = tempwhat;
                 else if ( PIECE_REF_RE.test(tempwhat) )
-                    step.targetPiece = tempwhat;
+                    step.targetPiece = tempwhat.toLowerCase();
                 else {
                     pm.error = "BAD_STEP_CONTENT";
                     break;
@@ -1274,7 +1277,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         if ( CARD_UID_RE.test(tempdest) ) {
                             step.card = tempdest;
                         } else if ( CELL_RE.test(tempdest) ) {
-                            step.targetCell = tempdest;
+                            step.targetCell = tempdest.toLowerCase();
                         } else {
                             pm.error = "BAD_TO_DESTINATION";
                             break;
@@ -1531,46 +1534,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // The move grammar's orientation vocabulary - N/E/S/W/U, used everywhere a move string names a facing. Case-insensitive on input.
-    private tryParseOrientation(s: string | undefined): Orientation | undefined {
-        if (s === undefined) {
-            return undefined;
-        }
-        const dir = s.toUpperCase();
-        if ( (allOrientations as string[]).includes(dir)) {
-            return dir as Orientation;
-        }
-        return undefined;
-    }
-
-    // Parses `s` as an orientation or reports why not - the one place BAD_ORIENTATION gets built, shared by every context that names a facing.
-    private parseOrientationOrFail(s: string | undefined): { orientation: Orientation } | { key: string; params?: Record<string, unknown> } {
-        const orientation = this.tryParseOrientation(s);
-        return orientation === undefined ? { key: "BAD_ORIENTATION", params: { orientation: s } } : { orientation };
-    }
-
     // Hard-rejects (ORIENT_NO_OP) a same-facing `candidate` - shared by contexts where reorienting IS the whole action; optional reorientations never call this.
     private checkOrientationChanges(reference: Orientation, candidate: Orientation): { key: string } | undefined {
         return candidate === reference ? { key: "ORIENT_NO_OP" } : undefined;
-    }
-
-    // The shared "base facing, plus an optional override" primitive - returns `correctionStr`'s parse when given, else `orientationStr`'s (never a no-op rejection).
-    private resolveTrailingOrientation(
-        orientationStr: string, correctionStr: string | undefined,
-    ): { orientation: Orientation } | { key: string; params?: Record<string, unknown> } {
-        const parsed = this.parseOrientationOrFail(orientationStr);
-        if ("key" in parsed || correctionStr === undefined) {
-            return parsed;
-        }
-        return this.parseOrientationOrFail(correctionStr);
-    }
-
-    private tryAlgebraic2coords(cell: string): [number, number] | undefined {
-        try {
-            return GnosticaBoard.algebraic2coords(cell);
-        } catch {
-            return undefined;
-        }
     }
 
     // "<cell>.<pips>[.<orientation>][.<player>]"; resolved against `pool` (minion-selector) if given, else every piece at the cell (a target, any owner).
@@ -1578,16 +1544,13 @@ export class GnosticaGame extends GameBaseSequenced {
         if (ref === undefined) {
             return { kind: "malformed" };
         }
-        const segments = ref.split(".");
+        const segments = ref.toLowerCase().split(".");
         if (segments.length < 2 || segments.length > 4) {
             return { kind: "malformed" };
         }
         const [cellStr, pipsStr, ...rest] = segments;
-        const coords = this.tryAlgebraic2coords(cellStr);
-        if (coords === undefined) {
-            return { kind: "malformed" };
-        }
-        const [x, y] = coords;
+        // PIECE_REF_RE (parseMove) already guarantees cellStr decodes cleanly - same cell grammar and case as CELL_RE.
+        const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
         const pips = parseInt(pipsStr, 10);
         if (Number.isNaN(pips) || pips < 1 || pips > 3) {
             return { kind: "malformed" };
@@ -1676,12 +1639,15 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // A bare cell token (no ".") - a "click the cell your minion is on" click landed here; only meaningful when 2+ of `pool`'s minions actually sit there, but stays defensive.
+    // Unlike a parsed step's own targetCell/targetPiece, `tok` isn't guaranteed cell-shaped at all here (e.g. orientMinion's own literal "orient" subhead reaches this same slot), so this still needs a real try/catch.
     private isMinionCellStillNarrowing(tok: string, pool: IMinionRef[]): boolean {
         if (tok.includes(".")) {
             return false;
         }
-        const coords = this.tryAlgebraic2coords(tok);
-        if (coords === undefined) {
+        let coords: [number, number];
+        try {
+            coords = GnosticaBoard.algebraic2coords(tok.toLowerCase());
+        } catch {
             return false;
         }
         const [cx, cy] = coords;
@@ -1707,14 +1673,14 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pool.length <= 1) {
             return { minion: pool[0], ambiguous: false, candidates: pool };
         }
-        const tok = tokens?.[0];
+        const tok = tokens?.[0]?.toLowerCase();
         if (tok !== undefined) {
             const resolved = this.resolvePieceRef(tok, pool);
             if (resolved.kind === "ok") {
                 return { minion: resolved.ref, ambiguous: false, candidates: pool };
             }
             if (this.isMinionCellStillNarrowing(tok, pool)) {
-                const coords = this.tryAlgebraic2coords(tok)!;
+                const coords = GnosticaBoard.algebraic2coords(tok);
                 const narrowed = pool.filter(m => m.x === coords[0] && m.y === coords[1]);
                 // A cell with 2+ eligible minions that all happen to be identical isn't really ambiguous - pick one at random, as if there'd only been one.
                 if (this.allIndistinguishable(narrowed)) {
@@ -2048,10 +2014,7 @@ export class GnosticaGame extends GameBaseSequenced {
             || step?.targetPiece === undefined || step.direction !== undefined || step.targetPiece.includes(".")) {
             return undefined;
         }
-        const coords = this.tryAlgebraic2coords(step.targetPiece);
-        if (coords === undefined) {
-            return undefined;
-        }
+        const coords = GnosticaBoard.algebraic2coords(step.targetPiece);
         const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1]));
         if (!ambiguous) {
             return undefined;
@@ -3911,11 +3874,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (cellStr === undefined) {
             return this.invalid("apgames:validation.gnostica.PLACE_CELL_REQUIRED");
         }
-        const coords = this.tryAlgebraic2coords(cellStr);
-        if (coords === undefined) {
-            return this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr });
-        }
-        const [x, y] = coords;
+        const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
         if (this.board.classify(x, y) === "void") {
             return this.invalid("apgames:validation.gnostica.PLACE_VOID", { cell: cellStr });
         }
@@ -3928,12 +3887,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_DIRECTION_REQUIRED") };
         }
         // A trailing "?" marks the click flow's own seeded default as not yet deliberate - complete:0; a hand-typed "place l0 U" is complete:1.
+        // parseMove already guarantees a valid N/E/S/W/U (with or without "?"), so there's nothing left to validate here.
         const prepopulated = orientationToken.endsWith("?");
-        const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
-        const resolved = this.resolveTrailingOrientation(orientationStr, undefined);
-        if ("key" in resolved) {
-            return this.invalid(`apgames:validation.gnostica.${resolved.key}`, resolved.params);
-        }
         return { valid: true, complete: prepopulated ? 0 : 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
@@ -3982,8 +3937,8 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A bare cell with 2+ of the player's own pieces means the acting minion hasn't been picked yet - still building, not a hard error, same tolerance every minion-selection context gets.
         if (!ref.includes(".")) {
-            const coords = this.tryAlgebraic2coords(ref);
-            if (coords !== undefined && this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1])).ambiguous) {
+            const coords = GnosticaBoard.algebraic2coords(ref);
+            if (this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1])).ambiguous) {
                 return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
             }
         }
@@ -5014,19 +4969,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 // A brand-new minion can't reasonably go unoriented - "U" is a real, always-legal choice, never auto-assigned but always REQUIRED as an explicit fact of creation.
                 const cellStr = step.atCell!;
                 const orientationToken = step.direction!;
-                const coords = this.tryAlgebraic2coords(cellStr);
-                if (coords === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
-                }
-                const [tx, ty] = coords;
+                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 // A trailing "?" marks the mode button's own seeded default as not yet deliberate (mirrors validatePlace's identical convention) - stripped before resolving.
+                // parseMove already guarantees a valid N/E/S/W/U (with or without "?"), so there's nothing left to validate here.
                 const prepopulated = orientationToken.endsWith("?");
-                const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
-                const resolved = this.resolveTrailingOrientation(orientationStr, undefined);
-                if ("key" in resolved) {
-                    return { failed: true, result: this.invalid(`apgames:validation.gnostica.${resolved.key}`, resolved.params) };
-                }
-                const finalOrientation = resolved.orientation;
+                const finalOrientation = (orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken) as Orientation;
                 const failure = checkCreateOwn(ctx, minion.x, minion.y, minion.index, tx, ty, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
@@ -5038,11 +4985,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "enemy": {
                 const cellStr = step.atCell!;
                 const victimRef = step.targetPiece!;
-                const coords = this.tryAlgebraic2coords(cellStr);
-                if (coords === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
-                }
-                const [tx, ty] = coords;
+                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 // victimRef is a full piece ref (#106), resolved board-wide, but Cups can only act on the SAME cell "at <cell>" already named - a ref elsewhere is rejected as "no victim there".
                 const victimResult = this.resolvePieceRef(victimRef);
                 if (victimResult.kind !== "ok") {
@@ -5060,11 +5003,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "new": {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
-                const coords = this.tryAlgebraic2coords(cellStr);
-                if (coords === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
-                }
-                const [tx, ty] = coords;
+                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 // Mirrors applyCups's own "new" case - "random" is only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
                 const failure = cardArg === "random" && opts.allowRandomDraw
                     ? checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts)
@@ -5171,11 +5110,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const cellStr = step.targetCell!;
                 const dist = step.amount!;
-                const coords = this.tryAlgebraic2coords(cellStr);
-                if (coords === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
-                }
-                const [srcX, srcY] = coords;
+                const [srcX, srcY] = GnosticaBoard.algebraic2coords(cellStr);
                 const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, srcX, srcY, dist);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
@@ -5255,11 +5190,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const cellStr = step.targetCell!;
                 const newCardUid = step.card!;
-                const coords = this.tryAlgebraic2coords(cellStr);
-                if (coords === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
-                }
-                const [tx, ty] = coords;
+                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const failure = checkGrowTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, newCardUid, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
@@ -5356,11 +5287,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.targetCell!;
                 const pips = step.amount!;
                 const newCardUid = step.card;
-                const coords = this.tryAlgebraic2coords(cellStr);
-                if (coords === undefined) {
-                    return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: cellStr }) };
-                }
-                const [tx, ty] = coords;
+                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const failure = checkAttackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
@@ -5473,19 +5400,16 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationToken }) };
         }
         // A trailing "?" marks the click handler's own seeded default as not yet deliberate (mirrors validateCups' identical convention) - stripped before resolving.
+        // parseMove already guarantees a valid N/E/S/W/U (with or without "?"), so there's nothing left to validate here.
         const prepopulated = orientationToken.endsWith("?");
-        const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
-        const orientationResolved = this.resolveTrailingOrientation(orientationStr, undefined);
-        if ("key" in orientationResolved) {
-            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${orientationResolved.key}`, orientationResolved.params) };
-        }
+        const orientation = (orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken) as Orientation;
         const failure = checkHierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
         // Replace-in-place (removeAt then add) - net piece count at this cell is unchanged, so pre- and post-mutation "last index" match.
         const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
-        const replacement = new Piece(this.currplayer, targetPiece.size, orientationResolved.orientation);
+        const replacement = new Piece(this.currplayer, targetPiece.size, orientation);
         return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replacement }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: prepopulated } };
     }
 
@@ -5523,11 +5447,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const mode = stepHermitMode(step)!;
         const ctx = this.buildPowerContext();
         const destCellStr = step.targetCell!;
-        const destCoords = this.tryAlgebraic2coords(destCellStr);
-        if (destCoords === undefined) {
-            return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_CELL", { cell: destCellStr }) };
-        }
-        const [destX, destY] = destCoords;
+        const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
         if (mode === "piece") {
             const targetRef = step.targetPiece!;
             const targetResult = this.resolvePieceRef(targetRef);
