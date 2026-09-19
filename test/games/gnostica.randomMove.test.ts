@@ -97,8 +97,8 @@ function richGame(): GnosticaGame {
     g.board.get(-1, 0)!.pieces = [new Piece(1, 1, "W"), new Piece(3, 2, "S")];
     g.board.get(0, 1)!.pieces = [new Piece(1, 2, "U")];
     g.board.get(0, -1)!.pieces = [new Piece(1, 1, "N"), new Piece(2, 2, "S")];
-    g.hands[0] = [minor("AC").uid, minor("5D").uid, minor("KS").uid, major(20).uid, minor("2R").uid, minor("9C").uid];
-    g.discardPile = [minor("3C").uid, minor("4D").uid, minor("7S").uid, minor("AR").uid];
+    g.hands[0] = ["AC", "5D", "KS", "20", "2R", "9C"];
+    g.discardPile = ["3C", "4D", "7S", "AR"];
     return commitFixture(g);
 }
 
@@ -115,7 +115,7 @@ describe("Gnostica: randomMove()", () => {
     it("always returns a currently-legal move with a near-empty hand", () => {
         assertAlwaysLegal(() => {
             const g = richGame();
-            g.hands[0] = [minor("AC").uid];
+            g.hands[0] = ["AC"];
             return commitFixture(g);
         }, 100);
     });
@@ -139,9 +139,9 @@ describe("Gnostica: randomMove()", () => {
     it("always returns a currently-legal move mid-redraw (bidding variant)", () => {
         const factory = () => {
             const g = new GnosticaGame(3, ["bidding"]);
-            g.hands[0] = [minor("KS").uid, "AC", "2C", "3C", "4C", "5C"];
-            g.hands[1] = [minor("QS").uid, "AR", "2R", "3R", "4R", "5R"];
-            g.hands[2] = [minor("PS").uid, "AD", "2D", "3D", "4D", "5D"];
+            g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
+            g.hands[1] = ["QS", "AR", "2R", "3R", "4R", "5R"];
+            g.hands[2] = ["PS", "AD", "2D", "3D", "4D", "5D"];
             g.move("bid 1", { trusted: true });
             g.move("bid 1", { trusted: true });
             g.move("bid 1", { trusted: true });
@@ -185,7 +185,7 @@ describe("Gnostica: randomMove()", () => {
         for (let i = 0; i < 200 && !committed; i++) {
             const g = richGame();
             const move = g.randomMove();
-            if (move.startsWith(`use ${major(6).uid}`) && move.split(",").length === 3) {
+            if (move.startsWith(`use 06`) && move.split(",").length === 3) {
                 const before = JSON.stringify(g.state());
                 expect(() => g.move(move, { trusted: false })).to.not.throw();
                 expect(JSON.stringify(g.state())).to.not.eq(before);
