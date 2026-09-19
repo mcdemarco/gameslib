@@ -629,7 +629,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess discards chosen cards then redraws up to 6, drawing the just-discarded card back out via reshuffle once the draw pile empties", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: ["KS"] });
-        discardDraw(ctx, ["AC"], undefined, false);
+        discardDraw(ctx, ["AC"], "5", false); // 5 is the max legal count (6 - 1 remaining in hand)
         // Only 3 cards exist anywhere (2C, KS, AC), so all 3 end up in hand -
         // the reshuffle even pulls the just-discarded AC back in, since the
         // rules make reshuffling unconditional.
@@ -641,7 +641,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess reshuffles the discard pile into the draw pile mid-redraw if the draw pile runs dry", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: ["3C"], drawPile: [] });
-        discardDraw(ctx, ["AC"], undefined, false);
+        discardDraw(ctx, ["AC"], "5", false); // 5 is the max legal count (6 - 1 remaining in hand)
         expect(ctx.hand.slice().sort()).to.deep.equal(["2C", "3C", "AC"].sort());
         expect(ctx.discardPile).to.deep.equal([]);
         expect(ctx.drawPile).to.deep.equal([]);
@@ -650,7 +650,7 @@ describe("Gnostica powers: special (major arcana)", () => {
     it("High Priestess stops redrawing once there is genuinely nothing left in either pile", () => {
         const b = new GnosticaBoard();
         const ctx = makeCtx(b, { hand: ["AC", "2C"], discardPile: [], drawPile: [] });
-        discardDraw(ctx, [], undefined, false); // skip discarding anything
+        discardDraw(ctx, [], "4", false); // skip discarding anything; 4 is the max legal count (6 - 2 in hand)
         expect(ctx.hand).to.deep.equal(["AC", "2C"]);
         expect(ctx.discardPile).to.deep.equal([]);
         expect(ctx.drawPile).to.deep.equal([]);

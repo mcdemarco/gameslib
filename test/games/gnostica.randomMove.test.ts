@@ -131,7 +131,7 @@ describe("Gnostica: randomMove()", () => {
     it("always returns a currently-legal move mid-bid (bidding variant)", () => {
         assertAlwaysLegal(() => {
             const g = new GnosticaGame(3, ["bidding"]);
-            g.move("bid 1", { trusted: true }); // player 1 has already bid
+            g.move("bid 1"); // player 1 has already bid
             return g;
         }, 50);
     });
@@ -142,9 +142,9 @@ describe("Gnostica: randomMove()", () => {
             g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
             g.hands[1] = ["QS", "AR", "2R", "3R", "4R", "5R"];
             g.hands[2] = ["PS", "AD", "2D", "3D", "4D", "5D"];
-            g.move("bid 1", { trusted: true });
-            g.move("bid 1", { trusted: true });
-            g.move("bid 1", { trusted: true });
+            g.move("bid 1");
+            g.move("bid 1");
+            g.move("bid 1");
             return g;
         };
         expect(factory().phase).eq("redraw");
@@ -235,8 +235,8 @@ describe("Gnostica: randomMove()", () => {
         let sawDeclare = false;
         for (let i = 0; i < 200 && !sawDeclare; i++) {
             const g = new GnosticaGame(2);
-            g.move("place m0 U", { trusted: true });
-            g.move("place n0 U", { trusted: true });
+            g.move("place m0 U");
+            g.move("place n0 U");
             // Rig every OTHER territory to a known-value major (3 pts),
             // uncontested by player 1 - comfortably >= the default
             // target of 9.
@@ -268,8 +268,8 @@ describe("Gnostica: randomMove()", () => {
     it("never declares last while the acting player's own score is still below target", () => {
         for (let i = 0; i < 200; i++) {
             const g = new GnosticaGame(2);
-            g.move("place m0 U", { trusted: true });
-            g.move("place n0 U", { trusted: true });
+            g.move("place m0 U");
+            g.move("place n0 U");
             commitFixture(g);
             const move = g.randomMove();
             expect(move.includes(" last"), `should not declare while ineligible: ${move}`).to.be.false;

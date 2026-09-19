@@ -34,9 +34,9 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"]; // King of Swords first
         g.hands[1] = ["QS", "AR", "2R", "3R", "4R", "5R"]; // Queen of Swords first
-        g.move("bid 1", { trusted: true }); // player 1 bids the King
+        g.move("bid 1"); // player 1 bids the King
         expect(g.phase).eq("bidding"); // still waiting on player 2
-        g.move("bid 1", { trusted: true }); // player 2 bids the Queen
+        g.move("bid 1"); // player 2 bids the Queen
         expect(g.phase).eq("redraw");
         expect(g.bidWinner).eq(1); // King beats Queen
         expect(g.biddingPool!).to.have.members(["KS", "QS"]);
@@ -48,8 +48,8 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["AS", "2C", "3C", "4C", "5C", "6C"]; // Ace of Swords
         g.hands[1] = ["2S", "2R", "3R", "4R", "5R", "6R"]; // 2 of Swords
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
+        g.move("bid 1");
+        g.move("bid 1");
         expect(g.bidWinner).eq(2); // 2 beats Ace
     });
 
@@ -57,8 +57,8 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["00", "AC", "2C", "3C", "4C", "5C"]; // The Fool - lowest-numbered major
         g.hands[1] = ["KS", "AR", "2R", "3R", "4R", "5R"]; // King of Swords - highest minor
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
+        g.move("bid 1");
+        g.move("bid 1");
         expect(g.bidWinner).eq(1); // Fool still beats King
     });
 
@@ -67,9 +67,9 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[0] = ["05", "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = ["15", "AR", "2R", "3R", "4R", "5R"];
         g.hands[2] = ["KS", "AD", "2D", "3D", "4D", "5D"]; // minor - shouldn't matter
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
+        g.move("bid 1");
+        g.move("bid 1");
+        g.move("bid 1");
         expect(g.bidWinner).eq(2); // The Devil (15) beats The Hierophant (5) and any minor
     });
 
@@ -78,9 +78,9 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = ["KR", "AR", "2R", "3R", "4R", "5R"];
         g.hands[2] = ["2D", "AD", "3D", "4D", "5D", "6D"]; // not tied, but must still re-bid
-        g.move("bid 1", { trusted: true }); // P1 bids King of Swords
-        g.move("bid 1", { trusted: true }); // P2 bids King of Rods - ties P1
-        g.move("bid 1", { trusted: true }); // P3 bids 2 of Discs
+        g.move("bid 1"); // P1 bids King of Swords
+        g.move("bid 1"); // P2 bids King of Rods - ties P1
+        g.move("bid 1"); // P3 bids 2 of Discs
         // Round 1 ties between P1/P2 (both Kings) - resets everyone, round 2 begins.
         expect(g.phase).eq("bidding");
         expect(g.bidRound).eq(1);
@@ -88,16 +88,16 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.bidPositions).to.deep.equal([null, null, null]);
         expect(g.biddingPool!).to.have.members(["KS", "KR", "2D"]);
 
-        g.move("bid 1", { trusted: true }); // P1 bids Ace of Cups
-        g.move("bid 1", { trusted: true }); // P2 bids Ace of Rods
-        g.move("bid 1", { trusted: true }); // P3 bids Ace of Discs - now everyone tied on Ace!
+        g.move("bid 1"); // P1 bids Ace of Cups
+        g.move("bid 1"); // P2 bids Ace of Rods
+        g.move("bid 1"); // P3 bids Ace of Discs - now everyone tied on Ace!
         expect(g.phase).eq("bidding");
         expect(g.bidRound).eq(2);
         expect(g.biddingPool!.length).eq(6);
 
-        g.move("bid 1", { trusted: true }); // P1: 2C
-        g.move("bid 1", { trusted: true }); // P2: 2R
-        g.move("bid 1", { trusted: true }); // P3: 3D
+        g.move("bid 1"); // P1: 2C
+        g.move("bid 1"); // P2: 2R
+        g.move("bid 1"); // P3: 3D
         expect(g.phase).eq("redraw"); // no more ties possible - 2 vs 2 vs 3
         expect(g.bidWinner).eq(3);
         expect(g.biddingPool!.length).eq(9);
@@ -116,8 +116,8 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         // Single-card hands that immediately tie and can't be re-bid.
         g.hands[0] = ["KS"];
         g.hands[1] = ["KR"];
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
+        g.move("bid 1");
+        g.move("bid 1");
         expect(g.phase).eq("bidding"); // never reaches redraw - there's no winner to hand off to
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([]);
@@ -138,16 +138,16 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         // round 3 that could never produce a legal bid.
         g.hands[0] = ["KS", "AC"];
         g.hands[1] = ["KR", "AR"];
-        g.move("bid 1", { trusted: true }); // P1: King of Swords
-        g.move("bid 1", { trusted: true }); // P2: King of Rods - ties
+        g.move("bid 1"); // P1: King of Swords
+        g.move("bid 1"); // P2: King of Rods - ties
         expect(g.phase).eq("bidding"); // round 1 tie, hands still have 1 card each - re-bid, not exhaustion
         expect(g.bidRound).eq(1);
         expect(g.hands[0].length).eq(1);
         expect(g.hands[1].length).eq(1);
         expect(g.gameover).eq(false);
 
-        g.move("bid 1", { trusted: true }); // P1: Ace of Cups
-        g.move("bid 1", { trusted: true }); // P2: Ace of Rods - ties again, and now both hands are empty
+        g.move("bid 1"); // P1: Ace of Cups
+        g.move("bid 1"); // P2: Ace of Rods - ties again, and now both hands are empty
         expect(g.gameover).eq(true); // exhaustion fired on round 2, not a stalled round 3
         expect(g.winner).to.deep.equal([]);
         expect(g.bidRound).eq(2);
@@ -165,13 +165,13 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[0] = ["AC", "AD"];
         g.hands[1] = ["KS", "QS"];
         g.hands[2] = ["KR", "QR"];
-        g.move("bid 1", { trusted: true }); // P1: Ace of Cups
-        g.move("bid 1", { trusted: true }); // P2: King of Swords
-        g.move("bid 1", { trusted: true }); // P3: King of Rods - P2/P3 tie
+        g.move("bid 1"); // P1: Ace of Cups
+        g.move("bid 1"); // P2: King of Swords
+        g.move("bid 1"); // P3: King of Rods - P2/P3 tie
         expect(g.phase).eq("bidding"); // still one card left each - re-bid, not exhaustion yet
-        g.move("bid 1", { trusted: true }); // P1: Ace of Discs
-        g.move("bid 1", { trusted: true }); // P2: Queen of Swords
-        g.move("bid 1", { trusted: true }); // P3: Queen of Rods - P2/P3 tie again, hands now empty
+        g.move("bid 1"); // P1: Ace of Discs
+        g.move("bid 1"); // P2: Queen of Swords
+        g.move("bid 1"); // P3: Queen of Rods - P2/P3 tie again, hands now empty
         expect(g.gameover).eq(true);
         // Every player loses here, even P1 (who was never even part of
         // the tie) - a subset tying forever is just as unresolvable as
@@ -187,10 +187,10 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[1] = ["2S", "AR", "2R", "3R", "4R", "5R"];
         g.hands[2] = ["3S", "AD", "2D", "3D", "4D", "5D"];
         g.hands[3] = ["4S", "5S", "6S", "7S", "8S", "9S"];
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
+        g.move("bid 1");
+        g.move("bid 1");
+        g.move("bid 1");
+        g.move("bid 1");
         expect(g.bidWinner).eq(1); // King is the highest bid
         // Rank order of what was actually bid (King > 4S > 3S > 2S), NOT
         // seating order from the winner (which would be [1,2,3,4]).
@@ -212,10 +212,10 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[1] = ["2S", "AR", "2R", "3R", "4R", "5R"];
         g.hands[2] = ["3S", "AD", "2D", "3D", "4D", "5D"];
         g.hands[3] = ["4S", "5S", "6S", "7S", "8S", "9S"];
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true });
-        g.move("bid 1", { trusted: true }); // the last bid resolves the round
+        g.move("bid 1");
+        g.move("bid 1");
+        g.move("bid 1");
+        g.move("bid 1"); // the last bid resolves the round
 
         const players = ["Alice", "Bob", "Carol", "Dave"];
         const rows = g.chatLog(players);
@@ -231,7 +231,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = ["2S", "AR", "2R", "3R", "4R", "5R"];
         g.hands[2] = ["3S", "AD", "2D", "3D", "4D", "5D"];
-        g.move("bid 1", { trusted: true }); // only player 1 has bid so far
+        g.move("bid 1"); // only player 1 has bid so far
         const reloaded = new GnosticaGame(g.serialize());
         expect(reloaded.phase).eq("bidding");
         expect(reloaded.currplayer).eq(2);
@@ -260,9 +260,9 @@ const setupRedraw = (): GnosticaGame => {
     g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
     g.hands[1] = ["QS", "AR", "2R", "3R", "4R", "5R"];
     g.hands[2] = ["PS", "AD", "2D", "3D", "4D", "5D"];
-    g.move("bid 1", { trusted: true });
-    g.move("bid 1", { trusted: true });
-    g.move("bid 1", { trusted: true });
+    g.move("bid 1");
+    g.move("bid 1");
+    g.move("bid 1");
     return g;
 };
 
@@ -293,7 +293,7 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         addResource("en");
         const g = setupRedraw();
         const uid = g.biddingPool![0];
-        g.move(`redraw ${uid}`, { trusted: true });
+        g.move(`redraw ${uid}`);
         const log = g.chatLog(["Alice", "Bob", "Carol"]);
         const line = log[log.length - 1].find(l => l.includes("bidding pool"));
         expect(line).eq(i18next.t("apresults:DECKDRAW.gnostica_pool", { player: "Carol", what: `the ${minor(uid).name}` }));
@@ -305,15 +305,15 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.currplayer).eq(3);
         const poolStart = [...g.biddingPool!];
 
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`);
         expect(g.currplayer).eq(2);
         expect(g.phase).eq("redraw");
 
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`);
         expect(g.currplayer).eq(1);
         expect(g.phase).eq("redraw");
 
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`);
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(1); // the bid winner
         expect(g.biddingPool).to.be.undefined; // spent - cleared once redraw concludes
@@ -329,9 +329,9 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
 
     it("normal play resumes immediately once redraw completes", () => {
         const g = setupRedraw();
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`);
+        g.move(`redraw ${g.biddingPool![0]}`);
+        g.move(`redraw ${g.biddingPool![0]}`);
         expect(g.phase).eq("main");
         expect(() => g.move("place l0 U")).to.not.throw();
     });
@@ -341,9 +341,9 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = ["10", "AR", "2R", "3R", "4R", "5R"]; // Wheel of Fortune - any major beats any minor
         g.hands[2] = ["QS", "AD", "2D", "3D", "4D", "5D"];
-        g.move("bid 1", { trusted: true }); // P1
-        g.move("bid 1", { trusted: true }); // P2 - major arcana, wins outright over P1/P3's minors
-        g.move("bid 1", { trusted: true }); // P3
+        g.move("bid 1"); // P1
+        g.move("bid 1"); // P2 - major arcana, wins outright over P1/P3's minors
+        g.move("bid 1"); // P3
         expect(g.bidWinner).eq(2);
         // Tournament rules: turnOrder is the rank order of what was bid -
         // major (player 2) outranks every minor, then King (player 1)
@@ -352,20 +352,20 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.turnOrder).to.deep.equal([2, 1, 3]);
         expect(g.redrawOrder).to.deep.equal([3, 1, 2]);
 
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true });
+        g.move(`redraw ${g.biddingPool![0]}`);
+        g.move(`redraw ${g.biddingPool![0]}`);
+        g.move(`redraw ${g.biddingPool![0]}`);
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(2); // the actual bid winner starts, not player 1
 
         // Walk a full cycle of real turns to confirm rotation is genuinely
         // anchored to turnOrder (2 -> 1 -> 3 -> 2), not just the first
         // currplayer value after the handoff.
-        g.move("place l1 U", { trusted: true });
+        g.move("place l1 U");
         expect(g.currplayer).eq(1);
-        g.move("place m1 U", { trusted: true });
+        g.move("place m1 U");
         expect(g.currplayer).eq(3);
-        g.move("place n1 U", { trusted: true });
+        g.move("place n1 U");
         expect(g.currplayer).eq(2);
     });
 
@@ -373,16 +373,16 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["QS", "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = ["KS", "AR", "2R", "3R", "4R", "5R"]; // P2 wins with the King
-        g.move("bid 1", { trusted: true }); // P1 bids - nextPlayer() -> P2
-        g.move("bid 1", { trusted: true }); // P2 bids - round resolves; ordinary rotation (2 -> 1) lands on the loser
+        g.move("bid 1"); // P1 bids - nextPlayer() -> P2
+        g.move("bid 1"); // P2 bids - round resolves; ordinary rotation (2 -> 1) lands on the loser
         expect(g.bidWinner).eq(2);
         expect(g.phase).eq("redraw");
         expect(g.currplayer).eq(1); // the loser, reached via nextPlayer(), never a direct jump
         expect(g.moves()).to.deep.equal([]); // nothing forced - player 1 has a genuine redraw available
 
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P1 (loser) redraws first
+        g.move(`redraw ${g.biddingPool![0]}`); // P1 (loser) redraws first
         expect(g.currplayer).eq(2);
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P2 (winner) redraws last - completes redraw
+        g.move(`redraw ${g.biddingPool![0]}`); // P2 (winner) redraws last - completes redraw
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(2); // the actual bid winner starts
         expect(g.results.some(r => r.type === "pass")).to.be.false; // no pass anywhere in this sequence
@@ -422,9 +422,9 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         g2.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
         g2.hands[1] = ["QS", "AR", "2R", "3R", "4R", "5R"];
         g2.hands[2] = ["PS", "AD", "2D", "3D", "4D", "5D"];
-        g2.move("bid 1", { trusted: true });
-        g2.move("bid 1", { trusted: true });
-        g2.move("bid 1", { trusted: true }); // 3+ players: mustPassBeforeRedraw() never applies
+        g2.move("bid 1");
+        g2.move("bid 1");
+        g2.move("bid 1"); // 3+ players: mustPassBeforeRedraw() never applies
         expect(g2.phase).eq("redraw");
         expect(g2.moves()).to.deep.equal([]);
         expect(() => g2.move("pass", { trusted: false })).to.throw();
@@ -432,7 +432,7 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
 
     it("survives a real serialize/deserialize round-trip mid-redraw", () => {
         const g = setupRedraw();
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // player 3's turn done
+        g.move(`redraw ${g.biddingPool![0]}`); // player 3's turn done
         const reloaded = new GnosticaGame(g.serialize());
         expect(reloaded.phase).eq("redraw");
         expect(reloaded.currplayer).eq(2);
@@ -520,18 +520,18 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
 
         // Bidding: each player clicks their own high card in turn.
         const bid1 = g.handleClick("", -1, -1, `hand_KS`);
-        g.move(bid1.move, { trusted: true });
+        g.move(bid1.move);
         const bid2 = g.handleClick("", -1, -1, `hand_QS`);
-        g.move(bid2.move, { trusted: true });
+        g.move(bid2.move);
         const bid3 = g.handleClick("", -1, -1, `hand_PS`);
-        g.move(bid3.move, { trusted: true });
+        g.move(bid3.move);
         expect(g.phase).eq("redraw");
         expect(g.bidWinner).eq(1);
 
         // Redraw: each player in redrawOrder clicks their one needed pool card.
         for (let i = 0; i < 3; i++) {
             const click = g.handleClick("", -1, -1, `pool_${g.biddingPool![0]}`);
-            g.move(click.move, { trusted: true });
+            g.move(click.move);
         }
         expect(g.phase).eq("main");
         expect(g.currplayer).eq(1);
@@ -566,7 +566,7 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = ["QS", "AR", "2R", "3R", "4R", "5R"];
-        g.move("bid 1", { trusted: true }); // player 1's real bid
+        g.move("bid 1"); // player 1's real bid
         g.move("bid 1", { partial: true }); // player 2's own preview click
         expect(g.phase).eq("bidding"); // must NOT have jumped to "redraw"
         expect(g.currplayer).eq(2); // must NOT have advanced

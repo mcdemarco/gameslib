@@ -965,8 +965,7 @@ export const discardDraw = (ctx: PowerContext, discardUids: string[], drawCountS
     if (partial) {
         return 0;
     }
-    const maxDraw = Math.max(0, 6 - ctx.hand.length);
-    const count = drawCountStr === undefined ? maxDraw : Number(drawCountStr);
+    const count = Number(drawCountStr);
     let drawn = 0;
     while (drawn < count) {
         reshuffle(ctx);

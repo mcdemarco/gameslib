@@ -65,13 +65,12 @@ export function generateRandomMove(game: GnosticaGame): string {
     // legal (matches getActionButtons()'s own "only one thing possible
     // right now" gate). High Priestess can't be Declined at all
     // (NOTHING_TO_DECLINE - its own round is mandatory, not a revealed
-    // card) - round 1's own randomizer, buildRandomHighPriestessResumeTokens,
-    // is reused for round 2 too, since both rounds share the identical
-    // grammar and legality.
+    // card) - buildRandomHighPriestessTokens is reused for round 2 too,
+    // since both rounds share the identical grammar and legality.
     if (game.continued.length > 0) {
         const activeUid = game.continued[game.continued.length - 1].split(".")[0];
         if (activeUid === "02") {
-            return game.buildViaMove([buildRandomHighPriestessResumeTokens(game)]);
+            return game.buildViaMove([buildRandomHighPriestessTokens(game)]);
         }
         // A persisted Fool obligation always means an ordinary revealed
         // card sits on top awaiting a decision (buildPendingFromContinued's
@@ -353,18 +352,14 @@ function randomPlaceMove(game: GnosticaGame): string {
     return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
 }
 
-// Any subset of hand is a legal discard list; an optional "draw <n>"
-// suffix (random count up to the room left) is sometimes added,
-// otherwise the draw-to-max default applies - see cmdDiscard's own
-// docs. Always legal by construction.
+// Any subset of hand is a legal discard list; "draw <n>" is required
+// for completeness (see validateDiscard's own docs), so always append
+// a random legal count. Always legal by construction.
 function randomDiscardMove(game: GnosticaGame): string {
     const hand = game.hands[game.currplayer - 1];
     const discards = hand.filter(() => Math.random() < 0.3);
     const maxDraw = Math.max(0, 6 - (hand.length - discards.length));
-    const tokens = ["discard", ...discards];
-    if (Math.random() < 0.5) {
-        tokens.push("draw", String(Math.floor(Math.random() * (maxDraw + 1))));
-    }
+    const tokens = ["discard", ...discards, "draw", String(Math.floor(Math.random() * (maxDraw + 1)))];
     return tokens.join(" ");
 }
 
@@ -952,34 +947,17 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
 
 // No minion involved at all - pure hand/pile manipulation. Always
 // legal by construction (a random subset of the acting player's own
-// hand, each uid distinct since it's drawn from `hand` itself).
+// hand, each uid distinct since it's drawn from `hand` itself);
+// "draw <n>" is required for completeness (see validateHighPriestess's
+// own docs), so always append a random legal count - both rounds share
+// the identical <discardUid...> draw <n> grammar and legality
+// (checkHighPriestess never distinguishes them), so one function covers
+// round 1 (via the card's own activation chain) and round 2's resume alike.
 function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
     const hand = game.hands[game.currplayer - 1];
     const discards = hand.filter(() => Math.random() < 0.3);
-    return game.validateHighPriestess({ action: "discard", cardList: discards }).valid ? discards : [];
-}
-
-// Round 2's own resume, reusing round 1's exact discard-uid randomization
-// above plus the ordinary top-level discard action's own "sometimes name
-// an explicit draw count" behaviour (randomDiscardMove) - both rounds
-// share the identical <discardUid...> [draw <n>] grammar and legality
-// (checkHighPriestess never distinguishes them), so there's nothing
-// round-2-specific left to derive here. One thing IS round-2-specific
-// though: a fully empty result (no discards, no "draw") would render as
-// a bare "discard via <uid>" - indistinguishable from
-// resumeStepSegments' own "nothing typed yet, just a preview seed" check
-// (see its own docs), so the resume would silently no-op instead of
-// actually clearing the obligation. Never omit "draw" when there are no
-// discards to disambiguate it - mirrors the top-level Pass button's own
-// identical "discard draw 0", never bare "discard", for the same reason.
-function buildRandomHighPriestessResumeTokens(game: GnosticaGame): string[] {
-    const discards = buildRandomHighPriestessTokens(game);
-    if (discards.length === 0 || Math.random() < 0.5) {
-        const hand = game.hands[game.currplayer - 1];
-        const maxDraw = Math.max(0, 6 - (hand.length - discards.length));
-        return [...discards, "draw", String(Math.floor(Math.random() * (maxDraw + 1)))];
-    }
-    return discards;
+    const maxDraw = Math.max(0, 6 - (hand.length - discards.length));
+    return [...discards, "draw", String(Math.floor(Math.random() * (maxDraw + 1)))];
 }
 
 function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower, minions: IMinionRef[]): string[] | undefined {
