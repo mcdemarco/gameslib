@@ -6446,11 +6446,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return `${card.name} (${card.romanNumeral})`;
     }
 
-    // Same as cardDisplayName, for results that carry a comma-joined list of uids (a redraw pick, a discard) rather than a single card.
-    private cardDisplayNames(uidsCsv: string): string {
-        return uidsCsv.split(",").filter(uid => uid.length > 0).map(uid => this.cardDisplayName(uid)).join(", ");
-    }
-
     // #47: resolves a player number to their real display name, or undefined if `who` is the acting player themselves.
     private otherPlayerName(who: number | undefined, player: string, players: string[]): string | undefined {
         if (who === undefined) {
@@ -6508,7 +6503,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         case "deckDraw":
                             switch (r.from) {
                                 case "pool":
-                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_pool", { player: name, what: this.cardDisplayNames(r.what ?? "") }));
+                                    node.push(i18next.t("apresults:DECKDRAW.gnostica_pool", { player: name, what: r.what!.split(",").filter(uid => uid.length > 0).map(uid => this.cardDisplayName(uid)).join(", ") }));
                                     break;
                                 case "discard":
                                     node.push(i18next.t("apresults:DECKDRAW.gnostica_discard", { player: name, count: r.count }));
