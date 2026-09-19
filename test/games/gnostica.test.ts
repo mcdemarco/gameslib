@@ -4073,7 +4073,7 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(g.continued).to.not.be.empty;
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
 
-        g.move(`decline 02 via 02`, { trusted: true }); // clears the obligation
+        g.move(`discard draw 0 via 02`, { trusted: true }); // clears the obligation
         expect(g.continued).to.be.empty;
         // Turn has passed to player 2, who has no pieces on the board yet.
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE"));
@@ -6069,7 +6069,7 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use 00`, { trusted: true }); // flip reveals the High Priestess
         expect(g.continued).to.deep.equal(["00.1"]);
         g.hands[0] = ["2C", "5C", "AR"];
-        g.move("discard 5C via 00", { trusted: true }); // High Priestess round 1
+        g.move("play 02 via 00/discard 5C draw 1", { trusted: true }); // High Priestess round 1
         expect(g.continued).to.deep.equal(["00.1", "02.1"]);
 
         // " via 00" names the buried Fool, not the active round 2 -> rejected.
