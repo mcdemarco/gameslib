@@ -804,20 +804,6 @@ describe("Gnostica: sidebarScores", () => {
 });
 
 describe("Gnostica: activate/play - minor arcana suit powers", () => {
-    it("#49: a bare use with no power step is not yet submittable, but a trusted caller may still apply it (test setup, click-preview 'still skipped so far' states)", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2
-        const validated = g.validateMove(`use AC`);
-        expect(validated.valid).to.be.true;
-        expect(validated.complete).eq(-1);
-        expect(validated.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: aceOfCups().name }));
-        g.move(`use AC`, { trusted: true }); // player 1, no power step
-        expect(g.board.get(0, 0)!.pieces.length).eq(1); // nothing changed but the turn
-        expect(g.currplayer).eq(2);
-    });
-
     it("Cups (own): adds an own small piece to the target cell", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
@@ -1053,36 +1039,9 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         expect(() => g.move(`use 21/with m0.1 C own m0 U`)).to.throw();
     });
 
-    // World is subject to #49 like every other major now (see the Fool/
-    // World test suite below for full coverage) - skipping its power
-    // entirely still needs a trusted caller to bypass #49, exactly like
-    // every other major arcana card.
-    it("skipping World's power outright is legal for a trusted caller, but not yet submittable untrusted (#49)", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => theWorld());
-        g.move("place m0 U");
-        g.move("place l0 U");
-        const validated = g.validateMove(`use 21`);
-        expect(validated.valid).to.be.true;
-        expect(validated.complete).eq(-1);
-        expect(() => g.move(`use 21`, { trusted: true })).to.not.throw();
-    });
 });
 
 describe("Gnostica: activate/play - major arcana chaining", () => {
-    it("#49: skipping every power step is not yet submittable, but a trusted caller may still apply it (test setup, click-preview 'still skipped so far' states)", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(6)); // The Lovers
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        const validated = g.validateMove(`use 06`);
-        expect(validated.valid).to.be.true;
-        expect(validated.complete).eq(-1);
-        expect(validated.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(6).name }));
-        g.move(`use 06`, { trusted: true }); // no power steps at all
-        expect(g.board.get(0, 0)!.pieces.length).eq(1);
-        expect(g.currplayer).eq(2);
-    });
-
     it("Lovers (move, then create): a pushed own piece becomes a minion for the second step", () => {
         const g = new GnosticaGame(2);
         // Fully deterministic (see clearBoard's own docs): the random
@@ -1141,9 +1100,9 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
 
     // validateMove() itself never mutates the board, so a later step
     // naming the exact minion an earlier step in this SAME chain just
-    // moved/created must still resolve correctly for an untrusted caller
-    // (the Lovers test above only exercises this with {trusted: true},
-    // which skips validateMove() entirely).
+    // moved/created must still resolve correctly for an untrusted caller -
+    // also checks that the frame history captures the intermediate
+    // (post-step-1) position, not just the final one.
     it("Chariot (move, then move): an untrusted move validates and applies when step 2 acts through step 1's own relocated piece", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
@@ -1458,16 +1417,6 @@ describe("Gnostica: frame-stepping render() contract", () => {
         expect(reps.length).eq(2);
         expect(barValues(reps[0])).eq(undefined); // no buttonBar area at all on the historical frame
         expect(barValues(reps[1])).to.not.eq(undefined); // the final/live rep still gets its own normal bar
-    });
-
-    it("0 real steps never produce an array or grouped results", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 U");
-        g.move("place l0 U");
-        g.move(`use AC`, { trusted: true }); // 0 steps - fully skipped
-        expect(Array.isArray(g.render())).eq(false);
-        expect(g.results.some(r => r.type === "_group")).eq(false);
     });
 
     it("1 real step never produces an array or grouped results, even on a card that could have taken more", () => {
@@ -2484,7 +2433,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("place m0 U");
         g.move("place n0 U");
         g.hands[0] = ["03", "2C", "3C", "4C", "5C", "6C"];
-        g.move(`discard 03`, { trusted: true });
+        g.move(`discard 03 draw 1`); // 1 is max: 6 - 5 remaining
         const rep = g.render() as DiscardRenderRep;
         const newKey = `discard_03_new`;
         expect(discardArea(rep)?.pieces).to.include(newKey);
@@ -2497,7 +2446,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("place n0 U");
         g.discardPile = ["2C"]; // one spot cup already discarded earlier
         g.hands[0] = ["AC", "3C", "4C", "5C", "6C", "7C"];
-        g.move("discard AC", { trusted: true }); // a second spot cup, discarded just now
+        g.move("discard AC draw 1"); // a second spot cup, discarded just now; 1 is max: 6 - 5 remaining
         const rep = g.render() as DiscardRenderRep;
         const pieces = discardArea(rep)?.pieces ?? [];
         expect(pieces).to.include("discard_C_spot"); // the older one, untinted
@@ -2512,7 +2461,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("place m0 U");
         g.move("place n0 U");
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
-        g.move("discard AC", { trusted: true });
+        g.move("discard AC draw 1"); // 1 is max: 6 - 5 remaining
         g.move("discard draw 0"); // player 2's own turn
         const rep = g.render() as DiscardRenderRep;
         expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
@@ -2523,7 +2472,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("place m0 U");
         g.move("place n0 U");
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
-        g.move("discard AC", { partial: true, trusted: true }); // simulates the player's own first click
+        g.move("discard AC", { partial: true }); // simulates the player's own first click
         const rep = g.render() as DiscardRenderRep;
         expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.true;
     });
@@ -4068,7 +4017,7 @@ describe("Gnostica: choose-step click messaging", () => {
 
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
 
-        g.move(`use 02/discard ${discardUid}`, { trusted: true }); // pauses, awaiting round 2
+        g.move(`use 02/discard ${discardUid} draw 1`); // pauses, awaiting round 2; 1 is max: 6 - 5 remaining
         expect(g.continued).to.not.be.empty;
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
 
@@ -5258,7 +5207,7 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     it("getPlies()/getRounds(): two same-seat plies, no synthetic pass, sharing one round until the cycle genuinely wraps", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use 02/discard 5C`, { trusted: true }); // step 1: discard 5C, redraw to 6, pauses
+        g.move(`use 02/discard 5C draw 4`); // step 1: discard 5C, redraw to 6, pauses; 4 is max: 6 - 2 remaining
         expect(g.continued).to.not.be.empty;
         expect(g.currplayer).eq(1); // same seat still owes step 2
         g.move(`discard draw 0 via 02`); // step 2: decline (discard nothing)
@@ -5307,7 +5256,7 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     it("resume-mismatch guards reject a wrong card uid or a wrong head word", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use 02/discard 5C`, { trusted: true });
+        g.move(`use 02/discard 5C draw 4`); // 4 is max: 6 - 2 remaining
         expect(g.continued).to.not.be.empty;
         // Wrong anchor (the Fool, a real continuing card, but not the
         // High Priestess round actually pending) / missing anchor.
@@ -5346,7 +5295,7 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
     it("buildViaMove's own High Priestess resume round-trips through validateMove/move cleanly", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use 02/discard 5C`, { trusted: true });
+        g.move(`use 02/discard 5C draw 4`); // 4 is max: 6 - 2 remaining
         expect(g.continued).to.deep.equal(["02.1"]);
 
         const built = g.buildViaMove([["AR", "draw", "1"]]);
@@ -5680,7 +5629,7 @@ describe("Gnostica: Fool and World", () => {
         expect(minorClick.move).eq(cellClick.move); // move string unchanged - no silent switch to "use AR"
     });
 
-    it("World rejects a self-reference and an off-board target; skipping its own power outright needs a trusted caller (#49, same as any other major)", () => {
+    it("World rejects a self-reference and an off-board target", () => {
         const selfRef = new GnosticaGame(2);
         forceCardAt(selfRef, 0, 0, () => theWorld());
         selfRef.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
@@ -5700,14 +5649,6 @@ describe("Gnostica: Fool and World", () => {
         }
         const offBoardResult = offBoard.validateMove(`use 21 as 06`); // Lovers isn't on the board
         expect(offBoardResult.valid).to.be.false;
-
-        const skip = new GnosticaGame(2);
-        forceCardAt(skip, 0, 0, () => theWorld());
-        skip.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        const validated = skip.validateMove(`use 21`);
-        expect(validated.valid).to.be.true;
-        expect(validated.complete).eq(-1); // #49 applies to the root the same as every other major now
-        expect(() => skip.move(`use 21`, { trusted: true })).to.not.throw();
     });
 
     it("Fool flips a forced major -> pauses; resuming Lovers' own two steps also auto-continues Fool's own second (mandatory) flip", () => {
