@@ -1098,6 +1098,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     step.direction = tempwhat.toUpperCase();
                 else if ( PIECE_REF_RE.test(tempwhat) )
                     step.targetPiece = tempwhat.toLowerCase();
+                else if ( tempwhat === "drawn" )
+                    step.amount = 1;
                 else {
                     pm.error = "BAD_CREATE_CONTENT";
                     break;
@@ -1382,6 +1384,8 @@ export class GnosticaGame extends GameBaseSequenced {
             if ( step.action === "create" ) {
                 if ( step.card !== undefined || step.direction !== undefined || step.targetPiece !== undefined)
                     ppart.push(((step.card ?? step.direction) ?? step.targetPiece) as string);
+                else if ( step.amount === 1 )
+                    ppart.push("drawn");
             }
                 
             if ( step.action === "place" || step.action === "orient" || step.action === "replace" ) {
@@ -2186,7 +2190,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // "new" mode's required card arg is otherwise only suppliable by clicking a hand card; Wheel of Fortune (allowRandomDraw) has none, so it gets a button.
             if (suitUid === "C" && pendingMinor.mode === "new" && pendingMinor.opts.allowRandomDraw === true) {
-                buttons.push({ label: "Random Card", value: "random" });
+                buttons.push({ label: "Draw a card", value: "draw" });
             }
             // Swords pips is pure damage, no destination cell to click (unlike Rods' distance), so it's a button set once a target is chosen.
             if (suitUid === "S" && pendingMinor.mode === "piece" && pendingMinor.rest.length >= 1) {
@@ -3402,7 +3406,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         // Declining pops the CURRENT top frame; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
                         return this.buildViaMove([["decline"]]);
                     }
-                    case "random":
+                    case "drawn":
                         // Only ever offered for Wheel of Fortune's special option.
                         // TODO: not implemented in the parser yet.
                         {
@@ -3410,7 +3414,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             if (pending === undefined || pending.suitUid !== "C" || pending.mode !== "new" || pending.opts.allowRandomDraw !== true) {
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                             }
-                            const result = this.supplyStepCardUid(pending, "random");
+                            const result = this.supplyStepCardUid(pending, "drawn");
                             return result ?? { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
                     default:
@@ -4704,7 +4708,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // TODO: remove the code described in the following comment once Wheel of Fortune parsing is finalized.
         // A trusted commit can reach here with `istep` undefined - a
         // segment whose content parseMove's own strict grammar rejects
-        // (Cups "new"'s own "random" token, say - see checkCreateTerritory's
+        // (Cups "new"'s own "drawn" token, say - see checkCreateTerritory's
         // own docs) never gets a real parsed.steps entry, but a trusted
         // caller is still allowed to submit it. Falls back to the same
         // token-based construction randomMove.ts's own speculative
@@ -4962,13 +4966,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                // "random" is only honored when THIS card's own step genuinely grants it (opts.allowRandomDraw), not just because the literal token was typed.
-                if (cardArg === "random" && opts.allowRandomDraw) {
+                // "drawn" is only honored when THIS card's own step genuinely grants it (opts.allowRandomDraw), not just because the literal token was typed.
+                if (cardArg === "drawn" && opts.allowRandomDraw) {
                     createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts);
                 } else {
                     createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 }
-                // Read the placed card back off the board rather than trusting cardArg directly - a "random" draw means the placed card isn't the literal token typed.
+                // Read the placed card back off the board rather than trusting cardArg directly - a "drawn" card isn't the literal token typed.
                 this.results.push({ type: "place", where: cellStr, how: "territory", what: this.board.get(tx, ty)!.card!.uid });
                 return {};
             }
@@ -5020,8 +5024,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                // Mirrors applyCups's own "new" case - "random" is only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
-                const failure = cardArg === "random" && opts.allowRandomDraw
+                // Mirrors applyCups's own "new" case - "drawn" is only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
+                const failure = cardArg === "drawn" && opts.allowRandomDraw
                     ? checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts)
                     : checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 if (failure) {

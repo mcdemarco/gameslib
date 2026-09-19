@@ -2833,7 +2833,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(accepted.move).eq(`use ${aceOfDiscs().uid}/with m0.1 grow n0`);
     });
 
-    it("Cups (new), Wheel of Fortune: a dedicated button supplies the random draw - no hand card needed, no other card offers it", () => {
+    it("Cups (new), Wheel of Fortune: a dedicated button supplies the drawn card - hand card needed, no other card offers it", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => major(10)); // Wheel of Fortune
@@ -2847,14 +2847,14 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         g.move(modeClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
-        expect(bar?.buttons?.some(b => b.value === "random")).eq(true);
+        expect(bar?.buttons?.some(b => b.value === "drawn")).eq(true);
 
-        const randomClick = g.handleClick(modeClick.move, -1, -1, "_btn_random");
-        expect(randomClick.move).eq(`use ${major(10).uid}/with m0.1 at n0 create random`);
+        const randomClick = g.handleClick(modeClick.move, -1, -1, "_btn_drawn");
+        expect(randomClick.move).eq(`use ${major(10).uid}/with m0.1 at n0 create drawn`);
         // Not .valid, currently - parseMove's own "create" content
         // recognition only accepts a card uid/direction/piece ref there
         // (a known, already-reported gap, sibling to the bare-victim-ref
-        // one), so "random" itself fails its own strict re-parse even
+        // one), so "drawn" itself fails its own strict re-parse even
         // though the move string built here is correct. A trusted commit
         // still works below, since that bypasses the same strict path.
         // Fully deterministic (see clearBoard's own docs on the same
@@ -2883,13 +2883,13 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         g2.move(modeClick2.move, { partial: true });
         const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
-        expect(bar2?.buttons?.some(b => b.value === "random")).eq(false);
+        expect(bar2?.buttons?.some(b => b.value === "drawn")).eq(false);
 
-        // And typing "random" by hand for that same non-Wheel-of-Fortune
+        // And typing "drawn" by hand for that same non-Wheel-of-Fortune
         // card is rejected outright, not silently honored - the gate is
         // opts.allowRandomDraw (derived from the card's own step
         // definition), not the literal token.
-        expect(g2.validateMove(`use ${aceOfCups().uid}/with m0.1 at n0 create random`).valid).to.be.false;
+        expect(g2.validateMove(`use ${aceOfCups().uid}/with m0.1 at n0 create drawn`).valid).to.be.false;
     });
 
     it("Swords (piece): with no facing piece to attack (minion is \"up\"), falls back to the minion itself", () => {
