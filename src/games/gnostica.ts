@@ -1751,12 +1751,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return { key: nextStepIndex > 0
                 ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"
                 : "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1_READY" };
-        }
-        if (cardUid === "00") {
-            return { key: "apgames:validation.gnostica.FOOL_FLIP_READY" };
-        }
-        // Defensive only - no other card currently sets forcePause; falls back to ordinary VALID_MOVE rather than silently mislabeling a future case.
-        return { key: "apgames:validation._general.VALID_MOVE" };
+        } //else (cardUid === "00") {
+        return { key: "apgames:validation.gnostica.FOOL_FLIP_READY" };
     }
 
     // The six top-level turn choices, as buttons - a bare click on an already-occupied cell/piece is ambiguous between "orient" and "use", with no way to disambiguate.
@@ -1778,7 +1774,9 @@ export class GnosticaGame extends GameBaseSequenced {
             found.add("declare");
         }
         const head = this.liveMove.head;
-        if (head === "discard" && this.isPassEquivalent(this.liveMove.steps[0])) {
+        const step0 = this.liveMove.steps[0];
+        // A discard move is Pass-equivalent only when it discards nothing AND explicitly draws zero
+        if (head === "discard" && ((step0.cardList === undefined || step0.cardList.length === 0) && step0.amount === 0)) {
             // "discard draw 0" is the user-facing pass, so bold Pass.
             found.add("pass");
         } else if (this.continued.length > 0) {
@@ -1788,11 +1786,6 @@ export class GnosticaGame extends GameBaseSequenced {
             found.add(head);
         }
         return found;
-    }
-
-    // A discard move is Pass-equivalent only when it discards nothing AND explicitly draws zero - an omitted "draw <n>" defaults to the max, a real draw.
-    private isPassEquivalent(step: IStep | undefined): boolean {
-        return (step?.cardList === undefined || step.cardList.length === 0) && step?.amount === 0;
     }
 
     // Wraps computeActionButtons() to unconditionally fold a persisting "Decline X" into the bar, since a pending obligation's card can always be declined.
@@ -1980,14 +1973,19 @@ export class GnosticaGame extends GameBaseSequenced {
         return topLevel;
     }
 
+    // Shared by the ordinary top-level "discard" action and High Priestess's own nested draw step - same picker, different click-value prefix routes it to its own destination in the move string.
+    private drawCountBar(prefix: string): [ButtonBarButton, ...ButtonBarButton[]] {
+        const hand = this.hands[this.currplayer - 1] ?? [];
+        const maxDraw = Math.max(0, 6 - hand.length);
+        return this.buildChoiceButtons(prefix, this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
     // Discard's own count is optional, but the bar still actively solicits it once "discard" is the live head and no count has been chosen yet.
     private discardCountBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "discard" || this.liveMove.steps[0]?.amount !== undefined) {
             return undefined;
         }
-        const hand = this.hands[this.currplayer - 1] ?? [];
-        const maxDraw = Math.max(0, 6 - hand.length);
-        return this.buildChoiceButtons("drawcount", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
+        return this.drawCountBar("drawcount");
     }
 
     // Orient: a bare cell means 2+ of the player's own pieces share it and none has been picked yet - same shape "use"/"play" get via minionPickerBar.
@@ -2086,9 +2084,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pendingMinor.special !== "highPriestess" || pendingMinor.rest.includes("draw")) {
             return undefined;
         }
-        const hand = this.hands[this.currplayer - 1] ?? [];
-        const maxDraw = Math.max(0, 6 - hand.length);
-        return this.buildChoiceButtons("hpdraw", this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
+        return this.drawCountBar("hpdraw");
     }
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
@@ -3189,7 +3185,7 @@ export class GnosticaGame extends GameBaseSequenced {
             outcome = this.pickleMove({ ...parsed, announceLast: !parsed.announceLast });
         } else {
             const bareMove = this.pickleMove({ ...parsed, announceLast: false });
-            const core = this.handleClickCore(bareMove, row, col, piece);
+            const core = this.handleClickCore(bareMove, row, col, piece, parsed);
             outcome = this.reattachLastFlag(core, parsed.announceLast);
         }
         let result: IClickResult;
@@ -3253,14 +3249,15 @@ export class GnosticaGame extends GameBaseSequenced {
         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
     }
 
-    private handleClickCore(move: string, row: number, col: number, piece?: string): string | IClickResult {
+    // `parsedMove`, when given, is `move` already parsed by the caller (handleClick already needs it for its own "last" handling) - reused here to skip a redundant re-parse.
+    private handleClickCore(move: string, row: number, col: number, piece?: string, parsedMove?: IParsedMove): string | IClickResult {
         try {
             // The "bidding" variant's opening procedure is structurally unlike every other click, so it's handled entirely by its own function.
             if (this.phase !== "main") {
                 return this.handleBiddingClick(move, piece);
             }
             // A pending obligation's own real click targets show up directly, so `move` may still be leftover from before it existed - seed it uniformly here.
-            if (this.continued.length > 0 && this.parseMove(move).head === undefined) {
+            if (this.continued.length > 0 && (parsedMove ?? this.parseMove(move)).head === undefined) {
                 move = this.buildViaMove([]);
             }
             if (piece !== undefined && piece.startsWith("_btn_")) {
