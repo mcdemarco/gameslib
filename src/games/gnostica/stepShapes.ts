@@ -23,7 +23,8 @@ export const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
     C: {
         own: { label: "Create Minion", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.direction !== undefined },
         enemy: { label: "Create Enemy", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.targetPiece !== undefined },
-        new: { label: "Create Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.card !== undefined },
+        // "drawn" (Wheel of Fortune's random-draw option) is parsed as amount === 1 rather than a real card uid, since card must always name an actual card - it satisfies this step just as completely.
+        new: { label: "Create Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && (s.card !== undefined || s.amount === 1) },
     },
     R: {
         piece: { label: "Move Piece", shape: "piece", minArgs: 2, isComplete: (s) => s.targetPiece !== undefined && s.amount !== undefined },

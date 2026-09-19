@@ -2190,7 +2190,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // "new" mode's required card arg is otherwise only suppliable by clicking a hand card; Wheel of Fortune (allowRandomDraw) has none, so it gets a button.
             if (suitUid === "C" && pendingMinor.mode === "new" && pendingMinor.opts.allowRandomDraw === true) {
-                buttons.push({ label: "Draw a card", value: "draw" });
+                buttons.push({ label: "Draw a card", value: "drawn" });
             }
             // Swords pips is pure damage, no destination cell to click (unlike Rods' distance), so it's a button set once a target is chosen.
             if (suitUid === "S" && pendingMinor.mode === "piece" && pendingMinor.rest.length >= 1) {
@@ -3408,7 +3408,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     case "drawn":
                         // Only ever offered for Wheel of Fortune's special option.
-                        // TODO: not implemented in the parser yet.
                         {
                             const pending = this.parsePendingStep(move);
                             if (pending === undefined || pending.suitUid !== "C" || pending.mode !== "new" || pending.opts.allowRandomDraw !== true) {
@@ -4966,8 +4965,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                // "drawn" is only honored when THIS card's own step genuinely grants it (opts.allowRandomDraw), not just because the literal token was typed.
-                if (cardArg === "drawn" && opts.allowRandomDraw) {
+                // "drawn" is parsed as step.amount === 1 (pickleMove's own sentinel, since step.card must always be a real card uid), and is only honored when THIS card's own step genuinely grants it (opts.allowRandomDraw), not just because the literal token was typed.
+                if (step.amount === 1 && opts.allowRandomDraw) {
                     createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts);
                 } else {
                     createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
@@ -5024,8 +5023,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                // Mirrors applyCups's own "new" case - "drawn" is only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
-                const failure = cardArg === "drawn" && opts.allowRandomDraw
+                // Mirrors applyCups's own "new" case - "drawn" is parsed as step.amount === 1, and only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
+                const failure = step.amount === 1 && opts.allowRandomDraw
                     ? checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts)
                     : checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 if (failure) {

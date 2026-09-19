@@ -2851,12 +2851,6 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 
         const randomClick = g.handleClick(modeClick.move, -1, -1, "_btn_drawn");
         expect(randomClick.move).eq(`use 10/with m0.1 at n0 create drawn`);
-        // Not .valid, currently - parseMove's own "create" content
-        // recognition only accepts a card uid/direction/piece ref there
-        // (a known, already-reported gap, sibling to the bare-victim-ref
-        // one), so "drawn" itself fails its own strict re-parse even
-        // though the move string built here is correct. A trusted commit
-        // still works below, since that bypasses the same strict path.
         // Fully deterministic (see clearBoard's own docs on the same
         // principle) - and deliberately a non-spot (major arcana) card,
         // to prove the random draw has no point-value restriction at all
