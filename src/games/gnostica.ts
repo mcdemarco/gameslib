@@ -4704,16 +4704,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined; // cell chosen, which minion there is still undecided - still skipped
         }
         const minion = this.resolvePieceRefTrusted(minionRef, minions);
-        // TODO: remove the code described in the following comment once Wheel of Fortune parsing is finalized.
-        // A trusted commit can reach here with `istep` undefined - a
-        // segment whose content parseMove's own strict grammar rejects
-        // (Cups "new"'s own "drawn" token, say - see checkCreateTerritory's
-        // own docs) never gets a real parsed.steps entry, but a trusted
-        // caller is still allowed to submit it. Falls back to the same
-        // token-based construction randomMove.ts's own speculative
-        // candidates use (see stepFromTokens's own docs) rather than
-        // crashing on a still-undefined istep.
-        istep = istep ?? this.stepFromTokens(step, tokens, borrowedPower);
         if ("primitive" in step) {
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
             // "Still building" vs "ready to act on" is answered by stepShapes.ts's own shared check.
@@ -4807,8 +4797,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalidPieceRef(result.kind, minionRef, "NOT_AN_ELIGIBLE_MINION") };
         }
         const minion = result.ref;
-        // A trusted commit can still reach here with `istep` undefined.
-        istep = istep ?? this.stepFromTokens(step, tokens, borrowedPower);
         if ("primitive" in step) {
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
             // Same shared shape check applyPowerStep uses, asked directly and independently - this function never calls into applyPowerStep for it.

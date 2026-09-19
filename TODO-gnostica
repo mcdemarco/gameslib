@@ -81,5 +81,5 @@ Mark items done with @done(date) only as they're confirmed.
 - #111 - handleClick(Core) should use the parsed move, not the old strings
 - #112 - Fix trailing orientation direction duplication issue. @done(2026-09-17)
 - #113 - Direction is used somewhere, so not removing after all. @done(2026-09-18)
-- #114 - Wheel of Fortune has its own create keyword "random" not currently in parseMove.
+- #114 - Wheel of Fortune has its own create keyword "random" not currently in parseMove. @done(2026-09-19)
 - #115 - The question of case-sensitivity of directions.
