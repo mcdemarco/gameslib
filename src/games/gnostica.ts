@@ -503,7 +503,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const parsed = this.parseMove(m);
-        
+
         if (parsed.head === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS") };
         }
@@ -1130,6 +1130,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         break;
                     }
                     step.targetPiece = tempwhat.toLowerCase();
+                    //The rules are not explicit about orient needing/being a minion,
+                    //but for code consistency purposes we also populate the minion field.
+                    if (step.withPiece === undefined)
+                        step.withPiece = step.targetPiece;
                 }
 
                 if ( segment.length > 0 ) {
@@ -1357,7 +1361,7 @@ export class GnosticaGame extends GameBaseSequenced {
         for (let s = 0; s < p.steps.length; s++) {
             const ppart: string[] = [];
             const step = p.steps[s];
-            if (step.withPiece !== undefined) {
+            if (step.withPiece !== undefined && (step.action !== "orient" || step.withPiece !== step.targetPiece) ) {
                 ppart.push("with");
                 ppart.push(step.withPiece);
             }
@@ -1399,7 +1403,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 if ( step.direction !== undefined ) {
                     ppart.push(step.direction);
                 }
-            
             }
 
             if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {

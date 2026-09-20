@@ -40,7 +40,8 @@ describe("Gnostica parsing", () => {
                 action: "orient",
                 complete: 1,
                 targetPiece: "n0.1",
-                direction: "N"
+                direction: "N",
+                withPiece: "n0.1"
             }],
             stepSegments: [],
             valid: true
@@ -135,10 +136,16 @@ describe("Gnostica parsing", () => {
         const move11 = "use 21 as 01 as C/with m0.1 at m1 create U?";
         const move12 = "discard 21 AS";
         const move13 = "use 10/with m0.1 at n0 create drawn";
-        //g.validateMove(move12);
+        const move14 = "use 04/orient m0.1 N/with m1.2 move m0.2 2 orient N"
+        const move15 = "use 15/orient m0.1 N/with m0.1 orient m1.2 W/orient m0.2 N"
+        g.validateMove(move15);
         expect(g.pickleMove(g.parseMove(move11))).to.equal(move11);
         expect(g.pickleMove(g.parseMove(move12))).to.equal(move12);
         expect(g.pickleMove(g.parseMove(move13))).to.equal(move13);
+        expect(g.pickleMove(g.parseMove(move14))).to.equal(move14);
+        expect(g.pickleMove(g.parseMove(move15))).to.equal(move15);
+
+        expect(g.pickleMove(g.parseMove("use 15/orient m0.1 N/with m0.1 orient m0.1 W/orient m0.2 N"))).to.equal("use 15/orient m0.1 N/orient m0.1 W/orient m0.2 N");
 
     });
 
