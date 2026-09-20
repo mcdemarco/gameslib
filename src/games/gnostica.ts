@@ -29,7 +29,7 @@ import {
     checkJudgementDraw, checkDiscardDraw, checkFool, checkWorldChoosePower,
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
-import { generateRandomMove } from "./gnostica/randomMove";
+import { generateRandomMove, buildViaMove } from "./gnostica/randomMove";
 import { ALL_SUITS, MINOR_MODES, HERMIT_MODES, primitiveStepShape, deriveMinorMode, deriveHermitMode, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, StepShape } from "./gnostica/stepShapes";
 import i18next from "i18next";
 
@@ -87,7 +87,7 @@ type PieceRefResolution =
     | { kind: "not_found" }
     | { kind: "ambiguous" };
 
-interface IParsedMove {
+export interface IParsedMove {
     announceLast: boolean;
     asUid?: string;  //for World
     asSuit?: string; //for Magician
@@ -1480,12 +1480,12 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The innermost continued obligation's own uid ("00" or "02") - the one a resume submission addresses and demotes into "via <uid>".
-    private getContinuedUid(): string | undefined {
+    public getContinuedUid(): string | undefined {
         return this.continued[this.continued.length - 1]?.split(".")[0];
     }
 
     // The ordinary card a Fool continuation is waiting on: what the last flip revealed (discard pile's top), or the in-progress resume move's own card. undefined when nothing is pending.
-    private activeCardUid(): string | undefined {
+    public activeCardUid(): string | undefined {
         const active = this.getContinuedUid();
         if (active !== "00") {
             return active;
@@ -1496,36 +1496,12 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.discardPile[this.discardPile.length - 1];
     }
 
-    // The one place that assembles a resumed move's own move STRING directly - every resume-seed call site shares this rather than hand-rolling the verb/parenthetical itself.
-    public buildViaMove(stepSegments: string[][], asUid?: string, asSuit?: string): string {
-        const activeUid = this.getContinuedUid()!;
-        const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
-        // "decline" is a bare head - it carries no step segments (unlike a mid-chain "/decline", it IS the whole submission).
-        const steps = declining ? [] : stepSegments;
-        // Assembled as plain words, matching what a player would type by hand; "via <uid>" sits in the HEAD (same slot as "as"), not trailing the string.
-        if (activeUid === "02") {
-            // High Priestess can never decline (validateHighPriestess only accepts "discard"; no Decline button is ever offered for it), so there's no decline shape to build here.
-            const tokens = steps.length > 0 ? steps[0] : [];
-            return ["discard", ...tokens, "via", activeUid].join(" ");
-        }
-        // "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
-        const head: IParsedMove = {
-            announceLast: false, valid: true, stepSegments: [],
-            head: declining ? "decline" : "play",
-            asUid: declining ? undefined : asUid,
-            asSuit: declining ? undefined : asSuit,
-            viaUid: activeUid,
-            steps: [{ action: declining ? "decline" : "play", card: this.activeCardUid() }],
-        };
-        return [this.pickleMove(head), ...steps.map(s => s.join(" "))].join("/");
-    }
-
     // Builds the resume seed plus whatever step segments this.liveMove has typed against the same obligation, always starting fresh from this.continued.
     private continuedSeedMoveString(): string {
         const forThisObligation = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid();
         // this.liveMove already has real, fully-shaped IStep[] for this obligation - pickleMove serializes it directly (keeping "with"/"orient" prefixes intact),
         // rather than re-joining raw stepSegments tokens (which buildViaMove can't do correctly without re-deriving which special/primitive kind each one is).
-        return forThisObligation ? this.pickleMove(this.liveMove!) : this.buildViaMove([]);
+        return forThisObligation ? this.pickleMove(this.liveMove!) : buildViaMove(this, []);
     }
 
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
@@ -3290,7 +3266,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // A pending obligation's own real click targets show up directly, so `move` may still be leftover from before it existed - seed it uniformly here.
             if (this.continued.length > 0 && (parsedMove ?? this.parseMove(move)).head === undefined) {
-                move = this.buildViaMove([]);
+                move = buildViaMove(this, []);
             }
             if (piece !== undefined && piece.startsWith("_btn_")) {
                 const value = piece.slice("_btn_".length);
@@ -3421,14 +3397,14 @@ export class GnosticaGame extends GameBaseSequenced {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
                         // Returned as a candidate string, not a hardcoded complete:-1, since a resumed Fool flip is ALREADY complete and needs Submit enabled.
-                        return this.buildViaMove([]);
+                        return buildViaMove(this, []);
                     }
                     case "decline_power": {
                         if (this.continued.length === 0) {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
                         // Declining pops the CURRENT top frame; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
-                        return this.buildViaMove([["decline"]]);
+                        return buildViaMove(this, [["decline"]]);
                     }
                     case "drawn":
                         // Only ever offered for Wheel of Fortune's special option.

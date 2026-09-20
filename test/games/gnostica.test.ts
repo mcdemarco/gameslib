@@ -8,7 +8,7 @@ import { Piece } from "../../src/games/gnostica/piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
-import { randomUseOrPlayMove } from "../../src/games/gnostica/randomMove";
+import { randomUseOrPlayMove, buildViaMove } from "../../src/games/gnostica/randomMove";
 import { MAJOR_ARCANA } from "../../src/games/gnostica/majorArcana";
 
 const theWorld = () => majorCards.find(c => c.rank.seq === 21)!;
@@ -5291,7 +5291,7 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         g.move(`use 02/discard 5C draw 4`); // 4 is max: 6 - 2 remaining
         expect(g.continued).to.deep.equal(["02.1"]);
 
-        const built = g.buildViaMove([["AR", "draw", "1"]]);
+        const built = buildViaMove(g, [["AR", "draw", "1"]]);
         expect(built).to.eq(`discard AR draw 1 via 02`);
         expect(g.validateMove(built).valid).to.be.true;
         expect(() => g.move(built, { trusted: false })).to.not.throw();

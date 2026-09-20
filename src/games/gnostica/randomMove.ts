@@ -24,7 +24,7 @@
 // helper) is inlined locally instead (see its own docs below), so
 // gnostica.ts can import from here with no circular value import
 // either way.
-import { type GnosticaGame, type IMinionRef, type IStepOutcome } from "../gnostica";
+import { type GnosticaGame, type IMinionRef, type IStepOutcome, type IParsedMove } from "../gnostica";
 import { shuffle } from "../../common";
 import { Card, allCards } from "../../common/tarot";
 import { cardPointValue } from "./cell";
@@ -50,6 +50,32 @@ function chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[]
     return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
 }
 
+// The one place that assembles a resumed move's own move STRING directly from raw tokens - every resume-seed call site here shares this rather than
+// hand-rolling the verb/parenthetical itself. Only this file's bot-move construction still builds moves from raw tokens rather than a real IStep[] (it
+// has no move string to parse one from in the first place), so this stays here rather than in gnostica.ts proper.
+export function buildViaMove(game: GnosticaGame, stepSegments: string[][], asUid?: string, asSuit?: string): string {
+    const activeUid = game.getContinuedUid()!;
+    const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
+    // "decline" is a bare head - it carries no step segments (unlike a mid-chain "/decline", it IS the whole submission).
+    const steps = declining ? [] : stepSegments;
+    // Assembled as plain words, matching what a player would type by hand; "via <uid>" sits in the HEAD (same slot as "as"), not trailing the string.
+    if (activeUid === "02") {
+        // High Priestess can never decline (validateHighPriestess only accepts "discard"; no Decline button is ever offered for it), so there's no decline shape to build here.
+        const tokens = steps.length > 0 ? steps[0] : [];
+        return ["discard", ...tokens, "via", activeUid].join(" ");
+    }
+    // "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
+    const head: IParsedMove = {
+        announceLast: false, valid: true, stepSegments: [],
+        head: declining ? "decline" : "play",
+        asUid: declining ? undefined : asUid,
+        asSuit: declining ? undefined : asSuit,
+        viaUid: activeUid,
+        steps: [{ action: declining ? "decline" : "play", card: game.activeCardUid() }],
+    };
+    return [game.pickleMove(head), ...steps.map(s => s.join(" "))].join("/");
+}
+
 export function generateRandomMove(game: GnosticaGame): string {
     if (game.gameover) {
         return ""; // matches magnate.ts's own precedent for this case
@@ -70,7 +96,7 @@ export function generateRandomMove(game: GnosticaGame): string {
     if (game.continued.length > 0) {
         const activeUid = game.continued[game.continued.length - 1].split(".")[0];
         if (activeUid === "02") {
-            return game.buildViaMove([buildRandomHighPriestessTokens(game)]);
+            return buildViaMove(game, [buildRandomHighPriestessTokens(game)]);
         }
         // A persisted Fool obligation always means an ordinary revealed
         // card sits on top awaiting a decision (buildPendingFromContinued's
@@ -93,7 +119,7 @@ export function generateRandomMove(game: GnosticaGame): string {
         if (revealedCard !== undefined && Math.random() >= 0.15) {
             let candidate: string | undefined;
             if (revealedCard.uid === "00") {
-                candidate = game.buildViaMove([]);
+                candidate = buildViaMove(game, []);
             } else if (revealedCard.uid === "21") {
                 const borrowedUid = randomWorldBorrowUid(game);
                 if (borrowedUid !== undefined) {
@@ -104,12 +130,12 @@ export function generateRandomMove(game: GnosticaGame): string {
                     if (borrowedUid === "01") {
                         const found = findRandomMagicianChain(game, game.eligibleMinionsForPlay());
                         if (found !== undefined) {
-                            candidate = game.buildViaMove(found.chain, borrowedUid, found.suitUid);
+                            candidate = buildViaMove(game, found.chain, borrowedUid, found.suitUid);
                         }
                     } else {
                         const borrowedCard = allCards().find(c => c.uid === borrowedUid)!;
                         const chain = buildRandomChain(game, borrowedCard, game.eligibleMinionsForPlay());
-                        candidate = game.buildViaMove(chain, borrowedUid);
+                        candidate = buildViaMove(game, chain, borrowedUid);
                     }
                 }
             } else if (revealedCard.uid === "01") {
@@ -119,12 +145,12 @@ export function generateRandomMove(game: GnosticaGame): string {
                 // docs).
                 const found = findRandomMagicianChain(game, game.eligibleMinionsForPlay());
                 if (found !== undefined) {
-                    candidate = game.buildViaMove(found.chain, found.suitUid);
+                    candidate = buildViaMove(game, found.chain, found.suitUid);
                 }
             } else {
                 const chain = buildRandomChain(game, revealedCard, game.eligibleMinionsForPlay());
                 if (chain.length > 0) {
-                    candidate = game.buildViaMove(chain);
+                    candidate = buildViaMove(game, chain);
                 }
             }
             if (candidate !== undefined) {
@@ -144,7 +170,7 @@ export function generateRandomMove(game: GnosticaGame): string {
                 }
             }
         }
-        return game.buildViaMove([["decline"]]);
+        return buildViaMove(game, [["decline"]]);
     }
     if (game.phase === "bidding") {
         const hand = game.hands[game.currplayer - 1];
