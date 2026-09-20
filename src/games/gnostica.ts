@@ -1523,8 +1523,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // Builds the resume seed plus whatever step segments this.liveMove has typed against the same obligation, always starting fresh from this.continued.
     private continuedSeedMoveString(): string {
         const forThisObligation = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid();
-        const segments = forThisObligation ? this.resumeStepSegments(this.liveMove!) : [];
-        return this.buildViaMove(segments, forThisObligation ? this.liveMove!.asUid : undefined, forThisObligation ? this.liveMove!.asSuit : undefined);
+        // this.liveMove already has real, fully-shaped IStep[] for this obligation - pickleMove serializes it directly (keeping "with"/"orient" prefixes intact),
+        // rather than re-joining raw stepSegments tokens (which buildViaMove can't do correctly without re-deriving which special/primitive kind each one is).
+        return forThisObligation ? this.pickleMove(this.liveMove!) : this.buildViaMove([]);
     }
 
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
@@ -2250,6 +2251,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.getContinuedUid();
         // High Priestess resumes with its own tokens right after "discard", not a "/"-segment - fold them back so the walk below sees them.
         const stepSegments = isGenuineResume ? this.resumeStepSegments(parsed) : parsed.stepSegments;
+        const steps = isGenuineResume ? this.resumeSteps(parsed) : parsed.steps.slice(1);
         if (isGenuineResume) {
             // A "discard" resume is a High Priestess round (not a card); a "play" resume names the revealed card as its front token.
             headArg = parsed.head === "discard" ? parsed.viaUid! : (parsed.steps[0]?.card ?? parsed.viaUid!);
@@ -2282,13 +2284,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (!card.major) {
             const suitUid = card.suit.uid;
             const segment = stepSegments[0] ?? []; // segment[0] is the minionRef, if typed yet - see resolveStepMinion
-            // Cups alone infers its mode from shape rather than a literal token; it already falls back to the plain positional read for every other suit.
+            // rest/mode still need the raw args split (not just the built istep) - pendingMoveString rebuilds a step from them via buildCupsStep/buildRdsStep.
             const derived = deriveMinorMode(suitUid, segment.slice(1));
+            const istep: IStep = steps[0] ?? { action: "with", withPiece: segment[0] };
             const { minion, ambiguous, candidates } = this.resolveStepMinion(segment, eligible);
-            const istep: IStep = derived === undefined
-                ? { action: "with", withPiece: segment[0] }
-                : suitUid === "C" ? this.buildCupsStep(segment[0], derived.mode, derived.args)
-                    : this.buildRdsStep(suitUid, derived.mode, segment[0], derived.args);
             return { head, headArg, activeCardUid: headArg, suitUid, eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, mode: derived?.mode, rest: derived?.args ?? segment.slice(1), istep };
         }
 
@@ -2311,7 +2310,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
         const priorSteps: IStep[] = [];
         let clone: GnosticaGame | undefined;
-        for (let segIdx = 0; segIdx < stepSegments.length; segIdx++) {
+        for (let segIdx = 0; segIdx < steps.length; segIdx++) {
             const top = stack[stack.length - 1];
             if (top === undefined) {
                 return undefined; // too many steps already typed - validateMove/move report this properly on submit
@@ -2327,28 +2326,24 @@ export class GnosticaGame extends GameBaseSequenced {
                 return undefined;
             }
             const tokens = stepSegments[segIdx];
-            const isLastSegment = segIdx === stepSegments.length - 1;
+            const isLastSegment = segIdx === steps.length - 1;
             // Set in whichever branch below falls through (step complete, not held back by preferCurrent) - the IStep this segment becomes.
             let completedStep: IStep | undefined;
             if ("primitive" in step) {
                 const suitUidForStep = this.primitiveToSuit(step.primitive);
                 const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
-                // Cups alone infers its mode from shape; it already falls back to the plain positional read for every other suit.
+                // rest/mode still need the raw args split (not just the built istep) - pendingMoveString rebuilds a step from them via buildCupsStep/buildRdsStep.
                 const derived = deriveMinorMode(suitUidForStep, tokens.slice(1));
                 const mode = derived?.mode;
                 const rest = derived?.args ?? tokens.slice(1);
-                // Built once up front so the shared shape check and a "complete" outcome below can both reuse it; "malformed" folds into "incomplete" here.
-                const istepSoFar = mode === undefined ? undefined
-                    : suitUidForStep === "C" ? this.buildCupsStep(tokens[0], mode, rest)
-                        : this.buildRdsStep(suitUidForStep, mode, tokens[0], rest);
-                const shape = istepSoFar === undefined ? { status: "incomplete" as const } : primitiveStepShape(suitUidForStep, istepSoFar);
+                const istepSoFar: IStep = steps[segIdx] ?? { action: "with", withPiece: tokens[0] };
+                const shape = primitiveStepShape(suitUidForStep, istepSoFar);
                 if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
                     // Still building this one, OR the caller wants the last-typed segment treated as "current" even once complete (board clicks keep refining it).
                     const { minion, ambiguous, candidates } = this.resolveStepMinion(tokens, top.minions);
-                    const istep = istepSoFar ?? { action: "with", withPiece: tokens[0] };
-                    return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode, rest, istep };
+                    return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode, rest, istep: istepSoFar };
                 }
-                completedStep = istepSoFar!;
+                completedStep = istepSoFar;
             } else {
                 // highPriestess/fool have no minionRef to strip; every other special does. A Magician's suit choice lives in asSuit, unless worldBorrow lets it spell its own leading token.
                 const magicianAs = step.special === "magicianChoice" && asSuit !== undefined;
@@ -2356,28 +2351,22 @@ export class GnosticaGame extends GameBaseSequenced {
                 const noMinionRef = step.special === "highPriestess" || step.special === "fool";
                 // orientMinion's "orient" subhead is kept literal by parseMove (unlike "with"), skipped here alongside the minionRef.
                 const isOrientMinion = step.special === "orientMinion" && tokens[0]?.toLowerCase() === "orient";
-                const rest = isOrientMinion ? tokens.slice(2) : noMinionRef ? tokens : tokens.slice(1);
                 const specialMinionRef = isOrientMinion ? tokens[1] : noMinionRef ? undefined : tokens[0];
                 // Built once up front - a Magician borrow's step needs no splicing once the suit is known: "at m0 create U" parses the same regardless of suit.
-                let istepSoFar: IStep | undefined;
+                const istepSoFar: IStep = steps[segIdx] ?? { action: "with", withPiece: specialMinionRef };
                 let shape: StepShape;
                 if (magicianAs) {
-                    const magicianDerived = deriveMinorMode(asSuit!, tokens.slice(1));
-                    istepSoFar = magicianDerived === undefined ? undefined
-                        : asSuit === "C" ? this.buildCupsStep(tokens[0], magicianDerived.mode, magicianDerived.args)
-                            : this.buildRdsStep(asSuit!, magicianDerived.mode, tokens[0], magicianDerived.args);
-                    shape = istepSoFar === undefined ? { status: "incomplete" } : primitiveStepShape(asSuit!, istepSoFar);
+                    shape = primitiveStepShape(asSuit!, istepSoFar);
                 } else if (magicianNeedsAs) {
                     shape = { status: "incomplete" };
                 } else {
-                    istepSoFar = this.buildSpecialStep(step.special, specialMinionRef, rest);
                     shape = SPECIAL_STEP_SHAPES[step.special](istepSoFar);
                 }
                 if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
                     // Same "still building, or the caller wants it treated as current regardless" rule as the primitive branch.
-                    return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, tokens, asUid, asSuit);
+                    return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, tokens, istepSoFar, asUid, asSuit);
                 }
-                completedStep = istepSoFar!;
+                completedStep = istepSoFar;
             }
             // Walking past this segment lets a LATER step of the SAME frame become click-driven, via a clone.
             priorSteps.push(completedStep!);
@@ -2416,39 +2405,40 @@ export class GnosticaGame extends GameBaseSequenced {
             const { minion, ambiguous, candidates } = this.resolveStepMinion(undefined, top.minions);
             return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode: undefined, rest: [], istep: { action: "with" } };
         }
-        return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, [], asUid, asSuit);
+        return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, [], { action: "with" }, asUid, asSuit);
     }
 
     // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice which can be treated as non-special.
     private buildSpecialPending(
         special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
-        eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], tokens: string[], asUid?: string, asSuit?: string,
+        eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], tokens: string[], istep: IStep, asUid?: string, asSuit?: string,
     ): IPendingStep {
         if (special === "magicianChoice") {
+            // A suit typed directly into the step's own tokens (no "as") is unreachable via the button-driven UI (#105) - kept for defensiveness, not re-verified.
             const suitFromToken = ALL_SUITS.some(s => s.uid === tokens[1]) ? tokens[1] : undefined;
             const suitUid = asSuit ?? suitFromToken;
             if (suitUid !== undefined) {
                 const afterSuit = suitFromToken !== undefined ? tokens.slice(2) : tokens.slice(1);
                 const [mode, ...rest] = afterSuit;
                 const { minion, ambiguous, candidates } = this.resolveStepMinion(tokens, minions);
-                const istep: IStep = mode === undefined
-                    ? { action: "with", withPiece: tokens[0] }
-                    : suitUid === "C" ? this.buildCupsStep(tokens[0], mode, rest)
-                        : this.buildRdsStep(suitUid, mode, tokens[0], rest);
-                return { head, headArg, activeCardUid, asUid, asSuit, suitUid, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode, rest, istep };
+                // Once the suit is known via `asSuit`, `istep` is already the correctly-shaped step - no need to rebuild it a second time.
+                const magicianIstep: IStep = asSuit !== undefined ? istep
+                    : mode === undefined ? { action: "with", withPiece: tokens[0] }
+                        : suitUid === "C" ? this.buildCupsStep(tokens[0], mode, rest)
+                            : this.buildRdsStep(suitUid, mode, tokens[0], rest);
+                return { head, headArg, activeCardUid, asUid, asSuit, suitUid, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode, rest, istep: magicianIstep };
             }
         }
-        // Fool/High Priestess have no minionRef; worldUseAny/an unchosen magicianChoice also have no minion HERE - each defers its own minion choice further along.
+        // Fool/High Priestess/worldUseAny have no minionRef here; an unchosen magicianChoice also defers its minion choice until after the suit is picked (its
+        // own button set needs to show before any ambiguous-minion picker would - see the "2+ minions... suit buttons first" regression test).
         const noMinionRef = special === "highPriestess" || special === "fool" || special === "worldUseAny" || special === "magicianChoice";
         // orientMinion's "orient" subhead is kept literal by parseMove (unlike "with") - the minionRef sits one slot later for it than for every other special.
         const isOrientMinion = special === "orientMinion" && tokens[0]?.toLowerCase() === "orient";
         const minionTokens = isOrientMinion ? tokens.slice(1) : tokens;
         const rest = noMinionRef ? tokens : minionTokens.slice(1);
-        const specialMinionRef = noMinionRef ? undefined : minionTokens[0];
         const { minion, ambiguous, candidates } = noMinionRef
             ? { minion: minions[0], ambiguous: false, candidates: minions }
             : this.resolveStepMinion(minionTokens, minions);
-        const istep = this.buildSpecialStep(special, specialMinionRef, rest);
         return { head, headArg, activeCardUid, asUid, asSuit, special, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode: undefined, rest, istep };
     }
 
