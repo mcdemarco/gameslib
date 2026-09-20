@@ -1081,7 +1081,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         }
         stepSegments.push(tokens);
         const istep = ctx.stepFromTokens(step, tokens);
-        const result = ctx.validatePowerStep(step, minions, tokens, istep, def, i, stepSegments.length);
+        const result = ctx.validatePowerStep(step, minions, istep, def, i, stepSegments.length);
         if (result.failed) {
             stepSegments.pop();
             break;
@@ -1090,12 +1090,12 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         minions = chainMinion(minions, result.outcome ?? {} as IStepOutcome);
         if (i < def.powers.length - 1) {
             clone ??= game.cloneLive();
-            clone.applyPowerStep(step, minionsForReplay, tokens, istep, def, i, def.powers.length, true);
+            clone.applyPowerStep(step, minionsForReplay, istep, def, i, def.powers.length, true);
         }
     }
     const isCleanSuccess = (segs: string[][]): boolean => {
         const steps = segs.map((toks, i) => game.stepFromTokens(def.powers[i], toks));
-        const result = game.validateMajorPower(def, eligible, segs, steps);
+        const result = game.validateMajorPower(def, eligible, steps);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see
         // validateFrameStack's own docs) - .valid alone is what actually
