@@ -5284,14 +5284,7 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.NOTHING_TO_DECLINE"));
     });
 
-    // Regression: buildViaMove's own High Priestess branch used to put its
-    // tokens in stepSegments instead of rest, which pickleMove rendered as
-    // a bogus "discard/draw 0"-shaped spelling that resumeStepSegments
-    // (reading rest, not stepSegments, for this exact case) couldn't
-    // recognize - silently no-opping the resume forever instead of
-    // resolving it. This is the same construction the click UI's own
-    // continuedSeedMoveString/getActionButtons use, so a real discard-uid
-    // resume built via the click path (not hand-typed) is covered here.
+    // Regression test of a real discard-uid resume built via the click path.
     it("buildViaMove's own High Priestess resume round-trips through validateMove/move cleanly", () => {
         const g = setupHP();
         g.hands[0] = ["2C", "5C", "AR"];
@@ -6489,16 +6482,8 @@ describe("Gnostica: Fool and World", () => {
 
         expect(g.validateMove(`decline via 02`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_CONTINUED_ACTION" }));
         const move = g.randomMove();
-        // No slash: buildViaMove's own High Priestess branch used to put
-        // its tokens in stepSegments instead of rest, which pickleMove
-        // then rendered as a bogus "discard/draw 0" - a spelling
-        // resumeStepSegments (which reads rest, not stepSegments, for
-        // this exact case) couldn't recognize at all, silently no-opping
-        // the resume forever instead of resolving it (this.continued
-        // never cleared, so the same player got asked again and again -
-        // reproduced live from a stuck game's own saved state). The exact
-        // discard uids/draw count are randomized now (buildRandomHighPriestessResumeTokens
-        // reuses round 1's own randomizer) - only the shape is fixed.
+        // No slash regression test.  The discard uids/draw count are randomized
+        // (buildRandomHighPriestessResumeTokens reuses round 1's own randomizer).
         expect(move.startsWith("discard ") && move.endsWith(` via 02`) && !move.includes("/")).to.be.true;
         expect(g.validateMove(move).valid).to.be.true;
         expect(() => g.move(move)).to.not.throw();

@@ -1545,11 +1545,6 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // Hard-rejects (ORIENT_NO_OP) a same-facing `candidate` - shared by contexts where reorienting IS the whole action; optional reorientations never call this.
-    private checkOrientationChanges(reference: Orientation, candidate: Orientation): { key: string } | undefined {
-        return candidate === reference ? { key: "ORIENT_NO_OP" } : undefined;
-    }
-
     // "<cell>.<pips>[.<orientation>][.<player>]"; resolved against `pool` (minion-selector) if given, else every piece at the cell (a target, any owner).
     private resolvePieceRef(ref: string | undefined, pool?: IMinionRef[]): PieceRefResolution {
         if (ref === undefined) {
@@ -5307,9 +5302,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // Same hard rejection as the standalone "orient" command's own ORIENT_NO_OP - reorienting IS the whole action here too, so a no-op achieves nothing.
         const currentPiece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
-        const noOp = this.checkOrientationChanges(currentPiece.orientation, orientation);
-        if (noOp) {
-            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
+        
+        if (currentPiece.orientation === orientation) {
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
         // Reorienting doesn't move the piece (same x,y,index) - only its facing changes, so predict that directly rather than reusing the pre-mutation `.piece`.
         const reoriented = new Piece(currentPiece.owner, currentPiece.size, orientation);
@@ -5346,9 +5341,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // reorienting the target IS the whole action here too, so a no-op is hard-rejected.
         const currentPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
-        const noOp = this.checkOrientationChanges(currentPiece.orientation, orientation);
-        if (noOp) {
-            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${noOp.key}`) };
+
+        if (currentPiece.orientation === orientation) {
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
         }
         if (currentPiece.owner !== this.currplayer) {
             return { failed: false };
