@@ -8,7 +8,7 @@ import { Piece } from "../../src/games/gnostica/piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
-import { randomUseOrPlayMove, buildViaMove } from "../../src/games/gnostica/randomMove";
+import { randomUseOrPlayMove } from "../../src/games/gnostica/randomMove";
 import { MAJOR_ARCANA } from "../../src/games/gnostica/majorArcana";
 
 const theWorld = () => majorCards.find(c => c.rank.seq === 21)!;
@@ -1701,7 +1701,7 @@ describe("Gnostica: handleClick", () => {
     // that exact formula so tests can go from absolute board coords to the
     // row/col a real click would report.
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClickCore's own window exactly (see
+        // Must match handleClick's own window exactly (see
         // renderWindow's own docs - territory bounds, not the raw
         // board.minX/maxX/minY/maxY, which also includes cardless
         // wasteland cells a piece may have been pushed onto) - reusing
@@ -2020,7 +2020,7 @@ describe("Gnostica: handleClick", () => {
         expect(result.complete).eq(-1);
     });
 
-    // The trickiest part of reattachLastFlag: a still-incomplete click
+    // The trickiest part of handleClick's own "last" reattachment: a still-incomplete click
     // result (e.g. Pass's own "discard", always legal on its own) gets
     // re-validated once "last" makes it a genuinely complete move -
     // catching a declare that's ONLY illegal because of the flag itself
@@ -2512,7 +2512,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
 // representative commit per suit prove the resulting move actually works.
 describe("Gnostica: handleClick - minor arcana power steps", () => {
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClickCore's own window exactly (see
+        // Must match handleClick's own window exactly (see
         // renderWindow's own docs - territory bounds, not the raw
         // board.minX/maxX/minY/maxY, which also includes cardless
         // wasteland cells a piece may have been pushed onto) - reusing
@@ -3598,7 +3598,7 @@ describe("Gnostica: click-to-orient messaging", () => {
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClickCore's own window exactly (see
+        // Must match handleClick's own window exactly (see
         // renderWindow's own docs - territory bounds, not the raw
         // board.minX/maxX/minY/maxY, which also includes cardless
         // wasteland cells a piece may have been pushed onto) - reusing
@@ -3759,7 +3759,7 @@ describe("Gnostica: choose-step click messaging", () => {
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClickCore's own window exactly (see
+        // Must match handleClick's own window exactly (see
         // renderWindow's own docs - territory bounds, not the raw
         // board.minX/maxX/minY/maxY, which also includes cardless
         // wasteland cells a piece may have been pushed onto) - reusing
@@ -4034,7 +4034,7 @@ describe("Gnostica: handleClick - major arcana chained power steps", () => {
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClickCore's own window exactly (see
+        // Must match handleClick's own window exactly (see
         // renderWindow's own docs - territory bounds, not the raw
         // board.minX/maxX/minY/maxY, which also includes cardless
         // wasteland cells a piece may have been pushed onto) - reusing
@@ -4218,7 +4218,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
     });
 
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClickCore's own window exactly (see
+        // Must match handleClick's own window exactly (see
         // renderWindow's own docs - territory bounds, not the raw
         // board.minX/maxX/minY/maxY, which also includes cardless
         // wasteland cells a piece may have been pushed onto) - reusing
@@ -5284,21 +5284,6 @@ describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
         expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.NOTHING_TO_DECLINE"));
     });
 
-    // Regression test of a real discard-uid resume built via the click path.
-    it("buildViaMove's own High Priestess resume round-trips through validateMove/move cleanly", () => {
-        const g = setupHP();
-        g.hands[0] = ["2C", "5C", "AR"];
-        g.move(`use 02/discard 5C draw 4`); // 4 is max: 6 - 2 remaining
-        expect(g.continued).to.deep.equal(["02.1"]);
-
-        const built = buildViaMove(g, [["AR", "draw", "1"]]);
-        expect(built).to.eq(`discard AR draw 1 via 02`);
-        expect(g.validateMove(built).valid).to.be.true;
-        expect(() => g.move(built, { trusted: false })).to.not.throw();
-        expect(g.continued).to.be.empty;
-        expect(g.currplayer).eq(2);
-        expect(g.hands[0]).to.not.include("AR");
-    });
 });
 
 describe("Gnostica: Fool and World", () => {
@@ -5711,7 +5696,7 @@ describe("Gnostica: Fool and World", () => {
     // A two-stage special (magicianChoice, hermitTeleport) that Fool
     // reveals must be click-driven from the very first click, when nothing
     // has been clicked yet THIS turn - movebox.value is still "" (untouched
-    // since the last real commit). handleClickCore's own parsePendingStep
+    // since the last real commit). handleClick's own parsePendingStep
     // calls need pendingPower's root seeded in for them in this case.
     it("a revealed Magician's own suit buttons are click-driven even before anything else has been clicked this turn", () => {
         const g = setupFool();

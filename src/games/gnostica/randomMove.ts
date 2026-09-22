@@ -193,8 +193,9 @@ export function generateRandomMove(game: GnosticaGame): string {
     // end. Not unconditional even once eligible - a real player might
     // wait for a wider safety margin first, same as this file's own
     // "prefer, don't require" weighting elsewhere.
+    const targetScore =  (game.variants.includes("target-8") ? 8 : (game.variants.includes("target-10") ? 10 : 9));
     const canAnnounce = game.lastTurner === undefined
-        && game.scoreFor(game.currplayer) >= game.targetScore();
+        && game.scoreFor(game.currplayer) >= targetScore;
     const announce = canAnnounce && Math.random() < 0.25;
     // "discard" is always unconditionally legal once the player has
     // board presence (any subset of hand, no draw suffix required), so
