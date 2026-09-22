@@ -70,7 +70,7 @@ Mark items done with @done(date) only as they're confirmed.
 - #100 - The message for distance moving a piece should not specify "your" piece. @done(2026-09-14)
 - #101 - In Hierophant, the new piece should inherit the enemy piece's orientation, not start as U. @done(2026-09-14)
 - #102 - Add structural testing of more steps to parseMove(). @done(2026-09-18)
-- #103 - Remove via requirement; just autopopulate on completion and always derive vianess from state?
+- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
 - #104 - I want to systematically add some words to move strings.  "with" before the minion.  "draw" before drawn card count (for Judgement), etc.  "create" for cups, move for rods, etc.  I think we can get rid of the piece vs tile distinction if we use cardUids when acting on "tiles". @done(2026-09-16)
 - #105 - Replace the single asUid head slot with a real chain for Magician with World and fix other issues with Magician picking up the suit. @done(2026-09-18)
 - #106 - Implement change to enemy pieceref (to be more of a pieceref) in create path fully. @done(2026-09-17)
@@ -78,9 +78,13 @@ Mark items done with @done(date) only as they're confirmed.
 - #108 - Rods must provide a target, not just a distance. @done(2026-09-17)
 - #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
 - #110 - Reattach last flag and the expected behavior of retaining the last flag don't seem to be working anymore. @done(2026-09-17)
-- #111 - handleClick(Core) should use the parsed move, not the old strings
+- #111 - handleClick(Core) should use the parsed move, not the old strings @done(2026-09-20)
 - #112 - Fix trailing orientation direction duplication issue. @done(2026-09-17)
 - #113 - Direction is used somewhere, so not removing after all. @done(2026-09-18)
 - #114 - Wheel of Fortune has its own create keyword "random" not currently in parseMove. @done(2026-09-19)
 - #115 - The question of case-sensitivity of directions.
 - #116 - On next rebase, credit Russ with his variant.
+- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)? 
+- #118 - Finish removing stepSegments.
+- #119 - Remove all echos of stepSegments and rest in other structures.
+- #120 - 

@@ -4,27 +4,23 @@ import { Card } from "../../common/tarot";
 export type SuitPrimitive = "create" | "move" | "grow" | "attack";
 
 export interface PrimitiveOpts {
-    // Empress/Emperor: bypass the normal 3-piece-per-territory cap.
-    ignoreCapacity?: boolean;
-    // Tower/Star: the replacement card may come from anywhere in the discard pile, not just the hand.
-    replacementSource?: "hand" | "discard";
-    // Wheel of Fortune: the new territory's card may be drawn randomly from the draw pile instead of played from hand.
-    allowRandomDraw?: boolean;
-    // Sun/Strength: a same-target shortcut's intermediate size is only ever transient, so its own step doesn't need a real stash piece.
-    skipStashCheck?: boolean;
+    ignoreCapacity?: boolean;  // Empress/Emperor: bypass the normal 3-piece-per-territory cap.
+    replacementSource?: "hand" | "discard"; // Tower/Star: the replacement card may be drawn from the discards instead.
+    allowRandomDraw?: boolean; // Wheel of Fortune: the new territory may be drawn from the deck instead.
+    skipStashCheck?: boolean; // Sun/Strength: the same-target shortcut doesn't require a real stash piece.
 }
 
 // Powers that don't reduce to a suit primitive - each is bespoke logic implemented directly in powers.ts.
 export type SpecialPower =
-    | "fool"              // flip and optionally play the top card of the draw pile
-    | "magicianChoice"    // this step IS one of sword/rod/cup/disc, chosen at resolution time
-    | "highPriestess"     // one discard-any-then-redraw-to-6 round
-    | "orientMinion"      // orient one of your own pieces
+    | "fool"              // draw and play (or decline) a card from the deck
+    | "magicianChoice"    // choose one of sword/rod/cup/disc (as if the Magician were of that suit)
+    | "highPriestess"     // one normal discard/draw cycle (as in the base action)
+    | "orientMinion"      // orient one of your own pieces (as in the base action)
     | "orientAny"         // orient any piece, even an opponent's (Devil only)
     | "hierophantReplace" // swap the target piece for one of yours, same size, then orient it
-    | "hermitTeleport"    // move a piece/territory anywhere on the board, ignoring adjacency
+    | "hermitTeleport"    // move a targeted piece/territory to any unoccupied space/any non-enemy wasteland.
     | "tradeHands"        // swap hands with the owner of the targeted piece
-    | "judgementDraw"     // draw N cards (N = minion's pip size) from anywhere in the discard pile
+    | "judgementDraw"     // draw up to N cards (N = max of minion's pip size and hand space available) from the discards.
     | "worldUseAny";      // use the power of any major arcana territory currently on the board
 
 export type PowerStep =
@@ -35,13 +31,10 @@ export interface MajorArcanaDef {
     uid: string;
     name: string;
     seq: number;
-    // Which suit-power icon(s) are printed on the card, in power order - Gnostica's own interpretation, not real tarot.
-    icons: string[];
+    icons: string[];// Which Gnostica suit-power icon(s) are printed on the card, in power order.
     powers: PowerStep[];
-    // Strength/Death/Sun/Chariot: same-target step pairs may shortcut (skip a rung / pass through); powers.ts interprets per primitive.
-    sameTargetShortcut?: boolean;
-    // Moon only: its move step may enter a 3-piece territory, as long as the follow-up attack leaves at most 3 there.
-    moonCapacityExemption?: boolean;
+    sameTargetShortcut?: boolean; // Strength/Death/Sun/Chariot: same-target step pairs may shortcut.
+    moonCapacityExemption?: boolean; // Moon only: may move into a 3-piece territory, as long as the subsequent attack leaves at most 3 there.
 }
 
 export const MAJOR_ARCANA: Record<string, MajorArcanaDef> = {
