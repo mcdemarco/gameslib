@@ -3,88 +3,38 @@ Some numbers carry over from a partially-lost task list.
 Some items were marked off at transfer here, not at completion.
 Mark items done with @done(date) only as they're confirmed.
 
-- #7 - i18n/moveresults work @done(26-08-20)
-- #25 - Implement Fool/World/High Priestess major arcana powers using new GameBase. @done(26-08-25)
-- #29 - reduce test count
-- #30 - reduce comments @done(2026-09-18)
-- #31 - board rotation view @done(26-08-20)
-- #32 - fixed the stale-preview click bug: handleClick() wasn't setting `canrender` on valid-but-incomplete clicks. @done(26-08-22)
-- #38 - tournament rules: turnOrder now reflects bid rank, used by nextPlayer()/redrawOrder. @done(26-08-20)
-- #44 - randomMove() tests and correct pass chat. @done(26-08-20)
-- #45 - checkX/getPiece crash for virtual chain minions fixed. @done(26-08-21)
-- #46 - pyramid overlap in densePieceGrid fixed. @done(26-08-20)
-- #47 - gnostica.ts now has a single chatLog() to resolve player names. @done(26-08-21)
-- #48 - pieceGridSlots()'s fallback order is now determined by the bumped piece's own orientation. @done(26-08-22)
-- #49 - use/play moves require at least one real power step to be complete (chain-tail declines and Fool/World stay exempt); also closed related gaps. @done(26-08-21)
-- #49 - follow-up - click-driven step messaging fixed. @done(26-08-22)
-- #50 - unified MinorCard/MajorCard into one Card class as with Decktet cards. @done(26-08-22)
-- #51 - test separate clusters. @done(26-08-20)
-- #52 - test double-letter coordinates. @done(26-08-20)
-- #53 - CellContents.card to uid. @done(26-08-20)
-- #54 - fixed a rare random-deal flake (not test-order pollution) in the Ace of Rods push test. @done(26-08-21)
-- #55 - added frame-stepping: render() returns one frame per step for multi-step major-arcana moves. @done(26-08-21)
-- #57 - added Wheel of Fortune's Random Card click support, plus two related bugs fixed along the way. @done(26-08-21)
-- #58 - randomMove: orientation on a wasteland cell now favors useful facings over ones pointing into more void. @done(26-08-22)
-- #59 - orient: a no-op reorientation (same facing as current) is now rejected and randomOrientMove() won't generate one. @done(26-08-22)
-- #60 - minion-picker buttons now read the piece's real orientation directly. @done(26-08-22)
-- #61 - validateMinorPower: 3 "still declined" branches now behave like the existing 0-step case. @done(26-08-22)
-- #62 - fixed major arcana's "looks valid" gap as in #61's minor-arcana fix. @done(26-08-22)
-- #63 - tree-pruning: doomed choices (upright minion for Rods, etc.) are now struck through/rejected immediately with a specific reason. @done(26-08-22)
-- #64 - better discard/draw messaging: both the basic action and the High Priestess version
-- #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances
-- #66 - test fool messaging on reload in production
-- #67 - "Use Territory"/"Play Card" buttons could show the active card's slug too, not just which action started the move @done(26-09-08)
-- #68 - an unresolvable bid tie (hands run dry) now ends the game with no winner, instead of falling back to an arbitrary turn order. @done(26-09-03)
-- #69 - Edit messages; trimmed/reworded validation text and dropped translation-key mimicry from powers.ts's trusted-path backstop errors. @done(26-09-06)
-- #70 - Improve Fool move strings; added a dedicated "continue" head word for resuming a paused power instead of re-typing use/play. @done(26-09-06)
-- #71 - Addressed Fool corner cases: declaring mid-stride, etc. @done(26-09-06)
-- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
-- #73 - Fix dark mode; cards/wasteland cells now default to a transparent backdrop instead of opaque white. @done(26-09-06)
-- #74 - Replaced "continue 00" move strings with an informative "play 9S (via 00)"/"decline 9S (via 00)" spelling, and extended to World. @done(26-09-08)
-- #75 - Pass in and fully report card name in gnostica_territory. @done(26-09-08)
-- #76 - Test reorienting a target minion. @done(26-09-09)
-- #77 - provisionalResult no longer downgrades complete (and was eventually removed altogether). @done(26-09-11)
-- #78 - Add an Undo button to the button bar for backing out of various multi-step moves, e.g., a Rods/Discs/Swords "piece" step once a target has been chosen.
-- #79 - Simplification plan Phase 2. @done(26-09-09)
-- #80 - Target selection for Rods/Discs/Swords "piece" mode now button-only. @done(26-09-09)
-- #81 - Cups "own" now uses the exact same trailing-optional-orientation primitive as any other target minion. @done(26-09-09)
-- #82 - Place sets an explicit direction (U), as do other new pieces. @done(26-09-09)
-- #83 - Simplification plan Phase 3 (partial). @done(26-09-09)
-- #84 - Separated the real recurring primitive underneath computeActionButtons' own button sets. @done(26-09-10)
-- #88 - Broke computeActionButtons up into its 8 named primitive states. @done(26-09-10)
-- #85 - Extracted randomMove() to a separate file for future deletion. @done(26-09-09)
-- #86 - Once gnostica/randomMove.ts is deleted (or no longer needs them - see #85), revert these 28 gnostica.ts methods from public back to private (all were private before #85; only made public so randomMove.ts could call them cross-file): buildViaMove, cloneLive, computeShortcutOpts, eligibleMinionsForActivate, eligibleMinionsForPlay, hasPiecesOnBoard, minorModeAvailability, minorTargetCell, pickleMove, pieceRefStr, primitiveToSuit, renderWindow, scoreFor, targetScore, validateHermitStep, validateHierophantReplace, validateHighPriestess, validateJudgementDraw, validateMagicianChoice, validateMajorPower, validateMinorPower, validateOrientAny, validateOrientMinion, validateSuitPrimitive, validateTradeHands, victimRefStr, applyPowerStep, validatePowerStep.
-- #87 - Remove randomMove.ts.
-- #88 - Also revert the IMinionRef/IStepOutcome/StepValidation/ALL_SUITS export/relocation changes #85 made once randomMove.ts is gone.
-- #89 - Test mutating the game state with a manual move in production (e.g. via Emu Ranchers) to see what the errors look like.
-- #90 - Replace this.liveMove (a stashed COPY of the raw parsed move string) with purpose-built fields render() actually reads, computed once inside move(..., {partial: true}) itself rather than re-derived from scratch by 5 different render-side functions every render() call. render()'s own signature is fixed by GameBase (just IRenderOpts - no move-string parameter, confirmed against _base.ts), so SOMETHING has to be stashed on the instance to bridge the handleClick -> move(partial) -> render() gap; the fix isn't eliminating that stash, it's stashing the right thing - the already-computed IPendingStep (feeds computeActionButtons' own pendingMinor construction directly, replacing parsePendingStep(pickleMove(this.liveMove))) plus whatever small explicit facts highlightedButtonValues/isPendingFirstPlacement/newHandCardUids need, matching Magnate's own this.highlights pattern - not a second copy of the move string, parsed or otherwise.
-- #91 - The Fool either didn't let me do the second half of the Sun or was so obscure in its notation that I didn't realize I could; needs retesting.
-- #92 - Replaced persisted pendingPower (whole IPowerFrame[] stack with minions/viaFool) with a minimal continued: string[] token stack. @done(26-09-09)
-- #93 - High Priestess round 2 now resumes as a bare "discard <uids> draw <n> (via 02)" (its step IS a discard/draw). buildViaMove/describePendingMove emit the "discard" head + tokens for a highPriestess pending; resumeStepSegments() folds "discard"-head tokens back into a step segment for the shared resume machinery; pickleMove drops rest[0] when it equals viaUid (keeps pickle(parse(x)) stable now that parseMove folds the anchor into rest[0]). @done(26-09-09)
-- #94 - Removed some undesigned flexibility in the move string. @done(26-09-10)
-- #95 - Replace cloneLive() with clone().
-- #96 - WORLD_CHOOSE_TARGET no longer tells the player to "click Decline" - a fresh World activation has no Decline button (#49). @done(26-09-10)
-- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
-- #98 - Eliminate fall-throughs to the default handler error from informative button-bar buttons.
-- #99 - Remove one-liner wrappers like invalid() and failureResult().
-- #100 - The message for distance moving a piece should not specify "your" piece. @done(2026-09-14)
-- #101 - In Hierophant, the new piece should inherit the enemy piece's orientation, not start as U. @done(2026-09-14)
-- #102 - Add structural testing of more steps to parseMove(). @done(2026-09-18)
-- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
-- #104 - I want to systematically add some words to move strings.  "with" before the minion.  "draw" before drawn card count (for Judgement), etc.  "create" for cups, move for rods, etc.  I think we can get rid of the piece vs tile distinction if we use cardUids when acting on "tiles". @done(2026-09-16)
-- #105 - Replace the single asUid head slot with a real chain for Magician with World and fix other issues with Magician picking up the suit. @done(2026-09-18)
-- #106 - Implement change to enemy pieceref (to be more of a pieceref) in create path fully. @done(2026-09-17)
-- #107 - Tests should not assemble internal structures manually.
-- #108 - Rods must provide a target, not just a distance. @done(2026-09-17)
-- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
-- #110 - Reattach last flag and the expected behavior of retaining the last flag don't seem to be working anymore. @done(2026-09-17)
-- #111 - handleClick(Core) should use the parsed move, not the old strings @done(2026-09-20)
-- #112 - Fix trailing orientation direction duplication issue. @done(2026-09-17)
-- #113 - Direction is used somewhere, so not removing after all. @done(2026-09-18)
-- #114 - Wheel of Fortune has its own create keyword "random" not currently in parseMove. @done(2026-09-19)
-- #115 - The question of case-sensitivity of directions.
-- #116 - On next rebase, credit Russ with his variant.
-- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)? 
-- #118 - Finish removing stepSegments.
-- #119 - Remove all echos of stepSegments and rest in other structures.
-- #120 - 
+Pre-release:
+	- #29 - reduce test count
+	- #66 - test fool messaging on reload in production
+	- #86 - Once gnostica/randomMove.ts is deleted (or no longer needs them - see #85), revert these 28 gnostica.ts methods from public back to private (all were private before #85; only made public so randomMove.ts could call them cross-file): buildViaMove, cloneLive, computeShortcutOpts, eligibleMinionsForActivate, eligibleMinionsForPlay, hasPiecesOnBoard, minorModeAvailability, minorTargetCell, pickleMove, pieceRefStr, primitiveToSuit, renderWindow, scoreFor, targetScore, validateHermitStep, validateHierophantReplace, validateHighPriestess, validateJudgementDraw, validateMagicianChoice, validateMajorPower, validateMinorPower, validateOrientAny, validateOrientMinion, validateSuitPrimitive, validateTradeHands, victimRefStr, applyPowerStep, validatePowerStep.
+	- #87 - Remove randomMove.ts.
+	- #88 - Also revert the IMinionRef/IStepOutcome/StepValidation/ALL_SUITS export/relocation changes #85 made once randomMove.ts is gone.
+	- #89 - Test mutating the game state with a manual move in production (e.g. via Emu Ranchers) to see what the errors look like.
+
+Miscellany:
+	- #64 - better discard/draw messaging: both the basic action and the High Priestess version
+	- #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances
+	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves, e.g., a Rods/Discs/Swords "piece" step once a target has been chosen.
+	- #91 - The Fool either didn't let me do the second half of the Sun or was so obscure in its notation that I didn't realize I could; needs retesting.
+	- #98 - Eliminate fall-throughs to the default handler error from informative button-bar buttons.
+	- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
+	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
+	- #115 - The question of case-sensitivity of directions.
+	- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)? 
+
+UX:
+	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
+	- #120 - Add another display mode for letters instead of icons.
+
+Refactoring:
+	- #90 - Replace this.liveMove with fields for render() to read, computed inside move(..., {partial: true}) itself rather than re-derived from scratch by 5 different render-side functions every render() call.
+	- #95 - Replace cloneLive() with clone().
+	- #99 - Remove one-liner wrappers like invalid() and failureResult().
+	- #107 - Tests should not assemble internal structures manually.
+	- #118 - Finish removing stepSegments.
+	- #119 - Remove all echos of stepSegments and rest from other structures.
+
+Rebasing:
+	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
+	- #116 - On next rebase, credit Russ with his variant.
+
