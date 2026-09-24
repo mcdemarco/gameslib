@@ -20,7 +20,7 @@ Miscellany:
 	- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
 	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
 	- #115 - The question of case-sensitivity of directions.
-	- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)? 
+	- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)?
 
 UX:
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
@@ -33,7 +33,9 @@ Refactoring:
 	- #107 - Tests should not assemble internal structures manually.
 	- #118 - Finish removing stepSegments.
 	- #119 - Remove all echos of stepSegments and rest from other structures.
-
+	- #121 - There's still an unprecendented amount of throwing of errors in the code.
+	- #122 - Determine whether the initial structural stepShapes are still needed, and whether the rest is as well.
+	
 Rebasing:
 	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
 	- #116 - On next rebase, credit Russ with his variant.
