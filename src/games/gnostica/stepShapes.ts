@@ -53,7 +53,7 @@ export type StepShape =
     | { status: "complete" };
 
 // Cups infers own/enemy/new from its argument's own shape (no mode word); Rods/Discs/Swords infer piece-vs-tile from a pips suffix on their verb's argument.
-const RDS_VERBS: Record<string, string> = { R: "move", D: "grow", S: "shrink" };
+export const RDS_VERBS: Record<string, string> = { R: "move", D: "grow", S: "shrink" };
 const PIECE_WITH_PIPS_RE = /^[a-z]{1,2}-?\d+\.[1-3](\.[neswu])?(\.\d+)?$/i;
 
 // A piece mode's own trailing reorientation is optional everywhere it appears, always spelled "orient <direction>".

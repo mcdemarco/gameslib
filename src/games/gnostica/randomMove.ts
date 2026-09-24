@@ -24,14 +24,14 @@
 // helper) is inlined locally instead (see its own docs below), so
 // gnostica.ts can import from here with no circular value import
 // either way.
-import { type GnosticaGame, type IMinionRef, type IStepOutcome, type IParsedMove } from "../gnostica";
+import { type GnosticaGame, type IMinionRef, type IStep, type IStepOutcome, type IParsedMove } from "../gnostica";
 import { shuffle } from "../../common";
 import { Card, allCards } from "../../common/tarot";
 import { cardPointValue } from "./cell";
 import { Orientation, allOrientations } from "./piece";
 import { GnosticaBoard } from "./board";
 import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana";
-import { ALL_SUITS, buildRdsTokens, buildHermitTokens, deriveMinorMode } from "./stepShapes";
+import { ALL_SUITS, buildRdsTokens, buildHermitTokens, deriveMinorMode, deriveHermitMode } from "./stepShapes";
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
 // docs there, including #98/#100's own) - duplicated rather than imported
@@ -74,6 +74,194 @@ export function buildViaMove(game: GnosticaGame, stepSegments: string[][], asUid
         steps: [{ action: declining ? "decline" : "play", card: game.activeCardUid() }],
     };
     return [game.pickleMove(head), ...steps.map(s => s.join(" "))].join("/");
+}
+
+// Converts a Rods/Discs/Swords primitive's own (suitUid, mode, args into the IStep fields pickleMove now reads.
+export function buildSuitStep(suitUid: string, minionRef: string, mode: string, args: string[]): IStep {
+    // `args` matches applyRods/applyDiscs/applySwords's own destructure - an empty/short `args` leaves the IStep fields unset
+    return suitUid === "C" ? buildCupsStep(minionRef, mode, args) : buildRdsStep(suitUid, mode, minionRef, args);
+}
+
+function buildRdsStep(suitUid: string, mode: string, minionRef: string, args: string[]): IStep {
+    const verb = suitUid === "R" ? "move" : suitUid === "D" ? "grow" : "shrink";
+    const step: IStep = { action: verb, withPiece: minionRef };
+    if (suitUid === "R") {
+        if (mode === "tile") {
+            const [cellStr, distStr] = args;
+            if (cellStr !== undefined) {
+                step.targetCell = cellStr;
+            }
+            if (distStr !== undefined) {
+                step.amount = parseInt(distStr, 10);
+            }
+            return step;
+        }
+        const [targetRef, distStr, orient] = args;
+        if (targetRef !== undefined) {
+            step.targetPiece = targetRef;
+        }
+        if (distStr !== undefined) {
+            step.amount = parseInt(distStr, 10);
+        }
+        if (orient !== undefined) {
+            step.direction = orient;
+        }
+        return step;
+    }
+    if (suitUid === "D") {
+        if (mode === "piece") {
+            const [targetRef, orient] = args;
+            if (targetRef !== undefined) {
+                step.targetPiece = targetRef;
+            }
+            if (orient !== undefined) {
+                step.direction = orient;
+            }
+            return step;
+        }
+        const [cellStr, uid] = args;
+        if (cellStr !== undefined) {
+            step.targetCell = cellStr;
+        }
+        if (uid !== undefined) {
+            step.card = uid;
+        }
+        return step;
+    }
+    // Swords
+    if (mode === "piece") {
+        const [targetRef, pipsStr, orient] = args;
+        if (targetRef !== undefined) {
+            step.targetPiece = targetRef;
+        }
+        if (pipsStr !== undefined) {
+            step.amount = parseInt(pipsStr, 10);
+        }
+        if (orient !== undefined) {
+            step.direction = orient;
+        }
+        return step;
+    }
+    const [cellStr, pipsStr, uid] = args;
+    if (cellStr !== undefined) {
+        step.targetCell = cellStr;
+    }
+    if (pipsStr !== undefined) {
+        step.amount = parseInt(pipsStr, 10);
+    }
+    if (uid !== undefined) {
+        step.card = uid;
+    }
+    return step;
+}
+
+// Cups' own (mode, args) into IStep shape; the "enemy" victim ref (#106) is a full piece ref, stored straight into targetPiece like any other target.
+function buildCupsStep(minionRef: string, mode: string, args: string[]): IStep {
+    const [cellStr, ...trailing] = args;
+    const step: IStep = { action: "create", withPiece: minionRef, atCell: cellStr };
+    if (mode === "own") {
+        // trailing is [seeded] or [seeded, correction] - the LAST one is always the real final facing; IStep has one direction slot, no room to mark "still just seeded".
+        const facing = trailing[trailing.length - 1];
+        if (facing !== undefined) {
+            step.direction = facing;
+        }
+    } else if (mode === "enemy") {
+        if (trailing[0] !== undefined) {
+            step.targetPiece = trailing[0];
+        }
+    } else if (trailing[0] !== undefined) {
+        step.card = trailing[0];
+    }
+    return step;
+}
+
+// Hermit's (minionRef, rest) into IStep fields. "piece" mode targets a piece ref; "tile" mode identifies the territory by its card uid, not a bare cell.
+function buildHermitStepFromArgs(minionRef: string, mode: string, args: string[]): IStep {
+    const step: IStep = { action: "fly", withPiece: minionRef };
+    const [primary, destCell, orient] = args;
+    if (primary !== undefined) {
+        if (mode === "tile") {
+            step.card = primary;
+        } else {
+            step.targetPiece = primary;
+        }
+    }
+    if (destCell !== undefined) {
+        step.targetCell = destCell;
+    }
+    if (mode === "piece" && orient !== undefined) {
+        step.direction = orient;
+    }
+    return step;
+}
+
+function buildHermitStep(minionRef: string, rest: string[]): IStep {
+    const derived = deriveHermitMode(rest);
+    if (derived === undefined) {
+        return { action: "fly", withPiece: minionRef };
+    }
+    return buildHermitStepFromArgs(minionRef, derived.mode, derived.args);
+}
+
+// Converts one power step's own already-assembled tokens into the matching IStep, for a caller with real tokens but no parsed move string (randomMove.ts).
+export function stepFromTokens(step: PowerStep, tokens: string[], borrowedPower?: string): IStep {
+    const withoutOrient = "special" in step && step.special === "orientMinion" && tokens[0]?.toLowerCase() === "orient" ? tokens.slice(1) : tokens;
+    const [minionRef, ...rest] = withoutOrient;
+    if ("primitive" in step) {
+        const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
+        const derived = deriveMinorMode(suitUid, rest);
+        return derived === undefined ? { action: "with", withPiece: minionRef } : buildSuitStep(suitUid, minionRef, derived.mode, derived.args);
+    }
+    if (step.special === "magicianChoice") {
+        // The suit is `borrowedPower` - the step's own tokens carry no suit letter now that #105's chained "as <uid> as <suit>" is the only spelling produced.
+        const derived = borrowedPower === undefined ? undefined : deriveMinorMode(borrowedPower, rest);
+        return derived === undefined ? { action: "with", withPiece: minionRef } : buildSuitStep(borrowedPower!, minionRef, derived.mode, derived.args);
+    }
+    return buildSpecialStep(step.special, minionRef, rest);
+}
+
+// Converts a completed special-power step's own (minionRef, rest) into the IStep fields pickleMove reads.
+function buildSpecialStep(special: SpecialPower, minionRef: string | undefined, rest: string[]): IStep {
+    switch (special) {
+        case "orientMinion":
+            // orientMinion's "orient" IS its own bare subhead - the acting minion is also the target, so both fields carry the same ref.
+            return { action: "orient", withPiece: minionRef, targetPiece: minionRef, direction: rest[0] };
+        case "tradeHands":
+            return { action: "trade", withPiece: minionRef, targetPiece: rest[1] };
+        case "orientAny":
+            return { action: "orient", withPiece: minionRef, targetPiece: rest[1], direction: rest[2] };
+        case "hierophantReplace":
+            // rest[3] (a real correction) always wins over rest[2] (the seeded default, "?" and all).
+            return { action: "replace", withPiece: minionRef, targetPiece: rest[1], direction: rest[3] ?? rest[2] };
+        case "hermitTeleport":
+            return buildHermitStep(minionRef!, rest);
+        case "judgementDraw":
+            return { action: "draw", withPiece: minionRef, cardList: rest.slice(1) };
+        case "magicianChoice": {
+            const [suitLetter, ...suitRest] = rest;
+            const derived = suitLetter === undefined ? undefined : deriveMinorMode(suitLetter, suitRest);
+            if (suitLetter === undefined || derived === undefined) {
+                return { action: "create", withPiece: minionRef };
+            }
+            return suitLetter === "C"
+                ? buildCupsStep(minionRef!, derived.mode, derived.args)
+                : buildRdsStep(suitLetter, derived.mode, minionRef!, derived.args);
+        }
+        case "highPriestess": {
+            // A bot chain's High Priestess tokens lead with a literal "discard" (see buildRandomStepForPowerStep).
+            const body = rest[0] === "discard" ? rest.slice(1) : rest;
+            const drawIdx = body.indexOf("draw");
+            const cardList = drawIdx === -1 ? body : body.slice(0, drawIdx);
+            const step: IStep = { action: "discard", cardList };
+            if (drawIdx !== -1 && body[drawIdx + 1] !== undefined) {
+                step.amount = parseInt(body[drawIdx + 1], 10);
+            }
+            return step;
+        }
+        default:
+            // fool/worldUseAny carry no meaningful args of their own - a bare action is enough.
+            return { action: special, withPiece: minionRef };
+    }
 }
 
 export function generateRandomMove(game: GnosticaGame): string {
@@ -794,7 +982,7 @@ function findRandomPrimitiveChoice(
         for (const { mode, candidates } of orderedModes) {
             const ordered = weightedShuffle(candidates, c => c.weight);
             for (const { args } of ordered) {
-                const step = game.buildSuitStep(suitUid, game.pieceRefStr(minion), mode, args);
+                const step = buildSuitStep(suitUid, game.pieceRefStr(minion), mode, args);
                 const check = game.validateSuitPrimitive(suitUid, minion, step, opts);
                 if (!check.failed) {
                     return { minion, mode, args };
@@ -995,8 +1183,7 @@ function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower,
         case "hierophantReplace": return buildRandomOrientAnyOrHierophantTokens(game, minions, "hierophantReplace");
         case "hermitTeleport": return buildRandomHermitTokens(game, minions);
         case "judgementDraw": return buildRandomJudgementDrawTokens(game, minions);
-        // Leading "discard" (see resumeStepSegments' own docs, gnostica.ts)
-        // is this step's own real token, unlike buildRandomHighPriestessTokens'
+        // Leading "discard" is this step's own real token, unlike buildRandomHighPriestessTokens'
         // OTHER caller below, which feeds bare tokens to buildViaMove -
         // that one already prepends "discard" itself for the resume's
         // own head word.
@@ -1048,7 +1235,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
             return [];
         }
         const derived = deriveMinorMode(suitUid, tokens.slice(1))!;
-        const step = game.buildSuitStep(suitUid, tokens[0], derived.mode, derived.args);
+        const step = buildSuitStep(suitUid, tokens[0], derived.mode, derived.args);
         const result = game.validateMinorPower(suitUid, card.uid, eligible, [step]);
         // Genuinely submittable is complete !== -1, not === 1 - see the
         // top-level loop's own matching docs. A Rods/Discs/Swords "piece"
@@ -1107,7 +1294,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
             break;
         }
         stepSegments.push(tokens);
-        const istep = ctx.stepFromTokens(step, tokens);
+        const istep = stepFromTokens(step, tokens);
         const result = ctx.validatePowerStep(step, minions, istep, def, i, stepSegments.length);
         if (result.failed) {
             stepSegments.pop();
@@ -1121,7 +1308,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         }
     }
     const isCleanSuccess = (segs: string[][]): boolean => {
-        const steps = segs.map((toks, i) => game.stepFromTokens(def.powers[i], toks));
+        const steps = segs.map((toks, i) => stepFromTokens(def.powers[i], toks));
         const result = game.validateMajorPower(def, eligible, steps);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see

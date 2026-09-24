@@ -31,7 +31,7 @@ Refactoring:
 	- #95 - Replace cloneLive() with clone().
 	- #99 - Remove one-liner wrappers like invalid() and failureResult().
 	- #107 - Tests should not assemble internal structures manually.
-	- #118 - Finish removing stepSegments.
+	- #118 - Finish removing stepSegments. @done(2026-09-24)
 	- #119 - Remove all echos of stepSegments and rest from other structures.
 	- #121 - There's still an unprecendented amount of throwing of errors in the code.
 	- #122 - Determine whether the initial structural stepShapes are still needed, and whether the rest is as well.

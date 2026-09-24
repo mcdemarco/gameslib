@@ -30,7 +30,7 @@ import {
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import { generateRandomMove } from "./gnostica/randomMove";
-import { ALL_SUITS, MINOR_MODES, HERMIT_MODES, primitiveStepShape, deriveMinorMode, deriveHermitMode, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, StepShape } from "./gnostica/stepShapes";
+import { ALL_SUITS, RDS_VERBS, MINOR_MODES, HERMIT_MODES, primitiveStepShape, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, StepShape } from "./gnostica/stepShapes";
 import i18next from "i18next";
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
@@ -2564,198 +2564,25 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.describePendingMove(pending, [...pending.priorSteps, currentStep]);
     }
 
-    // Converts a Rods/Discs/Swords primitive's own (suitUid, mode, args into the IStep fields pickleMove now reads.
-    public buildSuitStep(suitUid: string, minionRef: string, mode: string, args: string[]): IStep {
-        // `args` matches applyRods/applyDiscs/applySwords's own destructure - an empty/short `args` leaves the IStep fields unset
-        return suitUid === "C" ? this.buildCupsStep(minionRef, mode, args) : this.buildRdsStep(suitUid, mode, minionRef, args);
-    }
-
-    private buildRdsStep(suitUid: string, mode: string, minionRef: string, args: string[]): IStep {
-        const verb = suitUid === "R" ? "move" : suitUid === "D" ? "grow" : "shrink";
-        const step: IStep = { action: verb, withPiece: minionRef };
-        if (suitUid === "R") {
-            if (mode === "tile") {
-                const [cellStr, distStr] = args;
-                if (cellStr !== undefined) {
-                    step.targetCell = cellStr;
-                }
-                if (distStr !== undefined) {
-                    step.amount = parseInt(distStr, 10);
-                }
-                return step;
-            }
-            const [targetRef, distStr, orient] = args;
-            if (targetRef !== undefined) {
-                step.targetPiece = targetRef;
-            }
-            if (distStr !== undefined) {
-                step.amount = parseInt(distStr, 10);
-            }
-            if (orient !== undefined) {
-                step.direction = orient;
-            }
-            return step;
-        }
-        if (suitUid === "D") {
-            if (mode === "piece") {
-                const [targetRef, orient] = args;
-                if (targetRef !== undefined) {
-                    step.targetPiece = targetRef;
-                }
-                if (orient !== undefined) {
-                    step.direction = orient;
-                }
-                return step;
-            }
-            const [cellStr, uid] = args;
-            if (cellStr !== undefined) {
-                step.targetCell = cellStr;
-            }
-            if (uid !== undefined) {
-                step.card = uid;
-            }
-            return step;
-        }
-        // Swords
-        if (mode === "piece") {
-            const [targetRef, pipsStr, orient] = args;
-            if (targetRef !== undefined) {
-                step.targetPiece = targetRef;
-            }
-            if (pipsStr !== undefined) {
-                step.amount = parseInt(pipsStr, 10);
-            }
-            if (orient !== undefined) {
-                step.direction = orient;
-            }
-            return step;
-        }
-        const [cellStr, pipsStr, uid] = args;
-        if (cellStr !== undefined) {
-            step.targetCell = cellStr;
-        }
-        if (pipsStr !== undefined) {
-            step.amount = parseInt(pipsStr, 10);
-        }
-        if (uid !== undefined) {
-            step.card = uid;
-        }
-        return step;
-    }
-
-    // Cups' own (mode, args) into IStep shape; the "enemy" victim ref (#106) is a full piece ref, stored straight into targetPiece like any other target.
-    private buildCupsStep(minionRef: string, mode: string, args: string[]): IStep {
-        const [cellStr, ...trailing] = args;
-        const step: IStep = { action: "create", withPiece: minionRef, atCell: cellStr };
-        if (mode === "own") {
-            // trailing is [seeded] or [seeded, correction] - the LAST one is always the real final facing; IStep has one direction slot, no room to mark "still just seeded".
-            const facing = trailing[trailing.length - 1];
-            if (facing !== undefined) {
-                step.direction = facing;
-            }
-        } else if (mode === "enemy") {
-            if (trailing[0] !== undefined) {
-                step.targetPiece = trailing[0];
-            }
-        } else if (trailing[0] !== undefined) {
-            step.card = trailing[0];
-        }
-        return step;
-    }
-
-    // Hermit's (minionRef, rest) into IStep fields. "piece" mode targets a piece ref; "tile" mode identifies the territory by its card uid, not a bare cell.
-    private buildHermitStepFromArgs(minionRef: string, mode: string, args: string[]): IStep {
-        const step: IStep = { action: "fly", withPiece: minionRef };
-        const [primary, destCell, orient] = args;
-        if (primary !== undefined) {
-            if (mode === "tile") {
-                step.card = primary;
-            } else {
-                step.targetPiece = primary;
-            }
-        }
-        if (destCell !== undefined) {
-            step.targetCell = destCell;
-        }
-        if (mode === "piece" && orient !== undefined) {
-            step.direction = orient;
-        }
-        return step;
-    }
-
-    private buildHermitStep(minionRef: string, rest: string[]): IStep {
-        const derived = deriveHermitMode(rest);
-        if (derived === undefined) {
-            return { action: "fly", withPiece: minionRef };
-        }
-        return this.buildHermitStepFromArgs(minionRef, derived.mode, derived.args);
-    }
-
-    // Converts one power step's own already-assembled tokens into the matching IStep, for a caller with real tokens but no parsed move string (randomMove.ts).
-    public stepFromTokens(step: PowerStep, tokens: string[], borrowedPower?: string): IStep {
-        const withoutOrient = "special" in step && step.special === "orientMinion" && tokens[0]?.toLowerCase() === "orient" ? tokens.slice(1) : tokens;
-        const [minionRef, ...rest] = withoutOrient;
-        if ("primitive" in step) {
-            const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-            const derived = deriveMinorMode(suitUid, rest);
-            return derived === undefined ? { action: "with", withPiece: minionRef } : this.buildSuitStep(suitUid, minionRef, derived.mode, derived.args);
-        }
-        if (step.special === "magicianChoice") {
-            // The suit is `borrowedPower` - the step's own tokens carry no suit letter now that #105's chained "as <uid> as <suit>" is the only spelling produced.
-            const derived = borrowedPower === undefined ? undefined : deriveMinorMode(borrowedPower, rest);
-            return derived === undefined ? { action: "with", withPiece: minionRef } : this.buildSuitStep(borrowedPower!, minionRef, derived.mode, derived.args);
-        }
-        return this.buildSpecialStep(step.special, minionRef, rest);
-    }
-
-    // Converts a completed special-power step's own (minionRef, rest) into the IStep fields pickleMove reads; shared by parsePendingStep and every handle*Click function.
-    private buildSpecialStep(special: SpecialPower, minionRef: string | undefined, rest: string[]): IStep {
+    // The bare step for a special power whose minion is chosen and nothing else is yet - just its action and minion ref.
+    private anchorStep(special: SpecialPower, ref: string): IStep {
         switch (special) {
-            case "orientMinion":
-                // orientMinion's "orient" IS its own bare subhead - the acting minion is also the target, so both fields carry the same ref.
-                return { action: "orient", withPiece: minionRef, targetPiece: minionRef, direction: rest[0] };
-            case "tradeHands":
-                return { action: "trade", withPiece: minionRef, targetPiece: rest[1] };
-            case "orientAny":
-                return { action: "orient", withPiece: minionRef, targetPiece: rest[1], direction: rest[2] };
-            case "hierophantReplace":
-                // rest[3] (a real correction) always wins over rest[2] (the seeded default, "?" and all).
-                return { action: "replace", withPiece: minionRef, targetPiece: rest[1], direction: rest[3] ?? rest[2] };
-            case "hermitTeleport":
-                return this.buildHermitStep(minionRef!, rest);
-            case "judgementDraw":
-                return { action: "draw", withPiece: minionRef, cardList: rest.slice(1) };
-            case "magicianChoice": {
-                const [suitLetter, ...suitRest] = rest;
-                const derived = suitLetter === undefined ? undefined : deriveMinorMode(suitLetter, suitRest);
-                if (suitLetter === undefined || derived === undefined) {
-                    return { action: "create", withPiece: minionRef };
-                }
-                return suitLetter === "C"
-                    ? this.buildCupsStep(minionRef!, derived.mode, derived.args)
-                    : this.buildRdsStep(suitLetter, derived.mode, minionRef!, derived.args);
-            }
-            case "highPriestess": {
-                // The resume-seeded path (noMinionRef) hands over `rest` unstripped, so a literal leading "discard" can still be here.
-                const body = rest[0] === "discard" ? rest.slice(1) : rest;
-                const drawIdx = body.indexOf("draw");
-                const cardList = drawIdx === -1 ? body : body.slice(0, drawIdx);
-                const step: IStep = { action: "discard", cardList };
-                if (drawIdx !== -1 && body[drawIdx + 1] !== undefined) {
-                    step.amount = parseInt(body[drawIdx + 1], 10);
-                }
-                return step;
-            }
-            default:
-                // fool/worldUseAny carry no meaningful args of their own - a bare action is enough.
-                return { action: special, withPiece: minionRef };
+            // orientMinion's acting minion is also its target, so pickle omits the "with" prefix (the bare "orient <ref>" grammar).
+            case "orientMinion": return { action: "orient", withPiece: ref, targetPiece: ref };
+            case "tradeHands": return { action: "trade", withPiece: ref };
+            case "orientAny": return { action: "orient", withPiece: ref };
+            case "hierophantReplace": return { action: "replace", withPiece: ref };
+            case "hermitTeleport": return { action: "fly", withPiece: ref };
+            case "judgementDraw": return { action: "draw", withPiece: ref, cardList: [] };
+            case "magicianChoice": return { action: "create", withPiece: ref };
+            default: return { action: special, withPiece: ref };
         }
     }
 
     // The minion is chosen but nothing else about this step is yet - every IStep needs SOME action, so this seeds just a bare "with <ref>" anchor, mirroring parseMove's own tolerance.
     private buildAnchorMove(pending: IPendingStep, ref: string): string {
         if (pending.special !== undefined) {
-            return this.assembleStepMove(pending, this.buildSpecialStep(pending.special, ref, []));
+            return this.assembleStepMove(pending, this.anchorStep(pending.special, ref));
         }
         return `${this.describePendingMove(pending, pending.priorSteps)}/with ${ref}`;
     }
@@ -2771,44 +2598,45 @@ export class GnosticaGame extends GameBaseSequenced {
             let step: IStep;
             if (targetRef === "own") {
                 // Trailing "?" - the new piece's default facing isn't yet a deliberate choice (mirrors "place"'s identical convention for the first piece).
-                step = this.buildCupsStep(minionRef, "own", [targetCell, "U?"]);
+                step = { action: "create", withPiece: minionRef, atCell: targetCell, direction: "U?" };
             } else if (targetRef === "new") {
-                step = this.buildCupsStep(minionRef, "new", [targetCell]);
+                step = { action: "create", withPiece: minionRef, atCell: targetCell };
             } else {
-                step = this.buildCupsStep(minionRef, "enemy", [targetCell, targetRef]);
+                step = { action: "create", withPiece: minionRef, atCell: targetCell, targetPiece: targetRef };
             }
             return this.assembleStepMove(pending, step);
         }
         const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
         // A size-1 minion has only one legal dist/pips value, supplied here; a size>1 minion is left unset so the step reads as still-incomplete, not a guessed default.
-        const onlyCount = minionPiece.size === 1 ? "1" : undefined;
+        const onlyCount = minionPiece.size === 1 ? 1 : undefined;
         const isPieceTarget = targetRef.includes(".");
+        const action = RDS_VERBS[suitUid];
         let step: IStep;
-        if (suitUid === "R") {
-            // Rods' "tile" mode always seeds a real distance of 1 - a further destination-cell click is how the player reaches any distance beyond 1.
-            step = isPieceTarget
-                ? this.buildRdsStep("R", "piece", minionRef, onlyCount !== undefined ? [targetRef, onlyCount] : [targetRef])
-                : this.buildRdsStep("R", "tile", minionRef, [targetCell, "1"]);
-        } else if (suitUid === "D") {
-            step = isPieceTarget
-                ? this.buildRdsStep("D", "piece", minionRef, [targetRef])
-                : this.buildRdsStep("D", "tile", minionRef, [targetCell]);
+        if (suitUid === "D") {
+            step = isPieceTarget ? { action, withPiece: minionRef, targetPiece: targetRef } : { action, withPiece: minionRef, targetCell };
+        } else if (isPieceTarget) {
+            step = { action, withPiece: minionRef, targetPiece: targetRef };
+            if (onlyCount !== undefined) {
+                step.amount = onlyCount;
+            }
         } else {
-            step = isPieceTarget
-                ? this.buildRdsStep("S", "piece", minionRef, onlyCount !== undefined ? [targetRef, onlyCount] : [targetRef])
-                : this.buildRdsStep("S", "tile", minionRef, [targetCell, "1"]);
+            // Rods'/Swords' "tile" mode always seeds a real distance/pips of 1 - a further destination-cell click is how the player reaches any distance beyond 1.
+            step = { action, withPiece: minionRef, targetCell, amount: 1 };
         }
         return this.assembleStepMove(pending, step);
     }
 
-    // Hermit's version of buildTargetedStepMove, but using buildHermitStepFromArgs instead of buildRdsStep.
+    // Hermit's version of buildTargetedStepMove.
     private buildTargetedHermitMove(pending: IPendingStep, targetRef: string): string {
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         if (targetRef.includes(".")) {
-            return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "piece", [targetRef]));
+            return this.assembleStepMove(pending, { action: "fly", withPiece: minionRef, targetPiece: targetRef });
         }
         const cardUid = this.board.get(...this.minorTargetCell(pending.minion))?.cardUid;
-        const step = this.buildHermitStepFromArgs(minionRef, "tile", cardUid !== undefined ? [cardUid] : []);
+        const step: IStep = { action: "fly", withPiece: minionRef };
+        if (cardUid !== undefined) {
+            step.card = cardUid;
+        }
         return this.assembleStepMove(pending, step);
     }
 
@@ -2824,9 +2652,9 @@ export class GnosticaGame extends GameBaseSequenced {
         // Fills the rebuilt move's selector slot; the "piece"-shape branch's own self-or-facing target instead goes through pickPieceTargetClick.
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
-        // Only ever reached for R/D/S - every Cups branch below returns early instead (Cups carries no mode word to rebuild against).
-        const rebuild = (rest: string[]): string =>
-            this.assembleStepMove(pending, this.buildRdsStep(suitUid, mode, minionRef, rest));
+        // Only ever reached for R/D/S - every Cups branch below returns early instead. Always a fresh step, so stale trailing fields (e.g. a facing correction) drop off.
+        const rebuild = (fields: Partial<IStep>): string =>
+            this.assembleStepMove(pending, { action: RDS_VERBS[suitUid], withPiece: minionRef, ...fields });
 
         if (config.shape === "cell") {
             const [tx, ty] = this.minorTargetCell(pending.minion);
@@ -2838,14 +2666,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const cell = GnosticaBoard.coords2algebraic(tx, ty);
                 // Cups carries no mode word - built directly here instead of via `rebuild`, which would wrongly splice "own" back in.
-                return this.assembleStepMove(pending, this.buildCupsStep(minionRef, "own", [cell, dir]));
+                return this.assembleStepMove(pending, { action: "create", withPiece: minionRef, atCell: cell, direction: dir });
             }
             // Rods' "tile" mode: the cell is fixed (the facing cell) - a click instead sets DISTANCE, anchored on the facing cell rather than a chosen piece target.
             if (suitUid === "R") {
                 const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
                 for (let n = 1; n <= minionPiece.size; n++) {
                     if (x === tx + dx * n && y === ty + dy * n) {
-                        return rebuild([pending.istep.targetCell!, String(n)]);
+                        return rebuild({ targetCell: pending.istep.targetCell!, amount: n });
                     }
                 }
                 return undefined;
@@ -2855,10 +2683,10 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // "new" (Cups) - the only remaining arg is a hand-card uid, nothing to cycle here; "enemy"'s victim is already chosen the instant the mode is inferred.
             if (suitUid === "C") {
-                return mode === "new" ? this.assembleStepMove(pending, this.buildCupsStep(minionRef, "new", [pending.istep.atCell!])) : undefined;
+                return mode === "new" ? this.assembleStepMove(pending, { action: "create", withPiece: minionRef, atCell: pending.istep.atCell! }) : undefined;
             }
             // "tile" (Discs) - same as "new" above.
-            return rebuild([pending.istep.targetCell!]);
+            return rebuild({ targetCell: pending.istep.targetCell! });
         }
 
         if (config.shape === "piece") {
@@ -2877,7 +2705,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
                 for (let n = 1; n <= minionPiece.size; n++) {
                     if (x === target.x + dx * n && y === target.y + dy * n) {
-                        return rebuild([pending.istep.targetPiece, String(n)]);
+                        return rebuild({ targetPiece: pending.istep.targetPiece, amount: n });
                     }
                 }
             }
@@ -2903,13 +2731,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 return undefined;
             }
             // The "core" required args (target, plus distance/pips for R/S - D.piece has no second arg), dropping any stale trailing facing correction.
-            const core = suitUid === "D" ? [pending.istep.targetPiece] : [pending.istep.targetPiece, pending.istep.amount!.toString()];
+            const core: Partial<IStep> = suitUid === "D" ? { targetPiece: pending.istep.targetPiece } : { targetPiece: pending.istep.targetPiece, amount: pending.istep.amount! };
             // This trailing facing is only ever an OPTIONAL addition, so a click landing back on the piece's own UNCORRECTED facing completes the step, not a no-op.
             if (dir === targetPiece.orientation) {
                 const baseMove = rebuild(core);
                 return { move: baseMove, valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
             }
-            return rebuild([...core, dir]);
+            return rebuild({ ...core, direction: dir });
         }
 
         return undefined;
@@ -2923,19 +2751,17 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const key = `${pending.suitUid}.${mode}`;
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-        if (key === "C.new" && pending.istep.atCell !== undefined && pending.istep.card === undefined) {
-            // Cups carries no mode word - "at <cell> create" is already exactly what's typed so far, the uid is the only thing this click adds.
-            return this.assembleStepMove(pending, this.buildCupsStep(minionRef, "new", [pending.istep.atCell, uid]));
-        }
-        let rest: string[];
-        if (key === "D.tile" && pending.istep.targetCell !== undefined && pending.istep.card === undefined) {
-            rest = [pending.istep.targetCell, uid];
-        } else if (key === "S.tile" && pending.istep.targetCell !== undefined && pending.istep.amount !== undefined && pending.istep.card === undefined) {
-            rest = [pending.istep.targetCell, pending.istep.amount.toString(), uid];
-        } else {
+        const { istep } = pending;
+        const waitingForCard = istep.card === undefined && (
+            (key === "C.new" && istep.atCell !== undefined)
+            || (key === "D.tile" && istep.targetCell !== undefined)
+            || (key === "S.tile" && istep.targetCell !== undefined && istep.amount !== undefined)
+        );
+        if (!waitingForCard) {
             return undefined;
         }
-        return this.assembleStepMove(pending, this.buildRdsStep(pending.suitUid!, mode, minionRef, rest));
+        // Everything typed so far stays; the uid is the only thing this click adds.
+        return this.assembleStepMove(pending, { ...istep, withPiece: minionRef, card: uid });
     }
 
     // Shared self-or-facing-cell target pick, used by tradeHands/orientAny/hierophantReplace/hermitTeleport's "piece" mode alike; undefined when the click is off-target.
@@ -3070,13 +2896,13 @@ export class GnosticaGame extends GameBaseSequenced {
              if (cardUid === undefined) {
                 return undefined;
             }
-            return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "tile", [cardUid, cell]));
+            return this.assembleStepMove(pending, { action: "fly", withPiece: minionRef, card: cardUid, targetCell: cell });
         }
         // "piece" mode: the target is a genuine self-or-facing-cell choice until a destination is picked, then further clicks only replace it.
         if (pending.istep.targetCell === undefined) {
             const targetResult = this.pickPieceTargetClick(pending.minion, x, y, cell, pending);
             if (typeof targetResult === "string") {
-                return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "piece", [targetResult]));
+                return this.assembleStepMove(pending, { action: "fly", withPiece: minionRef, targetPiece: targetResult });
             }
             if (targetResult !== undefined) {
                 return targetResult; // NO_PIECE_THERE at the facing cell
@@ -3087,9 +2913,9 @@ export class GnosticaGame extends GameBaseSequenced {
             if (pending.istep.targetPiece === undefined) {
                 return undefined;
             }
-            return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "piece", [pending.istep.targetPiece, cell]));
+            return this.assembleStepMove(pending, { action: "fly", withPiece: minionRef, targetPiece: pending.istep.targetPiece, targetCell: cell });
         }
-        return this.assembleStepMove(pending, this.buildHermitStepFromArgs(minionRef, "piece", [pending.istep.targetPiece!, cell]));
+        return this.assembleStepMove(pending, { action: "fly", withPiece: minionRef, targetPiece: pending.istep.targetPiece!, targetCell: cell });
     }
 
     // worldUseAny: a click on any major currently on the board (except World itself) picks it as the borrowed card.
@@ -3202,7 +3028,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                             }
                             const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-                            return this.assembleStepMove(pending, this.buildRdsStep("S", "piece", minionRef, [pending.istep.targetPiece!, n]));
+                            return this.assembleStepMove(pending, { action: "shrink", withPiece: minionRef, targetPiece: pending.istep.targetPiece!, amount: parseInt(n, 10) });
                         }
                         if (value.startsWith("magician_")) {
                             // Stage 1 of magicianChoice - picks the suit letter, landing in the head as "as <suit>"; every following click then uses ordinary suit-mode machinery.
