@@ -1217,6 +1217,17 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.steps.push(step);
                         continue;
                     }
+                } else if (step.action === "shrink" || step.action === "move") {
+                    //No number but a number was needed for shrinks or moves.
+                    if (segment.length === 0 && lastStep) {
+                        //Partial move.
+                        step.complete = -1;
+                        pm.steps.push(step);
+                        break;
+                    } else {
+                        pm.error = "MISSING_STEP_CONTENT";
+                        break;
+                    }
                 }
                 
                 if (nextseg === "to") {

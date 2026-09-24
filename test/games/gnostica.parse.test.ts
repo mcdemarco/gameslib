@@ -152,4 +152,10 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("orient m0 U/blah blah blah")).to.have.deep.property("valid", false);
     });
 
+    it ("Rejects bad moves", () =>  {
+        expect(g.parseMove("shrink n0.1 orient N")).to.have.deep.property("valid", false);
+        expect(g.parseMove("grow n0 orient N")).to.have.deep.property("valid", false);
+        expect(g.parseMove("grow n0 2")).to.have.deep.property("valid", false);
+        expect(g.parseMove("grow n0 to n1")).to.have.deep.property("valid", false);
+    });
 });
