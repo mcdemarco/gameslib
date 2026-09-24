@@ -31,7 +31,7 @@ import { cardPointValue } from "./cell";
 import { Orientation, allOrientations } from "./piece";
 import { GnosticaBoard } from "./board";
 import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana";
-import { ALL_SUITS, RDS_VERBS } from "./stepShapes";
+import { ALL_SUITS, RDS_VERBS } from "./powers";
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
 // docs there, including #98/#100's own) - duplicated rather than imported
@@ -50,7 +50,7 @@ function chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[]
     return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
 }
 
-// The verb a suit's primitive step spells; Cups' is "create", the others come from stepShapes.
+// The verb a suit's primitive step spells; Cups' is "create", the others come from RDS_VERBS.
 function suitAction(suitUid: string): string {
     return suitUid === "C" ? "create" : RDS_VERBS[suitUid];
 }

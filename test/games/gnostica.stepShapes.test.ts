@@ -1,11 +1,11 @@
 import "mocha";
 import { expect } from "chai";
-import { SPECIAL_STEP_SHAPES } from "../../src/games/gnostica/stepShapes";
+import { SPECIAL_STEP_SHAPES } from "../../src/games/gnostica/powers";
 
 describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
     // These functions are the single source of truth apply, validate, and
     // the UI preview walker (parsePendingStep) each consult independently
-    // - see stepShapes.ts's own docs on why. Pinned here at the unit level
+    // - see SPECIAL_STEP_SHAPES' own docs in powers.ts on why. Pinned here at the unit level
     // rather than only indirectly through gnostica.test.ts's own apply/
     // validate/click-flow tests, so a regression can't surface as those
     // three quietly disagreeing with each other instead. IStep field

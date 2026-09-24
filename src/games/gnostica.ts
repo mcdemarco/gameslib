@@ -27,11 +27,27 @@ import {
     checkOrientMinion, checkOrientAny, checkHierophantReplace,
     checkHermitMovePiece, checkHermitMoveTerritory, checkTradeHands,
     checkJudgementDraw, checkDiscardDraw, checkFool, checkWorldChoosePower,
+    ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES,
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import { generateRandomMove } from "./gnostica/randomMove";
-import { ALL_SUITS, RDS_VERBS, RDS_TARGET_LABELS, MINOR_MODE_NAMES, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES } from "./gnostica/stepShapes";
+
 import i18next from "i18next";
+
+// The modes each suit's power can take: Cups infers own/enemy/new from its target, the others piece vs tile.
+const MINOR_MODE_NAMES: Record<string, string[]> = {
+    C: ["own", "enemy", "new"],
+    R: ["piece", "tile"],
+    D: ["piece", "tile"],
+    S: ["piece", "tile"],
+};
+
+// The target-button wording for Rods/Discs/Swords: the verb prefixing each piece candidate, and the whole-territory option.
+const RDS_TARGET_LABELS: Record<string, { verb: string; tile: string }> = {
+    R: { verb: "Move", tile: "Push Territory" },
+    D: { verb: "Grow", tile: "Grow Territory" },
+    S: { verb: "Attack", tile: "Attack Territory" },
+};
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 
