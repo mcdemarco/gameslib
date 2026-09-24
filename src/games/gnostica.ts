@@ -30,7 +30,7 @@ import {
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import { generateRandomMove } from "./gnostica/randomMove";
-import { ALL_SUITS, RDS_VERBS, MINOR_MODES, HERMIT_MODES, primitiveStepShape, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, StepShape } from "./gnostica/stepShapes";
+import { ALL_SUITS, RDS_VERBS, RDS_TARGET_LABELS, MINOR_MODE_NAMES, primitiveStepShape, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, StepShape } from "./gnostica/stepShapes";
 import i18next from "i18next";
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
@@ -2101,28 +2101,28 @@ export class GnosticaGame extends GameBaseSequenced {
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
         if (suitUid === "C") {
             const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
-            const options: ChoiceOption[] = [{ value: "own", label: MINOR_MODES.C.own.label, disabledReason: availability.get("own") }];
+            const options: ChoiceOption[] = [{ value: "own", label: "Create Minion", disabledReason: availability.get("own") }];
             cellPieces.forEach((p, index) => {
                 if (p.owner !== this.currplayer) {
                     options.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Capture ${this.textFormat(p)}`, disabledReason: availability.get("enemy") });
                 }
             });
-            options.push({ value: "new", label: MINOR_MODES.C.new.label, disabledReason: availability.get("new") });
+            options.push({ value: "new", label: "Create Territory", disabledReason: availability.get("new") });
             return options;
         }
-        const verb = MINOR_MODES[suitUid].piece.label.replace(" Piece", "");
+        const { verb, tile } = RDS_TARGET_LABELS[suitUid];
         return [
-            { value: targetCell, label: MINOR_MODES[suitUid].tile.label, disabledReason: availability.get("tile") },
+            { value: targetCell, label: tile, disabledReason: availability.get("tile") },
             ...this.pieceCandidateOptions(pending, p => `${verb} ${this.textFormat(p)}`, { disabledReason: availability.get("piece") }),
         ];
     }
 
-    // Hermit's own twin of suitTargetCandidates - same tile-plus-self-plus-every-co-located-piece enumeration, via HERMIT_MODES' own labels.
+    // Hermit's own twin of suitTargetCandidates - same tile-plus-self-plus-every-co-located-piece enumeration.
     private hermitTargetCandidates(pending: IPendingStep): ChoiceOption[] {
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
         return [
-            { value: targetCell, label: HERMIT_MODES.tile.label },
+            { value: targetCell, label: "Push Territory" },
             ...this.pieceCandidateOptions(pending, p => `Teleport ${this.textFormat(p)}`),
         ];
     }
@@ -2483,7 +2483,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const cell = GnosticaBoard.coords2algebraic(tx, ty);
         const hand = this.hands[this.currplayer - 1];
         const result = new Map<string, { key: string; params?: Record<string, unknown> } | undefined>();
-        for (const mode of Object.keys(MINOR_MODES[suitUid])) {
+        for (const mode of MINOR_MODE_NAMES[suitUid]) {
             switch (`${suitUid}.${mode}`) {
                 case "C.own":
                     result.set(mode, (targetT === undefined || targetT.canAdd(pending.opts.ignoreCapacity === true))
@@ -2666,7 +2666,6 @@ export class GnosticaGame extends GameBaseSequenced {
         // Only ever called for a suit-shaped pending - suitUid is guaranteed set here.
         const suitUid = pending.suitUid!;
         const mode = this.pendingMode(pending)!;
-        const config = MINOR_MODES[suitUid][mode];
         // Fills the rebuilt move's selector slot; the "piece"-shape branch's own self-or-facing target instead goes through pickPieceTargetClick.
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
@@ -2674,7 +2673,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const rebuild = (fields: Partial<IStep>): string =>
             this.assembleStepMove(pending, { action: RDS_VERBS[suitUid], withPiece: minionRef, ...fields });
 
-        if (config.shape === "cell") {
+        if (mode !== "piece") {
             const [tx, ty] = this.minorTargetCell(pending.minion);
             // Cups "own" is the one cell-shape mode with an orientation arg; a click here sets the OPTIONAL 3rd token, over the target cell PLUS its neighbours.
             if (suitUid === "C" && mode === "own") {
@@ -2707,7 +2706,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return rebuild({ targetCell: pending.istep.targetCell! });
         }
 
-        if (config.shape === "piece") {
+        if (mode === "piece") {
             // The target itself is button-only now - overloading the same cells with a THIRD meaning (retargeting) alongside distance/orientation was confusing.
             if (pending.istep.targetPiece === undefined) {
                 return undefined;
@@ -3940,9 +3939,6 @@ export class GnosticaGame extends GameBaseSequenced {
             const msg = this.primitiveIncompleteMessage(suitUid, step) ?? this.powerStepMessageKey(cardUid, 0, eligible);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
-        if (shape.status === "malformed") {
-            return this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params);
-        }
         const stepResult = this.validateSuitPrimitive(suitUid, minion, step, {});
         if (stepResult.failed) {
             return stepResult.result;
@@ -4525,9 +4521,6 @@ export class GnosticaGame extends GameBaseSequenced {
             if (shape.status === "incomplete") {
                 return { failed: false, complete: false };
             }
-            if (shape.status === "malformed") {
-                return { failed: true, result: this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params) };
-            }
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
             return this.validateSuitPrimitive(suitUid, minion, istep!, opts);
         }
@@ -4538,17 +4531,11 @@ export class GnosticaGame extends GameBaseSequenced {
             if (shape.status === "incomplete") {
                 return { failed: false, complete: false };
             }
-            if (shape.status === "malformed") {
-                return { failed: true, result: this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params) };
-            }
             return this.validateSuitPrimitive(suitLetter, minion, istep!, {});
         }
         const shape = SPECIAL_STEP_SHAPES[step.special](istep!);
         if (shape.status === "incomplete") {
             return { failed: false, complete: false };
-        }
-        if (shape.status === "malformed") {
-            return { failed: true, result: this.invalid(`apgames:validation.gnostica.${shape.key}`, shape.params) };
         }
         // Every validate* method below can now assume complete, well-formed input - the shape check above already ruled out anything else.
         switch (step.special) {

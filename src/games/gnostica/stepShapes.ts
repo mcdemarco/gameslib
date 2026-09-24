@@ -2,11 +2,6 @@
 import { SpecialPower } from "./majorArcana";
 import type { IStep } from "../gnostica";
 
-export interface MinorModeConfig {
-    label: string;
-    shape: "cell" | "piece";
-}
-
 // The four minor-arcana suits, shared by gnostica.ts and randomMove.ts so neither imports a value from the other.
 export const ALL_SUITS: { uid: string; label: string }[] = [
     { uid: "C", label: "Cups" },
@@ -15,37 +10,24 @@ export const ALL_SUITS: { uid: string; label: string }[] = [
     { uid: "S", label: "Swords" },
 ];
 
-// One entry per suit+mode: button label and cell-vs-piece target shape.
-export const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
-    C: {
-        own: { label: "Create Minion", shape: "cell" },
-        enemy: { label: "Create Enemy", shape: "cell" },
-        new: { label: "Create Territory", shape: "cell" },
-    },
-    R: {
-        piece: { label: "Move Piece", shape: "piece" },
-        tile: { label: "Push Territory", shape: "cell" },
-    },
-    D: {
-        piece: { label: "Grow Piece", shape: "piece" },
-        tile: { label: "Grow Territory", shape: "cell" },
-    },
-    S: {
-        piece: { label: "Attack Piece", shape: "piece" },
-        tile: { label: "Attack Territory", shape: "cell" },
-    },
+// The modes each suit's power can take: Cups infers own/enemy/new from its target, the others piece vs tile.
+export const MINOR_MODE_NAMES: Record<string, string[]> = {
+    C: ["own", "enemy", "new"],
+    R: ["piece", "tile"],
+    D: ["piece", "tile"],
+    S: ["piece", "tile"],
 };
 
-// Hermit isn't suit-shaped, so it gets its own tiny mode table rather than a MINOR_MODES slot - label only, its click handler manages stages directly.
-export const HERMIT_MODES: Record<string, { label: string }> = {
-    piece: { label: "Move Piece" },
-    tile: { label: "Push Territory" },
+// The target-button wording for Rods/Discs/Swords: the verb prefixing each piece candidate, and the whole-territory option.
+export const RDS_TARGET_LABELS: Record<string, { verb: string; tile: string }> = {
+    R: { verb: "Move", tile: "Push Territory" },
+    D: { verb: "Grow", tile: "Grow Territory" },
+    S: { verb: "Attack", tile: "Attack Territory" },
 };
 
-// Three-way, not boolean, since a given token can be actively WRONG (malformed) rather than merely absent (incomplete).
+// Whether a step has everything its power needs typed yet; legality is the validators' job.
 export type StepShape =
     | { status: "incomplete" }
-    | { status: "malformed"; key: string; params?: Record<string, unknown> }
     | { status: "complete" };
 
 // Cups infers own/enemy/new from its argument's own shape (no mode word); Rods/Discs/Swords infer piece-vs-tile from a pips suffix on their verb's argument.
@@ -203,10 +185,6 @@ export function primitiveStepShape(suitUid: string, step: IStep): StepShape {
     const mode = stepMinorMode(suitUid, step);
     if (mode === undefined) {
         return { status: "incomplete" };
-    }
-    const config = MINOR_MODES[suitUid]?.[mode];
-    if (config === undefined) {
-        return { status: "malformed", key: "BAD_MODE", params: { mode, suit: suitUid } };
     }
     // parseMove's own `complete` already says whether this mode's required arguments were all typed.
     return (step.complete ?? -1) >= 0 ? { status: "complete" } : { status: "incomplete" };
