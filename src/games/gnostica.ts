@@ -30,7 +30,7 @@ import {
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import { generateRandomMove } from "./gnostica/randomMove";
-import { ALL_SUITS, RDS_VERBS, RDS_TARGET_LABELS, MINOR_MODE_NAMES, primitiveStepShape, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, StepShape } from "./gnostica/stepShapes";
+import { ALL_SUITS, RDS_VERBS, RDS_TARGET_LABELS, MINOR_MODE_NAMES, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES } from "./gnostica/stepShapes";
 import i18next from "i18next";
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
@@ -1692,7 +1692,7 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    // "Incomplete" per primitiveStepShape needs different wording depending on whether the target is chosen yet; undefined means "use the generic wording".
+    // "Incomplete" needs different wording depending on whether the target is chosen yet; undefined means "use the generic wording".
     private primitiveIncompleteMessage(suitUid: string, step: IStep): { key: string; params?: Record<string, unknown> } | undefined {
         const mode = stepMinorMode(suitUid, step);
         if (mode === undefined) {
@@ -2287,8 +2287,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const suitUidForStep = this.primitiveToSuit(step.primitive);
                 const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
                 const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
-                const shape = primitiveStepShape(suitUidForStep, istepSoFar);
-                if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
+                if ((istepSoFar.complete ?? -1) < 0 || (isLastSegment && callOpts.preferCurrent)) {
                     // Still building this one, OR the caller wants the last-typed segment treated as "current" even once complete (board clicks keep refining it).
                     const { minion, ambiguous, candidates } = this.resolveStepMinion(istepSoFar.withPiece, top.minions);
                     return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: istepSoFar };
@@ -2300,15 +2299,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 const magicianNeedsAs = step.special === "magicianChoice" && asSuit === undefined && !worldBorrow;
                 // A Magician borrow's step needs no splicing once the suit is known: "at m0 create U" parses the same regardless of suit.
                 const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
-                let shape: StepShape;
-                if (magicianAs) {
-                    shape = primitiveStepShape(asSuit!, istepSoFar);
-                } else if (magicianNeedsAs) {
-                    shape = { status: "incomplete" };
-                } else {
-                    shape = SPECIAL_STEP_SHAPES[step.special](istepSoFar);
-                }
-                if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
+                const complete = magicianAs ? (istepSoFar.complete ?? -1) >= 0
+                    : magicianNeedsAs ? false
+                        : SPECIAL_STEP_SHAPES[step.special](istepSoFar).status === "complete";
+                if (!complete || (isLastSegment && callOpts.preferCurrent)) {
                     // Same "still building, or the caller wants it treated as current regardless" rule as the primitive branch.
                     return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, istepSoFar, asUid, asSuit);
                 }
@@ -3901,9 +3895,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return; // cell chosen, which minion there is still undecided - still skipped
         }
         const minion = this.resolvePieceRefTrusted(minionRef, eligible);
-        // Same shared shape check applyPowerStep uses for a major card's primitive step - a minor card's power is that same grammar, just never chained.
-        const shape = primitiveStepShape(suitUid, step);
-        if (shape.status === "incomplete") {
+        // A minor card's power is the same grammar as a major card's primitive step, just never chained.
+        if ((step.complete ?? -1) < 0) {
             return; // still skipped so far
         }
         this.applySuitPrimitive(suitUid, minion, step, {});
@@ -3933,9 +3926,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalidPieceRef(result.kind, minionRef, "NOT_AN_ELIGIBLE_MINION");
         }
         const minion = result.ref;
-        // Same shared shape check applyMinorPower/applyPowerStep use.
-        const shape = primitiveStepShape(suitUid, step);
-        if (shape.status === "incomplete") {
+        if ((step.complete ?? -1) < 0) {
             const msg = this.primitiveIncompleteMessage(suitUid, step) ?? this.powerStepMessageKey(cardUid, 0, eligible);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
@@ -4425,9 +4416,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const minion = this.resolvePieceRefTrusted(minionRef, minions);
         if ("primitive" in step) {
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-            // "Still building" vs "ready to act on" is answered by stepShapes.ts's own shared check.
-            const shape = primitiveStepShape(suitUid, istep!);
-            if (shape.status === "incomplete") {
+            if ((istep!.complete ?? -1) < 0) {
                 return undefined; // still skipped so far
             }
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
@@ -4436,8 +4425,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (step.special === "magicianChoice") {
             // Magician's suit is named with "as <suit>".
             const suitLetter = borrowedPower!;
-            const shape = primitiveStepShape(suitLetter, istep!);
-            if (shape.status === "incomplete") {
+            if ((istep!.complete ?? -1) < 0) {
                 return undefined; // still skipped so far
             }
             return this.applySuitPrimitive(suitLetter, minion, istep!, {});
@@ -4516,9 +4504,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const minion = result.ref;
         if ("primitive" in step) {
             const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-            // Same shared shape check applyPowerStep uses, asked directly and independently - this function never calls into applyPowerStep for it.
-            const shape = primitiveStepShape(suitUid, istep!);
-            if (shape.status === "incomplete") {
+            if ((istep!.complete ?? -1) < 0) {
                 return { failed: false, complete: false };
             }
             const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
@@ -4527,8 +4513,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (step.special === "magicianChoice") {
             // The suit is always `borrowedPower` now.
             const suitLetter = borrowedPower!;
-            const shape = primitiveStepShape(suitLetter, istep!);
-            if (shape.status === "incomplete") {
+            if ((istep!.complete ?? -1) < 0) {
                 return { failed: false, complete: false };
             }
             return this.validateSuitPrimitive(suitLetter, minion, istep!, {});
@@ -4614,7 +4599,11 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     public validateSuitPrimitive(suitUid: string, minion: IMinionRef, step: IStep, opts: Record<string, unknown>): StepValidation {
-        const mode = stepMinorMode(suitUid, step)!;
+        const mode = stepMinorMode(suitUid, step);
+        if (mode === undefined) {
+            // The step's action doesn't spell this suit's verb (or names no target) - not something a well-formed move for this power can contain.
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_STEP_ACTION" }) };
+        }
         switch (suitUid) {
             case "C":
                 return this.validateCups(minion, mode, step, opts);
@@ -4672,7 +4661,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             default:
-                // Legality is validateCups's own job - primitiveStepShape already gated entry, so an unrecognized mode here is a bug upstream, not something to re-litigate.
+                // Legality is validateCups's own job - validateSuitPrimitive already rejected an unrecognized mode, so reaching one here is a bug upstream, not something to re-litigate.
                 throw new Error(`Unknown Cups mode "${mode}".`);
         }
     }

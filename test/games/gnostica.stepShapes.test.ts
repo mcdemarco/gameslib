@@ -1,6 +1,6 @@
 import "mocha";
 import { expect } from "chai";
-import { primitiveStepShape, SPECIAL_STEP_SHAPES } from "../../src/games/gnostica/stepShapes";
+import { SPECIAL_STEP_SHAPES } from "../../src/games/gnostica/stepShapes";
 
 describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
     // These functions are the single source of truth apply, validate, and
@@ -12,21 +12,6 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
     // presence stands in for "how many tokens have been typed" now -
     // {action:"with"} is parseMove's own sentinel for "verb not typed
     // yet" (see IStep's own docs).
-
-    it("primitiveStepShape: needs a recognized mode for the suit, then defers to parseMove's own complete value", () => {
-        // Mode gate: no recognizable mode for this suit's verb reads as incomplete, whatever `complete` says.
-        expect(primitiveStepShape("R", { action: "with", complete: 1 })).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("R", { action: "move", complete: 1 })).to.deep.equal({ status: "incomplete" }); // no target/cell
-        expect(primitiveStepShape("R", { action: "nope", targetCell: "n0", complete: 1 })).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("D", { action: "move", targetCell: "n0", amount: 1, complete: 0 })).to.deep.equal({ status: "incomplete" }); // wrong verb for the suit
-        expect(primitiveStepShape("C", { action: "at", atCell: "m0", complete: 1 })).to.deep.equal({ status: "incomplete" }); // no "create" yet
-        // With a mode, completeness is parseMove's: -1 (or absent) still building, 0/1 submittable.
-        expect(primitiveStepShape("R", { action: "move", targetCell: "n0" })).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("R", { action: "move", targetCell: "n0", complete: -1 })).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("R", { action: "move", targetCell: "n0", amount: 1, complete: 0 })).to.deep.equal({ status: "complete" });
-        expect(primitiveStepShape("R", { action: "move", targetPiece: "m0.1", amount: 3, complete: 1 })).to.deep.equal({ status: "complete" });
-        expect(primitiveStepShape("C", { action: "create", atCell: "m0", direction: "U", complete: 1 })).to.deep.equal({ status: "complete" });
-    });
 
     it("SPECIAL_STEP_SHAPES.orientMinion/tradeHands/orientAny/hierophantReplace: field-presence, table-driven", () => {
         expect(SPECIAL_STEP_SHAPES.orientMinion({ action: "with" })).to.deep.equal({ status: "incomplete" });
@@ -53,7 +38,7 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
     // <suit>" before apply/validate/parsePendingStep ever reach the
     // shared dispatch (see applyPowerStep's/validatePowerStep's own
     // docs), which then checks the step exactly like an ordinary suit
-    // primitive - primitiveStepShape(suitUid, step), not through this
+    // primitive - checked via parseMove's own complete value, not through this
     // table at all. This entry is unreachable in practice now; kept only
     // for Record<SpecialPower> exhaustiveness, always reporting complete
     // regardless of input.

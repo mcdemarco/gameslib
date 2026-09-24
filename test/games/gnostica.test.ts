@@ -937,6 +937,15 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2, orientation: "N" });
     });
 
+    it("Discs: a step whose verb isn't the suit's own is rejected, not treated as unfinished", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => aceOfDiscs());
+        g.move("place m0 U"); // player 1
+        g.move("place l0 U"); // player 2
+        expect(g.validateMove(`use AD/with m0.1 grow m0.1`).valid).to.be.true;
+        expect(g.validateMove(`use AD/with m0.1 move m0.1 1`).valid).to.be.false;
+    });
+
     it("Discs (tile): grows the pointed-at territory's value by one, discarding the old card", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfDiscs());

@@ -1,4 +1,4 @@
-// Pure completeness check for each power step kind's own IStep grammar (never legality); deriveMinorMode/deriveHermitMode below do the same for raw tokens.
+// Completeness checks for each special power's own IStep grammar (never legality), deriveMinorMode/deriveHermitMode below do the same for raw tokens.
 import { SpecialPower } from "./majorArcana";
 import type { IStep } from "../gnostica";
 
@@ -178,16 +178,6 @@ export function stepHermitMode(step: IStep): string | undefined {
         return undefined;
     }
     return step.targetPiece !== undefined ? "piece" : step.card !== undefined ? "tile" : undefined;
-}
-
-// A primitive suit step's own grammar - shared by minor-arcana, major-arcana primitive, and Magician-borrowed suit steps alike.
-export function primitiveStepShape(suitUid: string, step: IStep): StepShape {
-    const mode = stepMinorMode(suitUid, step);
-    if (mode === undefined) {
-        return { status: "incomplete" };
-    }
-    // parseMove's own `complete` already says whether this mode's required arguments were all typed.
-    return (step.complete ?? -1) >= 0 ? { status: "complete" } : { status: "incomplete" };
 }
 
 // One shape function per SpecialPower; highPriestess/fool have no minionRef of their own but accept anything regardless.
