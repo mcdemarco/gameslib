@@ -1367,7 +1367,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         // Hand-typed nonsense, not reachable through any click path - a
         // bare suit letter isn't valid step content at all anymore (Cups
-        // itself carries no mode word - see deriveMinorMode's own docs),
+        // itself carries no mode word - see stepMinorMode's own docs),
         // so this is just an ordinary malformed-step rejection now, not a
         // Magician-specific one.
         const result = g.validateMove(`use 01/with m0.1 C own m0 U`);

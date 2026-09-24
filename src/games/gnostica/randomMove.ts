@@ -31,7 +31,7 @@ import { cardPointValue } from "./cell";
 import { Orientation, allOrientations } from "./piece";
 import { GnosticaBoard } from "./board";
 import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana";
-import { ALL_SUITS, buildRdsTokens, buildHermitTokens, deriveMinorMode, deriveHermitMode } from "./stepShapes";
+import { ALL_SUITS, RDS_VERBS } from "./stepShapes";
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
 // docs there, including #98/#100's own) - duplicated rather than imported
@@ -50,228 +50,42 @@ function chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[]
     return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
 }
 
-// The one place that assembles a resumed move's own move STRING directly from raw tokens - every resume-seed call site here shares this rather than
-// hand-rolling the verb/parenthetical itself. Only this file's bot-move construction still builds moves from raw tokens rather than a real IStep[] (it
-// has no move string to parse one from in the first place), so this stays here rather than in gnostica.ts proper.
-export function buildViaMove(game: GnosticaGame, stepSegments: string[][], asUid?: string, asSuit?: string): string {
-    const activeUid = game.getContinuedUid()!;
-    const declining = stepSegments.length === 1 && stepSegments[0].length === 1 && stepSegments[0][0].toLowerCase() === "decline";
-    // "decline" is a bare head - it carries no step segments (unlike a mid-chain "/decline", it IS the whole submission).
-    const steps = declining ? [] : stepSegments;
-    // Assembled as plain words, matching what a player would type by hand; "via <uid>" sits in the HEAD (same slot as "as"), not trailing the string.
-    if (activeUid === "02") {
-        // High Priestess can never decline (validateHighPriestess only accepts "discard"; no Decline button is ever offered for it), so there's no decline shape to build here.
-        const tokens = steps.length > 0 ? steps[0] : [];
-        return ["discard", ...tokens, "via", activeUid].join(" ");
-    }
-    // "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
-    const head: IParsedMove = {
-        announceLast: false, valid: true,
-        head: declining ? "decline" : "play",
-        asUid: declining ? undefined : asUid,
-        asSuit: declining ? undefined : asSuit,
-        viaUid: activeUid,
-        steps: [{ action: declining ? "decline" : "play", card: game.activeCardUid() }],
-    };
-    return [game.pickleMove(head), ...steps.map(s => s.join(" "))].join("/");
+// The verb a suit's primitive step spells; Cups' is "create", the others come from stepShapes.
+function suitAction(suitUid: string): string {
+    return suitUid === "C" ? "create" : RDS_VERBS[suitUid];
 }
 
-// Converts a Rods/Discs/Swords primitive's own (suitUid, mode, args into the IStep fields pickleMove now reads.
-export function buildSuitStep(suitUid: string, minionRef: string, mode: string, args: string[]): IStep {
-    // `args` matches applyRods/applyDiscs/applySwords's own destructure - an empty/short `args` leaves the IStep fields unset
-    return suitUid === "C" ? buildCupsStep(minionRef, mode, args) : buildRdsStep(suitUid, mode, minionRef, args);
+function suitStep(suitUid: string, minionRef: string, fields: Partial<IStep>): IStep {
+    return { action: suitAction(suitUid), withPiece: minionRef, ...fields };
 }
 
-function buildRdsStep(suitUid: string, mode: string, minionRef: string, args: string[]): IStep {
-    const verb = suitUid === "R" ? "move" : suitUid === "D" ? "grow" : "shrink";
-    const step: IStep = { action: verb, withPiece: minionRef };
-    if (suitUid === "R") {
-        if (mode === "tile") {
-            const [cellStr, distStr] = args;
-            if (cellStr !== undefined) {
-                step.targetCell = cellStr;
-            }
-            if (distStr !== undefined) {
-                step.amount = parseInt(distStr, 10);
-            }
-            return step;
-        }
-        const [targetRef, distStr, orient] = args;
-        if (targetRef !== undefined) {
-            step.targetPiece = targetRef;
-        }
-        if (distStr !== undefined) {
-            step.amount = parseInt(distStr, 10);
-        }
-        if (orient !== undefined) {
-            step.direction = orient;
-        }
-        return step;
-    }
-    if (suitUid === "D") {
-        if (mode === "piece") {
-            const [targetRef, orient] = args;
-            if (targetRef !== undefined) {
-                step.targetPiece = targetRef;
-            }
-            if (orient !== undefined) {
-                step.direction = orient;
-            }
-            return step;
-        }
-        const [cellStr, uid] = args;
-        if (cellStr !== undefined) {
-            step.targetCell = cellStr;
-        }
-        if (uid !== undefined) {
-            step.card = uid;
-        }
-        return step;
-    }
-    // Swords
-    if (mode === "piece") {
-        const [targetRef, pipsStr, orient] = args;
-        if (targetRef !== undefined) {
-            step.targetPiece = targetRef;
-        }
-        if (pipsStr !== undefined) {
-            step.amount = parseInt(pipsStr, 10);
-        }
-        if (orient !== undefined) {
-            step.direction = orient;
-        }
-        return step;
-    }
-    const [cellStr, pipsStr, uid] = args;
-    if (cellStr !== undefined) {
-        step.targetCell = cellStr;
-    }
-    if (pipsStr !== undefined) {
-        step.amount = parseInt(pipsStr, 10);
-    }
-    if (uid !== undefined) {
-        step.card = uid;
-    }
-    return step;
-}
-
-// Cups' own (mode, args) into IStep shape; the "enemy" victim ref (#106) is a full piece ref, stored straight into targetPiece like any other target.
-function buildCupsStep(minionRef: string, mode: string, args: string[]): IStep {
-    const [cellStr, ...trailing] = args;
-    const step: IStep = { action: "create", withPiece: minionRef, atCell: cellStr };
-    if (mode === "own") {
-        // trailing is [seeded] or [seeded, correction] - the LAST one is always the real final facing; IStep has one direction slot, no room to mark "still just seeded".
-        const facing = trailing[trailing.length - 1];
-        if (facing !== undefined) {
-            step.direction = facing;
-        }
-    } else if (mode === "enemy") {
-        if (trailing[0] !== undefined) {
-            step.targetPiece = trailing[0];
-        }
-    } else if (trailing[0] !== undefined) {
-        step.card = trailing[0];
-    }
-    return step;
-}
-
-// Hermit's (minionRef, rest) into IStep fields. "piece" mode targets a piece ref; "tile" mode identifies the territory by its card uid, not a bare cell.
-function buildHermitStepFromArgs(minionRef: string, mode: string, args: string[]): IStep {
-    const step: IStep = { action: "fly", withPiece: minionRef };
-    const [primary, destCell, orient] = args;
-    if (primary !== undefined) {
-        if (mode === "tile") {
-            step.card = primary;
-        } else {
-            step.targetPiece = primary;
-        }
-    }
-    if (destCell !== undefined) {
-        step.targetCell = destCell;
-    }
-    if (mode === "piece" && orient !== undefined) {
-        step.direction = orient;
-    }
-    return step;
-}
-
-function buildHermitStep(minionRef: string, rest: string[]): IStep {
-    const derived = deriveHermitMode(rest);
-    if (derived === undefined) {
-        return { action: "fly", withPiece: minionRef };
-    }
-    return buildHermitStepFromArgs(minionRef, derived.mode, derived.args);
-}
-
-// A step built straight from tokens has no `complete` value; a pickle+parse round trip gets the one parseMove would have assigned.
+// A step built directly has no `complete` value; a pickle+parse round trip gets the one parseMove would have assigned.
 function reparsedStep(game: GnosticaGame, step: IStep): IStep {
     const head: IParsedMove = { announceLast: false, valid: true, head: "use", steps: [{ action: "use", card: "AC" }, step] };
     return game.parseMove(game.pickleMove(head)).steps[1];
 }
 
-// Converts one power step's own already-assembled tokens into the matching IStep, for a caller with real tokens but no parsed move string (randomMove.ts).
-export function stepFromTokens(game: GnosticaGame, step: PowerStep, tokens: string[], borrowedPower?: string): IStep {
-    return reparsedStep(game, stepFromTokensRaw(step, tokens, borrowedPower));
+// A fresh "use"/"play" move on card `uid`: the head step, then the chain (pickleMove writes the "with"/"orient" subheads and "as" annotations).
+function pickleBotMove(game: GnosticaGame, head: "use" | "play", uid: string, chain: IStep[], asUid?: string, asSuit?: string): string {
+    return game.pickleMove({ announceLast: false, valid: true, head, asUid, asSuit, steps: [{ action: head, card: uid }, ...chain] });
 }
 
-function stepFromTokensRaw(step: PowerStep, tokens: string[], borrowedPower?: string): IStep {
-    const withoutOrient = "special" in step && step.special === "orientMinion" && tokens[0]?.toLowerCase() === "orient" ? tokens.slice(1) : tokens;
-    const [minionRef, ...rest] = withoutOrient;
-    if ("primitive" in step) {
-        const suitUid = step.primitive === "create" ? "C" : step.primitive === "move" ? "R" : step.primitive === "grow" ? "D" : "S";
-        const derived = deriveMinorMode(suitUid, rest);
-        return derived === undefined ? { action: "with", withPiece: minionRef } : buildSuitStep(suitUid, minionRef, derived.mode, derived.args);
+// A resume submission for the current obligation: "discard ... via 02" for High Priestess, otherwise "play <revealed card> via <uid>" plus the chain.
+export function buildViaMove(game: GnosticaGame, chain: IStep[], asUid?: string, asSuit?: string): string {
+    const activeUid = game.getContinuedUid()!;
+    if (activeUid === "02") {
+        return game.pickleMove({ announceLast: false, valid: true, head: "discard", viaUid: activeUid, steps: [chain[0] ?? { action: "discard" }] });
     }
-    if (step.special === "magicianChoice") {
-        // The suit is `borrowedPower` - the step's own tokens carry no suit letter now that #105's chained "as <uid> as <suit>" is the only spelling produced.
-        const derived = borrowedPower === undefined ? undefined : deriveMinorMode(borrowedPower, rest);
-        return derived === undefined ? { action: "with", withPiece: minionRef } : buildSuitStep(borrowedPower!, minionRef, derived.mode, derived.args);
-    }
-    return buildSpecialStep(step.special, minionRef, rest);
+    const head: IParsedMove = {
+        announceLast: false, valid: true, head: "play", asUid, asSuit, viaUid: activeUid,
+        steps: [{ action: "play", card: game.activeCardUid() }, ...chain],
+    };
+    return game.pickleMove(head);
 }
 
-// Converts a completed special-power step's own (minionRef, rest) into the IStep fields pickleMove reads.
-function buildSpecialStep(special: SpecialPower, minionRef: string | undefined, rest: string[]): IStep {
-    switch (special) {
-        case "orientMinion":
-            // orientMinion's "orient" IS its own bare subhead - the acting minion is also the target, so both fields carry the same ref.
-            return { action: "orient", withPiece: minionRef, targetPiece: minionRef, direction: rest[0] };
-        case "tradeHands":
-            return { action: "trade", withPiece: minionRef, targetPiece: rest[1] };
-        case "orientAny":
-            return { action: "orient", withPiece: minionRef, targetPiece: rest[1], direction: rest[2] };
-        case "hierophantReplace":
-            // rest[3] (a real correction) always wins over rest[2] (the seeded default, "?" and all).
-            return { action: "replace", withPiece: minionRef, targetPiece: rest[1], direction: rest[3] ?? rest[2] };
-        case "hermitTeleport":
-            return buildHermitStep(minionRef!, rest);
-        case "judgementDraw":
-            return { action: "draw", withPiece: minionRef, cardList: rest.slice(1) };
-        case "magicianChoice": {
-            const [suitLetter, ...suitRest] = rest;
-            const derived = suitLetter === undefined ? undefined : deriveMinorMode(suitLetter, suitRest);
-            if (suitLetter === undefined || derived === undefined) {
-                return { action: "create", withPiece: minionRef };
-            }
-            return suitLetter === "C"
-                ? buildCupsStep(minionRef!, derived.mode, derived.args)
-                : buildRdsStep(suitLetter, derived.mode, minionRef!, derived.args);
-        }
-        case "highPriestess": {
-            // A bot chain's High Priestess tokens lead with a literal "discard" (see buildRandomStepForPowerStep).
-            const body = rest[0] === "discard" ? rest.slice(1) : rest;
-            const drawIdx = body.indexOf("draw");
-            const cardList = drawIdx === -1 ? body : body.slice(0, drawIdx);
-            const step: IStep = { action: "discard", cardList };
-            if (drawIdx !== -1 && body[drawIdx + 1] !== undefined) {
-                step.amount = parseInt(body[drawIdx + 1], 10);
-            }
-            return step;
-        }
-        default:
-            // fool/worldUseAny carry no meaningful args of their own - a bare action is enough.
-            return { action: special, withPiece: minionRef };
-    }
+// "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
+function buildDeclineMove(game: GnosticaGame): string {
+    return game.pickleMove({ announceLast: false, valid: true, head: "decline", viaUid: game.getContinuedUid()!, steps: [{ action: "decline", card: game.activeCardUid() }] });
 }
 
 export function generateRandomMove(game: GnosticaGame): string {
@@ -289,12 +103,12 @@ export function generateRandomMove(game: GnosticaGame): string {
     // legal (matches getActionButtons()'s own "only one thing possible
     // right now" gate). High Priestess can't be Declined at all
     // (NOTHING_TO_DECLINE - its own round is mandatory, not a revealed
-    // card) - buildRandomHighPriestessTokens is reused for round 2 too,
+    // card) - buildRandomHighPriestessStep is reused for round 2 too,
     // since both rounds share the identical grammar and legality.
     if (game.continued.length > 0) {
         const activeUid = game.continued[game.continued.length - 1].split(".")[0];
         if (activeUid === "02") {
-            return buildViaMove(game, [buildRandomHighPriestessTokens(game)]);
+            return buildViaMove(game, [buildRandomHighPriestessStep(game)]);
         }
         // A persisted Fool obligation always means an ordinary revealed
         // card sits on top awaiting a decision (buildPendingFromContinued's
@@ -368,7 +182,7 @@ export function generateRandomMove(game: GnosticaGame): string {
                 }
             }
         }
-        return buildViaMove(game, [["decline"]]);
+        return buildDeclineMove(game);
     }
     if (game.phase === "bidding") {
         const hand = game.hands[game.currplayer - 1];
@@ -460,7 +274,7 @@ function buildRandomHeadMove(game: GnosticaGame, head: string): string | undefin
 // docs), NOT just `board.entries()` (which only yields cells with a
 // stored CellContents object - see randomPlaceMove's own docs on why
 // that under-enumerates). Shared by randomPlaceMove (a legal
-// initial-placement target) and buildRandomHermitTokens (a legal
+// initial-placement target) and buildRandomHermitStep (a legal
 // teleport destination - hermit's own rules use the identical "empty
 // territory or wasteland" shape).
 function emptyNonVoidCells(game: GnosticaGame): [number, number][] {
@@ -643,9 +457,7 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
             return buildRandomMagicianMove(game, "use", eligible);
         }
         const card = allCards().find(c => c.uid === uid)!;
-        const chain = buildRandomChain(game, card, eligible);
-        const steps = chain.map(tokens => tokens.join(" "));
-        return steps.length === 0 ? `use ${uid}` : `use ${uid}/${steps.join("/")}`;
+        return pickleBotMove(game, "use", uid, buildRandomChain(game, card, eligible));
     }
     const hand = game.hands[game.currplayer - 1];
     if (hand.length === 0) {
@@ -672,9 +484,7 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
             return buildRandomMagicianMove(game, "play", eligible);
         }
         const card = allCards().find(c => c.uid === uid)!;
-        const chain = buildRandomChain(game, card, eligible);
-        const steps = chain.map(tokens => tokens.join(" "));
-        return steps.length === 0 ? `play ${uid}` : `play ${uid}/${steps.join("/")}`;
+        return pickleBotMove(game, "play", uid, buildRandomChain(game, card, eligible));
     } finally {
         hand.splice(handIdx, 0, uid);
     }
@@ -714,36 +524,27 @@ function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible
     if (borrowedUid === "01") {
         const found = findRandomMagicianChain(game, eligible);
         if (found === undefined) {
-            return `${head} 21 as ${borrowedUid}`;
+            return pickleBotMove(game, head, "21", [], borrowedUid);
         }
-        const steps = found.chain.map(tokens => tokens.join(" "));
-        return `${head} 21 as ${borrowedUid} as ${found.suitUid}/${steps.join("/")}`;
+        return pickleBotMove(game, head, "21", found.chain, borrowedUid, found.suitUid);
     }
     const borrowedCard = allCards().find(c => c.uid === borrowedUid)!;
-    const chain = buildRandomChain(game, borrowedCard, eligible);
-    const steps = chain.map(tokens => tokens.join(" "));
-    return steps.length === 0 ? `${head} 21 as ${borrowedUid}` : `${head} 21 as ${borrowedUid}/${steps.join("/")}`;
+    return pickleBotMove(game, head, "21", buildRandomChain(game, borrowedCard, eligible), borrowedUid);
 }
 
 // A random legal (suit, one-step chain) combination for a FRESH Magician
 // activation - shared by a root "use"/"play 01" (buildRandomMagicianMove
 // below) and a Fool-revealed Magician (generateRandomMove's own resume
-// branch). Both put the suit in the head's "as <suit>", never a step
-// token - only a Magician frame PUSHED BY WORLD reads its suit from its
-// own step instead, since World's own borrow already spent the head's
-// one asUid slot (see gnostica.ts's deriveStepTokens/walkFrameStack for
-// the matching real-commit rule, and buildRandomMagicianChoiceTokens
-// below for that one remaining case). findRandomPrimitiveChoice does the
-// real legality search, same as an ordinary suit card's own single step
-// (buildRandomStepTokens's own twin).
-function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { suitUid: string; chain: string[][] } | undefined {
+// branch). The suit goes in the head's "as <suit>", never in the step
+// itself. findRandomPrimitiveChoice does the real legality search, same
+// as an ordinary suit card's own single step (buildRandomSuitStep's twin).
+function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { suitUid: string; chain: IStep[] } | undefined {
     for (const suit of shuffle([...ALL_SUITS]) as typeof ALL_SUITS) {
         const choice = findRandomPrimitiveChoice(game, suit.uid, minions, {});
         if (choice === undefined) {
             continue;
         }
-        const ref = game.pieceRefStr(choice.minion, minions);
-        return { suitUid: suit.uid, chain: [["with", ref, ...suitStepTokens(suit.uid, choice.mode, choice.args)]] };
+        return { suitUid: suit.uid, chain: [suitStep(suit.uid, game.pieceRefStr(choice.minion, minions), choice.fields)] };
     }
     return undefined;
 }
@@ -755,8 +556,7 @@ function buildRandomMagicianMove(game: GnosticaGame, head: "use" | "play", minio
     if (found === undefined) {
         return undefined;
     }
-    const steps = found.chain.map(tokens => tokens.join(" "));
-    return `${head} 01 as ${found.suitUid}/${steps.join("/")}`;
+    return pickleBotMove(game, head, "01", found.chain, undefined, found.suitUid);
 }
 
 // Every legal target ref for a minion's own "piece"-shaped actions:
@@ -847,19 +647,19 @@ function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: st
 // no self/other choice at all in their own target set (C.own/C.enemy/
 // C.new/R.tile, each always self-only, enemy-only, or plain territory)
 // get a flat weight of 1 throughout.
-function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, suitUid: string, mode: string): { args: string[]; weight: number }[] {
+function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, suitUid: string, mode: string): { fields: Partial<IStep>; weight: number }[] {
     const piece = minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index];
     const [tx, ty] = game.minorTargetCell(minion);
     const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
     const targetT = game.board.get(tx, ty);
     const hand = game.hands[game.currplayer - 1];
     const pieceTargets = pieceTargetRefsWithOwner(game, minion);
-    const pips = Array.from({ length: piece.size }, (_, i) => String(i + 1));
+    const pips = Array.from({ length: piece.size }, (_, i) => i + 1);
     const cardsWorth = (value: number) => hand.filter(uid => {
         const c = allCards().find(cc => cc.uid === uid);
         return c !== undefined && cardPointValue(c) === value;
     });
-    const flat = (candidates: string[][]): { args: string[]; weight: number }[] => candidates.map(args => ({ args, weight: 1 }));
+    const flat = (candidates: Partial<IStep>[]): { fields: Partial<IStep>; weight: number }[] => candidates.map(fields => ({ fields, weight: 1 }));
     // Growing/attacking a territory benefits whoever currently profits
     // from it uncontested - a cell nobody profits from yet (contested,
     // or genuinely neutral) counts as "not the acting player's own"
@@ -868,14 +668,14 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
 
     switch (`${suitUid}.${mode}`) {
         case "C.own":
-            return flat(allOrientations.map(o => [targetCell, o]));
+            return flat(allOrientations.map(o => ({ atCell: targetCell, direction: o })));
         case "C.enemy":
             return flat((targetT?.pieces ?? [])
                 .map((p, i) => ({ p, i }))
                 .filter(({ p }) => p.owner !== game.currplayer)
-                .map(({ i }) => [targetCell, game.pieceRefStr({ x: tx, y: ty, index: i })]));
+                .map(({ i }) => ({ atCell: targetCell, targetPiece: game.pieceRefStr({ x: tx, y: ty, index: i }) })));
         case "C.new":
-            return flat(cardsWorth(1).map(uid => [targetCell, uid]));
+            return flat(cardsWorth(1).map(uid => ({ atCell: targetCell, card: uid })));
         case "R.piece": {
             // Moving your own minion is ordinary positioning; shoving
             // an enemy's is a real but less common destructive tactic
@@ -892,45 +692,44 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
             const selfRef = game.pieceRefStr(minion);
             return pieceTargets.flatMap(({ ref, owner }) => {
                 const [bx, by] = ref === selfRef ? [minion.x, minion.y] : [tx, ty];
-                return pips.map(d => {
-                    const dist = Number(d);
+                return pips.map(dist => {
                     const ownWeight = owner === game.currplayer ? 2 : 1;
                     const landsOnTerritory = owner === game.currplayer
                         && game.board.classify(bx + dx * dist, by + dy * dist) === "territory";
-                    return { args: [ref, d], weight: ownWeight * (landsOnTerritory ? 2 : 1) };
+                    return { fields: { targetPiece: ref, amount: dist }, weight: ownWeight * (landsOnTerritory ? 2 : 1) };
                 });
             });
         }
         case "R.tile":
-            return flat(pips.map(d => [targetCell, d]));
+            return flat(pips.map(amount => ({ targetCell, amount })));
         case "D.piece":
             // Growing is constructive - strongly favor your own minion
             // over an enemy's.
-            return pieceTargets.map(({ ref, owner }) => ({ args: [ref], weight: owner === game.currplayer ? 3 : 1 }));
+            return pieceTargets.map(({ ref, owner }) => ({ fields: { targetPiece: ref }, weight: owner === game.currplayer ? 3 : 1 }));
         case "D.tile": {
             const current = targetT?.pointValue() ?? 0;
             const weight = benefitsSelf ? 3 : 1;
-            return [...cardsWorth(current + 1), ...cardsWorth(current + 2)].map(uid => ({ args: [targetCell, uid], weight }));
+            return [...cardsWorth(current + 1), ...cardsWorth(current + 2)].map(uid => ({ fields: { targetCell, card: uid }, weight }));
         }
         case "S.piece":
             // Attacking is destructive - strongly favor an enemy's
             // minion over your own.
             return pieceTargets.flatMap(({ ref, owner }) =>
-                pips.map(p => ({ args: [ref, p], weight: owner === game.currplayer ? 1 : 3 })));
+                pips.map(p => ({ fields: { targetPiece: ref, amount: p }, weight: owner === game.currplayer ? 1 : 3 })));
         case "S.tile": {
             const current = targetT?.pointValue() ?? 0;
             const weight = benefitsSelf ? 1 : 3;
-            const results: { args: string[]; weight: number }[] = [];
+            const results: { fields: Partial<IStep>; weight: number }[] = [];
             for (const p of pips) {
-                const resultValue = current - Number(p);
+                const resultValue = current - p;
                 if (resultValue < 0) {
                     continue;
                 }
                 if (resultValue === 0) {
-                    results.push({ args: [targetCell, p], weight });
+                    results.push({ fields: { targetCell, amount: p }, weight });
                 } else {
                     for (const uid of cardsWorth(resultValue)) {
-                        results.push({ args: [targetCell, p, uid], weight });
+                        results.push({ fields: { targetCell, amount: p, card: uid }, weight });
                     }
                 }
             }
@@ -941,18 +740,18 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
     }
 }
 
-// Searches for one legal (minion, mode, args) combination for a suit
+// Searches for one legal (minion, step fields) combination for a suit
 // primitive - shuffled minion pool, shuffled legal modes per minion,
-// weighted-shuffled arg candidates per mode (see
+// weighted-shuffled candidates per mode (see
 // buildRandomModeArgCandidates's own docs on the weighting), first
-// fully-validated combination wins. Returns the raw pieces (not yet
-// assembled into a move-string token array) since magicianChoice needs
+// fully-validated combination wins. Returns the raw minion plus the
+// step's own fields (not yet a whole step) since magicianChoice needs
 // the same raw minion to build its own doubly-wrapped step;
-// buildRandomStepTokens below is the thin wrapper that assembles
-// tokens for direct suit-mode use.
+// buildRandomSuitStep below is the thin wrapper that builds the step
+// for direct suit-mode use.
 function findRandomPrimitiveChoice(
     game: GnosticaGame, suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>,
-): { minion: IMinionRef; mode: string; args: string[] } | undefined {
+): { minion: IMinionRef; fields: Partial<IStep> } | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
         const modeCandidates = legalModesForMinion(game, minion, suitUid, opts)
@@ -989,13 +788,12 @@ function findRandomPrimitiveChoice(
             return 3;
         };
         const orderedModes = weightedShuffle(modeCandidates, modeWeight);
-        for (const { mode, candidates } of orderedModes) {
+        for (const { candidates } of orderedModes) {
             const ordered = weightedShuffle(candidates, c => c.weight);
-            for (const { args } of ordered) {
-                const step = buildSuitStep(suitUid, game.pieceRefStr(minion), mode, args);
-                const check = game.validateSuitPrimitive(suitUid, minion, step, opts);
+            for (const { fields } of ordered) {
+                const check = game.validateSuitPrimitive(suitUid, minion, suitStep(suitUid, game.pieceRefStr(minion), fields), opts);
                 if (!check.failed) {
-                    return { minion, mode, args };
+                    return { minion, fields };
                 }
             }
         }
@@ -1003,28 +801,12 @@ function findRandomPrimitiveChoice(
     return undefined;
 }
 
-// The inverse of deriveMinorMode (gnostica/stepShapes.ts) - given the
-// same (mode, args) shape findRandomPrimitiveChoice/validateSuitPrimitive
-// already use internally, rebuilds this suit's own verb-first (Rods/
-// Discs/Swords) or "at <cell> create ..." (Cups) tokens. Needed
-// immediately here, not deferred like "with" itself (see buildRandomChain's
-// own docs on why "with" alone can be patched on later at the
-// string-join step while this can't).
-function suitStepTokens(suitUid: string, mode: string, args: string[]): string[] {
-    if (suitUid === "C") {
-        const [cellStr, ...trailingArgs] = args;
-        return ["at", cellStr, "create", ...trailingArgs];
-    }
-    return buildRdsTokens(suitUid, mode, args);
-}
-
-function buildRandomStepTokens(game: GnosticaGame, suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>): string[] | undefined {
+function buildRandomSuitStep(game: GnosticaGame, suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>): IStep | undefined {
     const choice = findRandomPrimitiveChoice(game, suitUid, minions, opts);
     if (choice === undefined) {
         return undefined;
     }
-    const ref = game.pieceRefStr(choice.minion, minions);
-    return [ref, ...suitStepTokens(suitUid, choice.mode, choice.args)];
+    return suitStep(suitUid, game.pieceRefStr(choice.minion, minions), choice.fields);
 }
 
 // A major card's own `primitive` step - same suit machinery as a minor
@@ -1036,36 +818,36 @@ function buildRandomStepTokens(game: GnosticaGame, suitUid: string, minions: IMi
 // unrelaxed rules. computeShortcutOpts's relaxations only ever WIDEN
 // legality, so skipping this would be safe, just needlessly weaker
 // coverage of those cards' own shortcut paths.
-function buildRandomPrimitiveStepTokens(
+function buildRandomPrimitiveStep(
     game: GnosticaGame, primitive: SuitPrimitive, minions: IMinionRef[], def: MajorArcanaDef, stepOpts: PrimitiveOpts | undefined, stepIndex: number, totalSteps: number,
-): string[] | undefined {
+): IStep | undefined {
     const suitUid = game.primitiveToSuit(primitive);
     const opts = game.computeShortcutOpts(def, primitive, stepIndex, totalSteps, stepOpts);
-    return buildRandomStepTokens(game, suitUid, minions, opts);
+    return buildRandomSuitStep(game, suitUid, minions, opts);
 }
 
-function buildRandomOrientMinionTokens(game: GnosticaGame, minions: IMinionRef[]): string[] | undefined {
+function buildRandomOrientMinionStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
         for (const o of shuffle([...allOrientations]) as Orientation[]) {
             const check = game.validateOrientMinion(minion, { action: "orient", targetPiece: ref, direction: o });
             if (!check.failed) {
-                return [ref, o];
+                return { action: "orient", withPiece: ref, targetPiece: ref, direction: o };
             }
         }
     }
     return undefined;
 }
 
-function buildRandomTradeHandsTokens(game: GnosticaGame, minions: IMinionRef[]): string[] | undefined {
+function buildRandomTradeHandsStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
         for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
             const check = game.validateTradeHands(minion, { action: "trade", withPiece: ref, targetPiece: targetRef });
             if (!check.failed) {
-                return [ref, "trade", targetRef];
+                return { action: "trade", withPiece: ref, targetPiece: targetRef };
             }
         }
     }
@@ -1081,22 +863,16 @@ function buildRandomTradeHandsTokens(game: GnosticaGame, minions: IMinionRef[]):
 // `undefined` joins hierophantReplace's shuffled correction candidates
 // so the random mover sometimes leaves that seeded default in place
 // instead of always overriding it.
-function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMinionRef[], special: "orientAny" | "hierophantReplace"): string[] | undefined {
+function buildRandomOrientAnyOrHierophantStep(game: GnosticaGame, minions: IMinionRef[], special: "orientAny" | "hierophantReplace"): IStep | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
         if (special === "orientAny") {
             for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
                 for (const o of shuffle([...allOrientations]) as Orientation[]) {
-                    const check = game.validateOrientAny(minion, { action: "orient", withPiece: ref, targetPiece: targetRef, direction: o });
-                    if (!check.failed) {
-                        // No "with" here - these tokens feed validatePowerStep/
-                        // applyPowerStep directly (buildRandomChain, below),
-                        // bypassing parseMove's own "with"-stripping entirely;
-                        // "with" is optional there anyway (parseMove tolerates
-                        // its absence), so the eventual move STRING this
-                        // becomes still parses correctly without it.
-                        return [ref, "orient", targetRef, o];
+                    const step: IStep = { action: "orient", withPiece: ref, targetPiece: targetRef, direction: o };
+                    if (!game.validateOrientAny(minion, step).failed) {
+                        return step;
                     }
                 }
             }
@@ -1105,10 +881,9 @@ function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMi
         for (const { ref: targetRef, orientation: capturedFacing } of shuffle(pieceTargetRefsWithOrientation(game, minion)) as { ref: string; orientation: Orientation }[]) {
             const orientationToken = `${capturedFacing}?`;
             for (const o of shuffle([...allOrientations, undefined]) as (Orientation | undefined)[]) {
-                const rest = o === undefined ? ["replace", targetRef, orientationToken] : ["replace", targetRef, orientationToken, o];
-                const check = game.validateHierophantReplace(minion, { action: "replace", withPiece: ref, targetPiece: targetRef, direction: o ?? orientationToken });
-                if (!check.failed) {
-                    return [ref, ...rest];
+                const step: IStep = { action: "replace", withPiece: ref, targetPiece: targetRef, direction: o ?? orientationToken };
+                if (!game.validateHierophantReplace(minion, step).failed) {
+                    return step;
                 }
             }
         }
@@ -1116,7 +891,7 @@ function buildRandomOrientAnyOrHierophantTokens(game: GnosticaGame, minions: IMi
     return undefined;
 }
 
-function buildRandomHermitTokens(game: GnosticaGame, minions: IMinionRef[]): string[] | undefined {
+function buildRandomHermitStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
     const destinations = shuffle(emptyNonVoidCells(game)) as [number, number][];
     if (destinations.length === 0) {
         return undefined;
@@ -1139,13 +914,12 @@ function buildRandomHermitTokens(game: GnosticaGame, minions: IMinionRef[]): str
             for (const target of pieceTargets) {
                 for (const [dx, dy] of destinations) {
                     const destCell = GnosticaBoard.coords2algebraic(dx, dy);
-                    const tokens = buildHermitTokens([target, destCell]);
-                    const step = mode === "tile"
+                    const step: IStep = mode === "tile"
                         ? { action: "fly", withPiece: ref, card: target, targetCell: destCell }
                         : { action: "fly", withPiece: ref, targetPiece: target, targetCell: destCell };
                     const check = game.validateHermitStep(minion, step);
                     if (!check.failed) {
-                        return [ref, ...tokens];
+                        return step;
                     }
                 }
             }
@@ -1154,7 +928,7 @@ function buildRandomHermitTokens(game: GnosticaGame, minions: IMinionRef[]): str
     return undefined;
 }
 
-function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[]): string[] | undefined {
+function buildRandomJudgementDrawStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     const hand = game.hands[game.currplayer - 1];
     for (const minion of pool) {
@@ -1163,8 +937,9 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
         const count = Math.floor(Math.random() * (maxDraw + 1));
         const uids = (shuffle([...game.discardPile]) as string[]).slice(0, count);
         const ref = game.pieceRefStr(minion, minions);
-        if (game.validateJudgementDraw(minion, { action: "draw", withPiece: ref, cardList: uids }).valid) {
-            return [ref, "draw", ...uids];
+        const step: IStep = { action: "draw", withPiece: ref, cardList: uids };
+        if (game.validateJudgementDraw(minion, step).valid) {
+            return step;
         }
     }
     return undefined;
@@ -1178,26 +953,22 @@ function buildRandomJudgementDrawTokens(game: GnosticaGame, minions: IMinionRef[
 // the identical <discardUid...> draw <n> grammar and legality
 // (checkHighPriestess never distinguishes them), so one function covers
 // round 1 (via the card's own activation chain) and round 2's resume alike.
-function buildRandomHighPriestessTokens(game: GnosticaGame): string[] {
+function buildRandomHighPriestessStep(game: GnosticaGame): IStep {
     const hand = game.hands[game.currplayer - 1];
     const discards = hand.filter(() => Math.random() < 0.3);
     const maxDraw = Math.max(0, 6 - (hand.length - discards.length));
-    return [...discards, "draw", String(Math.floor(Math.random() * (maxDraw + 1)))];
+    return { action: "discard", cardList: discards, amount: Math.floor(Math.random() * (maxDraw + 1)) };
 }
 
-function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower, minions: IMinionRef[]): string[] | undefined {
+function buildRandomSpecialStep(game: GnosticaGame, special: SpecialPower, minions: IMinionRef[]): IStep | undefined {
     switch (special) {
-        case "orientMinion": return buildRandomOrientMinionTokens(game, minions);
-        case "tradeHands": return buildRandomTradeHandsTokens(game, minions);
-        case "orientAny": return buildRandomOrientAnyOrHierophantTokens(game, minions, "orientAny");
-        case "hierophantReplace": return buildRandomOrientAnyOrHierophantTokens(game, minions, "hierophantReplace");
-        case "hermitTeleport": return buildRandomHermitTokens(game, minions);
-        case "judgementDraw": return buildRandomJudgementDrawTokens(game, minions);
-        // Leading "discard" is this step's own real token, unlike buildRandomHighPriestessTokens'
-        // OTHER caller below, which feeds bare tokens to buildViaMove -
-        // that one already prepends "discard" itself for the resume's
-        // own head word.
-        case "highPriestess": return ["discard", ...buildRandomHighPriestessTokens(game)];
+        case "orientMinion": return buildRandomOrientMinionStep(game, minions);
+        case "tradeHands": return buildRandomTradeHandsStep(game, minions);
+        case "orientAny": return buildRandomOrientAnyOrHierophantStep(game, minions, "orientAny");
+        case "hierophantReplace": return buildRandomOrientAnyOrHierophantStep(game, minions, "hierophantReplace");
+        case "hermitTeleport": return buildRandomHermitStep(game, minions);
+        case "judgementDraw": return buildRandomJudgementDrawStep(game, minions);
+        case "highPriestess": return buildRandomHighPriestessStep(game);
         // fool/worldUseAny/magicianChoice - never reached; every caller of
         // buildRandomChain intercepts Fool/World/Magician by uid before
         // any step is ever attempted (see buildRandomWorldMove's/
@@ -1210,11 +981,11 @@ function buildRandomSpecialStepTokens(game: GnosticaGame, special: SpecialPower,
 
 function buildRandomStepForPowerStep(
     game: GnosticaGame, step: PowerStep, minions: IMinionRef[], def: MajorArcanaDef, stepIndex: number, totalSteps: number,
-): string[] | undefined {
+): IStep | undefined {
     if ("primitive" in step) {
-        return buildRandomPrimitiveStepTokens(game, step.primitive, minions, def, step.opts, stepIndex, totalSteps);
+        return buildRandomPrimitiveStep(game, step.primitive, minions, def, step.opts, stepIndex, totalSteps);
     }
-    return buildRandomSpecialStepTokens(game, step.special, minions);
+    return buildRandomSpecialStep(game, step.special, minions);
 }
 
 // Builds a random (possibly empty) power-step chain for a "use"/"play"
@@ -1234,30 +1005,24 @@ function buildRandomStepForPowerStep(
 // from the length assumed while speculatively building it. Always
 // terminates - validateMajorPower(def, eligible, []) is trivially
 // legal (no steps to check).
-function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]): string[][] {
+function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]): IStep[] {
     if (!card.major) {
         if (eligible.length === 0 || Math.random() < 0.2) {
             return []; // skip outright - always legal
         }
         const suitUid = card.suit.uid;
-        const tokens = buildRandomStepTokens(game, suitUid, eligible, {});
-        if (tokens === undefined) {
+        const built = buildRandomSuitStep(game, suitUid, eligible, {});
+        if (built === undefined) {
             return [];
         }
-        const derived = deriveMinorMode(suitUid, tokens.slice(1))!;
-        const step = reparsedStep(game, buildSuitStep(suitUid, tokens[0], derived.mode, derived.args));
+        const step = reparsedStep(game, built);
         const result = game.validateMinorPower(suitUid, card.uid, eligible, [step]);
         // Genuinely submittable is complete !== -1, not === 1 - see the
         // top-level loop's own matching docs. A Rods/Discs/Swords "piece"
         // step landing on the acting player's own minion is legitimately
         // final yet still complete:0 (a further reorientation remains
         // available, never supplied by buildRandomModeArgCandidates).
-        // `tokens` itself stays bare for validateMinorPower above (a
-        // direct-array call, bypassing parseMove) - "with" only gets
-        // added to the copy returned here, which becomes part of the
-        // eventual move STRING (see buildRandomChain's own matching docs
-        // on the major-arcana loop below for why).
-        return result.valid && result.complete !== -1 ? [["with", ...tokens]] : [];
+        return result.valid && result.complete !== -1 ? [step] : [];
     }
     const def = getMajorArcanaDef(card);
     if (def.uid === "00") {
@@ -1277,13 +1042,13 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
     // own worldUseAny step needs a borrow target named in the move's
     // head, not a step segment - buildRandomChain has no mechanism for
     // that). If World's own def somehow does reach here (a caller bug),
-    // buildRandomSpecialStepTokens's own default case already returns
+    // buildRandomSpecialStep's own default case already returns
     // undefined for "worldUseAny", so the loop below still degrades to
     // the same empty chain it always returned before.
     if (Math.random() < 0.15) {
         return []; // skip outright sometimes, same as minor arcana
     }
-    const stepSegments: string[][] = [];
+    const chain: IStep[] = [];
     let minions = [...eligible];
     // A relocated/replaced-in-place piece (Rods' own "piece" move, say)
     // only exists at chainMinion's own predicted position on a board
@@ -1299,15 +1064,15 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
     for (let i = 0; i < def.powers.length; i++) {
         const step = def.powers[i];
         const ctx = clone ?? game;
-        const tokens = buildRandomStepForPowerStep(ctx, step, minions, def, i, stepSegments.length + 1);
-        if (tokens === undefined) {
+        const built = buildRandomStepForPowerStep(ctx, step, minions, def, i, chain.length + 1);
+        if (built === undefined) {
             break;
         }
-        stepSegments.push(tokens);
-        const istep = stepFromTokens(game, step, tokens);
-        const result = ctx.validatePowerStep(step, minions, istep, def, i, stepSegments.length);
+        const istep = reparsedStep(game, built);
+        chain.push(istep);
+        const result = ctx.validatePowerStep(step, minions, istep, def, i, chain.length);
         if (result.failed) {
-            stepSegments.pop();
+            chain.pop();
             break;
         }
         const minionsForReplay = minions;
@@ -1317,8 +1082,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
             clone.applyPowerStep(step, minionsForReplay, istep, def, i, def.powers.length, true);
         }
     }
-    const isCleanSuccess = (segs: string[][]): boolean => {
-        const steps = segs.map((toks, i) => stepFromTokens(game, def.powers[i], toks));
+    const isCleanSuccess = (steps: IStep[]): boolean => {
         const result = game.validateMajorPower(def, eligible, steps);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see
@@ -1327,21 +1091,8 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         // could still be added," which isn't this check's own concern.
         return result.valid;
     };
-    while (stepSegments.length > 0 && !isCleanSuccess(stepSegments)) {
-        stepSegments.pop();
+    while (chain.length > 0 && !isCleanSuccess(chain)) {
+        chain.pop();
     }
-    // stepSegments validated above bare (validateMajorPower is a direct-
-    // array call too, bypassing parseMove exactly like validatePowerStep/
-    // applyPowerStep above - see this function's own top docs). The
-    // eventual move STRING this chain becomes (joined by the caller) does
-    // need a "with"/"orient" subhead on every segment though, now that
-    // parseMove requires one (see its own docs) - added here, once, after
-    // trimming, rather than while the chain's still being built and
-    // internally re-validated.
-    const NO_SUBHEAD = ["discard", "draw", "decline"];
-    return stepSegments.map((seg, idx) => {
-        const stepAtIdx = def.powers[idx];
-        const subhead = "special" in stepAtIdx && stepAtIdx.special === "orientMinion" ? "orient" : "with";
-        return NO_SUBHEAD.includes(seg[0]?.toLowerCase()) ? seg : [subhead, ...seg];
-    });
+    return chain;
 }
