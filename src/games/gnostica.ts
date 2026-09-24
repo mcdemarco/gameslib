@@ -1039,6 +1039,13 @@ export class GnosticaGame extends GameBaseSequenced {
 
             //Create was mostly handled in our pre-processing.
             if ( step.action === "create" ) {
+
+                //With and at are required.
+                if (step.withPiece === undefined || step.atCell === undefined) {
+                    pm.error = "MISSING_CREATE_CONTENT";
+                    break;
+                }
+
                 if ( CARD_UID_RE.test(tempwhat) )
                     step.card = tempwhat;
                 else if ( DIRECTION_RE.test(tempwhat) )
