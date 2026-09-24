@@ -13,26 +13,19 @@ describe("Gnostica: stepShapes - shared step-completeness predicates", () => {
     // {action:"with"} is parseMove's own sentinel for "verb not typed
     // yet" (see IStep's own docs).
 
-    it("primitiveStepShape: mode undefined is incomplete, missing fields is incomplete, all fields present is complete", () => {
-        expect(primitiveStepShape("R", { action: "with" })).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("R", { action: "move" })).to.deep.equal({ status: "incomplete" }); // no target/cell yet
-        expect(primitiveStepShape("R", { action: "move", targetCell: "n0" })).to.deep.equal({ status: "incomplete" }); // tile: cell chosen, distance still needed
-        expect(primitiveStepShape("R", { action: "move", targetCell: "n0", amount: 1 })).to.deep.equal({ status: "complete" }); // tile: cell + distance
-        expect(primitiveStepShape("R", { action: "move", targetPiece: "m0.1" })).to.deep.equal({ status: "incomplete" }); // piece: target chosen, distance still needed
-        expect(primitiveStepShape("R", { action: "move", targetPiece: "m0.1", amount: 3 })).to.deep.equal({ status: "complete" });
-        // No suit spells a mode word anymore - Rods/Discs/Swords infer
-        // piece vs tile from which of targetPiece/targetCell parseMove
-        // itself already populated, the same way Cups infers own/enemy/
-        // new (see its own docs below) - so an unrecognized verb just
-        // reads as still-incomplete; there's no "unknown mode" left for
-        // primitiveStepShape to ever report as malformed.
-        expect(primitiveStepShape("R", { action: "nope" })).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("C", { action: "with" })).to.deep.equal({ status: "incomplete" });
-        expect(primitiveStepShape("C", { action: "at", atCell: "m0" })).to.deep.equal({ status: "incomplete" }); // no "create" yet
-        expect(primitiveStepShape("C", { action: "create", atCell: "m0" })).to.deep.equal({ status: "incomplete" }); // "new" inferred, still needs a card uid
-        expect(primitiveStepShape("C", { action: "create", atCell: "m0", direction: "U" })).to.deep.equal({ status: "complete" }); // "own" inferred from the direction field
-        expect(primitiveStepShape("C", { action: "create", atCell: "m0", targetPiece: "m0.1" })).to.deep.equal({ status: "complete" }); // "enemy" inferred from the targetPiece field
-        expect(primitiveStepShape("C", { action: "create", atCell: "m0", card: "5D" })).to.deep.equal({ status: "complete" }); // "new" inferred from the card field
+    it("primitiveStepShape: needs a recognized mode for the suit, then defers to parseMove's own complete value", () => {
+        // Mode gate: no recognizable mode for this suit's verb reads as incomplete, whatever `complete` says.
+        expect(primitiveStepShape("R", { action: "with", complete: 1 })).to.deep.equal({ status: "incomplete" });
+        expect(primitiveStepShape("R", { action: "move", complete: 1 })).to.deep.equal({ status: "incomplete" }); // no target/cell
+        expect(primitiveStepShape("R", { action: "nope", targetCell: "n0", complete: 1 })).to.deep.equal({ status: "incomplete" });
+        expect(primitiveStepShape("D", { action: "move", targetCell: "n0", amount: 1, complete: 0 })).to.deep.equal({ status: "incomplete" }); // wrong verb for the suit
+        expect(primitiveStepShape("C", { action: "at", atCell: "m0", complete: 1 })).to.deep.equal({ status: "incomplete" }); // no "create" yet
+        // With a mode, completeness is parseMove's: -1 (or absent) still building, 0/1 submittable.
+        expect(primitiveStepShape("R", { action: "move", targetCell: "n0" })).to.deep.equal({ status: "incomplete" });
+        expect(primitiveStepShape("R", { action: "move", targetCell: "n0", complete: -1 })).to.deep.equal({ status: "incomplete" });
+        expect(primitiveStepShape("R", { action: "move", targetCell: "n0", amount: 1, complete: 0 })).to.deep.equal({ status: "complete" });
+        expect(primitiveStepShape("R", { action: "move", targetPiece: "m0.1", amount: 3, complete: 1 })).to.deep.equal({ status: "complete" });
+        expect(primitiveStepShape("C", { action: "create", atCell: "m0", direction: "U", complete: 1 })).to.deep.equal({ status: "complete" });
     });
 
     it("SPECIAL_STEP_SHAPES.orientMinion/tradeHands/orientAny/hierophantReplace: field-presence, table-driven", () => {

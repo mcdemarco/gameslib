@@ -103,6 +103,7 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 21 as 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("play 21 as 01 as C via 00/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
+        expect(g.parseMove("use 11/with m0.1 trade n0.1")).to.have.deep.property("valid", true);
     });
     
     it ("Pickles", () =>  {

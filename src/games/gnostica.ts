@@ -2729,7 +2729,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
 
             // Once the suit action is otherwise complete, a further click adjacent to the target's EFFECTIVE position sets its facing - only for the player's own piece.
-            if (!config.isComplete(pending.istep)) {
+            if ((pending.istep.complete ?? -1) < 0) {
                 return undefined;
             }
             const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];

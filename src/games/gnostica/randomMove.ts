@@ -203,8 +203,18 @@ function buildHermitStep(minionRef: string, rest: string[]): IStep {
     return buildHermitStepFromArgs(minionRef, derived.mode, derived.args);
 }
 
+// A step built straight from tokens has no `complete` value; a pickle+parse round trip gets the one parseMove would have assigned.
+function reparsedStep(game: GnosticaGame, step: IStep): IStep {
+    const head: IParsedMove = { announceLast: false, valid: true, head: "use", steps: [{ action: "use", card: "AC" }, step] };
+    return game.parseMove(game.pickleMove(head)).steps[1];
+}
+
 // Converts one power step's own already-assembled tokens into the matching IStep, for a caller with real tokens but no parsed move string (randomMove.ts).
-export function stepFromTokens(step: PowerStep, tokens: string[], borrowedPower?: string): IStep {
+export function stepFromTokens(game: GnosticaGame, step: PowerStep, tokens: string[], borrowedPower?: string): IStep {
+    return reparsedStep(game, stepFromTokensRaw(step, tokens, borrowedPower));
+}
+
+function stepFromTokensRaw(step: PowerStep, tokens: string[], borrowedPower?: string): IStep {
     const withoutOrient = "special" in step && step.special === "orientMinion" && tokens[0]?.toLowerCase() === "orient" ? tokens.slice(1) : tokens;
     const [minionRef, ...rest] = withoutOrient;
     if ("primitive" in step) {
@@ -1235,7 +1245,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
             return [];
         }
         const derived = deriveMinorMode(suitUid, tokens.slice(1))!;
-        const step = buildSuitStep(suitUid, tokens[0], derived.mode, derived.args);
+        const step = reparsedStep(game, buildSuitStep(suitUid, tokens[0], derived.mode, derived.args));
         const result = game.validateMinorPower(suitUid, card.uid, eligible, [step]);
         // Genuinely submittable is complete !== -1, not === 1 - see the
         // top-level loop's own matching docs. A Rods/Discs/Swords "piece"
@@ -1294,7 +1304,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
             break;
         }
         stepSegments.push(tokens);
-        const istep = stepFromTokens(step, tokens);
+        const istep = stepFromTokens(game, step, tokens);
         const result = ctx.validatePowerStep(step, minions, istep, def, i, stepSegments.length);
         if (result.failed) {
             stepSegments.pop();
@@ -1308,7 +1318,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         }
     }
     const isCleanSuccess = (segs: string[][]): boolean => {
-        const steps = segs.map((toks, i) => stepFromTokens(def.powers[i], toks));
+        const steps = segs.map((toks, i) => stepFromTokens(game, def.powers[i], toks));
         const result = game.validateMajorPower(def, eligible, steps);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see

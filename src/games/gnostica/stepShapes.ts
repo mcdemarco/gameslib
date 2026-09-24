@@ -5,9 +5,6 @@ import type { IStep } from "../gnostica";
 export interface MinorModeConfig {
     label: string;
     shape: "cell" | "piece";
-    minArgs: number;
-    // The IStep-field-presence equivalent of minArgs, used by primitiveStepShape below; minArgs itself stays in use for click-handling's own slicing.
-    isComplete: (step: IStep) => boolean;
 }
 
 // The four minor-arcana suits, shared by gnostica.ts and randomMove.ts so neither imports a value from the other.
@@ -18,25 +15,24 @@ export const ALL_SUITS: { uid: string; label: string }[] = [
     { uid: "S", label: "Swords" },
 ];
 
-// One entry per suit+mode: button label, cell-vs-piece target shape, and the minimum tokens before a step is complete.
+// One entry per suit+mode: button label and cell-vs-piece target shape.
 export const MINOR_MODES: Record<string, Record<string, MinorModeConfig>> = {
     C: {
-        own: { label: "Create Minion", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.direction !== undefined },
-        enemy: { label: "Create Enemy", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && s.targetPiece !== undefined },
-        // "drawn" (Wheel of Fortune's random-draw option) is parsed as amount === 1 rather than a real card uid, since card must always name an actual card - it satisfies this step just as completely.
-        new: { label: "Create Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.atCell !== undefined && (s.card !== undefined || s.amount === 1) },
+        own: { label: "Create Minion", shape: "cell" },
+        enemy: { label: "Create Enemy", shape: "cell" },
+        new: { label: "Create Territory", shape: "cell" },
     },
     R: {
-        piece: { label: "Move Piece", shape: "piece", minArgs: 2, isComplete: (s) => s.targetPiece !== undefined && s.amount !== undefined },
-        tile: { label: "Push Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.targetCell !== undefined && s.amount !== undefined },
+        piece: { label: "Move Piece", shape: "piece" },
+        tile: { label: "Push Territory", shape: "cell" },
     },
     D: {
-        piece: { label: "Grow Piece", shape: "piece", minArgs: 1, isComplete: (s) => s.targetPiece !== undefined },
-        tile: { label: "Grow Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.targetCell !== undefined && s.card !== undefined },
+        piece: { label: "Grow Piece", shape: "piece" },
+        tile: { label: "Grow Territory", shape: "cell" },
     },
     S: {
-        piece: { label: "Attack Piece", shape: "piece", minArgs: 2, isComplete: (s) => s.targetPiece !== undefined && s.amount !== undefined },
-        tile: { label: "Attack Territory", shape: "cell", minArgs: 2, isComplete: (s) => s.targetCell !== undefined && s.amount !== undefined },
+        piece: { label: "Attack Piece", shape: "piece" },
+        tile: { label: "Attack Territory", shape: "cell" },
     },
 };
 
@@ -212,7 +208,8 @@ export function primitiveStepShape(suitUid: string, step: IStep): StepShape {
     if (config === undefined) {
         return { status: "malformed", key: "BAD_MODE", params: { mode, suit: suitUid } };
     }
-    return config.isComplete(step) ? { status: "complete" } : { status: "incomplete" };
+    // parseMove's own `complete` already says whether this mode's required arguments were all typed.
+    return (step.complete ?? -1) >= 0 ? { status: "complete" } : { status: "incomplete" };
 }
 
 // One shape function per SpecialPower; highPriestess/fool have no minionRef of their own but accept anything regardless.
