@@ -96,8 +96,6 @@ export interface IParsedMove {
     steps: IStep[];
     valid: boolean;
     viaUid?: string; //for Fool and High Priestess
-    //Deprecated attribute.
-    stepSegments: string[][];
 }
 
 export interface IStep {
@@ -140,9 +138,7 @@ interface IPendingStep {
     priorSteps: IStep[];
     // computeShortcutOpts's result for the CURRENT step - lets minorModeAvailability's button pre-filter account for a same-target-shortcut/Moon card.
     opts: Record<string, unknown>;
-    mode?: string;
-    rest: string[];
-    // The current step's own raw content, already resolved into an IStep - used for completeness gates instead of re-deriving shape from `rest`/`mode`.
+    // The current step's own content as typed so far, already resolved into an IStep - completeness gates and click handlers read it directly.
     istep: IStep;
 }
 
@@ -711,17 +707,12 @@ export class GnosticaGame extends GameBaseSequenced {
         const NUMBER_RE = /^[0-6]$/i; //Used for player Ids, card counts, bids, etc.
         const SUIT_RE = /^[CDRS]$/i;
         
-        // Deprecated.
-        const STEP_TOKEN_RE = /^[a-z0-9.-]+\??$/i;
-        const MAX_STEP_TOKENS = 12;
-
         let trimmed = m.trim();
         const pm: IParsedMove = {
             announceLast: false,
             head: undefined,
             valid: true,
             steps: [],
-            stepSegments: []
         };
 
         if ( trimmed.endsWith("last") ) {
@@ -741,42 +732,6 @@ export class GnosticaGame extends GameBaseSequenced {
             pm.valid = true;
             return pm;
         }
-
-/* deprecated code to be removed */
-        
-        const segments2 = segments.slice();
-        const rawStepSegments = segments2.slice(1).map(s => s.split(/\s+/));
-        const stepSegments = rawStepSegments.map(raw => raw[0]?.toLowerCase() === "with" ? raw.slice(1) : raw);
-        //let stepsWellFormed = true;
-        for (let i = 0; i < rawStepSegments.length; i++) {
-            const raw = rawStepSegments[i];
-            if (raw.length === 0 || raw.length > MAX_STEP_TOKENS) {
-                //stepsWellFormed = false;
-                break;
-            }
-            if (raw[0]?.toLowerCase() === "draw" || raw[0]?.toLowerCase() === "discard"
-                || (raw.length === 1 && raw[0]?.toLowerCase() === "decline")) {
-                continue;
-            }
-            if (raw[0]?.toLowerCase() !== "with" && raw[0]?.toLowerCase() !== "orient") {
-                //stepsWellFormed = false;
-                break;
-            }
-            const tokens = stepSegments[i];
-            // "orient" wasn't stripped, so the real minionRef sits one
-            // slot later for it than for everything else here.
-            const refIdx = tokens[0]?.toLowerCase() === "orient" ? 1 : 0;
-            if (!tokens.every(t => STEP_TOKEN_RE.test(t))
-                || !(PIECE_REF_RE.test(tokens[refIdx]) || CARD_UID_RE.test(tokens[refIdx]))) {
-                //stepsWellFormed = false;
-                break;
-            }
-        }
-
-        pm.stepSegments = stepSegments;
-        //console.log("old analysis: ", stepsWellFormed);
-
-/* end deprecation */
 
         //Here we step through ALL segments.
 
@@ -1362,7 +1317,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 ppart.push(step.atCell);
             }
             
-            ppart.push(step.action);
+            // "with" is parseMove's placeholder action for a segment that so far only names its minion ref - the "with <ref>" prefix above already spells it.
+            if (step.action !== "with") {
+                ppart.push(step.action);
+            }
             
             if ( step.action === "draw" || step.action === "redraw" || step.action === "discard" ) {
                 if (step.cardList !== undefined)
@@ -1496,7 +1454,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
         const head: IParsedMove = {
-            announceLast: false, valid: true, stepSegments: [],
+            announceLast: false, valid: true,
             head: decline ? "decline" : "play",
             viaUid: activeUid,
             steps: [{ action: decline ? "decline" : "play", card: this.activeCardUid() }],
@@ -1641,14 +1599,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return ids.every(id => id !== undefined && id === ids[0]);
     }
 
-    // Resolves a step's leading minionRef token against `pool`: a full ref resolves definitively, a bare cell token narrows `candidates` and sets ambiguous.
+    // Resolves a step's typed minionRef against `pool`: a full ref resolves definitively, a bare cell token narrows `candidates` and sets ambiguous.
     private resolveStepMinion(
-        tokens: string[] | undefined, pool: IMinionRef[],
+        ref: string | undefined, pool: IMinionRef[],
     ): { minion: IMinionRef; ambiguous: boolean; candidates: IMinionRef[] } {
         if (pool.length <= 1) {
             return { minion: pool[0], ambiguous: false, candidates: pool };
         }
-        const tok = tokens?.[0]?.toLowerCase();
+        const tok = ref?.toLowerCase();
         if (tok !== undefined) {
             const resolved = this.resolvePieceRef(tok, pool);
             if (resolved.kind === "ok") {
@@ -2196,12 +2154,12 @@ export class GnosticaGame extends GameBaseSequenced {
         return primitive === "create" ? "C" : primitive === "move" ? "R" : primitive === "grow" ? "D" : "S";
     }
 
-    // The current step's own minor-arcana mode (own/enemy/new/piece/tile), derived from `istep` rather than the raw `mode` field - undefined for a plain special step (no suitUid) or a not-yet-shaped primitive/magicianChoice step. Completeness-gate equivalent of `pending.mode`.
+    // The current step's own minor-arcana mode (own/enemy/new/piece/tile), derived from `istep` - undefined for a plain special step (no suitUid) or a not-yet-shaped primitive/magicianChoice step.
     private pendingMode(pending: IPendingStep): string | undefined {
         return pending.suitUid === undefined ? undefined : stepMinorMode(pending.suitUid, pending.istep);
     }
 
-    // Whether NOTHING has been typed yet for `pending`'s own special step, beyond the bare minion ref (if any) - completeness-gate equivalent of `pending.rest.length === 0` for any special kind.
+    // Whether NOTHING has been typed yet for `pending`'s own special step, beyond the bare minion ref (if any).
     private pendingSpecialUntouched(pending: IPendingStep): boolean {
         switch (pending.special) {
             case "orientMinion": return pending.istep.direction === undefined;
@@ -2232,8 +2190,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A genuine resume is detected from the "via <root>" anchor matching this.continued; for button-building it always plays the active card, so `head` is "play".
         const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.getContinuedUid();
-        // High Priestess resumes with its own tokens right after "discard", not a "/"-segment - fold them back so the walk below sees them.
-        const stepSegments = isGenuineResume ? this.resumeStepSegments(parsed) : parsed.stepSegments;
+        // High Priestess resumes with its own content right after "discard", not a "/"-segment - resumeSteps folds it back so the walk below sees it.
         const steps = isGenuineResume ? this.resumeSteps(parsed) : parsed.steps.slice(1);
         if (isGenuineResume) {
             // A "discard" resume is a High Priestess round (not a card); a "play" resume names the revealed card as its front token.
@@ -2266,12 +2223,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (!card.major) {
             const suitUid = card.suit.uid;
-            const segment = stepSegments[0] ?? []; // segment[0] is the minionRef, if typed yet - see resolveStepMinion
-            // rest/mode still need the raw args split (not just the built istep) - pendingMoveString rebuilds a step from them via buildCupsStep/buildRdsStep.
-            const derived = deriveMinorMode(suitUid, segment.slice(1));
-            const istep: IStep = steps[0] ?? { action: "with", withPiece: segment[0] };
-            const { minion, ambiguous, candidates } = this.resolveStepMinion(segment, eligible);
-            return { head, headArg, activeCardUid: headArg, suitUid, eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, mode: derived?.mode, rest: derived?.args ?? segment.slice(1), istep };
+            const istep: IStep = steps[0] ?? { action: "with" };
+            const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, eligible);
+            return { head, headArg, activeCardUid: headArg, suitUid, eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, istep };
         }
 
         const def = getMajorArcanaDef(card);
@@ -2308,35 +2262,26 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Fool's own step always auto-resolves the instant it's next in line on a real commit - nothing here for a click to build.
                 return undefined;
             }
-            const tokens = stepSegments[segIdx];
             const isLastSegment = segIdx === steps.length - 1;
             // Set in whichever branch below falls through (step complete, not held back by preferCurrent) - the IStep this segment becomes.
             let completedStep: IStep | undefined;
             if ("primitive" in step) {
                 const suitUidForStep = this.primitiveToSuit(step.primitive);
                 const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
-                // rest/mode still need the raw args split (not just the built istep) - pendingMoveString rebuilds a step from them via buildCupsStep/buildRdsStep.
-                const derived = deriveMinorMode(suitUidForStep, tokens.slice(1));
-                const mode = derived?.mode;
-                const rest = derived?.args ?? tokens.slice(1);
-                const istepSoFar: IStep = steps[segIdx] ?? { action: "with", withPiece: tokens[0] };
+                const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
                 const shape = primitiveStepShape(suitUidForStep, istepSoFar);
                 if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
                     // Still building this one, OR the caller wants the last-typed segment treated as "current" even once complete (board clicks keep refining it).
-                    const { minion, ambiguous, candidates } = this.resolveStepMinion(tokens, top.minions);
-                    return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode, rest, istep: istepSoFar };
+                    const { minion, ambiguous, candidates } = this.resolveStepMinion(istepSoFar.withPiece, top.minions);
+                    return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: istepSoFar };
                 }
                 completedStep = istepSoFar;
             } else {
-                // highPriestess/fool have no minionRef to strip; every other special does. A Magician's suit choice lives in asSuit, unless worldBorrow lets it spell its own leading token.
+                // A Magician's suit choice lives in asSuit, unless worldBorrow lets a chained frame supply it.
                 const magicianAs = step.special === "magicianChoice" && asSuit !== undefined;
                 const magicianNeedsAs = step.special === "magicianChoice" && asSuit === undefined && !worldBorrow;
-                const noMinionRef = step.special === "highPriestess" || step.special === "fool";
-                // orientMinion's "orient" subhead is kept literal by parseMove (unlike "with"), skipped here alongside the minionRef.
-                const isOrientMinion = step.special === "orientMinion" && tokens[0]?.toLowerCase() === "orient";
-                const specialMinionRef = isOrientMinion ? tokens[1] : noMinionRef ? undefined : tokens[0];
-                // Built once up front - a Magician borrow's step needs no splicing once the suit is known: "at m0 create U" parses the same regardless of suit.
-                const istepSoFar: IStep = steps[segIdx] ?? { action: "with", withPiece: specialMinionRef };
+                // A Magician borrow's step needs no splicing once the suit is known: "at m0 create U" parses the same regardless of suit.
+                const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
                 let shape: StepShape;
                 if (magicianAs) {
                     shape = primitiveStepShape(asSuit!, istepSoFar);
@@ -2347,7 +2292,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 if (shape.status !== "complete" || (isLastSegment && callOpts.preferCurrent)) {
                     // Same "still building, or the caller wants it treated as current regardless" rule as the primitive branch.
-                    return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, tokens, istepSoFar, asUid, asSuit);
+                    return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, istepSoFar, asUid, asSuit);
                 }
                 completedStep = istepSoFar;
             }
@@ -2386,43 +2331,27 @@ export class GnosticaGame extends GameBaseSequenced {
             const suitUid = this.primitiveToSuit(step.primitive);
             const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
             const { minion, ambiguous, candidates } = this.resolveStepMinion(undefined, top.minions);
-            return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, mode: undefined, rest: [], istep: { action: "with" } };
+            return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: { action: "with" } };
         }
-        return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, [], { action: "with" }, asUid, asSuit);
+        return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, { action: "with" }, asUid, asSuit);
     }
 
-    // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice which can be treated as non-special.
+    // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice once its suit is chosen, which is treated as a plain suit step.
     private buildSpecialPending(
         special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
-        eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], tokens: string[], istep: IStep, asUid?: string, asSuit?: string,
+        eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: string,
     ): IPendingStep {
-        if (special === "magicianChoice") {
-            // A suit typed directly into the step's own tokens (no "as") is unreachable via the button-driven UI (#105) - kept for defensiveness, not re-verified.
-            const suitFromToken = ALL_SUITS.some(s => s.uid === tokens[1]) ? tokens[1] : undefined;
-            const suitUid = asSuit ?? suitFromToken;
-            if (suitUid !== undefined) {
-                const afterSuit = suitFromToken !== undefined ? tokens.slice(2) : tokens.slice(1);
-                const [mode, ...rest] = afterSuit;
-                const { minion, ambiguous, candidates } = this.resolveStepMinion(tokens, minions);
-                // Once the suit is known via `asSuit`, `istep` is already the correctly-shaped step - no need to rebuild it a second time.
-                const magicianIstep: IStep = asSuit !== undefined ? istep
-                    : mode === undefined ? { action: "with", withPiece: tokens[0] }
-                        : suitUid === "C" ? this.buildCupsStep(tokens[0], mode, rest)
-                            : this.buildRdsStep(suitUid, mode, tokens[0], rest);
-                return { head, headArg, activeCardUid, asUid, asSuit, suitUid, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode, rest, istep: magicianIstep };
-            }
+        if (special === "magicianChoice" && asSuit !== undefined) {
+            const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, minions);
+            return { head, headArg, activeCardUid, asUid, asSuit, suitUid: asSuit, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
         }
         // Fool/High Priestess/worldUseAny have no minionRef here; an unchosen magicianChoice also defers its minion choice until after the suit is picked (its
         // own button set needs to show before any ambiguous-minion picker would - see the "2+ minions... suit buttons first" regression test).
         const noMinionRef = special === "highPriestess" || special === "fool" || special === "worldUseAny" || special === "magicianChoice";
-        // orientMinion's "orient" subhead is kept literal by parseMove (unlike "with") - the minionRef sits one slot later for it than for every other special.
-        const isOrientMinion = special === "orientMinion" && tokens[0]?.toLowerCase() === "orient";
-        const minionTokens = isOrientMinion ? tokens.slice(1) : tokens;
-        const rest = noMinionRef ? tokens : minionTokens.slice(1);
         const { minion, ambiguous, candidates } = noMinionRef
             ? { minion: minions[0], ambiguous: false, candidates: minions }
-            : this.resolveStepMinion(minionTokens, minions);
-        return { head, headArg, activeCardUid, asUid, asSuit, special, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, mode: undefined, rest, istep };
+            : this.resolveStepMinion(istep.withPiece, minions);
+        return { head, headArg, activeCardUid, asUid, asSuit, special, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
     }
 
     // The single valid cell a minor suit-power step may affect: the minion's own cell if facing "U", otherwise the one cell it's pointing at.
@@ -2615,7 +2544,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Spells a pending step's own head. `pending.head` is always the original verb, `headArg` the root card.
     private describePendingMove(pending: IPendingStep, steps: IStep[]): string {
         const { asUid, asSuit } = pending;
-        const base = { announceLast: false, valid: true, rest: [], stepSegments: [] };
+        const base = { announceLast: false, valid: true };
         // A genuine resume always carries a "via <root>".
         if (this.continued.length > 0) {
             // High Priestess's second step is a discard/draw.
@@ -2883,19 +2812,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.assembleStepMove(pending, step);
     }
 
-    private pendingMoveString(pending: IPendingStep): string {
-        if (this.pendingMode(pending) === undefined) {
-            return this.describePendingMove(pending, pending.priorSteps);
-        }
-        const ref = this.pieceRefStr(pending.minion, pending.minions);
-        const suitUid = pending.suitUid!;
-        const mode = pending.mode!; // pendingMode(pending) just confirmed this is defined
-        const step = suitUid === "C"
-            ? this.buildCupsStep(ref, mode, pending.rest)
-            : this.buildRdsStep(suitUid, mode, ref, pending.rest);
-        return this.assembleStepMove(pending, step).trim();
-    }
-
     // Board-click handling once a minor-arcana power step's MODE is already chosen - cycling or switching whichever trailing arg(s) that mode's shape supports.
     private handlePendingStepBoardClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
         if (this.pendingMode(pending) === undefined) {
@@ -2903,7 +2819,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // Only ever called for a suit-shaped pending - suitUid is guaranteed set here.
         const suitUid = pending.suitUid!;
-        const mode = pending.mode!; // pendingMode(pending) just confirmed this is defined
+        const mode = this.pendingMode(pending)!;
         const config = MINOR_MODES[suitUid][mode];
         // Fills the rebuilt move's selector slot; the "piece"-shape branch's own self-or-facing target instead goes through pickPieceTargetClick.
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
@@ -3030,7 +2946,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const enemyKey = pendingForError.special === "tradeHands" ? "TRADEHANDS_MUST_TARGET_ENEMY" : "HIEROPHANT_MUST_TARGET_ENEMY";
         if (x === minion.x && y === minion.y) {
             if (requiresEnemy) {
-                return { move: this.pendingMoveString(pendingForError), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
+                return { move: this.describePendingMove(pendingForError, pendingForError.priorSteps), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
             }
             return this.pieceRefStr(minion);
         }
@@ -3039,12 +2955,12 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const t = this.board.get(faceX, faceY);
         if (t === undefined || t.pieces.length === 0) {
-            return { move: this.pendingMoveString(pendingForError), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
+            return { move: this.describePendingMove(pendingForError, pendingForError.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
         }
         if (requiresEnemy) {
             const enemyIndex = t.pieces.findIndex(p => p.owner !== this.currplayer);
             if (enemyIndex === -1) {
-                return { move: this.pendingMoveString(pendingForError), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
+                return { move: this.describePendingMove(pendingForError, pendingForError.priorSteps), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
             }
             return this.pieceRefStr({ x: faceX, y: faceY, index: enemyIndex });
         }
@@ -3184,10 +3100,10 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A card cell, but the wrong kind.
         if (t.card.uid === "21") {
-            return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.WORLD_SELF_REFERENCE") };
+            return { move: this.describePendingMove(pending, pending.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.WORLD_SELF_REFERENCE") };
         }
         if (!t.card.major) {
-            return { move: this.pendingMoveString(pending), valid: false, message: i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET") };
+            return { move: this.describePendingMove(pending, pending.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET") };
         }
         return this.describePendingMove({ ...pending, asUid: t.card.uid }, pending.priorSteps);
     }
@@ -3307,7 +3223,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             return ["discard", ...(parsed.steps[0]?.cardList ?? []), "draw", n].join(" ");
                         }
                         if (value.startsWith("hpdraw_")) {
-                            // High Priestess's count-picker - mirrors drawcount_ but appends onto pending.rest (the CURRENT power step's own tokens), not the top-level move's args.
+                            // High Priestess's count-picker - mirrors drawcount_ but appends onto the CURRENT power step's own istep, not the top-level move's args.
                             const n = value.slice("hpdraw_".length);
                             const pending = this.parsePendingStep(move);
                             if (pending === undefined || pending.special !== "highPriestess") {
@@ -3430,7 +3346,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                 return rebuildDiscard(selected.filter(u => u !== key));
                             }
                             if (selected.length >= maxDraw || !this.discardPile.includes(key)) {
-                                return { move: this.pendingMoveString(pendingForDiscard), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
+                                return { move: this.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
                             }
                             return rebuildDiscard([...selected, key]);
                         }
@@ -3450,11 +3366,11 @@ export class GnosticaGame extends GameBaseSequenced {
                             return rebuildDiscard([...selected.slice(0, idx), ...selected.slice(idx + 1)]);
                         }
                         if (selected.length >= maxDraw) {
-                            return { move: this.pendingMoveString(pendingForDiscard), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
+                            return { move: this.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
                         }
                         const candidates = this.discardPile.filter(uid => matchesBucket(uid) && !selected.includes(uid));
                         if (candidates.length === 0) {
-                            return { move: this.pendingMoveString(pendingForDiscard), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
+                            return { move: this.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
                         }
                         const picked = candidates[Math.floor(Math.random() * candidates.length)];
                         return rebuildDiscard([...selected, picked]);
@@ -4408,24 +4324,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return pending?.stack.map(f => ({ ...f, minions: [...f.minions] }));
     }
 
-    // The step segments the frame-walk should see for a resume: decline/discard/"anything else".
-    private resumeStepSegments(parsed: IParsedMove): string[][] {
-        if (parsed.head === "decline") {
-            return [["decline"]];
-        }
-        if (parsed.head === "discard" && parsed.viaUid !== undefined) {
-            const step = parsed.steps[0];
-            if (step?.cardList === undefined && step?.amount === undefined) {
-                return [];
-            }
-            // Mirrors pickleMove's own "discard" token order exactly.
-            const tokens = ["discard", ...(step.cardList ?? []), ...(step.amount !== undefined ? ["draw", step.amount.toString()] : [])];
-            return [tokens];
-        }
-        return parsed.stepSegments;
-    }
-
-    // The IStep-based twin of resumeStepSegments above; the "discard" resume is already a real, fully-parsed IStep at parsed.steps[0] - no synthetic reconstruction needed.
+    // The steps a genuine resume submission carries; the "discard" resume is already a real, fully-parsed IStep at parsed.steps[0] - no synthetic reconstruction needed.
     private resumeSteps(parsed: IParsedMove): IStep[] {
         if (parsed.head === "decline") {
             return [{ action: "decline" }];
@@ -5997,7 +5896,6 @@ export class GnosticaGame extends GameBaseSequenced {
             snapshot.liveMove = {
                 ...this.liveMove,
                 steps: this.liveMove.steps.slice(0, stepIndex + 2),
-                stepSegments: this.liveMove.stepSegments.slice(0, stepIndex + 1),
             };
         }
         return snapshot;

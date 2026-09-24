@@ -66,7 +66,7 @@ export function buildViaMove(game: GnosticaGame, stepSegments: string[][], asUid
     }
     // "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
     const head: IParsedMove = {
-        announceLast: false, valid: true, stepSegments: [],
+        announceLast: false, valid: true,
         head: declining ? "decline" : "play",
         asUid: declining ? undefined : asUid,
         asSuit: declining ? undefined : asSuit,

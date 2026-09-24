@@ -15,7 +15,6 @@ describe("Gnostica parsing", () => {
                 direction: "U?",
                 targetCell: "m0"
             }],
-            stepSegments: [],
             valid: true
         });
 
@@ -27,7 +26,6 @@ describe("Gnostica parsing", () => {
                 card: "00",
                 complete: 1
             }],
-            stepSegments: [],
             valid: true,
             viaUid: "00"
         });
@@ -42,7 +40,6 @@ describe("Gnostica parsing", () => {
                 direction: "N",
                 withPiece: "n0.1"
             }],
-            stepSegments: [],
             valid: true
         });
 
@@ -60,8 +57,7 @@ describe("Gnostica parsing", () => {
                  "withPiece":"l1.1",
                  "targetPiece":"l1.1"
                 }
-            ],
-            "stepSegments":[["l1.1","grow","l1.1"]]
+            ]
             });
 
     });
