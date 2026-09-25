@@ -1215,6 +1215,70 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.validateMove(`use 08/with m0.1 grow n0 to 00/with m0.1 grow m0.1`).valid).to.be.false;
     });
 
+    describe("two-step shortcuts need the paired second step, on the same piece", () => {
+        const setupStrength = (): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(8)); // Strength
+            forceCardAt(g, 1, 0, () => card("AC"));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")];
+            return g;
+        };
+
+        it("Strength: a lone grow only earns the waiver with its second step - without a size-2 in stash it stays incomplete", () => {
+            const g = setupStrength();
+            g.stashes.get(1)![1] = 0;
+            expect(g.validateMove("use 08/with m0.1 grow m0.1")).to.deep.include({ valid: true, complete: -1 });
+            expect(g.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow m0.2")).to.deep.include({ valid: true });
+        });
+
+        it("Strength: a lone grow with a real size-2 in stash is an ordinary grow with exact stash accounting", () => {
+            const g = setupStrength();
+            const before = g.stashes.get(1)!.slice();
+            expect(g.validateMove("use 08/with m0.1 grow m0.1").complete).eq(0);
+            g.move("use 08/with m0.1 grow m0.1");
+            expect(g.stashes.get(1)).to.deep.equal([before[0] + 1, before[1] - 1, before[2]]);
+        });
+
+        it("Strength: the second grow must act on the piece the first grow produced", () => {
+            const g = setupStrength();
+            expect(g.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow n0.1").valid).to.be.false;
+            const before = g.stashes.get(1)!.slice();
+            g.move("use 08/with m0.1 grow m0.1/with m0.2 grow m0.2");
+            expect(g.stashes.get(1)).to.deep.equal([before[0] + 1, before[1], before[2] - 1]);
+        });
+
+        it("Sun: the grow must act on the piece the create just made", () => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(19)); // The Sun
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 2, "U")];
+            expect(g.validateMove("use 19/with m0.1 at n0 create U/with n0.1 grow n0.1").valid).to.be.true;
+            expect(g.validateMove("use 19/with m0.1 at n0 create U/with m0.2 grow m0.2").valid).to.be.false;
+        });
+
+        it("Chariot: a full-territory waypoint needs the same piece moved again; alone it stays incomplete", () => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(7)); // The Chariot
+            forceCardAt(g, 1, 0, () => card("AC")); // n0 - already holds three pieces
+            forceCardAt(g, 3, 0, () => aceOfDiscs()); // keeps o0 (2,0) a genuine wasteland, not void
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+            g.board.get(1, 0)!.pieces = [new Piece(2, 2, "U"), new Piece(2, 2, "U"), new Piece(2, 2, "U")];
+            expect(g.validateMove("use 07/with m0.1 move m0.1 1")).to.deep.include({ valid: true, complete: -1 });
+            expect(g.validateMove("use 07/with m0.1 move m0.1 1/with n0.1 move n0.1 1").valid).to.be.true;
+            expect(g.validateMove("use 07/with m0.1 move m0.1 1/with n0.1 move n0.2 1").valid).to.be.false;
+        });
+
+        it("Strength's +2 territory jump belongs to the first grow only", () => {
+            const g = new GnosticaGame(2);
+            const def = MAJOR_ARCANA["08"];
+            expect(g.computeShortcutOpts(def, "grow", 0, 2, undefined).skipLadder).to.be.true;
+            expect(g.computeShortcutOpts(def, "grow", 1, 2, undefined).skipLadder).to.be.undefined;
+        });
+    });
+
     it("Strength: growing the same piece 1->3 works even with zero size-2 pieces in stash", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(8)); // Strength

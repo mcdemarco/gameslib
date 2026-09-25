@@ -91,6 +91,8 @@ export interface IStepOutcome {
     destroyedAtCell?: { x: number; y: number };
     // A one-step shortcut (Strength's +2 grow, Sun's royalty create, Death's both-swords shrink) already did the card's whole job, so its remaining steps are spent.
     consumesRest?: boolean;
+    // The piece a grow/create/move produced, for the not-tracked (an enemy's) cases newMinion leaves out - a two-step shortcut's second step must act on it.
+    producedPiece?: { x: number; y: number; index: number };
 }
 
 // The non-mutating validator's counterpart to IStepOutcome: a failure, or an outcome where `complete: false` marks a still-building step, not a finished one.
@@ -4111,7 +4113,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 });
             }
             const resultsBefore = this.results.length;
-            const outcome = this.applyPowerStep(step, top.minions, istep, frameDef, top.nextStepIndex, frameDef.powers.length, partial, borrowedForThisStep);
+            // A two-step shortcut's waiver only applies when the card's next step was actually supplied (or this is a still-being-built preview).
+            const outcome = this.applyPowerStep(step, top.minions, istep, frameDef, top.nextStepIndex, frameDef.powers.length, partial, borrowedForThisStep, i < steps.length || partial);
             if (outcome === undefined) {
                 // A still-being-typed segment - stop here WITHOUT advancing nextStepIndex; nothing is persisted, so this exit only fires under a partial preview.
                 if (stepsProcessed > 0) {
@@ -4212,6 +4215,10 @@ export class GnosticaGame extends GameBaseSequenced {
         let softComplete = false;
         // Set once Moon's own move step genuinely needed its capacity exemption (destination was already at 3); cleared once the attack step destroys a piece there, restoring it.
         let moonRestoreCell: { x: number; y: number } | undefined;
+        // Set when the last step was only legal thanks to a two-step shortcut's waiver, which its (missing) paired second step would have earned.
+        let awaitingPair = false;
+        // Where the previous step of a same-target-shortcut card left the piece it acted on; the next step must act on that same piece.
+        let sameTargetWanted: { x: number; y: number; index: number } | undefined;
         for (;;) {
             const top = stack[stack.length - 1];
             const poppedViaDecline = justDeclined;
@@ -4219,6 +4226,9 @@ export class GnosticaGame extends GameBaseSequenced {
             if (top === undefined) {
                 if (i < steps.length) {
                     return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" });
+                }
+                if (awaitingPair) {
+                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
                 }
                 if (hpDrawNotChosen) {
                     return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
@@ -4271,6 +4281,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         const msg = this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions);
                         return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                     }
+                    // The last step was only legal thanks to a two-step shortcut's waiver, so its paired second step is no longer optional.
+                    if (awaitingPair) {
+                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
+                    }
                     // Moon's own move step genuinely pushed a territory over capacity - its own attack step is no longer optional, since skipping it would leave that territory illegally over-full.
                     if (moonRestoreCell !== undefined) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.MOON_MUST_RESTORE_CAPACITY") };
@@ -4291,7 +4305,24 @@ export class GnosticaGame extends GameBaseSequenced {
                 istep = steps[i];
                 i++;
             }
-            const stepResult = (clone ?? this).validatePowerStep(step, top.minions, istep, frameDef, stepIndex, frameDef.powers.length, isFreshRootFool, borrowedForStep);
+            if (sameTargetWanted !== undefined && "primitive" in step && istep !== undefined && (istep.complete ?? -1) >= 0) {
+                const target = istep.targetPiece === undefined ? undefined : (clone ?? this).resolvePieceRef(istep.targetPiece);
+                if (target?.kind !== "ok" || target.ref.x !== sameTargetWanted.x || target.ref.y !== sameTargetWanted.y || target.ref.index !== sameTargetWanted.index) {
+                    return this.invalid("apgames:validation.gnostica.SAME_TARGET_REQUIRED");
+                }
+            }
+            sameTargetWanted = undefined;
+            // Strict rules first: a two-step shortcut's waiver only applies when the card's next step was actually supplied.
+            const followed = i < steps.length;
+            let stepResult = (clone ?? this).validatePowerStep(step, top.minions, istep, frameDef, stepIndex, frameDef.powers.length, isFreshRootFool, borrowedForStep, followed);
+            if (stepResult.failed && !followed && stepIndex < frameDef.powers.length - 1) {
+                // Legal only WITH the waiver: fine as far as it goes, but the move can't be submitted until the paired second step is added.
+                const optimistic = (clone ?? this).validatePowerStep(step, top.minions, istep, frameDef, stepIndex, frameDef.powers.length, isFreshRootFool, borrowedForStep);
+                if (!optimistic.failed) {
+                    awaitingPair = true;
+                    stepResult = optimistic;
+                }
+            }
             if (stepResult.failed) {
                 return stepResult.result;
             }
@@ -4346,6 +4377,10 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // Captured BEFORE chainMinion updates top.minions - the replay call further down re-runs this step onto `clone` and needs the SAME pool validatePowerStep just used.
             const minionsForReplay = top.minions;
+            if (frameDef.sameTargetShortcut && followed && "primitive" in step) {
+                const produced = stepResult.outcome?.producedPiece ?? stepResult.outcome?.newMinion;
+                sameTargetWanted = produced === undefined ? undefined : { x: produced.x, y: produced.y, index: produced.index };
+            }
             top.minions = GnosticaGame.chainMinion(top.minions, stepResult.outcome ?? {});
             top.nextStepIndex = stepResult.outcome?.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
             if ("special" in step && step.special === "highPriestess" && top.nextStepIndex >= frameDef.powers.length) {
@@ -4396,7 +4431,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as minor arcana); "special" steps have their own bespoke shapes. High Priestess alone has no minion reference at all.
     public applyPowerStep(
         step: PowerStep, minions: IMinionRef[], istep: IStep | undefined, def: MajorArcanaDef, stepIndex: number, totalSteps: number, partial: boolean,
-        borrowedPower?: string,
+        borrowedPower?: string, paired = true,
     ): IStepOutcome | undefined {
         if ("special" in step && step.special === "worldUseAny") {
             // The borrowed card is named "as <uid>" in the head, never a step segment - this step takes no minion of its own and just hands off to that card's frame.
@@ -4437,7 +4472,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if ((istep!.complete ?? -1) < 0) {
                 return undefined; // still skipped so far
             }
-            const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
+            const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts, paired);
             return this.applySuitPrimitive(suitUid, minion, istep!, opts);
         }
         if (step.special === "magicianChoice") {
@@ -4476,7 +4511,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Mirrors applyPowerStep's own "incomplete step, still skipped" tolerance.
     public validatePowerStep(
         step: PowerStep, minions: IMinionRef[], istep: IStep | undefined, def: MajorArcanaDef, stepIndex: number, totalSteps: number,
-        isFreshRootFool = false, borrowedPower?: string,
+        isFreshRootFool = false, borrowedPower?: string, paired = true,
     ): StepValidation {
         if ("special" in step && step.special === "worldUseAny") {
             if (borrowedPower === undefined) {
@@ -4525,7 +4560,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if ((istep!.complete ?? -1) < 0) {
                 return { failed: false, complete: false };
             }
-            const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts);
+            const opts = this.computeShortcutOpts(def, step.primitive, stepIndex, totalSteps, step.opts, paired);
             return this.validateSuitPrimitive(suitUid, minion, istep!, opts);
         }
         if (step.special === "magicianChoice") {
@@ -4565,16 +4600,19 @@ export class GnosticaGame extends GameBaseSequenced {
     public computeShortcutOpts(
         def: MajorArcanaDef, primitive: SuitPrimitive,
         stepIndex: number, totalSteps: number, staticOpts: object | undefined,
+        // False when this step is being validated/applied with no second step actually supplied - a two-step shortcut's waiver then doesn't apply.
+        paired = true,
     ): Record<string, unknown> {
         const opts: Record<string, unknown> = { ...staticOpts };
+        const waiverApplies = paired && stepIndex < totalSteps - 1;
         if (def.sameTargetShortcut) {
             if (primitive === "grow") {
-                // Strength's two grows may jump two values at once; the Sun's single grow is still one value at a time.
-                if (def.powers.every(pw => "primitive" in pw && pw.primitive === "grow")) {
+                // Strength's first grow may jump two values at once (one step for both grows); the Sun's single grow is still one value at a time.
+                if (stepIndex === 0 && def.powers.every(pw => "primitive" in pw && pw.primitive === "grow")) {
                     opts.skipLadder = true;
                 }
                 // Strength's own shortcut: a non-final grow step's resulting size is only transient, restored to its final size by the step after.
-                if (stepIndex < totalSteps - 1) {
+                if (waiverApplies) {
                     opts.skipStashCheck = true;
                 }
                 // Strength/Sun: a step past the first is growing a piece whose OWN current size was itself never really taken (the step before skipped it) - returning it now would over-credit the stash.
@@ -4586,16 +4624,20 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (stepIndex === 0) {
                     opts.bothSwords = true;
                 }
-            } else if (primitive === "move" && stepIndex < totalSteps - 1) {
+            } else if (primitive === "move" && waiverApplies) {
                 opts.skipLandingCheck = true;
-            } else if (primitive === "create" && stepIndex < totalSteps - 1) {
-                // Sun's own shortcut: the created piece's initial size-1 form is only transient, grown to its final size by the step after,
-                // and a created territory may go straight to royalty instead of a spot card grown by the step after.
-                opts.skipStashCheck = true;
-                opts.allowRoyalty = true;
+            } else if (primitive === "create") {
+                // Sun's own shortcut: the created piece's initial size-1 form is only transient, grown to its final size by the step after.
+                if (waiverApplies) {
+                    opts.skipStashCheck = true;
+                }
+                // A created territory may go straight to royalty instead of a spot card grown by the step after - one step doing both jobs, so no second step is needed.
+                if (stepIndex === 0) {
+                    opts.allowRoyalty = true;
+                }
             }
         }
-        if (def.moonCapacityExemption && primitive === "move" && stepIndex === 0 && totalSteps >= 2) {
+        if (def.moonCapacityExemption && primitive === "move" && stepIndex === 0 && totalSteps >= 2 && paired) {
             opts.ignoreCapacity = true;
         }
         return opts;
@@ -4829,7 +4871,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: false, outcome: { newMinion: { x: destX, y: destY, index: newIndex, piece: newPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined, movedToCell: { x: destX, y: destY } } };
                 }
                 // Moved an enemy's own piece - not tracked in this pool, but still a real removeAt at target's old slot.
-                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index }, movedToCell: { x: destX, y: destY } } };
+                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index }, movedToCell: { x: destX, y: destY }, producedPiece: { x: destX, y: destY, index: this.board.get(destX, destY)?.pieces.length ?? 0 } } };
             }
             case "tile": {
                 const cellStr = step.targetCell!;
@@ -4910,7 +4952,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: grownPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
                 }
                 // Grown into a piece this pool doesn't track (an enemy's) - still a real removeAt at target's old slot, so chainMinion still needs to know.
-                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index } } };
+                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index }, producedPiece: { x: target.x, y: target.y, index: (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1 } } };
             }
             case "tile": {
                 const cellStr = step.targetCell!;

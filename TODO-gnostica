@@ -21,6 +21,8 @@ Miscellany:
 	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
 	- #115 - The question of case-sensitivity of directions.
 	- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)?
+	- #123 - Death's territory attack: the click UI always seeds 1 pip for a Swords "tile" step, so a shrink of more than 1 (needed for Death's one-step shortcut, up to twice the minion's pips) can only be typed; add pips buttons like the piece "Attack for N" ones.
+	- #124 - StepShape (powers.ts) is down to incomplete/complete now that "malformed" is gone; consider making it a plain boolean.
 
 UX:
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
