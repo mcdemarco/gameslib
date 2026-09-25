@@ -89,6 +89,8 @@ export interface IStepOutcome {
     movedToCell?: { x: number; y: number };
     // Swords "piece" mode's own cell, set only when the target was fully destroyed (not just shrunk in place) - Moon's own capacity-restoration check reads this too.
     destroyedAtCell?: { x: number; y: number };
+    // A one-step shortcut (Strength's +2 grow, Sun's royalty create, Death's both-swords shrink) already did the card's whole job, so its remaining steps are spent.
+    consumesRest?: boolean;
 }
 
 // The non-mutating validator's counterpart to IStepOutcome: a failure, or an outcome where `complete: false` marks a still-building step, not a finished one.
@@ -2172,7 +2174,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (suitUid === "S" && stepMinorMode("S", pendingMinor.istep) === "piece") {
                 const minionPiece = pendingMinor.minion.piece ?? this.board.get(pendingMinor.minion.x, pendingMinor.minion.y)!.pieces[pendingMinor.minion.index];
                 const pipsOptions: ChoiceOption[] = [];
-                for (let n = minionPiece.size; n >= 1; n--) {
+                for (let n = minionPiece.size * (pendingMinor.opts.bothSwords === true ? 2 : 1); n >= 1; n--) {
                     pipsOptions.push({ value: String(n), label: `Attack for ${n}` });
                 }
                 buttons.push(...this.buildChoiceButtons("pips", pipsOptions, pendingMinor.istep.amount?.toString()));
@@ -2335,7 +2337,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     ...m,
                     piece: clone!.board.get(m.x, m.y)?.pieces[m.index],
                 }));
-                top.nextStepIndex++;
+                top.nextStepIndex = outcome?.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
                 if (outcome?.pushFrame !== undefined) {
                     stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, eligible: [...outcome.pushFrame.minions], minions: [...outcome.pushFrame.minions] });
                 }
@@ -2506,7 +2508,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 case "C.new":
                     if (this.board.classify(tx, ty) !== "wasteland") {
                         result.set(mode, { key: "NOT_A_WASTELAND" });
-                    } else if (pending.opts.allowRandomDraw === true || handHasCardOfValue(hand, 1)) {
+                    } else if (pending.opts.allowRandomDraw === true || handHasCardOfValue(hand, 1) || (pending.opts.allowRoyalty === true && handHasCardOfValue(hand, 2))) {
                         result.set(mode, undefined);
                     } else {
                         result.set(mode, { key: "NO_CARD_FOR_TERRITORY" });
@@ -2541,7 +2543,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     const pile = pending.opts.replacementSource === "discard" ? this.discardPile : hand;
                     let ok = false;
-                    for (let p = 1; p <= minion.size; p++) {
+                    for (let p = 1; p <= minion.size * (pending.opts.bothSwords === true ? 2 : 1); p++) {
                         const resultValue = current - p;
                         if (resultValue < 0) {
                             continue;
@@ -4119,7 +4121,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             stepsProcessed++;
             top.minions = GnosticaGame.chainMinion(top.minions, outcome);
-            top.nextStepIndex++;
+            top.nextStepIndex = outcome.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
             // Wrap this step's own results into one _group entry, mirroring frogger.ts's own precedent.
             if (chained) {
                 const stepResults = this.results.splice(resultsBefore) as APMoveResult[];
@@ -4345,7 +4347,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // Captured BEFORE chainMinion updates top.minions - the replay call further down re-runs this step onto `clone` and needs the SAME pool validatePowerStep just used.
             const minionsForReplay = top.minions;
             top.minions = GnosticaGame.chainMinion(top.minions, stepResult.outcome ?? {});
-            top.nextStepIndex++;
+            top.nextStepIndex = stepResult.outcome?.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
             if ("special" in step && step.special === "highPriestess" && top.nextStepIndex >= frameDef.powers.length) {
                 hpFinalRoundReady = this.forcePauseReadyMessage(top.cardUid, stepIndex);
             }
@@ -4567,7 +4569,10 @@ export class GnosticaGame extends GameBaseSequenced {
         const opts: Record<string, unknown> = { ...staticOpts };
         if (def.sameTargetShortcut) {
             if (primitive === "grow") {
-                opts.skipLadder = true;
+                // Strength's two grows may jump two values at once; the Sun's single grow is still one value at a time.
+                if (def.powers.every(pw => "primitive" in pw && pw.primitive === "grow")) {
+                    opts.skipLadder = true;
+                }
                 // Strength's own shortcut: a non-final grow step's resulting size is only transient, restored to its final size by the step after.
                 if (stepIndex < totalSteps - 1) {
                     opts.skipStashCheck = true;
@@ -4577,19 +4582,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     opts.skipStashReturn = true;
                 }
             } else if (primitive === "attack") {
-                // Death's own shortcut: a non-final attack step's resulting size is only transient, shrunk further by the step after.
-                if (stepIndex < totalSteps - 1) {
-                    opts.skipStashCheck = true;
-                }
-                // Death: a step past the first is shrinking a piece whose OWN current size was itself never really taken (the step before skipped it) - returning it now would over-credit the stash.
-                if (stepIndex > 0) {
-                    opts.skipStashReturn = true;
+                // Death's own shortcut: one shrink standing for both swords, so the first step may be worth up to twice the minion's pips.
+                if (stepIndex === 0) {
+                    opts.bothSwords = true;
                 }
             } else if (primitive === "move" && stepIndex < totalSteps - 1) {
                 opts.skipLandingCheck = true;
             } else if (primitive === "create" && stepIndex < totalSteps - 1) {
-                // Sun's own shortcut: the created piece's initial size-1 form is only transient, grown to its final size by the step after.
+                // Sun's own shortcut: the created piece's initial size-1 form is only transient, grown to its final size by the step after,
+                // and a created territory may go straight to royalty instead of a spot card grown by the step after.
                 opts.skipStashCheck = true;
+                opts.allowRoyalty = true;
             }
         }
         if (def.moonCapacityExemption && primitive === "move" && stepIndex === 0 && totalSteps >= 2) {
@@ -4674,7 +4677,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // Read the placed card back off the board rather than trusting cardArg directly - a "drawn" card isn't the literal token typed.
                 this.results.push({ type: "place", where: cellStr, how: "territory", what: this.board.get(tx, ty)!.card!.uid });
-                return {};
+                return opts.allowRoyalty === true && cardArg !== undefined && this.cardValueByUid(cardArg) === 2 ? { consumesRest: true } : {};
             }
             default:
                 // Legality is validateCups's own job - validateSuitPrimitive already rejected an unrecognized mode, so reaching one here is a bug upstream, not something to re-litigate.
@@ -4731,7 +4734,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                return { failed: false };
+                const royalty = opts.allowRoyalty === true && cardArg !== undefined && this.cardValueByUid(cardArg) === 2;
+                return royalty ? { failed: false, outcome: { consumesRest: true } } : { failed: false };
             }
             default:
                 return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Cups" }) };
@@ -4869,9 +4873,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 const newCardUid = step.card!;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const beforeUid = this.board.get(tx, ty)!.card!.uid;
+                const jumpsTwo = opts.skipLadder === true && this.cardValueByUid(newCardUid) - this.board.get(tx, ty)!.pointValue() === 2;
                 growTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, newCardUid, opts);
                 this.results.push({ type: "convert", what: beforeUid, into: newCardUid, where: cellStr });
-                return {};
+                return jumpsTwo ? { consumesRest: true } : {};
             }
             default:
                 // See applyCups's own matching comment - validateDiscs owns this legality, not this function.
@@ -4915,7 +4920,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                return { failed: false };
+                const jumpsTwo = opts.skipLadder === true && this.cardValueByUid(newCardUid) - (this.board.get(tx, ty)?.pointValue() ?? 0) === 2;
+                return jumpsTwo ? { failed: false, outcome: { consumesRest: true } } : { failed: false };
             }
             default:
                 return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Discs" }) };
@@ -4923,19 +4929,34 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Swords - piece <targetRef> <pips> [orientation] | tile <cell> <pips> [newCardUid]
+    private minionSize(minion: IMinionRef): number {
+        return (minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index]).size;
+    }
+
+    // The value of a card by uid, for recognizing when a one-step shortcut was used.
+    private cardValueByUid(uid: string): number {
+        return cardPointValue(allCards().find(c => c.uid === uid)!);
+    }
+
+    // Death's shortcut lets one shrink stand for both of its swords, so a total larger than what's there is just a wipeout (a 4 acts as a 3).
+    private effectiveShrink(amount: number, available: number, opts: Record<string, unknown>): number {
+        return opts.bothSwords === true && available > 0 ? Math.min(amount, available) : amount;
+    }
+
     private applySwords(minion: IMinionRef, mode: string, step: IStep, opts: Record<string, unknown> = {}): IStepOutcome {
         const ctx = this.buildPowerContext();
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
-                const pips = step.amount!;
                 const orientationStr = step.direction;
                 const target = this.resolvePieceRefTrusted(targetRef);
                 const newOrientation = orientationStr as Orientation | undefined;
                 const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+                const pips = this.effectiveShrink(step.amount!, targetPiece.size, opts);
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
                 attackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, newOrientation, opts);
+                const bothSwordsUsed = opts.bothSwords === true && pips > this.minionSize(minion);
                 const resultSize = beforeSize - pips;
                 const where = GnosticaBoard.coords2algebraic(target.x, target.y);
                 if (resultSize === 0) {
@@ -4946,25 +4967,26 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (resultSize > 0 && owner === this.currplayer) {
                     const shrunk = this.board.get(target.x, target.y)!.pieces;
                     const newIndex = shrunk.length - 1;
-                    return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunk[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
+                    return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunk[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index }, consumesRest: bothSwordsUsed || undefined };
                 }
                 // Destroyed outright, or shrunk but not into a piece this pool tracks (an enemy's) - still a real removeAt at target's old slot, so chainMinion still needs to know.
-                return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
+                return { replacesMinion: { x: target.x, y: target.y, index: target.index }, consumesRest: bothSwordsUsed || undefined };
             }
             case "tile": {
                 const cellStr = step.targetCell!;
-                const pips = step.amount!;
                 const newCardUid = step.card;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const beforeUid = this.board.get(tx, ty)!.card!.uid;
+                const pips = this.effectiveShrink(step.amount!, this.board.get(tx, ty)!.pointValue(), opts);
                 attackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
+                const bothSwordsUsed = opts.bothSwords === true && pips > this.minionSize(minion);
                 // A replacement card means the territory survived, shrunk; only a true wipeout (no replacement) is a "destroy".
                 if (newCardUid === undefined) {
                     this.results.push({ type: "destroy", where: cellStr, what: beforeUid });
                 } else {
                     this.results.push({ type: "convert", what: beforeUid, into: newCardUid, where: cellStr });
                 }
-                return {};
+                return bothSwordsUsed ? { consumesRest: true } : {};
             }
             default:
                 // See applyCups's own matching comment - validateSwords owns this legality, not this function.
@@ -4977,7 +4999,6 @@ export class GnosticaGame extends GameBaseSequenced {
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
-                const pips = step.amount!;
                 const orientationStr = step.direction;
                 const targetResult = this.resolvePieceRef(targetRef);
                 if (targetResult.kind !== "ok") {
@@ -4985,6 +5006,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const target = targetResult.ref;
                 const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
+                const pips = this.effectiveShrink(step.amount!, targetPiece.size, opts);
                 // This facing is an optional addition to an already-meaningful step, not the whole action, so a same-facing correction isn't a no-op worth rejecting.
                 // parseMove now rejects a non-single-letter direction here too (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U (or absent) by now.
                 const orientation = (orientationStr as Orientation | undefined) ?? targetPiece.orientation;
@@ -4994,26 +5016,27 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const owner = targetPiece.owner;
                 const resultSize = targetPiece.size - pips;
+                const bothSwordsUsed = opts.bothSwords === true && pips > this.minionSize(minion);
                 if (resultSize > 0 && owner === this.currplayer) {
                     // Shrinking replaces the piece in place, same net count as Discs' own grow above.
                     const newIndex = (this.board.get(target.x, target.y)?.pieces.length ?? 1) - 1;
                     const shrunkPiece = new Piece(owner, resultSize as Pips, orientation);
-                    return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunkPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined } };
+                    return { failed: false, outcome: { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunkPiece }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined, consumesRest: bothSwordsUsed || undefined } };
                 }
                 // Destroyed outright, or shrunk but not into a piece this pool tracks (an enemy's) - still a real removeAt at target's old slot.
                 // A true destroy (not just a shrink into an untracked enemy piece) actually frees a slot at this cell - only that satisfies Moon's own capacity-restoration requirement.
-                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index }, destroyedAtCell: resultSize === 0 ? { x: target.x, y: target.y } : undefined } };
+                return { failed: false, outcome: { replacesMinion: { x: target.x, y: target.y, index: target.index }, destroyedAtCell: resultSize === 0 ? { x: target.x, y: target.y } : undefined, consumesRest: bothSwordsUsed || undefined } };
             }
             case "tile": {
                 const cellStr = step.targetCell!;
-                const pips = step.amount!;
                 const newCardUid = step.card;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const pips = this.effectiveShrink(step.amount!, this.board.get(tx, ty)?.pointValue() ?? 0, opts);
                 const failure = checkAttackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
-                return { failed: false };
+                return opts.bothSwords === true && pips > this.minionSize(minion) ? { failed: false, outcome: { consumesRest: true } } : { failed: false };
             }
             default:
                 return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_MODE", { mode, suit: "Swords" }) };

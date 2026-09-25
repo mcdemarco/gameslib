@@ -258,7 +258,7 @@ export const createEnemy = (
 // Create a territory on a wasteland with a spot card from hand, or (Wheel of Fortune's allowRandomDraw) an unrestricted draw-pile card instead.
 export const checkCreateTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts = {},
+    targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
 ): PowerFailure | undefined => {
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const ownErr = checkOwnMinion(minion, ctx.currplayer);
@@ -287,7 +287,8 @@ export const checkCreateTerritory = (
     if (card === undefined) {
         return { key: "UNKNOWN_CARD", params: { uid: cardUid } };
     }
-    if (cardPointValue(card) !== 1) {
+    // opts.allowRoyalty (the Sun's shortcut): a royalty card may stand in for creating a spot card and then growing it.
+    if (cardPointValue(card) !== 1 && !(opts.allowRoyalty && cardPointValue(card) === 2)) {
         return { key: "MUST_BE_SPOT_CARD" };
     }
     return undefined;
@@ -295,7 +296,7 @@ export const checkCreateTerritory = (
 
 export const createTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts = {},
+    targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
 ): void => {
     const failure = checkCreateTerritory(ctx, minionX, minionY, minionIndex, targetX, targetY, cardUid, opts);
     if (failure) {
@@ -550,17 +551,18 @@ export const growTerritory = (
 // Swords - Attack
 
 // Shrink a targeted piece by up to `pips`, replacing it from the VICTIM's own stash - or destroying it outright if the result is 0 pips.
+// opts.bothSwords (Death's shortcut) lets `pips` be the total of both of the card's attacks, i.e. up to twice the minion's size.
 export const checkAttackPiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, pips: number,
-    opts: { skipStashCheck?: boolean } = {},
+    opts: { bothSwords?: boolean } = {},
 ): PowerFailure | undefined => {
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const ownErr = checkOwnMinion(minion, ctx.currplayer);
     if (ownErr) return ownErr;
     const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
     if (targetErr) return targetErr;
-    if (pips < 1 || pips > minion.size) {
+    if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
         return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
     }
     const victim = ctx.board.get(targetX, targetY)?.pieces[targetIndex];
@@ -571,7 +573,7 @@ export const checkAttackPiece = (
     if (resultSize < 0) {
         return { key: "TOO_FEW_PIPS", params: { size: victim.size, pips } };
     }
-    if (resultSize > 0 && !opts.skipStashCheck && !hasStashAvailable(ctx, victim.owner, resultSize as Pips)) {
+    if (resultSize > 0 && !hasStashAvailable(ctx, victim.owner, resultSize as Pips)) {
         return { key: "STASH_EMPTY", params: { player: victim.owner, size: resultSize } };
     }
     return undefined;
@@ -580,7 +582,7 @@ export const checkAttackPiece = (
 export const attackPiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, pips: number,
-    newOrientation: Orientation | undefined, opts: { skipStashCheck?: boolean; skipStashReturn?: boolean } = {},
+    newOrientation: Orientation | undefined, opts: { bothSwords?: boolean } = {},
 ): void => {
     const failure = checkAttackPiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex, pips, opts);
     if (failure) {
@@ -590,20 +592,13 @@ export const attackPiece = (
     const victim = t.pieces[targetIndex];
     const resultSize = victim.size - pips;
     if (resultSize === 0) {
-        // Symmetric case: if THIS piece's own current size was itself never really taken (an earlier step in the same chain skipped it), returning it now would over-credit the stash.
-        if (!opts.skipStashReturn) {
-            returnToStash(ctx, victim.owner, victim.size);
-        }
+        returnToStash(ctx, victim.owner, victim.size);
         t.removeAt(targetIndex);
         ctx.board.pruneIfEmpty(targetX, targetY);
         return;
     }
-    if (!opts.skipStashCheck) {
-        stashOf(ctx, victim.owner)[resultSize - 1] -= 1;
-    }
-    if (!opts.skipStashReturn) {
-        returnToStash(ctx, victim.owner, victim.size);
-    }
+    stashOf(ctx, victim.owner)[resultSize - 1] -= 1;
+    returnToStash(ctx, victim.owner, victim.size);
     const orientation = victim.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
     t.removeAt(targetIndex);
     t.add(new Piece(victim.owner, resultSize as Pips, orientation));
@@ -613,7 +608,7 @@ export const attackPiece = (
 export const checkAttackTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
-    opts: PrimitiveOpts = {},
+    opts: PrimitiveOpts & { bothSwords?: boolean } = {},
 ): PowerFailure | undefined => {
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const ownErr = checkOwnMinion(minion, ctx.currplayer);
@@ -623,7 +618,7 @@ export const checkAttackTerritory = (
     if (hasEnemyPieces(ctx, targetX, targetY, ctx.currplayer)) {
         return { key: "CELL_HAS_ENEMY" };
     }
-    if (pips < 1 || pips > minion.size) {
+    if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
         return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
     }
     const t = ctx.board.get(targetX, targetY);
@@ -662,7 +657,7 @@ export const checkAttackTerritory = (
 export const attackTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
-    opts: PrimitiveOpts = {},
+    opts: PrimitiveOpts & { bothSwords?: boolean } = {},
 ): void => {
     const failure = checkAttackTerritory(ctx, minionX, minionY, minionIndex, targetX, targetY, pips, newCardUid, opts);
     if (failure) {

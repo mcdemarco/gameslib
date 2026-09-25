@@ -1205,6 +1205,16 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.board.get(1, 0)!.card?.uid).eq("00");
     });
 
+    it("Strength: a one-step +2 territory grow uses up both grows, so a second step is rejected", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(8)); // Strength
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+        forceCardAt(g, 1, 0, () => card("AC")); // n0 - spot, worth 1
+        g.hands[0].push("00"); // The Fool, worth 3
+        expect(g.validateMove(`use 08/with m0.1 grow n0 to 00`)).to.deep.include({ valid: true, complete: 1 });
+        expect(g.validateMove(`use 08/with m0.1 grow n0 to 00/with m0.1 grow m0.1`).valid).to.be.false;
+    });
+
     it("Strength: growing the same piece 1->3 works even with zero size-2 pieces in stash", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(8)); // Strength
@@ -1225,11 +1235,126 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.stashes.get(1)!).to.deep.equal([0, 4, 5]); // the transient size-1 was never taken OR returned - net effect is just the real size-2 draw
     });
 
-    it("Death's own shortcut only relaxes the stash check for its non-final attack step, not the final one", () => {
+    describe("Sun's territory shortcut", () => {
+        const setupSun = (uid = "19"): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => uid === "19" ? major(19) : card(uid));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // n0 is the wasteland it points at
+            g.hands[0] = ["2C", "KS", "00"];
+            return g;
+        };
+
+        it("creating a territory with a royalty card stands in for creating a spot card and growing it", () => {
+            const g = setupSun();
+            expect(g.validateMove("use 19/with m0.1 at n0 create 2C").valid).to.be.true; // the ordinary spot card still works
+            expect(g.validateMove("use 19/with m0.1 at n0 create KS").valid).to.be.true;
+            g.move("use 19/with m0.1 at n0 create KS");
+            expect(g.board.get(1, 0)!.card?.uid).eq("KS");
+        });
+
+        it("a major arcana card is still not a legal create, and only the Sun may create royalty", () => {
+            expect(setupSun().validateMove("use 19/with m0.1 at n0 create 00").valid).to.be.false;
+            expect(setupSun("AC").validateMove("use AC/with m0.1 at n0 create KS").valid).to.be.false;
+        });
+
+        it("creating a royalty territory uses up both steps, so a following grow is rejected", () => {
+            const g = setupSun();
+            expect(g.validateMove("use 19/with m0.1 at n0 create KS").complete).eq(1);
+            expect(g.validateMove("use 19/with m0.1 at n0 create KS/with m0.1 grow n0 to 00").valid).to.be.false;
+        });
+
+        it("the Sun's grow is one value at a time (no skipLadder)", () => {
+            const g = setupSun();
+            expect(g.validateMove("use 19/with m0.1 at n0 create 2C/with m0.1 grow n0 to KS").valid).to.be.true;
+            expect(g.validateMove("use 19/with m0.1 at n0 create 2C/with m0.1 grow n0 to 00").valid).to.be.false;
+        });
+    });
+
+    it("Death's shortcut is one shrink standing for both swords, so only its first step gets bothSwords", () => {
         const g = new GnosticaGame(2);
         const def = MAJOR_ARCANA["13"]; // Death
-        expect(g.computeShortcutOpts(def, "attack", 0, 2, undefined).skipStashCheck).to.be.true; // step 1 of 2 - relaxed
-        expect(g.computeShortcutOpts(def, "attack", 1, 2, undefined).skipStashCheck).to.be.undefined; // step 2 of 2 - real check
+        expect(g.computeShortcutOpts(def, "attack", 0, 2, undefined).bothSwords).to.be.true;
+        expect(g.computeShortcutOpts(def, "attack", 1, 2, undefined).bothSwords).to.be.undefined;
+        expect(g.computeShortcutOpts(def, "attack", 0, 2, undefined).skipStashCheck).to.be.undefined; // no stash waiver anymore
+    });
+
+    // Death (attack, attack): two swords on the same target may be written as one shrink of their total.
+    describe("Death's single-step shortcut", () => {
+        const setup = (minionSize: 1 | 2): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(13)); // Death
+            g.board.get(0, 0)!.pieces = [new Piece(1, minionSize, "E")];
+            return g;
+        };
+        const withCardAtN0 = (g: GnosticaGame, uid: string): void => forceCardAt(g, 1, 0, () => card(uid));
+
+        it("piece 3->1: a size-1 minion shrinks an enemy size-3 piece by 2 in one step", () => {
+            const g = setup(1);
+            withCardAtN0(g, "3C");
+            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
+            expect(g.validateMove("use 13/with m0.1 shrink n0.3 3").valid).to.be.false; // 3 > 2 x 1
+            expect(g.validateMove("use 13/with m0.1 shrink n0.3 2").valid).to.be.true;
+            g.move("use 13/with m0.1 shrink n0.3 2");
+            expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1 });
+        });
+
+        it("piece 2->0: a size-1 minion destroys an enemy size-2 piece in one step", () => {
+            const g = setup(1);
+            withCardAtN0(g, "3C");
+            g.board.get(1, 0)!.pieces = [new Piece(2, 2, "U")];
+            g.move("use 13/with m0.1 shrink n0.2 2");
+            expect(g.board.get(1, 0)!.pieces.length).eq(0);
+        });
+
+        it("piece 3->0: a size-2 minion destroys an enemy size-3 piece in one step", () => {
+            const g = setup(2);
+            withCardAtN0(g, "3C");
+            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
+            g.move("use 13/with m0.2 shrink n0.3 3");
+            expect(g.board.get(1, 0)!.pieces.length).eq(0);
+        });
+
+        it("a total above what's there acts as a wipeout (4 acts as 3)", () => {
+            const g = setup(2);
+            withCardAtN0(g, "3C");
+            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
+            g.move("use 13/with m0.2 shrink n0.3 4");
+            expect(g.board.get(1, 0)!.pieces.length).eq(0);
+        });
+
+        it("territory 2->0: a size-1 minion destroys a royalty territory in one step", () => {
+            const g = setup(1);
+            withCardAtN0(g, "KS"); // worth 2
+            g.move("use 13/with m0.1 shrink n0 2");
+            expect(g.board.get(1, 0)?.card).to.be.undefined;
+        });
+
+        it("territory 3->1: a size-1 minion shrinks a major arcana territory to a spot card in one step", () => {
+            const g = setup(1);
+            forceCardAt(g, 1, 0, () => major(0)); // worth 3
+            g.hands[0].push("2C");
+            expect(g.validateMove("use 13/with m0.1 shrink n0 2 to KS").valid).to.be.false; // wrong replacement value
+            g.move("use 13/with m0.1 shrink n0 2 to 2C");
+            expect(g.board.get(1, 0)!.card?.uid).eq("2C");
+        });
+
+        it("a one-step Death shrink uses up both swords, so a second step is rejected; the ordinary two steps still work", () => {
+            const g = setup(1);
+            withCardAtN0(g, "3C");
+            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
+            expect(g.validateMove("use 13/with m0.1 shrink n0.3 2").complete).eq(1);
+            expect(g.validateMove("use 13/with m0.1 shrink n0.3 2/with m0.1 shrink n0.1 1").valid).to.be.false;
+            expect(g.validateMove("use 13/with m0.1 shrink n0.3 1/with m0.1 shrink n0.2 1").valid).to.be.true;
+        });
+
+        it("territory 3->0: a size-2 minion destroys a major arcana territory in one step", () => {
+            const g = setup(2);
+            forceCardAt(g, 1, 0, () => major(0));
+            g.move("use 13/with m0.2 shrink n0 3");
+            expect(g.board.get(1, 0)?.card).to.be.undefined;
+        });
     });
 
     it("Moon: a move that pushes a territory to 4 pieces stays incomplete until the attack destroys one there, restoring the cap", () => {

@@ -431,26 +431,22 @@ describe("Gnostica powers: Swords (attack)", () => {
         expect(ctx.stashes.get(1)!).to.deep.equal([5, 6, 5]);
     });
 
-    it("cannot shrink to a size unavailable in the victim's stash, unless skipStashCheck is set", () => {
+    it("cannot shrink to a size unavailable in the victim's stash", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 3, "N")]));
         const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, [5, 0, 5] as Stash]]) });
         expect(() => attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined)).to.throw();
-        attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined, { skipStashCheck: true }); // Death's shortcut
-        expect(b.get(0, 0)!.pieces[1].size).eq(2);
     });
 
-    it("Death's own shortcut doesn't double-credit stash across a same-target double-attack", () => {
+    it("Death's shortcut (bothSwords): one shrink may total both swords, up to twice the minion's size", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U"), new Piece(2, 3, "N")]));
-        const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, [0, 0, 5] as Stash]]) });
-        // Step 1 of 2 (3->2): its own take is skipped (mirrors the always-skipped shortcut), but its input (size 3) was real, so returning it is correct.
-        attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined, { skipStashCheck: true });
-        expect(ctx.stashes.get(2)!).to.deep.equal([0, 0, 6]); // the real size-3 came back; the transient size-2 was never taken
-        // Step 2 of 2 (2->1): its own input (size 2) was itself the FIRST step's transient output, so returning it now must be skipped too.
-        attackPiece(ctx, 0, 0, 0, 0, 0, 1, 1, undefined, { skipStashCheck: true, skipStashReturn: true });
+        const ctx = makeCtx(b, { stashes: new Map([[1, fullStash()], [2, [5, 5, 5] as Stash]]) });
+        expect(() => attackPiece(ctx, 0, 0, 0, 0, 0, 1, 2, undefined)).to.throw(); // 2 pips from a size-1 minion, one sword only
+        expect(() => attackPiece(ctx, 0, 0, 0, 0, 0, 1, 3, undefined, { bothSwords: true })).to.throw(); // still capped at 2 x size
+        attackPiece(ctx, 0, 0, 0, 0, 0, 1, 2, undefined, { bothSwords: true });
         expect(b.get(0, 0)!.pieces[1].size).eq(1);
-        expect(ctx.stashes.get(2)!).to.deep.equal([0, 0, 6]); // unchanged - the transient size-2 was never taken OR returned
+        expect(ctx.stashes.get(2)!).to.deep.equal([4, 5, 6]); // only the FINAL size-1 was taken; the size-3 came back
     });
 
     it("may not attack for more pips than the victim has, or for zero", () => {
