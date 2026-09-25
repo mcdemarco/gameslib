@@ -1299,6 +1299,29 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.stashes.get(1)!).to.deep.equal([0, 4, 5]); // the transient size-1 was never taken OR returned - net effect is just the real size-2 draw
     });
 
+    describe("a special power's step must be spelled with that power's own action", () => {
+        const setupSpecial = (seq: number): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(seq));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")];
+            forceCardAt(g, 1, 0, () => card("AC"));
+            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "N")];
+            g.hands[0] = ["2C", "KS", "5D"];
+            return g;
+        };
+
+        it("Justice: a sword step is not read as tradeHands just because it names a target piece", () => {
+            expect(setupSpecial(11).validateMove("use 11/with m0.2 trade n0.1").valid).to.be.true;
+            expect(setupSpecial(11).validateMove("use 11/with m0.2 shrink n0.1 1").valid).to.be.false;
+        });
+
+        it("Empress: a create step is not read as orientMinion just because it carries a facing", () => {
+            expect(setupSpecial(3).validateMove("use 03/orient m0.2 N").valid).to.be.true;
+            expect(setupSpecial(3).validateMove("use 03/with m0.2 at n0 create U").valid).to.be.false;
+        });
+    });
+
     describe("Sun's territory shortcut", () => {
         const setupSun = (uid = "19"): GnosticaGame => {
             const g = new GnosticaGame(2);

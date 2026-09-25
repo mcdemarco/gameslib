@@ -27,7 +27,7 @@ import {
     checkOrientMinion, checkOrientAny, checkHierophantReplace,
     checkHermitMovePiece, checkHermitMoveTerritory, checkTradeHands,
     checkJudgementDraw, checkDiscardDraw, checkFool, checkWorldChoosePower,
-    ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES,
+    ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, SPECIAL_STEP_ACTIONS,
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import { generateRandomMove } from "./gnostica/randomMove";
@@ -4281,13 +4281,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         const msg = this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions);
                         return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                     }
-                    // The last step was only legal thanks to a two-step shortcut's waiver, so its paired second step is no longer optional.
-                    if (awaitingPair) {
-                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
-                    }
                     // Moon's own move step genuinely pushed a territory over capacity - its own attack step is no longer optional, since skipping it would leave that territory illegally over-full.
                     if (moonRestoreCell !== undefined) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.MOON_MUST_RESTORE_CAPACITY") };
+                    }
+                    // The last step was only legal thanks to a two-step shortcut's waiver, so its paired second step is no longer optional.
+                    if (awaitingPair) {
+                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
                     }
                     // Frame not exhausted: a further step is still optional, so complete:0.
                     return {
@@ -4574,6 +4574,11 @@ export class GnosticaGame extends GameBaseSequenced {
         const shape = SPECIAL_STEP_SHAPES[step.special](istep!);
         if (shape.status === "incomplete") {
             return { failed: false, complete: false };
+        }
+        const expectedAction = SPECIAL_STEP_ACTIONS[step.special];
+        if (expectedAction !== undefined && istep!.action !== expectedAction) {
+            // The fields line up with this power's shape, but the step is spelled as some other action (a "shrink" read as a "trade", a "create" read as an "orient").
+            return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_STEP_ACTION" }) };
         }
         // Every validate* method below can now assume complete, well-formed input - the shape check above already ruled out anything else.
         switch (step.special) {

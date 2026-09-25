@@ -1066,6 +1066,16 @@ export function stepHermitMode(step: IStep): string | undefined {
 }
 
 // One shape function per SpecialPower; highPriestess/fool have no minionRef of their own but accept anything regardless.
+// The verb each of these special powers' step is spelled with; a step with any other action is not this power's step, however its fields happen to line up.
+export const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
+    orientMinion: "orient",
+    orientAny: "orient",
+    hierophantReplace: "replace",
+    hermitTeleport: "fly",
+    tradeHands: "trade",
+    judgementDraw: "draw",
+};
+
 export const SPECIAL_STEP_SHAPES: Record<SpecialPower, (step: IStep) => StepShape> = {
     orientMinion: (step) => step.direction !== undefined ? { status: "complete" } : { status: "incomplete" },
     tradeHands: (step) => step.targetPiece !== undefined ? { status: "complete" } : { status: "incomplete" },
