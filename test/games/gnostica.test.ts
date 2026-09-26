@@ -3174,34 +3174,73 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.stashes.get(2)![0]).eq(5); // returned to ITS owner's stash
     });
 
-    it("Swords (tile): mode button seeds an incomplete (still valid) step, a hand-card click supplies the uid", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        forceCardAt(g, -1, 0, () => card("KS")); // l0, worth 2
-        g.move("place m0 W"); // player 1, pointing at l0
-        g.move("place n0 U"); // player 2
-        // The random deal may not happen to include a spot minor at all -
-        // force one in rather than relying on chance (a real flaky failure
-        // otherwise, on the rare hand with none).
-        const spotUid = "2S";
-        g.hands[0] = g.hands[0].filter(uid => uid !== spotUid);
-        g.hands[0].push(spotUid);
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_l0");
-        expect(modeClick.move).eq(`use AS/with m0.1 shrink l0 1`);
-        // Unlike Cups "new"/Discs "tile", Swords "tile" already has enough
-        // tokens (mode+cell+pips) to attempt the primitive outright - and a
-        // pips-1 attack on a worth-2 territory leaves a nonzero remainder,
-        // which genuinely requires a replacement card. This is a real rules
-        // error, not applyMinorPower's "still skipped" tolerance - fixed
-        // up below by the hand-card click regardless.
-        expect(modeClick.valid).to.be.false;
-        const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
-        expect(cardClick.move).eq(`use AS/with m0.1 shrink l0 1 to ${spotUid}`);
-        g.move(cardClick.move);
-        expect(g.board.get(-1, 0)!.card?.uid).eq(spotUid);
+    describe("Swords (tile) click flow: the shrink comes from the replacement card, or the Destroy button", () => {
+        // Spot cards are worth 1, courts 2, majors 3.
+        const setup = (size: 1 | 2 | 3, territory: () => TarotCard) => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => aceOfSwords());
+            forceCardAt(g, -1, 0, territory);
+            forceCardAt(g, 1, 0, () => aceOfRods());
+            g.board.get(0, 0)!.pieces = [new Piece(1, size, "W")];
+            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")];
+            g.hands[0] = ["AC", "2S", "KS"];
+            const seed = g.handleClick("", -1, -1, "_btn_use");
+            const [row, col] = rowColFor(g, 0, 0);
+            const cellClick = g.handleClick(seed.move, row, col);
+            const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_l0");
+            return { g, modeClick };
+        };
+        const buttonValuesOf = (g: GnosticaGame) =>
+            (g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.value);
+
+        it("the target click leaves the shrink open, and a hand-card click derives it", () => {
+            const { g, modeClick } = setup(2, () => major(3));
+            expect(modeClick.move).eq("use AS/with m0.2 shrink l0");
+            expect(modeClick.valid).to.be.true;
+            const cardClick = g.handleClick(modeClick.move, -1, -1, "hand_2S");
+            expect(cardClick.move).eq("use AS/with m0.2 shrink l0 2 to 2S");
+            g.move(cardClick.move);
+            expect(g.board.get(-1, 0)!.card?.uid).eq("2S");
+        });
+
+        it("a card needing a bigger shrink than the minion's size is rejected by validation", () => {
+            const { g, modeClick } = setup(1, () => major(3));
+            const cardClick = g.handleClick(modeClick.move, -1, -1, "hand_2S");
+            expect(cardClick.move).eq("use AS/with m0.1 shrink l0 2 to 2S");
+            expect(g.validateMove(cardClick.move).valid).to.be.false;
+        });
+
+        it("Destroy Territory wipes it, when its value is within the minion's reach", () => {
+            const { g, modeClick } = setup(2, () => card("QS"));
+            g.move(modeClick.move, { partial: true });
+            expect(buttonValuesOf(g)).to.include("destroy");
+            const destroyClick = g.handleClick(modeClick.move, -1, -1, "_btn_destroy");
+            expect(destroyClick.move).eq("use AS/with m0.2 shrink l0 2");
+            g.move(destroyClick.move);
+            expect(g.board.get(-1, 0)?.card).to.be.undefined;
+        });
+
+        it("Death's shortcut reaches twice the minion's size: a size-2 minion destroys a value-3 territory in one step", () => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(13));
+            forceCardAt(g, -1, 0, () => major(3));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 2, "W")];
+            g.hands[0] = ["AC", "2S", "KS"];
+            g.move("use 13/with m0.2 shrink l0", { partial: true });
+            expect(buttonValuesOf(g)).to.include("destroy");
+            const destroyClick = g.handleClick("use 13/with m0.2 shrink l0", -1, -1, "_btn_destroy");
+            expect(destroyClick.move).eq("use 13/with m0.2 shrink l0 3");
+            g.move(destroyClick.move);
+            expect(g.board.get(-1, 0)?.card).to.be.undefined;
+        });
+
+        it("offers no Destroy button for a territory beyond the minion's reach", () => {
+            const { g, modeClick } = setup(1, () => card("QS"));
+            g.move(modeClick.move, { partial: true });
+            expect(buttonValuesOf(g)).to.not.include("destroy");
+        });
     });
 
     it("narrows the bar to just the selected top-level button, a spacer, then the mode buttons", () => {

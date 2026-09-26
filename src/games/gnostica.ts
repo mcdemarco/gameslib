@@ -1744,6 +1744,9 @@ export class GnosticaGame extends GameBaseSequenced {
         if (mode === "piece" && (suitUid === "R" || suitUid === "S") && step.amount === undefined) {
             return { key: suitUid === "R" ? "apgames:validation.gnostica.PICK_DESTINATION_TO_SET_DISTANCE" : "apgames:validation.gnostica.PICK_PIPS_BUTTON" };
         }
+        if (mode === "tile" && suitUid === "S" && step.card === undefined && step.amount === undefined) {
+            return { key: "apgames:validation.gnostica.PICK_REPLACEMENT_OR_DESTROY" };
+        }
         return undefined;
     }
 
@@ -2193,6 +2196,14 @@ export class GnosticaGame extends GameBaseSequenced {
             // "new" mode's required card arg is otherwise only suppliable by clicking a hand card; Wheel of Fortune (allowRandomDraw) has none, so it gets a button.
             if (suitUid === "C" && stepMinorMode("C", pendingMinor.istep) === "new" && pendingMinor.opts.allowRandomDraw === true) {
                 buttons.push({ label: "Draw a card", value: "drawn" });
+            }
+            if (suitUid === "S" && stepMinorMode("S", pendingMinor.istep) === "tile" && pendingMinor.istep.card === undefined) {
+                const [tx, ty] = GnosticaBoard.algebraic2coords(pendingMinor.istep.targetCell!);
+                const size = (pendingMinor.minion.piece ?? this.board.get(pendingMinor.minion.x, pendingMinor.minion.y)!.pieces[pendingMinor.minion.index]).size;
+                const current = this.board.get(tx, ty)?.pointValue() ?? 0;
+                if (current > 0 && current <= size * (pendingMinor.opts.bothSwords === true ? 2 : 1)) {
+                    buttons.push({ label: "Destroy Territory", value: "destroy" });
+                }
             }
             // Swords pips is pure damage, no destination cell to click (unlike Rods' distance), so it's a button set once a target is chosen.
             if (suitUid === "S" && stepMinorMode("S", pendingMinor.istep) === "piece") {
@@ -2680,9 +2691,12 @@ export class GnosticaGame extends GameBaseSequenced {
             if (onlyCount !== undefined) {
                 step.amount = onlyCount;
             }
-        } else {
-            // Rods'/Swords' "tile" mode always seeds a real distance/pips of 1 - a further destination-cell click is how the player reaches any distance beyond 1.
+        } else if (suitUid === "R") {
+            // Rods' "tile" mode always seeds a real distance of 1 - a further destination-cell click is how the player reaches any distance beyond 1.
             step = { action, withPiece: minionRef, targetCell, amount: 1 };
+        } else {
+            // A territory's shrink is set by the replacement card (or the Destroy button), not chosen up front.
+            step = { action, withPiece: minionRef, targetCell };
         }
         return this.assembleStepMove(pending, step);
     }
@@ -2815,10 +2829,15 @@ export class GnosticaGame extends GameBaseSequenced {
         const waitingForCard = istep.card === undefined && (
             (key === "C.new" && istep.atCell !== undefined)
             || (key === "D.tile" && istep.targetCell !== undefined)
-            || (key === "S.tile" && istep.targetCell !== undefined && istep.amount !== undefined)
+            || (key === "S.tile" && istep.targetCell !== undefined)
         );
         if (!waitingForCard) {
             return undefined;
+        }
+        if (key === "S.tile") {
+            const [tx, ty] = GnosticaBoard.algebraic2coords(istep.targetCell!);
+            const amount = (this.board.get(tx, ty)?.pointValue() ?? 0) - this.cardValueByUid(uid);
+            return this.assembleStepMove(pending, { ...istep, withPiece: minionRef, card: uid, amount });
         }
         // Everything typed so far stays; the uid is the only thing this click adds.
         return this.assembleStepMove(pending, { ...istep, withPiece: minionRef, card: uid });
@@ -3160,6 +3179,15 @@ export class GnosticaGame extends GameBaseSequenced {
                                     const result = this.supplyStepCardUid(pending, "drawn");
                                     return result ?? { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                                 }
+                            case "destroy": {
+                                const pending = this.parsePendingStep(move);
+                                if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "tile" || pending.istep.targetCell === undefined) {
+                                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                                }
+                                const [tx, ty] = GnosticaBoard.algebraic2coords(pending.istep.targetCell);
+                                const minionRef = this.pieceRefStr(pending.minion, pending.minions);
+                                return this.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: this.board.get(tx, ty)?.pointValue() ?? 0 });
+                            }
                             default:
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
