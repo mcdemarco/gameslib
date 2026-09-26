@@ -1017,7 +1017,7 @@ export const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArc
     return MAJOR_ARCANA[chosenUid];
 };
 
-// ---- Power step grammar: suit/mode constants and IStep-based mode and completeness inference (never legality) ----
+// ---- Power step grammar: suit/mode constants and IStep-based mode inference (never legality) ----
 
 // The four minor-arcana suits, shared by gnostica.ts and randomMove.ts (which can't import values from gnostica.ts).
 export const ALL_SUITS: { uid: string; label: string }[] = [
@@ -1026,11 +1026,6 @@ export const ALL_SUITS: { uid: string; label: string }[] = [
     { uid: "D", label: "Discs" },
     { uid: "S", label: "Swords" },
 ];
-
-// Whether a step has everything its power needs typed yet; legality is the validators' job.
-export type StepShape =
-    | { status: "incomplete" }
-    | { status: "complete" };
 
 // The verb each of Rods/Discs/Swords spells its step with.
 export const RDS_VERBS: Record<string, string> = { R: "move", D: "grow", S: "shrink" };
@@ -1065,7 +1060,6 @@ export function stepHermitMode(step: IStep): string | undefined {
     return step.targetPiece !== undefined ? "piece" : step.card !== undefined ? "tile" : undefined;
 }
 
-// One shape function per SpecialPower; highPriestess/fool have no minionRef of their own but accept anything regardless.
 // The verb each of these special powers' step is spelled with; a step with any other action is not this power's step, however its fields happen to line up.
 export const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
     orientMinion: "orient",
@@ -1074,27 +1068,4 @@ export const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
     hermitTeleport: "fly",
     tradeHands: "trade",
     judgementDraw: "draw",
-};
-
-export const SPECIAL_STEP_SHAPES: Record<SpecialPower, (step: IStep) => StepShape> = {
-    orientMinion: (step) => step.direction !== undefined ? { status: "complete" } : { status: "incomplete" },
-    tradeHands: (step) => step.targetPiece !== undefined ? { status: "complete" } : { status: "incomplete" },
-    orientAny: (step) => step.targetPiece !== undefined && step.direction !== undefined ? { status: "complete" } : { status: "incomplete" },
-    hierophantReplace: (step) => step.targetPiece !== undefined && step.direction !== undefined ? { status: "complete" } : { status: "incomplete" },
-    hermitTeleport: (step) => {
-        const mode = stepHermitMode(step);
-        if (mode === undefined) {
-            return { status: "incomplete" };
-        }
-        return step.targetCell !== undefined ? { status: "complete" } : { status: "incomplete" };
-    },
-    // Dead in practice - a Magician borrow resolves its suit via the head's own "as <suit>" before this table is ever consulted; kept for exhaustiveness.
-    magicianChoice: () => ({ status: "complete" }),
-    // Dead in practice - the borrowed card is "as <uid>" in the head now; kept for exhaustiveness (and parsePendingStep's pre-"as" walk).
-    worldUseAny: () => ({ status: "complete" }),
-    // "draw" is mandatory; any count after it (including zero) is complete enough to ATTEMPT - real semantics live in checkJudgementDraw.
-    judgementDraw: (step) => step.action === "draw" ? { status: "complete" } : { status: "incomplete" },
-    // Matters only to parsePendingStep (apply/validate special-case highPriestess early); its discard list stays editable right up until Submit.
-    highPriestess: () => ({ status: "incomplete" }),
-    fool: () => ({ status: "incomplete" }),
 };

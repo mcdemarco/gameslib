@@ -166,4 +166,20 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 09/with n0.1 fly AC 3")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 09/with n0.1 fly AC to AR")).to.have.deep.property("valid", false);
     });
+
+    it("marks a special power's step complete only once its fields are typed", () => {
+        const lastComplete = (m: string) => g.parseMove(m).steps!.at(-1)!.complete;
+        expect(lastComplete("use 03/with m0.1")).eq(-1);
+        expect(lastComplete("use 03/with m0.1 orient")).eq(-1);
+        expect(lastComplete("use 03/orient m0.1 N")).eq(1);
+        expect(lastComplete("use 11/with m0.1 trade")).eq(-1);
+        expect(lastComplete("use 11/with m0.1 trade n0.1")).eq(1);
+        expect(lastComplete("use 05/with m0.1 replace n0.1")).eq(-1);
+        expect(lastComplete("use 05/with m0.1 replace n0.1 N")).eq(1);
+        expect(lastComplete("use 09/with m0.1 fly n0.1")).eq(-1);
+        expect(lastComplete("use 09/with m0.1 fly n0.1 to o0")).eq(0);
+        expect(lastComplete("use 20/with m0.1 draw")).eq(-1);
+        expect(g.parseMove("use 09/with m0.1 fly n0.1 to AR")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 09/with m0.1 fly n0.1 3")).to.have.deep.property("valid", false);
+    });
 });

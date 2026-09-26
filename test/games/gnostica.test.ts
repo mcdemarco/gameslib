@@ -1323,7 +1323,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
 
         it("a step spelled as neither of the card's powers is rejected", () => {
             expect(setupSpecial(11).validateMove("use 11/with m0.2 grow m0.2").valid).to.be.false;
-            expect(setupSpecial(3).validateMove("use 03/with m0.2 shrink n0.1 1").complete).eq(-1); // not submittable
+            expect(setupSpecial(3).validateMove("use 03/with m0.2 shrink n0.1 1").valid).to.be.false;
         });
 
         it("Empress: a create step is the cup (her second power used alone), not orientMinion", () => {

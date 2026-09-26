@@ -27,7 +27,7 @@ import {
     checkOrientMinion, checkOrientAny, checkHierophantReplace,
     checkHermitMovePiece, checkHermitMoveTerritory, checkTradeHands,
     checkJudgementDraw, checkDiscardDraw, checkFool, checkWorldChoosePower,
-    ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_SHAPES, SPECIAL_STEP_ACTIONS,
+    ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_ACTIONS,
 } from "./gnostica/powers";
 import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaDef, getMajorArcanaIcons } from "./gnostica/majorArcana";
 import { generateRandomMove } from "./gnostica/randomMove";
@@ -1198,6 +1198,18 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.steps.push(step);
                         continue;
                     }
+                } else if ( step.action === "trade" ) {
+                    step.complete = 1;
+                    pm.steps.push(step);
+                    continue;
+                } else if ( lastStep ) {
+                    // Replace still needs its facing.
+                    step.complete = -1;
+                    pm.steps.push(step);
+                    break;
+                } else {
+                    pm.error = "MISSING_STEP_CONTENT";
+                    break;
                 }
             }
 
@@ -2333,13 +2345,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 completedStep = istepSoFar;
             } else {
                 // A Magician's suit choice lives in asSuit, unless worldBorrow lets a chained frame supply it.
-                const magicianAs = step.special === "magicianChoice" && asSuit !== undefined;
                 const magicianNeedsAs = step.special === "magicianChoice" && asSuit === undefined && !worldBorrow;
                 // A Magician borrow's step needs no splicing once the suit is known: "at m0 create U" parses the same regardless of suit.
                 const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
-                const complete = magicianAs ? (istepSoFar.complete ?? -1) >= 0
-                    : magicianNeedsAs ? false
-                        : SPECIAL_STEP_SHAPES[step.special](istepSoFar).status === "complete";
+                // A High Priestess discard list stays editable right up until Submit, so it is never "complete" here.
+                const complete = magicianNeedsAs || step.special === "highPriestess" ? false : (istepSoFar.complete ?? -1) >= 0;
                 if (!complete || (isLastSegment && callOpts.preferCurrent)) {
                     // Same "still building, or the caller wants it treated as current regardless" rule as the primitive branch.
                     return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, istepSoFar, asUid, asSuit);
@@ -4555,11 +4565,10 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return this.applySuitPrimitive(suitLetter, minion, istep!, {});
         }
-        const shape = SPECIAL_STEP_SHAPES[step.special](istep!);
-        if (shape.status === "incomplete") {
+        if ((istep!.complete ?? -1) < 0) {
             return undefined; // still skipped so far
         }
-        // Every apply* method below can now assume complete, well-formed input after the shape check above.
+        // Every apply* method below can now assume complete, well-formed input after the completeness check above.
         switch (step.special) {
             case "orientMinion":
                 return this.applyOrientMinion(minion, istep!);
@@ -4643,8 +4652,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return this.validateSuitPrimitive(suitLetter, minion, istep!, {});
         }
-        const shape = SPECIAL_STEP_SHAPES[step.special](istep!);
-        if (shape.status === "incomplete") {
+        if ((istep!.complete ?? -1) < 0) {
             return { failed: false, complete: false };
         }
         const expectedAction = SPECIAL_STEP_ACTIONS[step.special];
@@ -4652,7 +4660,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // The fields line up with this power's shape, but the step is spelled as some other action (a "shrink" read as a "trade", a "create" read as an "orient").
             return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_STEP_ACTION" }) };
         }
-        // Every validate* method below can now assume complete, well-formed input - the shape check above already ruled out anything else.
+        // Every validate* method below can now assume complete, well-formed input - the completeness check above already ruled out anything else.
         switch (step.special) {
             case "orientMinion":
                 return this.validateOrientMinion(minion, istep!);
