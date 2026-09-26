@@ -160,5 +160,10 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 3D/grow n0 to n1")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 3D/grow n0.1 2")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 3C/with m0.1 create U")).to.have.deep.property("valid", false);
+
+        expect(g.parseMove("use 09/with n0.1 fly n0.1 to AR")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 09/with n0.1 fly n0.1 3")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 09/with n0.1 fly AC 3")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 09/with n0.1 fly AC to AR")).to.have.deep.property("valid", false);
     });
 });

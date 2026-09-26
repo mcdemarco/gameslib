@@ -1214,6 +1214,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     break;
                 }
 
+                if (step.action === "fly" && step.targetCell !== undefined) {
+                    pm.error = "CANT_FLY_A_CELL";
+                    break;
+                }
+
                 if (segment.length === 0) {
                     //More is needed for these actions, except grow *can* end with a piece.
                     if ( step.action === "grow" && step.targetPiece !== undefined ) {
@@ -1235,7 +1240,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 let nextseg = segment.shift()!;
 
                 if ( NUMBER_RE.test(nextseg) ) {
-                    step.amount = parseInt(nextseg, 10);
+                    if (step.action === "fly") {
+                        pm.error = "CANT_FLY_A_DISTANCE";
+                        break;
+                    } else
+                        step.amount = parseInt(nextseg, 10);
+                    
                     if (segment.length > 0)
                         nextseg = segment.shift()!;
                     else {
@@ -1269,7 +1279,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         break;
                     } else {
                         const tempdest = segment.shift()!;
-                        if ( CARD_UID_RE.test(tempdest) ) {
+                        if ( CARD_UID_RE.test(tempdest) && step.action !== "fly") {
                             step.card = tempdest;
                         } else if ( CELL_RE.test(tempdest) ) {
                             step.targetCell = tempdest.toLowerCase();
