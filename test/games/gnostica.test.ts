@@ -1311,14 +1311,93 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             return g;
         };
 
-        it("Justice: a sword step is not read as tradeHands just because it names a target piece", () => {
-            expect(setupSpecial(11).validateMove("use 11/with m0.2 trade n0.1").valid).to.be.true;
-            expect(setupSpecial(11).validateMove("use 11/with m0.2 shrink n0.1 1").valid).to.be.false;
+        it("Justice: a sword step is the sword (Justice's second power used alone), not tradeHands", () => {
+            const g = setupSpecial(11);
+            g.hands[1] = ["3S", "4S"];
+            expect(g.validateMove("use 11/with m0.2 trade n0.1").valid).to.be.true;
+            expect(g.validateMove("use 11/with m0.2 shrink n0.1 1").valid).to.be.true;
+            g.move("use 11/with m0.2 shrink n0.1 1");
+            expect(g.hands[0]).to.deep.equal(["2C", "KS", "5D"]); // hands were not traded
+            expect(g.board.get(1, 0)!.pieces.length).eq(0); // the size-1 enemy piece was attacked
         });
 
-        it("Empress: a create step is not read as orientMinion just because it carries a facing", () => {
+        it("a step spelled as neither of the card's powers is rejected", () => {
+            expect(setupSpecial(11).validateMove("use 11/with m0.2 grow m0.2").valid).to.be.false;
+            expect(setupSpecial(3).validateMove("use 03/with m0.2 shrink n0.1 1").complete).eq(-1); // not submittable
+        });
+
+        it("Empress: a create step is the cup (her second power used alone), not orientMinion", () => {
             expect(setupSpecial(3).validateMove("use 03/orient m0.2 N").valid).to.be.true;
-            expect(setupSpecial(3).validateMove("use 03/with m0.2 at n0 create U").valid).to.be.false;
+            const g = setupSpecial(3);
+            expect(g.validateMove("use 03/with m0.2 at n0 create U").valid).to.be.true;
+            g.move("use 03/with m0.2 at n0 create U");
+            expect(g.board.get(1, 0)!.pieces.length).eq(2); // the created piece
+            expect(g.board.get(0, 0)!.pieces[0].orientation).eq("E"); // not reoriented
+        });
+    });
+
+    // All powers are optional: either of a two-power card's powers may be used alone, but never in reverse order.
+    describe("using a card's second power alone", () => {
+        const setupCard = (seq: number): GnosticaGame => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => major(seq));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")];
+            forceCardAt(g, 1, 0, () => card("AC"));
+            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "N")];
+            g.hands[0] = ["2C", "KS", "5D"];
+            g.hands[1] = ["3S", "4S"];
+            return g;
+        };
+
+        it("Lovers: the cup alone creates a piece", () => {
+            const g = setupCard(6);
+            g.move("use 06/with m0.2 at n0 create U");
+            expect(g.board.get(1, 0)!.pieces.length).eq(2);
+        });
+
+        it("Emperor: the rod alone moves the piece", () => {
+            const g = setupCard(4);
+            g.move("use 04/with m0.2 move m0.2 1");
+            expect(g.board.get(1, 0)!.pieces.some(p => p.owner === 1 && p.size === 2)).to.be.true;
+        });
+
+        it("Hanged Man: the trade alone swaps hands", () => {
+            const g = setupCard(12);
+            g.move("use 12/with m0.2 trade n0.1");
+            expect(g.hands[0]).to.deep.equal(["3S", "4S"]);
+        });
+
+        it("Tower and Moon: the sword alone destroys the enemy piece", () => {
+            const tower = setupCard(16);
+            tower.move("use 16/with m0.2 shrink n0.1 1");
+            expect(tower.board.get(1, 0)?.pieces.length ?? 0).eq(0);
+            const moon = setupCard(18);
+            moon.move("use 18/with m0.2 shrink n0.1 1");
+            expect(moon.board.get(1, 0)?.pieces.length ?? 0).eq(0);
+        });
+
+        it("Star: the disc alone grows the piece", () => {
+            const g = setupCard(17);
+            g.move("use 17/with m0.2 grow m0.2");
+            expect(g.board.get(0, 0)!.pieces[0].size).eq(3);
+        });
+
+        it("Sun: the disc alone is an ordinary grow with exact stash accounting", () => {
+            const g = setupCard(19);
+            const before = g.stashes.get(1)!.slice();
+            g.move("use 19/with m0.2 grow m0.2");
+            expect(g.board.get(0, 0)!.pieces[0].size).eq(3);
+            expect(g.stashes.get(1)).to.deep.equal([before[0], before[1] + 1, before[2] - 1]);
+        });
+
+        it("the powers may not be used in reverse order", () => {
+            expect(setupCard(19).validateMove("use 19/with m0.2 grow m0.2/with m0.2 at n0 create U").valid).to.be.false;
+            expect(setupCard(18).validateMove("use 18/with m0.2 shrink n0.1 1/with m0.2 move m0.2 1").valid).to.be.false;
+        });
+
+        it("the full two-power forms still work", () => {
+            expect(setupCard(6).validateMove("use 06/with m0.2 move m0.2 1/with n0.2 at o0 create U").valid).to.be.true;
         });
     });
 
