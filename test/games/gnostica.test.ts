@@ -3284,6 +3284,28 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         });
     });
 
+    describe("Cups options after picking the final step's minion", () => {
+        it("offers Create Minion, a struck-through Create Territory (the cell is already one), and Capture for the enemy piece there", () => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => aceOfRods());
+            forceCardAt(g, 1, 0, () => aceOfCups());
+            g.board.get(0, 0)!.pieces = [new Piece(2, 1, "E"), new Piece(2, 1, "E"), new Piece(2, 2, "N")];
+            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")];
+            g.currplayer = 2;
+            g.hands[1] = ["03", "2S"];
+            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
+            const move = "play 03/orient m0.1.e.2 N";
+            const withMinion = g.handleClick(move, -1, -1, "_btn_minion_m0.1.E");
+            g.move(withMinion.move, { partial: true });
+            const buttons = (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            expect(buttons.some(b => b.value === "target_own")).to.be.true;
+            expect(buttons.some(b => b.value === "target_n0.1")).to.be.true;
+            const territory = buttons.find(b => b.value === "target_new")!;
+            expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
+        });
+    });
+
     describe("Swords (tile) click flow: the shrink comes from the replacement card, or the Destroy button", () => {
         // Spot cards are worth 1, courts 2, majors 3.
         const setup = (size: 1 | 2 | 3, territory: () => TarotCard) => {

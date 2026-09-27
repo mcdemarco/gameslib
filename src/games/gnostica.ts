@@ -2384,7 +2384,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
                 if ((istepSoFar.complete ?? -1) < 0 || (isLastSegment && callOpts.preferCurrent)) {
                     // Still building this one, OR the caller wants the last-typed segment treated as "current" even once complete (board clicks keep refining it).
-                    const { minion, ambiguous, candidates } = this.resolveStepMinion(istepSoFar.withPiece, top.minions);
+                    const { minion, ambiguous, candidates } = (holder.clone ?? this).resolveStepMinion(istepSoFar.withPiece, top.minions);
                     return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: istepSoFar };
                 }
                 completedStep = istepSoFar;
@@ -2397,7 +2397,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const complete = magicianNeedsAs || step.special === "highPriestess" ? false : (istepSoFar.complete ?? -1) >= 0;
                 if (!complete || (isLastSegment && callOpts.preferCurrent)) {
                     // Same "still building, or the caller wants it treated as current regardless" rule as the primitive branch.
-                    return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, istepSoFar, asUid, asSuit);
+                    return this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, istepSoFar, asUid, asSuit);
                 }
                 completedStep = istepSoFar;
             }
@@ -2434,19 +2434,19 @@ export class GnosticaGame extends GameBaseSequenced {
         if ("primitive" in step) {
             const suitUid = this.primitiveToSuit(step.primitive);
             const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
-            const { minion, ambiguous, candidates } = this.resolveStepMinion(undefined, top.minions);
+            const { minion, ambiguous, candidates } = (holder.clone ?? this).resolveStepMinion(undefined, top.minions);
             return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: { action: "with" } };
         }
-        return this.buildSpecialPending(step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, { action: "with" }, asUid, asSuit);
+        return this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, { action: "with" }, asUid, asSuit);
     }
 
     // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice once its suit is chosen, which is treated as a plain suit step.
     private buildSpecialPending(
-        special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
+        ctx: GnosticaGame, special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
         eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: string,
     ): Omit<IPendingStep, "game"> {
         if (special === "magicianChoice" && asSuit !== undefined) {
-            const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, minions);
+            const { minion, ambiguous, candidates } = ctx.resolveStepMinion(istep.withPiece, minions);
             return { head, headArg, activeCardUid, asUid, asSuit, suitUid: asSuit, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
         }
         // Fool/High Priestess/worldUseAny have no minionRef here; an unchosen magicianChoice also defers its minion choice until after the suit is picked (its
@@ -2454,7 +2454,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const noMinionRef = special === "highPriestess" || special === "fool" || special === "worldUseAny" || special === "magicianChoice";
         const { minion, ambiguous, candidates } = noMinionRef
             ? { minion: minions[0], ambiguous: false, candidates: minions }
-            : this.resolveStepMinion(istep.withPiece, minions);
+            : ctx.resolveStepMinion(istep.withPiece, minions);
         return { head, headArg, activeCardUid, asUid, asSuit, special, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
     }
 
