@@ -3285,7 +3285,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 
     describe("Cups options after picking the final step's minion", () => {
-        it("offers Create Minion, a struck-through Create Territory (the cell is already one), and Capture for the enemy piece there", () => {
+        it("offers Create Minion, a struck-through Create Territory (the cell is already one), and Create Enemy for the enemy piece there", () => {
             const g = new GnosticaGame(2);
             clearBoard(g);
             forceCardAt(g, 0, 0, () => aceOfRods());
@@ -3300,9 +3300,51 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             g.move(withMinion.move, { partial: true });
             const buttons = (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.some(b => b.value === "target_own")).to.be.true;
-            expect(buttons.some(b => b.value === "target_n0.1")).to.be.true;
+            const enemyBtn = buttons.find(b => b.value === "target_n0.1")!;
+            expect(enemyBtn.label).to.eq("Create Enemy 1-pip pointing up");
             const territory = buttons.find(b => b.value === "target_new")!;
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
+        });
+
+        // "use AC" activates via a minion standing ON the Cups card itself (n0), which then targets the cell it faces (o0) - unlike the Empress
+        // test above, where the acting minion sits elsewhere and points AT the Cups territory.
+        it("appends the owner to the label only when two candidates would otherwise read identically (3+ players)", () => {
+            const g = new GnosticaGame(3);
+            clearBoard(g);
+            forceCardAt(g, 1, 0, () => aceOfCups()); // n0
+            forceCardAt(g, 2, 0, () => aceOfRods()); // o0
+            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // player 1, on the Cups card, facing o0
+            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U"), new Piece(3, 1, "U")]; // two other players, identical size/facing
+            g.currplayer = 1;
+            g.hands[0] = ["03", "2S"];
+            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
+            const internal = g as unknown as {
+                parsePendingStep: (m: string) => object | undefined;
+                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
+            };
+            const pending = internal.parsePendingStep("use AC")!;
+            const candidates = internal.suitTargetCandidates(pending, "C");
+            const enemyLabels = candidates.filter(c => c.value.startsWith("o0.")).map(c => c.label).sort();
+            expect(enemyLabels).to.deep.equal(["Create Enemy 1-pip pointing up (Player 2)", "Create Enemy 1-pip pointing up (Player 3)"]);
+        });
+
+        it("does not append an owner when only one candidate has that label (2 players)", () => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 1, 0, () => aceOfCups()); // n0
+            forceCardAt(g, 2, 0, () => aceOfRods()); // o0
+            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")];
+            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U")];
+            g.currplayer = 1;
+            g.hands[0] = ["03", "2S"];
+            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
+            const internal = g as unknown as {
+                parsePendingStep: (m: string) => object | undefined;
+                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
+            };
+            const pending = internal.parsePendingStep("use AC")!;
+            const candidates = internal.suitTargetCandidates(pending, "C");
+            expect(candidates.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy 1-pip pointing up");
         });
     });
 
@@ -5552,7 +5594,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.stashes.get(1)![0] = 0; // drain player 1's own smalls
         const validated = g.validateMove(`use AC/with m0.1 at n0 create U`);
         expect(validated.valid).to.be.false;
-        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { player: 1, size: 1 }));
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: 1, size: 1 }));
         // An untrusted commit still throws (same as any other illegal move -
         // see every other ".to.throw()" case in this file) - the fix is
         // that validateMove() above already caught it, not that move()
@@ -5568,7 +5610,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.stashes.get(2)![0] = 0; // drain player 2's (the victim's) own smalls
         const validated = g.validateMove(`use AC/with m0.1 at n0 create n0.1`);
         expect(validated.valid).to.be.false;
-        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { player: 2, size: 1 }));
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: 2, size: 1 }));
         expect(() => g.move(`use AC/with m0.1 at n0 create n0.1`, { trusted: false })).to.throw();
     });
 

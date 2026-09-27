@@ -5865,7 +5865,7 @@
             "REDRAW_UID_NOT_IN_POOL": "That card is not available to draw from the bidding pool.",
             "REPLACEMENT_CARD_REQUIRED": "You must provide the replacement territory from your hand.",
             "ROD_NEEDS_FACING": "You may not take a Rods action with an upright minion.",
-            "STASH_EMPTY": "{{player}} has no pieces of size {{size}} left in their stash, so you cannot perform this action.",
+            "STASH_EMPTY": "Player {{playerNum}} has no pieces of size {{size}} left in their stash, so you cannot perform this action.",
             "TARGET_IS_VOID": "You may not create a piece in the void.",
             "TOO_FEW_PIPS": "Your minion does not have enough pips to attack this enemy.",
             "TOO_FEW_PIPS_TERRITORY": "Your minion does not have enough pips to attack this territory.",

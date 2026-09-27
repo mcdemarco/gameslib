@@ -2137,7 +2137,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const { disabledReason, includeSelf = true, filter } = opts;
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
-        const options: ChoiceOption[] = [];
+        const entries: { option: ChoiceOption; owner: number }[] = [];
         const seen = new Set<string>();
         const pushPieceCandidate = (x: number, y: number, index: number): void => {
             const ref = this.pieceRefStr({ x, y, index });
@@ -2145,7 +2145,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 return;
             }
             seen.add(ref);
-            options.push({ value: ref, label: labelFor(this.board.get(x, y)!.pieces[index]), disabledReason });
+            const piece = this.board.get(x, y)!.pieces[index];
+            entries.push({ option: { value: ref, label: labelFor(piece), disabledReason }, owner: piece.owner });
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
         if (includeSelf) {
@@ -2156,7 +2157,22 @@ export class GnosticaGame extends GameBaseSequenced {
                 pushPieceCandidate(tx, ty, index);
             }
         });
-        return options;
+        GnosticaGame.disambiguateByOwner(entries);
+        return entries.map(e => e.option);
+    }
+
+    // Two same-size, same-facing pieces read identically (textFormat carries no owner) - in a 3+ player game they can belong to different opponents, so
+    // append "(Player N)" to every option whose label collides with another's, leaving unambiguous ones untouched.
+    private static disambiguateByOwner(entries: { option: ChoiceOption; owner: number }[]): void {
+        const counts = new Map<string, number>();
+        for (const { option } of entries) {
+            counts.set(option.label, (counts.get(option.label) ?? 0) + 1);
+        }
+        for (const { option, owner } of entries) {
+            if ((counts.get(option.label) ?? 0) > 1) {
+                option.label = `${option.label} (Player ${owner})`;
+            }
+        }
     }
 
     // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy, matching pickPieceTargetClick's own rule.
@@ -2176,11 +2192,15 @@ export class GnosticaGame extends GameBaseSequenced {
         if (suitUid === "C") {
             const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
             const options: ChoiceOption[] = [{ value: "own", label: "Create Minion", disabledReason: availability.get("own") }];
+            // The new piece is a gift added to the referenced enemy's own side, not a capture of anything - see applyCups' "enemy" case.
+            const enemyEntries: { option: ChoiceOption; owner: number }[] = [];
             cellPieces.forEach((p, index) => {
                 if (p.owner !== this.currplayer) {
-                    options.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Capture ${this.textFormat(p)}`, disabledReason: availability.get("enemy") });
+                    enemyEntries.push({ option: { value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Create Enemy ${this.textFormat(p)}`, disabledReason: availability.get("enemy") }, owner: p.owner });
                 }
             });
+            GnosticaGame.disambiguateByOwner(enemyEntries);
+            options.push(...enemyEntries.map(e => e.option));
             options.push({ value: "new", label: "Create Territory", disabledReason: availability.get("new") });
             return options;
         }

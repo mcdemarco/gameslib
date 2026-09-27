@@ -185,7 +185,7 @@ export const checkCreateOwn = (
         return { key: "CELL_FULL" };
     }
     if (!opts.skipStashCheck && !hasStashAvailable(ctx, ctx.currplayer, 1)) {
-        return { key: "STASH_EMPTY", params: { player: ctx.currplayer, size: 1 } };
+        return { key: "STASH_EMPTY", params: { playerNum: ctx.currplayer, size: 1 } };
     }
     return undefined;
 };
@@ -236,7 +236,7 @@ export const checkCreateEnemy = (
         return { key: "CELL_FULL" };
     }
     if (!hasStashAvailable(ctx, victim.owner, 1)) {
-        return { key: "STASH_EMPTY", params: { player: victim.owner, size: 1 } };
+        return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: 1 } };
     }
     return undefined;
 };
@@ -469,7 +469,7 @@ export const checkGrowPiece = (
         return { key: "ALREADY_MAX_SIZE" };
     }
     if (!opts.skipStashCheck && !hasStashAvailable(ctx, target.owner, nextSize(target.size))) {
-        return { key: "STASH_EMPTY", params: { player: target.owner, size: nextSize(target.size) } };
+        return { key: "STASH_EMPTY", params: { playerNum: target.owner, size: nextSize(target.size) } };
     }
     return undefined;
 };
@@ -574,7 +574,7 @@ export const checkAttackPiece = (
         return { key: "TOO_FEW_PIPS", params: { size: victim.size, pips } };
     }
     if (resultSize > 0 && !hasStashAvailable(ctx, victim.owner, resultSize as Pips)) {
-        return { key: "STASH_EMPTY", params: { player: victim.owner, size: resultSize } };
+        return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: resultSize } };
     }
     return undefined;
 };
@@ -750,7 +750,7 @@ export const checkHierophantReplace = (
         return { key: "HIEROPHANT_MUST_TARGET_ENEMY" };
     }
     if (!hasStashAvailable(ctx, ctx.currplayer, target.size)) {
-        return { key: "STASH_EMPTY", params: { player: ctx.currplayer, size: target.size } };
+        return { key: "STASH_EMPTY", params: { playerNum: ctx.currplayer, size: target.size } };
     }
     return undefined;
 };
