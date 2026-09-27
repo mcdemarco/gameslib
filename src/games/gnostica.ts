@@ -1935,6 +1935,15 @@ export class GnosticaGame extends GameBaseSequenced {
             if (this.continued.length > 0) {
                 return this.pausedPowerButtons();
             }
+            // Past the card's first step the player is mid-card, so the bar stays collapsed instead of reverting to the top-level choices.
+            if (pendingMinor.priorSteps.length > 0) {
+                const collapsed: ButtonBarButton[] = selected !== undefined ? [selected] : [];
+                collapsed.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
+                if (declareBtn !== undefined) {
+                    collapsed.push(declareBtn);
+                }
+                return collapsed as [ButtonBarButton, ...ButtonBarButton[]];
+            }
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
@@ -3364,12 +3373,19 @@ export class GnosticaGame extends GameBaseSequenced {
                             }
                             return this.buildAnchorMove(candidate, cell);
                         };
-                        if (advanced !== undefined && advanced.special !== undefined && this.pendingSpecialUntouched(advanced)
-                            && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1)) {
+                        const advancedPastCurrent = advanced !== undefined && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1);
+                        // With the previous step complete and the next step's minion still undecided, a click on a candidate minion's cell picks that minion rather than refining the previous step.
+                        if (advancedPastCurrent) {
                             const narrowed = tryNarrowMinion(advanced);
                             if (narrowed !== undefined) {
                                 return narrowed;
                             }
+                            // Any other click can't refine the finished step here; name the next one instead of raising that step's own errors.
+                            if (advanced.minionAmbiguous) {
+                                return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.PICK_MINION_CELL") };
+                            }
+                        }
+                        if (advanced !== undefined && advanced.special !== undefined && this.pendingSpecialUntouched(advanced) && advancedPastCurrent) {
                             const result = this.handlePendingSpecialBoardClick(advanced, x, y, cell);
                             if (result !== undefined) {
                                 return result;
@@ -4038,11 +4054,13 @@ export class GnosticaGame extends GameBaseSequenced {
     // Applies a step's own outcome.newMinion chaining to `minions`: appends it, first removing whichever existing entry it supersedes (a splice can shift later same-cell indices down by one).
     private static chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[] {
         const stale = outcome.replacesMinion;
+        // An in-place change (a reorientation) leaves every other piece's index alone; only a removeAt shifts later ones down.
+        const inPlace = stale !== undefined && outcome.newMinion?.x === stale.x && outcome.newMinion.y === stale.y && outcome.newMinion.index === stale.index;
         const base = stale === undefined
             ? minions
             : minions
                 .filter(m => !(m.x === stale.x && m.y === stale.y && m.index === stale.index))
-                .map(m => (m.x === stale.x && m.y === stale.y && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
+                .map(m => (!inPlace && m.x === stale.x && m.y === stale.y && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
         return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
     }
 
@@ -4398,10 +4416,11 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
                     }
                     // Frame not exhausted: a further step is still optional, so complete:0.
+                    const optional = this.powerStepMessageKey(top.cardUid, i, top.minions);
                     return {
                         valid: true,
                         complete: 0,
-                        message: i18next.t("apgames:validation._general.VALID_MOVE"),
+                        message: i18next.t(optional.key, optional.params),
                     };
                 }
                 if ("special" in step && step.special === "magicianChoice") {

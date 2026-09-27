@@ -3174,6 +3174,93 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.stashes.get(2)![0]).eq(5); // returned to ITS owner's stash
     });
 
+    describe("after a completed power step, the next optional step is announced", () => {
+        const setup = (twoCells: boolean) => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => aceOfRods());
+            forceCardAt(g, 1, 0, () => aceOfCups());
+            forceCardAt(g, 2, 0, () => aceOfDiscs());
+            g.board.get(1, 0)!.pieces = [new Piece(1, 2, "E")];
+            if (twoCells) {
+                g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+            }
+            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U")];
+            g.hands[0] = ["03", "2S"];
+            return g;
+        };
+        const barValues = (g: GnosticaGame) =>
+            (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+        const optionalMsg = () => i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: "The Empress" });
+
+        it("with minions on several cells, the bar stays collapsed to the card and a Choose Minion spacer", () => {
+            const g = setup(true);
+            const move = "play 03/orient n0.2 S";
+            const result = g.validateMove(move);
+            expect(result.complete).eq(0);
+            expect(result.message).eq(optionalMsg());
+            g.move(move, { partial: true });
+            const buttons = barValues(g);
+            expect(buttons.map(b => b.value)).to.not.include("use");
+            expect(buttons.map(b => b.value)).to.not.include("pass");
+            expect(buttons.some(b => b.label === "Choose Minion")).to.be.true;
+        });
+
+        it("clicking a minion's cell then picks the next step's minion, not another facing for the finished orient", () => {
+            const g = setup(true);
+            const move = "play 03/orient n0.2 S";
+            const [row, col] = rowColFor(g, 1, 0);
+            const same = g.handleClick(move, row, col);
+            expect(same.move).eq(`${move}/with n0.2`);
+            expect(same.valid).to.be.true;
+            expect(same.message).eq(optionalMsg());
+            const [row2, col2] = rowColFor(g, 0, 0);
+            expect(g.handleClick(move, row2, col2).move).eq(`${move}/with m0.1`);
+        });
+
+        it("any other board click names the next step instead of raising the finished orient's errors", () => {
+            const g = setup(true);
+            const move = "play 03/orient n0.2 S";
+            for (const [x, y] of [[2, 0], [3, 1]]) {
+                forceCardAt(g, 3, 1, () => card("2C"));
+                const [row, col] = rowColFor(g, x, y);
+                const result = g.handleClick(move, row, col);
+                expect(result.move).eq(move);
+                expect(result.valid).to.be.true;
+                expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_CELL"));
+            }
+        });
+
+        it("with a single minion the message still announces the optional step, and the Cups buttons are offered", () => {
+            const g = setup(false);
+            const move = "play 03/orient n0.2 S";
+            expect(g.validateMove(move).message).eq(optionalMsg());
+            g.move(move, { partial: true });
+            expect(barValues(g).some(b => b.label === "Cups")).to.be.true;
+        });
+
+        it("a fresh play with minions on several cells still shows the top-level bar", () => {
+            const g = setup(true);
+            g.move("play 03", { partial: true });
+            expect(barValues(g).map(b => b.value)).to.include("use");
+        });
+    });
+
+    describe("a reoriented minion stays in the pool alongside its untouched siblings", () => {
+        it("after orient, the next step's candidates include every own minion in the cell, at its current facing", () => {
+            const g = new GnosticaGame(2);
+            clearBoard(g);
+            forceCardAt(g, 0, 0, () => aceOfRods());
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "W"), new Piece(2, 1, "W"), new Piece(2, 1, "W"), new Piece(2, 2, "N")];
+            g.currplayer = 2;
+            g.hands[1] = ["03", "2S"];
+            const pending = (g as unknown as { parsePendingStep: (m: string) => { minionCandidates: { index: number; piece?: Piece }[] } | undefined })
+                .parsePendingStep("play 03/orient m0.1.w.2 E")!;
+            const facings = pending.minionCandidates.map(c => `${c.piece?.size}${c.piece?.orientation}`).sort();
+            expect(facings).to.deep.equal(["1E", "1W", "2N"]);
+        });
+    });
+
     describe("Swords (tile) click flow: the shrink comes from the replacement card, or the Destroy button", () => {
         // Spot cards are worth 1, courts 2, majors 3.
         const setup = (size: 1 | 2 | 3, territory: () => TarotCard) => {
@@ -4623,11 +4710,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(result.move).eq(`use 03/orient m0.1 E`);
         expect(result.valid).to.be.true;
         // Step 1 (orientMinion) is complete, but step 2 (create) is still
-        // genuinely optional - complete:0, generic message, computed
-        // directly by validateMove() now, not just click.
+        // genuinely optional - complete:0, with the "remaining powers are
+        // optional" message, computed directly by validateMove() now, not just click.
+        const optionalMsg = i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: "The Empress" });
         expect(result.complete).eq(0);
-        expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
-        expect(g.validateMove(result.move).message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
+        expect(result.message).eq(optionalMsg);
+        expect(g.validateMove(result.move).message).eq(optionalMsg);
         g.move(result.move); // skips step 2 (create)
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("E");
         expect(g.currplayer).eq(2);
@@ -4751,11 +4839,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(step2.valid).to.be.true;
         // This step is genuinely complete (one real direction click is
         // the whole action), but steps 2 & 3 are still genuinely optional -
-        // complete:0, generic message, computed directly by validateMove()
-        // now, not just click.
+        // complete:0, with the "remaining powers are optional" message,
+        // computed directly by validateMove() now, not just click.
+        const optionalMsg = i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: "The Devil" });
         expect(step2.complete).eq(0);
-        expect(step2.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
-        expect(g.validateMove(step2.move).message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
+        expect(step2.message).eq(optionalMsg);
+        expect(g.validateMove(step2.move).message).eq(optionalMsg);
         g.move(step2.move); // skips steps 2 & 3
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1, orientation: "E" });
         expect(g.currplayer).eq(2);
