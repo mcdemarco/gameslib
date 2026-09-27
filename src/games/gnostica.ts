@@ -160,6 +160,23 @@ interface IPendingStep {
     opts: Record<string, unknown>;
     // The current step's own content as typed so far, already resolved into an IStep - completeness gates and click handlers read it directly.
     istep: IStep;
+    // The game as it stands after every completed step above was applied to a clone of the committed state; refs, candidates and lookups for this step resolve against its board.
+    game: GnosticaGame;
+}
+
+// What the click UI needs to know about an in-progress (partial) move, computed once inside move(..., {partial: true}) from the pre-move state.
+interface IPreview {
+    head: string | undefined;
+    // Top-level button values to bold.
+    highlighted: Set<string>;
+    discardNeedsCount: boolean;
+    // A bare orient cell whose piece is still ambiguous.
+    orientPickCell: string | undefined;
+    // The revealed card a Fool resume is playing, when the move names one.
+    foolCard: string | undefined;
+    // The resume seed move string, including whatever was typed against the pending obligation.
+    seed: string;
+    pending: IPendingStep | undefined;
 }
 
 // A lossless-for-display abbreviation of a raw uid list - individual major uids, plus per-suit/per-(spot|royal) minor COUNTs (minors aren't shown individually).
@@ -297,8 +314,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.stack[this.stack.length - 1].hands.filter(h => h.length === 6).length;
     }
 
-    // Transient click-UI hint, not part of persisted game state; stores the ALREADY-PARSED move so readers don't each re-parse the same string.
-    private liveMove: IParsedMove | undefined;
+    // Transient click-UI hints, not part of persisted game state; set by move(..., {partial: true}) and cleared by a committed move.
+    private preview: IPreview | undefined;
+    private framePreviews: IPreview[] = [];
     private buffers: Direction[] = [];
     private discarded: string[] = [];
 
@@ -603,6 +621,7 @@ export class GnosticaGame extends GameBaseSequenced {
         let newLast = this.lastTurner;
         // The frame stack walkFrameStack hands back, serialized into this.continued once past the partial boundary below.
         let residualFrames: IPowerFrame[] | undefined;
+        let preview: IPreview | undefined;
 
         if (m.toLowerCase() === "pass") {
             // validateMove() (above) is the actual gate on WHO may say "pass"; `head` deliberately stays undefined here (see the tail below).
@@ -615,6 +634,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // Parses and executes `m` against `this` - the one place move grammar is interpreted (validateMove mirrors this exact structure, read-only).
             const parsed = this.parseMove(m);
             head = parsed.head;
+            preview = partial ? this.buildPreview(parsed) : undefined;
 
             // A genuine cross-turn pause means every legal move right now has to be resuming it; legality of any kind is validateMove's job alone now.
             if (this.continued.length > 0) {
@@ -657,7 +677,11 @@ export class GnosticaGame extends GameBaseSequenced {
 
             }
             // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
-            this.liveMove = partial ? parsed : undefined;
+            this.preview = preview;
+            // A mid-build chain's earlier frames each get the preview they'd have had at that step, typed segments truncated to match.
+            this.framePreviews = partial
+                ? this.frames.map((f, i) => this.frameSnapshot(f, []).buildPreview({ ...parsed, steps: parsed.steps.slice(0, i + 2) }))
+                : [];
 
         }
  
@@ -1491,8 +1515,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (active !== "00") {
             return active;
         }
-        if (this.liveMove?.viaUid === "00" && this.liveMove.steps[0]?.card !== undefined) {
-            return this.liveMove.steps[0].card;
+        if (this.preview?.foolCard !== undefined) {
+            return this.preview.foolCard;
         }
         return this.discardPile[this.discardPile.length - 1];
     }
@@ -1515,11 +1539,19 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.pickleMove(head);
     }
 
-    // Builds the resume seed plus whatever step segments this.liveMove has typed against the same obligation, always starting fresh from this.continued.
-    private continuedSeedMoveString(): string {
-        const forThisObligation = this.liveMove !== undefined && this.liveMove.viaUid === this.getContinuedUid();
-        // this.liveMove already has real, fully-shaped IStep[] for this obligation - pickleMove serializes it directly (keeping "with"/"orient" prefixes intact).
-        return forThisObligation ? this.pickleMove(this.liveMove!) : this.freshResumeSeed();
+    private buildPreview(parsed: IParsedMove): IPreview {
+        const seed = parsed.viaUid === this.getContinuedUid() ? this.pickleMove(parsed) : this.freshResumeSeed();
+        const step0 = parsed.steps[0];
+        const head = parsed.head?.toLowerCase();
+        return {
+            head: parsed.head,
+            highlighted: this.highlightedButtonValues(parsed),
+            discardNeedsCount: head === "discard" && step0?.amount === undefined,
+            orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
+            foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
+            seed,
+            pending: this.parsePendingStep(this.continued.length > 0 ? seed : this.pickleMove(parsed)),
+        };
     }
 
     private invalid(key: string, params?: Record<string, unknown>): IValidationResult {
@@ -1596,8 +1628,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (matches.length > 1 && new Set(matches.map(({ piece }) => piece.id())).size > 1) {
             return { kind: "ambiguous" };
         }
-        // #98/#100: never hand back `r`'s stored index verbatim - a splice elsewhere can leave it stale; re-derive the CURRENT index by attribute, not identity.
         const { r, piece } = matches[0];
+        // #98/#100: never hand back `r`'s stored index verbatim - a splice elsewhere can leave it stale; re-derive the CURRENT index by attribute, not identity.
         const live = this.board.get(r.x, r.y)?.pieces ?? [];
         const freshIndex = live.findIndex(p => p.size === piece.size && p.orientation === piece.orientation && p.owner === piece.owner);
         if (freshIndex === -1) {
@@ -1763,24 +1795,21 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The six top-level turn choices, as buttons - a bare click on an already-occupied cell/piece is ambiguous between "orient" and "use", with no way to disambiguate.
     private isPendingFirstPlacement(): boolean {
-        if (this.liveMove === undefined) {
-            return false;
-        }
         // validateMove unconditionally rejects "place" once the acting player has ANY board presence, so a live "place" preview can only be their first piece.
-        return this.liveMove.head?.toLowerCase() === "place";
+        return this.preview?.head?.toLowerCase() === "place";
     }
 
-    // Which button(s) to bold, based on this.liveMove; "Declare" is a modifier so it can be highlighted alongside whatever the base action is, not instead of it.
-    private highlightedButtonValues(): Set<string> {
+    // Which button(s) to bold, based on the partial move; "Declare" is a modifier so it can be highlighted alongside whatever the base action is, not instead of it.
+    private highlightedButtonValues(parsed: IParsedMove | undefined): Set<string> {
         const found = new Set<string>();
-        if (this.liveMove === undefined) {
+        if (parsed === undefined) {
             return found;
         }
-        if (this.liveMove.announceLast) {
+        if (parsed.announceLast) {
             found.add("declare");
         }
-        const head = this.liveMove.head;
-        const step0 = this.liveMove.steps[0];
+        const head = parsed.head;
+        const step0 = parsed.steps[0];
         // A discard move is Pass-equivalent only when it discards nothing AND explicitly draws zero
         if (head === "discard" && ((step0.cardList === undefined || step0.cardList.length === 0) && step0.amount === 0)) {
             // "discard draw 0" is the user-facing pass, so bold Pass.
@@ -1806,8 +1835,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return bar;
         }
         // The state as ADVANCED by whatever's been clicked so far this render; `.special === "fool"` means clicks already ran a revealed card's steps.
-        const advanced = this.parsePendingStep(this.continuedSeedMoveString());
-        const justDeclined = this.liveMove?.head === "decline";
+        const advanced = this.computePendingMinor();
+        const justDeclined = this.preview?.head === "decline";
         if (advanced?.special === "fool" && !justDeclined) {
             // Fool's flip is never optional - nothing to decline once a revealed card's own steps have simply run their course.
             return bar;
@@ -1823,7 +1852,7 @@ export class GnosticaGame extends GameBaseSequenced {
             : activeTop.cardUid;
         const declineBtn: ButtonBarButton = { label: `Decline ${declinedUid}`, value: "decline_power" };
         if (justDeclined) {
-            // Bold marks a button matching what this.liveMove ALREADY says - once clicked, it stays confirmed rather than reverting to an open choice.
+            // Bold marks a button matching what the partial move ALREADY says - once clicked, it stays confirmed rather than reverting to an open choice.
             declineBtn.attributes = [{ name: "font-weight", value: "bold" }];
         }
         return [...bar, declineBtn] as [ButtonBarButton, ...ButtonBarButton[]];
@@ -1913,13 +1942,13 @@ export class GnosticaGame extends GameBaseSequenced {
 
         // pendingMinor.special === "fool" means Fool flipped and revealed ANOTHER Fool; only the ROOT card's untouched first flip is mandatory, so this nested one is declinable.
         if (pendingMinor.special === "fool") {
-            if (this.liveMove === undefined) {
+            if (this.preview === undefined) {
                 return this.pausedPowerButtons();
             }
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        const minionPicker = this.minionPickerBar(pendingMinor, selected, declareBtn);
+        const minionPicker = pendingMinor.game.minionPickerBar(pendingMinor, selected, declareBtn);
         if (minionPicker !== undefined) {
             return minionPicker;
         }
@@ -1940,11 +1969,11 @@ export class GnosticaGame extends GameBaseSequenced {
             return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        const hpCount = this.highPriestessCountBar(pendingMinor);
+        const hpCount = pendingMinor.game.highPriestessCountBar(pendingMinor);
         if (hpCount !== undefined) {
             return hpCount;
         }
-        const specialTargetPicker = this.specialTargetPickerBar(pendingMinor, selected, declareBtn);
+        const specialTargetPicker = pendingMinor.game.specialTargetPickerBar(pendingMinor, selected, declareBtn);
         if (specialTargetPicker !== undefined) {
             return specialTargetPicker;
         }
@@ -1958,12 +1987,12 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.pausedPowerButtons();
         }
 
-        return this.stepModeBar(pendingMinor, selected, declareBtn);
+        return pendingMinor.game.stepModeBar(pendingMinor, selected, declareBtn);
     }
 
     // A live "use"/"play" preview or genuine pendingPower obligation can never collapse to "Place" - a transient zero-piece moment shouldn't misread as a fresh start.
     private isPlaceOnlyState(): boolean {
-        const midPowerStep = this.liveMove?.head === "use" || this.liveMove?.head === "play" || this.continued.length > 0;
+        const midPowerStep = this.preview?.head === "use" || this.preview?.head === "play" || this.continued.length > 0;
         return (!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement();
     }
 
@@ -1979,7 +2008,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.lastTurner === undefined) {
             topLevel.push({ label: "(Declare)", value: "declare" });
         }
-        const highlighted = this.highlightedButtonValues();
+        const highlighted = this.preview?.highlighted ?? new Set<string>();
         for (const b of topLevel) {
             if (b.value !== undefined && highlighted.has(b.value)) {
                 b.attributes = [{ name: "font-weight", value: "bold" }];
@@ -1997,7 +2026,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Discard's own count is optional, but the bar still actively solicits it once "discard" is the live head and no count has been chosen yet.
     private discardCountBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "discard" || this.liveMove.steps[0]?.amount !== undefined) {
+        if (this.preview?.discardNeedsCount !== true) {
             return undefined;
         }
         return this.drawCountBar("drawcount");
@@ -2005,12 +2034,11 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Orient: a bare cell means 2+ of the player's own pieces share it and none has been picked yet - same shape "use"/"play" get via minionPickerBar.
     private orientAmbiguityBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const step = this.liveMove?.steps[0];
-        if (this.liveMove === undefined || this.liveMove.head?.toLowerCase() !== "orient"
-            || step?.targetPiece === undefined || step.direction !== undefined || step.targetPiece.includes(".")) {
+        const cell = this.preview?.orientPickCell;
+        if (cell === undefined) {
             return undefined;
         }
-        const coords = GnosticaBoard.algebraic2coords(step.targetPiece);
+        const coords = GnosticaBoard.algebraic2coords(cell);
         const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1]));
         if (!ambiguous) {
             return undefined;
@@ -2031,13 +2059,12 @@ export class GnosticaGame extends GameBaseSequenced {
         ] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
-    // For a genuine resume, continuedSeedMoveString() rebuilds a move string from this.continued plus liveMove's typed segments; no "already reflected" bookkeeping needed.
+    // For a genuine resume, the preview's seed is a move string rebuilt from this.continued plus the typed segments; no "already reflected" bookkeeping needed.
     private computePendingMinor(): IPendingStep | undefined {
-        return this.continued.length > 0
-            ? this.parsePendingStep(this.continuedSeedMoveString())
-            : this.liveMove === undefined
-                ? undefined
-                : this.parsePendingStep(this.pickleMove(this.liveMove));
+        if (this.preview !== undefined) {
+            return this.preview.pending;
+        }
+        return this.continued.length > 0 ? this.parsePendingStep(this.freshResumeSeed()) : undefined;
     }
 
     // Every remaining candidate minion for THIS step already sits on the same cell AND there's more than one, so a real choice is still needed - one button each.
@@ -2248,6 +2275,12 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Reconstructs the in-progress power step (if any) purely from a move string.  Checks step segments for STRUCTURAL completeness,  also stopping at Fool or World.
     private parsePendingStep(moveStr: string, callOpts: { preferCurrent?: boolean } = {}): IPendingStep | undefined {
+        const holder: { clone?: GnosticaGame } = {};
+        const pending = this.walkPendingStep(moveStr, callOpts, holder);
+        return pending === undefined ? undefined : { ...pending, game: holder.clone ?? this.clone() };
+    }
+
+    private walkPendingStep(moveStr: string, callOpts: { preferCurrent?: boolean }, holder: { clone?: GnosticaGame }): Omit<IPendingStep, "game"> | undefined {
         const parsed = this.parseMove(moveStr);
         // A "via <uid>" marker dispatches from the Fool/HP anchor for a genuine resume; otherwise the front card token. "as <x>" never moves the head arg.
         let headArg = parsed.viaUid ?? parsed.steps[0]?.card;
@@ -2319,7 +2352,6 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const priorSteps: IStep[] = [];
-        let clone: GnosticaGame | undefined;
         // False right after a power was skipped (a later power of the card used alone); true once a step has been walked past.
         let priorTaken = true;
         for (let segIdx = 0; segIdx < steps.length; segIdx++) {
@@ -2371,16 +2403,14 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // Walking past this segment lets a LATER step of the SAME frame become click-driven, via a clone.
             priorSteps.push(completedStep!);
-            clone ??= this.clone();
+            holder.clone ??= this.clone();
+            const clone = holder.clone;
             // A magicianChoice step needs its suit passed as `borrowedPower` here.
             const magicianAs = "special" in step && step.special === "magicianChoice" && asSuit !== undefined;
             try {
                 const outcome = clone.applyPowerStep(step, top.minions, completedStep, frameDef, stepIndex, frameDef.powers.length, true, magicianAs ? asSuit : undefined, true, priorTaken);
                 priorTaken = true;
-                top.minions = GnosticaGame.chainMinion(top.minions, outcome ?? {}).map(m => ({
-                    ...m,
-                    piece: clone!.board.get(m.x, m.y)?.pieces[m.index],
-                }));
+                top.minions = GnosticaGame.chainMinion(top.minions, outcome ?? {});
                 top.nextStepIndex = outcome?.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
                 if (outcome?.pushFrame !== undefined) {
                     stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, eligible: [...outcome.pushFrame.minions], minions: [...outcome.pushFrame.minions] });
@@ -2414,7 +2444,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private buildSpecialPending(
         special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
         eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: string,
-    ): IPendingStep {
+    ): Omit<IPendingStep, "game"> {
         if (special === "magicianChoice" && asSuit !== undefined) {
             const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, minions);
             return { head, headArg, activeCardUid, asUid, asSuit, suitUid: asSuit, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
@@ -3043,17 +3073,17 @@ export class GnosticaGame extends GameBaseSequenced {
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                             }
                             // Resolved against minionCandidates (currently shown), not the full minions pool - a stale move string shouldn't resolve against pieces no longer on offer.
-                            const resolved = this.resolvePieceRef(ref, pending.minionCandidates);
+                            const resolved = pending.game.resolvePieceRef(ref, pending.minionCandidates);
                             if (resolved.kind !== "ok") {
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                             }
-                            const clickedPiece = this.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
+                            const clickedPiece = pending.game.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
                             const rodReason = this.rodNeedsFacingReason(pending.suitUid, clickedPiece);
                             if (rodReason !== undefined) {
                                 return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${rodReason.key}`) };
                             }
-                            const minionRef = this.pieceRefStr(resolved.ref, pending.minions);
-                            return this.buildAnchorMove(pending, minionRef);
+                            const minionRef = pending.game.pieceRefStr(resolved.ref, pending.minions);
+                            return pending.game.buildAnchorMove(pending, minionRef);
                         }
                         if (value.startsWith("orientpick_")) {
                             // "orientpick_<ref>" - orient's own minion-picker (orient has no IPendingStep to resolve against, so it can't reuse "minion_"); facing is a separate click.
@@ -3079,13 +3109,13 @@ export class GnosticaGame extends GameBaseSequenced {
                                 if (stepHermitMode(pending.istep) !== undefined) {
                                     return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                                 }
-                                return this.buildTargetedHermitMove(pending, ref);
+                                return pending.game.buildTargetedHermitMove(pending, ref);
                             }
                             if (pending.special === "orientAny" || pending.special === "tradeHands" || pending.special === "hierophantReplace") {
                                 if (pending.istep.targetPiece !== undefined) {
                                     return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                                 }
-                                const result = this.buildSpecialTargetMove(pending, ref);
+                                const result = pending.game.buildSpecialTargetMove(pending, ref);
                                 return result ?? { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                             }
                             if (pending.suitUid === undefined || this.pendingMode(pending) !== undefined) {
@@ -3095,11 +3125,11 @@ export class GnosticaGame extends GameBaseSequenced {
                             const clickedMode = pending.suitUid === "C"
                                 ? (ref === "own" || ref === "new" ? ref : "enemy")
                                 : (ref.includes(".") ? "piece" : "tile");
-                            const reason = this.minorModeAvailability(pending).get(clickedMode);
+                            const reason = pending.game.minorModeAvailability(pending).get(clickedMode);
                             if (reason !== undefined) {
                                 return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${reason.key}`, reason.params ?? {}) };
                             }
-                            return this.buildTargetedStepMove(pending, ref);
+                            return pending.game.buildTargetedStepMove(pending, ref);
                         }
                         if (value.startsWith("pips_")) {
                             // Swords "piece" (attack) pips - a button set rather than a click-cycled arg, always rebuilt against the CURRENT target.
@@ -3108,8 +3138,8 @@ export class GnosticaGame extends GameBaseSequenced {
                             if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "piece") {
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                             }
-                            const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-                            return this.assembleStepMove(pending, { action: "shrink", withPiece: minionRef, targetPiece: pending.istep.targetPiece!, amount: parseInt(n, 10) });
+                            const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
+                            return pending.game.assembleStepMove(pending, { action: "shrink", withPiece: minionRef, targetPiece: pending.istep.targetPiece!, amount: parseInt(n, 10) });
                         }
                         if (value.startsWith("magician_")) {
                             // Stage 1 of magicianChoice - picks the suit letter, landing in the head as "as <suit>"; every following click then uses ordinary suit-mode machinery.
@@ -3118,7 +3148,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             if (pending === undefined || pending.special !== "magicianChoice") {
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                             }
-                            return this.describePendingMove({ ...pending, asSuit: suitUid }, pending.priorSteps);
+                            return pending.game.describePendingMove({ ...pending, asSuit: suitUid }, pending.priorSteps);
                         }
                         if (value.startsWith("drawcount_")) {
                             // The count-picker buttons offered once "discard" is the live head and no "draw <n>" suffix has been chosen yet; always rebuilt from the current discard uids.
@@ -3138,7 +3168,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             }
                             // Picking a count always completes this step - whatever's already been discarded is sitting in the step's own cardList.
                             const cardList = pending.istep.cardList ?? [];
-                            return this.assembleStepMove(pending, { action: "discard", cardList, amount: parseInt(n, 10) });
+                            return pending.game.assembleStepMove(pending, { action: "discard", cardList, amount: parseInt(n, 10) });
                         }
                         switch (value) {
                             case "pass":
@@ -3178,7 +3208,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     if (pending === undefined || pending.suitUid !== "C" || this.pendingMode(pending) !== "new" || pending.opts.allowRandomDraw !== true) {
                                         return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                                     }
-                                    const result = this.supplyStepCardUid(pending, "drawn");
+                                    const result = pending.game.supplyStepCardUid(pending, "drawn");
                                     return result ?? { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                                 }
                             case "destroy": {
@@ -3187,8 +3217,8 @@ export class GnosticaGame extends GameBaseSequenced {
                                     return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                                 }
                                 const [tx, ty] = GnosticaBoard.algebraic2coords(pending.istep.targetCell);
-                                const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-                                return this.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: this.board.get(tx, ty)?.pointValue() ?? 0 });
+                                const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
+                                return pending.game.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: pending.game.board.get(tx, ty)?.pointValue() ?? 0 });
                             }
                             default:
                                 return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
@@ -3207,7 +3237,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         }
                         const pendingForCard = this.parsePendingStep(move, { preferCurrent: true });
                         if (pendingForCard !== undefined && this.pendingMode(pendingForCard) !== undefined) {
-                            const result = this.supplyStepCardUid(pendingForCard, uid);
+                            const result = pendingForCard.game.supplyStepCardUid(pendingForCard, uid);
                             if (result !== undefined) {
                                 return result;
                             }
@@ -3221,7 +3251,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             } else {
                                 discards.push(uid);
                             }
-                            return this.assembleStepMove(pendingForCard, { action: "discard", cardList: discards });
+                            return pendingForCard.game.assembleStepMove(pendingForCard, { action: "discard", cardList: discards });
                         }
                         if (head === "play") {
                             // "play"'s own pool can span the whole board, unlike "use".
@@ -3248,13 +3278,14 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (pendingForDiscard?.special !== "judgementDraw") {
                             return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
                         }
-                        const minionRef = this.pieceRefStr(pendingForDiscard.minion, pendingForDiscard.minions);
+                        const game = pendingForDiscard.game;
+                        const minionRef = game.pieceRefStr(pendingForDiscard.minion, pendingForDiscard.minions);
                         // Leading "draw" may or may not be there yet depending on whether this is the first click - stripped before working the list, reattached when rebuilding.
                         const selected = pendingForDiscard.istep.cardList ?? [];
-                        const minionPiece = this.board.get(pendingForDiscard.minion.x, pendingForDiscard.minion.y)!.pieces[pendingForDiscard.minion.index];
+                        const minionPiece = game.board.get(pendingForDiscard.minion.x, pendingForDiscard.minion.y)!.pieces[pendingForDiscard.minion.index];
                         const maxDraw = Math.min(minionPiece.size, Math.max(0, 6 - (this.hands[this.currplayer - 1]?.length ?? 0)));
                         const rebuildDiscard = (updated: string[]): string =>
-                            this.assembleStepMove(pendingForDiscard, { action: "draw", withPiece: minionRef, cardList: updated });
+                            game.assembleStepMove(pendingForDiscard, { action: "draw", withPiece: minionRef, cardList: updated });
 
                         if (/^\d{2}$/.test(key)) {
                             // Unambiguous major-arcana uid.
@@ -3262,7 +3293,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                 return rebuildDiscard(selected.filter(u => u !== key));
                             }
                             if (selected.length >= maxDraw || !this.discardPile.includes(key)) {
-                                return { move: this.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
+                                return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
                             }
                             return rebuildDiscard([...selected, key]);
                         }
@@ -3282,11 +3313,11 @@ export class GnosticaGame extends GameBaseSequenced {
                             return rebuildDiscard([...selected.slice(0, idx), ...selected.slice(idx + 1)]);
                         }
                         if (selected.length >= maxDraw) {
-                            return { move: this.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
+                            return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
                         }
                         const candidates = this.discardPile.filter(uid => matchesBucket(uid) && !selected.includes(uid));
                         if (candidates.length === 0) {
-                            return { move: this.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
+                            return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
                         }
                         const picked = candidates[Math.floor(Math.random() * candidates.length)];
                         return rebuildDiscard([...selected, picked]);
@@ -3361,10 +3392,10 @@ export class GnosticaGame extends GameBaseSequenced {
                                 return undefined;
                             }
                             if (atCell.length === 1) {
-                                const ref = this.pieceRefStr(atCell[0], candidate.minions);
-                                return this.buildAnchorMove(candidate, ref);
+                                const ref = candidate.game.pieceRefStr(atCell[0], candidate.minions);
+                                return candidate.game.buildAnchorMove(candidate, ref);
                             }
-                            return this.buildAnchorMove(candidate, cell);
+                            return candidate.game.buildAnchorMove(candidate, cell);
                         };
                         const advancedPastCurrent = advanced !== undefined && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1);
                         // With the previous step complete and the next step's minion still undecided, a click on a candidate minion's cell picks that minion rather than refining the previous step.
@@ -3379,7 +3410,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             }
                         }
                         if (advanced !== undefined && advanced.special !== undefined && this.pendingSpecialUntouched(advanced) && advancedPastCurrent) {
-                            const result = this.handlePendingSpecialBoardClick(advanced, x, y, cell);
+                            const result = advanced.game.handlePendingSpecialBoardClick(advanced, x, y, cell);
                             if (result !== undefined) {
                                 return result;
                             }
@@ -3391,13 +3422,13 @@ export class GnosticaGame extends GameBaseSequenced {
                             }
                         }
                         if (pending !== undefined && this.pendingMode(pending) !== undefined) {
-                            const result = this.handlePendingStepBoardClick(pending, x, y);
+                            const result = pending.game.handlePendingStepBoardClick(pending, x, y);
                             if (result !== undefined) {
                                 return result;
                             }
                         }
                         if (pending !== undefined && pending.special !== undefined) {
-                            const result = this.handlePendingSpecialBoardClick(pending, x, y, cell);
+                            const result = pending.game.handlePendingSpecialBoardClick(pending, x, y, cell);
                             if (result !== undefined) {
                                 return result;
                             }
@@ -5501,7 +5532,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Cards drawn at the end of their last turn, for highlighting by render() - only non-empty for the CURRENT player, and only until they've started building THIS turn's move.
     private newHandCardUids(player: playerid): Set<string> {
-        if (player !== this.currplayer || this.liveMove !== undefined) {
+        if (player !== this.currplayer || this.preview !== undefined) {
             return new Set();
         }
         const drawn = this.cardsDrawn[player - 1] || 0;
@@ -5912,21 +5943,16 @@ export class GnosticaGame extends GameBaseSequenced {
     private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
         // this.results holds one _group entry per step of the chain - pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
-        const raw = this.state();
-        raw.stack = [{
-            ...this.moveState(),
-            board: frame.board,
-            _results: groups[stepIndex] !== undefined ? [groups[stepIndex]] : [],
-        }];
-        const snapshot = new GnosticaGame(JSON.stringify(raw, replacer));
-        if (this.liveMove !== undefined) {
-            // Still mid-build - reconstruct exactly what had been typed as of this step, so getActionButtons() on the snapshot offers the real choices available then.
-            snapshot.liveMove = {
-                ...this.liveMove,
-                steps: this.liveMove.steps.slice(0, stepIndex + 2),
-            };
-        }
+        const snapshot = this.frameSnapshot(frame, groups[stepIndex] !== undefined ? [groups[stepIndex]] : []);
+        // Still mid-build - the snapshot offers the real choices available as of this step.
+        snapshot.preview = this.framePreviews[stepIndex];
         return snapshot;
+    }
+
+    private frameSnapshot(frame: FrameState, results: APMoveResult[]): GnosticaGame {
+        const raw = this.state();
+        raw.stack = [{ ...this.moveState(), board: frame.board, _results: results }];
+        return new GnosticaGame(JSON.stringify(raw, replacer));
     }
 
     // this.frames is only non-empty for a move that chained 2+ major-arcana steps - every other move returns the single rep renderCurrent() always has.
@@ -5935,7 +5961,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.renderCurrent(opts);
         }
         // Historical (fully committed) frames get no buttons, via renderFrame(); a still-mid-build chain gets real ones instead, via renderCurrent() on a snapshot.
-        const historical = this.liveMove === undefined;
+        const historical = this.preview === undefined;
         const reps = historical
             ? this.frames.map((f, i) => this.renderFrame(f, i, opts))
             : this.frames.map((f, i) => this.renderFrameSnapshot(f, i).renderCurrent(opts, true));

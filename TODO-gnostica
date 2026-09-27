@@ -31,7 +31,7 @@ UX:
 	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups.
 
 Refactoring:
-	- #90 - Replace this.liveMove with fields for render() to read, computed inside move(..., {partial: true}) itself rather than re-derived from scratch by 5 different render-side functions every render() call.
+	- #90 - Replace this.liveMove with fields for render() to read, computed inside move(..., {partial: true}) itself rather than re-derived from scratch by 5 different render-side functions every render() call. @done(2026-09-27) The game now sets explicit preview fields (including the pending step and its clone) in move(partial); liveMove is gone.
 	- #95 - Replace cloneLive() with clone(). @done(2026-09-26)
 	- #99 - Remove one-liner wrappers like invalid() and failureResult().
 	- #107 - Tests should not assemble internal structures manually.
