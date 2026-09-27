@@ -3443,27 +3443,32 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(values[values.length - 1]).eq("declare");
     });
 
-    it("offers a target candidate for own/new, struck through when not currently sensible, and rejects a click on one immediately - no candidate at all when there's no enemy to attack", () => {
+    it("offers a target candidate for own/enemy/new, struck through when not currently sensible, and rejects a click on one immediately", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
         g.move("place m0 U"); // "U" - targets itself, a territory with no enemy on it
         g.move("place l0 U");
         g.move(`use AC`, { partial: true }); // sync engine state, same as the playground's own preview flow
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("target_own");
+        expect(values).to.include("target_enemy");
         expect(values).to.include("target_new");
-        // No enemy piece at the target (self) cell - unlike own/new, an
-        // enemy candidate is only offered per actual enemy piece present,
-        // so there's no struck-through placeholder for it at all here.
-        expect(values.some(v => v?.startsWith("target_") && v !== "target_own" && v !== "target_new")).to.be.false;
         const ownBtn = bar!.buttons!.find(b => b.value === "target_own");
         expect(ownBtn!.attributes).to.be.undefined; // feasible - not struck through
+        // No enemy piece at the target (self) cell - a struck-through generic
+        // placeholder is still offered, matching own/new's own always-present buttons.
+        const enemyBtn = bar!.buttons!.find(b => b.value === "target_enemy");
+        expect(enemyBtn!.label).to.eq("Create Enemy");
+        expect(enemyBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         const newBtn = bar!.buttons!.find(b => b.value === "target_new");
         expect(newBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" }); // "U" targets self, a territory, not a wasteland
         const ownClick = g.handleClick(`use AC`, -1, -1, "_btn_target_own");
         expect(ownClick.valid).to.be.true;
+        const enemyClick = g.handleClick(`use AC`, -1, -1, "_btn_target_enemy");
+        expect(enemyClick.valid).to.be.false;
+        expect(enemyClick.message).eq(i18next.t("apgames:validation.gnostica.NO_ENEMY_THERE", { cell: "m0" }));
         const newClick = g.handleClick(`use AC`, -1, -1, "_btn_target_new");
         expect(newClick.valid).to.be.false;
         expect(newClick.message).eq(i18next.t("apgames:validation.gnostica.NOT_A_WASTELAND"));

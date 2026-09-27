@@ -2200,7 +2200,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             });
             GnosticaGame.disambiguateByOwner(enemyEntries);
-            options.push(...enemyEntries.map(e => e.option));
+            if (enemyEntries.length > 0) {
+                options.push(...enemyEntries.map(e => e.option));
+            } else {
+                // No enemy piece to reference right now - still show the option, struck through, matching "own"/"new"'s own always-present buttons.
+                options.push({ value: "enemy", label: "Create Enemy", disabledReason: availability.get("enemy") });
+            }
             options.push({ value: "new", label: "Create Territory", disabledReason: availability.get("new") });
             return options;
         }
