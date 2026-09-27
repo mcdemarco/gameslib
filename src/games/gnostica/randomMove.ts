@@ -1078,7 +1078,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         const minionsForReplay = minions;
         minions = chainMinion(minions, result.outcome ?? {} as IStepOutcome);
         if (i < def.powers.length - 1) {
-            clone ??= game.cloneLive();
+            clone ??= game.clone();
             clone.applyPowerStep(step, minionsForReplay, istep, def, i, def.powers.length, true);
         }
     }

@@ -453,13 +453,6 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    // Unlike clone() (last REAL commit only), reflects this.board/hands live, including a partial preview's own in-progress mutation - validateMajorPower needs this.
-    public cloneLive(): GnosticaGame {
-        const raw = this.state();
-        raw.stack = [this.moveState()];
-        return new GnosticaGame(JSON.stringify(raw, replacer));
-    }
-
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
@@ -2378,7 +2371,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // Walking past this segment lets a LATER step of the SAME frame become click-driven, via a clone.
             priorSteps.push(completedStep!);
-            clone ??= this.cloneLive();
+            clone ??= this.clone();
             // A magicianChoice step needs its suit passed as `borrowedPower` here.
             const magicianAs = "special" in step && step.special === "magicianChoice" && asSuit !== undefined;
             try {
@@ -4371,7 +4364,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Popping can expose an already-exhausted buried frame (e.g. World's own spent frame), which a later segment must not be validated against.
                 GnosticaGame.popExhaustedFrames(this, stack);
                 if (i < steps.length) {
-                    clone ??= this.cloneLive();
+                    clone ??= this.clone();
                 }
                 justDeclined = true;
                 continue;
@@ -4522,7 +4515,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             GnosticaGame.popExhaustedFrames(this, stack);
             if (i < steps.length || stack.length > 0) {
-                clone ??= this.cloneLive();
+                clone ??= this.clone();
                 clone.applyPowerStep(step, minionsForReplay, istep, frameDef, stepIndex, frameDef.powers.length, true, borrowedForStep, true, takenBefore);
             }
         }

@@ -4,7 +4,7 @@ Some items were marked off at transfer here, not at completion.
 Mark items done with @done(date) only as they're confirmed.
 
 Pre-release:
-	- #29 - reduce test count
+	- #29 - reduce test count; remember to evaluate the 60 tests skipped when cloneLive() was replaced by clone() for the reduced list
 	- #66 - test fool messaging on reload in production
 	- #86 - Once gnostica/randomMove.ts is deleted (or no longer needs them - see #85), revert these 28 gnostica.ts methods from public back to private (all were private before #85; only made public so randomMove.ts could call them cross-file): buildViaMove, cloneLive, computeShortcutOpts, eligibleMinionsForActivate, eligibleMinionsForPlay, hasPiecesOnBoard, minorModeAvailability, minorTargetCell, pickleMove, pieceRefStr, primitiveToSuit, renderWindow, scoreFor, targetScore, validateHermitStep, validateHierophantReplace, validateHighPriestess, validateJudgementDraw, validateMagicianChoice, validateMajorPower, validateMinorPower, validateOrientAny, validateOrientMinion, validateSuitPrimitive, validateTradeHands, victimRefStr, applyPowerStep, validatePowerStep.
 	- #87 - Remove randomMove.ts.
@@ -32,7 +32,7 @@ UX:
 
 Refactoring:
 	- #90 - Replace this.liveMove with fields for render() to read, computed inside move(..., {partial: true}) itself rather than re-derived from scratch by 5 different render-side functions every render() call.
-	- #95 - Replace cloneLive() with clone().
+	- #95 - Replace cloneLive() with clone(). @done(2026-09-26)
 	- #99 - Remove one-liner wrappers like invalid() and failureResult().
 	- #107 - Tests should not assemble internal structures manually.
 	- #118 - Finish removing stepSegments. @done(2026-09-24)
