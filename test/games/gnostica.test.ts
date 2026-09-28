@@ -10,6 +10,7 @@ import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 import { randomUseOrPlayMove } from "../../src/games/gnostica/randomMove";
 import { MAJOR_ARCANA } from "../../src/games/gnostica/majorArcana";
+import { testGame } from "./gnostica.testState";
 
 // The it.skip tests below build boards by editing live state (never committed to the game's history), which the pending-step/validation walkers no longer see now that they clone() instead of cloneLive(); revisit with TODO #29.
 const theWorld = () => majorCards.find(c => c.rank.seq === 21)!;
@@ -804,114 +805,78 @@ describe("Gnostica: sidebarScores", () => {
     });
 });
 
+// Minimal 2-player boards for the minor-arcana suit-power tests below - real cards, seeded via
+// testGame() (TODO #107) rather than forced onto a live, randomly-dealt game. Filler hand cards
+// are unrelated spot cards, present only so a hand isn't suspiciously empty.
+const filler = ["2R", "3R", "4R", "5D", "6D", "7D"];
+
 describe("Gnostica: activate/play - minor arcana suit powers", () => {
     it("Cups (own): adds an own small piece to the target cell", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }],
+            hands: [filler, filler],
+        });
         g.move(`use AC/with m0.1 at n0 create U`);
         const t = g.board.get(1, 0)!;
         expect(t.pieces.length).eq(1);
         expect(t.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "U" });
-        expect(g.stashes.get(1)![0]).eq(3); // one for the initial placement, one for this
+        expect(g.stashes.get(1)![0]).eq(4); // the piece at m0 already accounted for one
     });
 
     it("Cups (enemy): adds a copy of a targeted enemy's small piece from THEIR stash", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the targeted cell
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 1, "W"]] }],
+            hands: [filler, filler],
+        });
         g.move(`use AC/with m0.1 at n0 create n0.1`);
         const t = g.board.get(1, 0)!;
         expect(t.pieces.length).eq(2);
         expect(t.pieces[1]).to.deep.include({ owner: 2, size: 1, orientation: "W" });
-        expect(g.stashes.get(2)![0]).eq(3); // player 2's stash, not player 1's
+        expect(g.stashes.get(2)![0]).eq(4); // player 2's stash, not player 1's
     });
 
     it("Cups (new): creates a territory on a wasteland from a hand card", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, -1, 0, () => aceOfCups()); // l0
-        g.move("place l0 W"); // player 1, pointing further west
-        g.move("place n0 U"); // player 2
-        // The random deal may not happen to include a spot minor - dedupe
-        // and force one in, rather than relying on chance (a real flaky
-        // failure otherwise, on the rare hand with none).
         const spotUid = "2S";
-        g.hands[0] = g.hands[0].filter(uid => uid !== spotUid);
-        g.hands[0].push(spotUid);
+        const g = testGame({
+            board: [{ x: -1, y: 0, uid: "AC", pieces: [[1, 1, "W"]] }],
+            hands: [[spotUid, ...filler], filler],
+        });
         g.move(`use AC/with l0.1 at k0 create ${spotUid}`);
         expect(g.board.get(-2, 0)!.card?.uid).eq(spotUid);
         expect(g.hands[0]).to.not.include(spotUid);
     });
 
     it("Rods (piece): moves the minion itself and reorients it", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        g.move("place m0 E"); // player 1
-        g.move("place l0 U"); // player 2
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }],
+            hands: [filler, filler],
+        });
         g.move(`use AR/with m0.1 move m0.1 1 orient N`);
         expect(g.board.get(0, 0)!.pieces.length).eq(0);
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, orientation: "N" });
     });
 
-    it("Rods (tile): pushes the pointed-at territory further away", () => {
-        const g = new GnosticaGame(2);
-        // Fully deterministic (see clearBoard's own docs): the random
-        // initial deal could otherwise occasionally put the Ace of Rods
-        // itself at n0, which forceCardAt's own duplicate-clearing would
-        // then wipe out from there, leaving no territory to push.
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2, onto the wasteland beside m0
-        g.move(`use AR/with m0.1 move n0 1`);
-        expect(g.board.has(1, 0)).eq(false);
-        expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
-    });
-
-    // Real gameplay counterpart to the bare-board "keeps two genuinely
-    // separate multi-cell clusters classified correctly" unit test in
-    // gnostica.board.test.ts (identical geometry, fromX=1/toX=4) - that
-    // test calls board.pushTerritory() directly, skipping turns, players,
-    // and validateMove() entirely (see its own docs on why a bare board
-    // is the right size for it). This version drives the exact same push
-    // through a real player's "use" move, and also checks the OTHER
-    // player's own, genuinely disconnected cluster stays independently
-    // valid to interact with afterward.
-    it("real gameplay: a Rods push across a genuine void gap validates and applies correctly, and both disconnected clusters stay independently usable", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, -1, 0, () => card("2C")); // l0 - cluster A
-        forceCardAt(g, 0, 0, () => aceOfRods()); // m0 - cluster A, the acting minion's own card
-        forceCardAt(g, 1, 0, () => card("KS")); // n0 - isolated card to be pushed
-        // Cluster B, pre-existing, far away - a DIFFERENT uid than cluster
-        // A's own "2C", since "use <uid>" resolves by scanning the whole
-        // board for a matching uid (see forceCardAt's own docs) - reusing
-        // one would make the final cross-cluster "use" check ambiguous,
-        // and would also make THIS call's own duplicate-clearing wipe out
-        // cluster A's card out from under it.
-        forceCardAt(g, 5, 0, () => card("2D"));
-        g.move("place m0 E"); // player 1, facing n0
-        g.move("place r0 U"); // player 2, onto cluster B's own card
-
-        // A real initial placement always starts at size 1 (see
-        // MUST_PLACE_FIRST's own wording); bumped directly to 3 here so a
-        // real, validated dist-3 push is reachable in one move, matching
-        // the bare-board test's exact push (fromX=1, toX=4) rather than
-        // needing several turns of Discs growth first, which isn't what
-        // this test is about.
-        g.board.get(0, 0)!.pieces[0].size = 3;
-
+    // Also the real gameplay counterpart to the bare-board "keeps two genuinely separate
+    // multi-cell clusters classified correctly" unit test in gnostica.board.test.ts (identical
+    // geometry, fromX=1/toX=4): that test calls board.pushTerritory() directly, skipping turns
+    // and validateMove() entirely. This version drives the exact same push through a real
+    // player's "use" move, and checks the OTHER player's own, disconnected cluster stays usable.
+    it("Rods (tile): a push across a genuine void gap validates and applies correctly, and both disconnected clusters stay independently usable", () => {
+        const g = testGame({
+            board: [
+                { x: -1, y: 0, uid: "2C" }, // cluster A
+                { x: 0, y: 0, uid: "AR", pieces: [[1, 3, "E"]] }, // cluster A, the acting minion
+                { x: 1, y: 0, uid: "KS" }, // the isolated card to be pushed
+                { x: 5, y: 0, uid: "2D", pieces: [[2, 1, "U"]] }, // cluster B, far away
+            ],
+            hands: [filler, filler],
+        });
         const pushMove = `use AR/with m0.3 move n0 3`;
         expect(g.validateMove(pushMove).valid).to.be.true; // through real validation, not a trusted bypass
         g.move(pushMove);
-
-        // Cluster A: unaffected.
+        // Cluster A: unaffected. Departure cell: reverted to wasteland, still adjacent to m0.
         expect(g.board.classify(-1, 0)).eq("territory");
         expect(g.board.classify(0, 0)).eq("territory");
-        // Departure cell: reverted to wasteland, still adjacent to m0.
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.classify(1, 0)).eq("wasteland");
         // The gap: genuinely disconnected from either cluster.
@@ -921,91 +886,65 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         expect(g.board.classify(4, 0)).eq("territory");
         expect(g.board.get(4, 0)!.card?.uid).eq("KS");
         expect(g.board.classify(5, 0)).eq("territory");
-
-        // Cluster B stays independently valid for its own owner to act
-        // on, entirely unaffected by the unrelated push that happened
-        // three cells away on the other side of a genuine void gap.
+        // Cluster B stays independently valid for its own owner, unaffected by the push.
         expect(g.currplayer).eq(2);
         expect(g.validateMove(`use 2D`).valid).to.be.true;
     });
 
-    it("Discs (piece): grows the minion by one size", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfDiscs());
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
+    it("Discs (piece): grows the minion by one size, and rejects a step spelled as the wrong verb", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        expect(g.validateMove(`use AD/with m0.1 move m0.1 1`).valid).to.be.false; // wrong verb, rejected outright
         g.move(`use AD/with m0.1 grow m0.1 orient N`);
         expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2, orientation: "N" });
     });
 
-    it("Discs: a step whose verb isn't the suit's own is rejected, not treated as unfinished", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfDiscs());
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
-        expect(g.validateMove(`use AD/with m0.1 grow m0.1`).valid).to.be.true;
-        expect(g.validateMove(`use AD/with m0.1 move m0.1 1`).valid).to.be.false;
-    });
-
     it("Discs (tile): grows the pointed-at territory's value by one, discarding the old card", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfDiscs());
-        const target = g.board.get(1, 0)!; // n0
-        const oldUid = "2C";
-        target.card = card("2C"); // a known worth-1 spot card
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
-        const royaltyUid = "KS"; // King of Swords, worth 2 - injected so the test doesn't depend on the random deal
-        g.hands[0].push(royaltyUid);
+        const royaltyUid = "KS"; // worth 2
+        const oldUid = "2C"; // worth 1
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: oldUid }],
+            hands: [[royaltyUid, ...filler], filler],
+        });
         g.move(`use AD/with m0.1 grow n0 to ${royaltyUid}`);
         expect(g.board.get(1, 0)!.card?.uid).eq(royaltyUid);
         expect(g.discardPile).to.include(oldUid);
     });
 
-    it("Swords (piece): shrinks a targeted enemy piece, returning it to their stash", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g); // fully deterministic - see clearBoard's own docs
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, small piece, on the targeted cell - stash now [4,5,5]
+    it("Swords (piece): shrinks a targeted enemy piece to destruction, returning it to their stash", () => {
+        const g = testGame({
+            // n0 has no card of its own - the targeted piece just stands on a wasteland.
+            board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, pieces: [[2, 1, "W"]] }],
+            hands: [filler, filler],
+            stashes: { 1: [5, 5, 5], 2: [4, 5, 5] }, // player 2 already has one piece down, at n0
+        });
         g.move(`use AS/with m0.1 shrink n0.1 1`);
-        // n0 has no card of its own (cleared above) - once its only piece
-        // is destroyed, pruneIfEmpty deletes the cell outright rather than
-        // leaving empty CellContents behind (see pruneIfEmpty's own docs),
-        // so board.get(1,0) itself becomes undefined, not just empty.
-        expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // small piece, 1 pip = destroyed
-        expect(g.stashes.get(2)![0]).eq(5); // destruction returns it, undoing the placement's draw
+        // pruneIfEmpty deletes a cardless cell outright once its last piece is gone.
+        expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0);
+        expect(g.stashes.get(2)![0]).eq(5); // destruction returns it
     });
 
     it("Swords (tile): shrinks the acting player's own uncontested territory's value", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        const oldUid = "KS"; // King of Swords, worth 2
-        forceCardAt(g, -1, 0, () => card("KS")); // l0
-        g.move("place m0 W"); // player 1, pointing at l0
-        g.move("place n0 U"); // player 2
-        // The random deal may not happen to include a spot minor at all -
-        // force one in rather than relying on chance (a real flaky failure
-        // otherwise, on the rare hand with none).
-        const spotUid = "2S";
-        g.hands[0] = g.hands[0].filter(uid => uid !== spotUid);
-        g.hands[0].push(spotUid);
+        const oldUid = "KS"; // worth 2
+        const spotUid = "2S"; // worth 1
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 1, "W"]] }, { x: -1, y: 0, uid: oldUid }],
+            hands: [[spotUid, ...filler], filler],
+        });
         g.move(`use AS/with m0.1 shrink l0 1 to ${spotUid}`);
         expect(g.board.get(-1, 0)!.card?.uid).eq(spotUid);
         expect(g.discardPile).to.include(oldUid);
     });
 
-    it("play: uses a hand card's power through any of the player's board pieces/then discards it", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1, defaults to "U" - no relation to the played card's suit
-        g.move("place l0 U"); // player 2
+    it("play: uses a hand card's power through any of the player's board pieces, then discards it", () => {
         const cupsUid = "2C";
-        // The random deal may already hold a copy - dedupe first so the
-        // post-play "not.include" assertion below can't see a leftover.
-        g.hands[0] = g.hands[0].filter(c => c !== cupsUid);
-        g.hands[0].push(cupsUid);
-        // The minion at m0 points "U", so it can only target its own
-        // cell - add the second piece there rather than at an adjacent one.
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "U"]] }],
+            hands: [[cupsUid, ...filler], filler],
+        });
+        // The minion at m0 points "U", so it can only target its own cell.
         g.move(`play ${cupsUid}/with m0.1 at m0 create U`);
         expect(g.hands[0]).to.not.include(cupsUid);
         expect(g.discardPile).to.include(cupsUid);
@@ -1013,42 +952,24 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         expect(g.board.get(0, 0)!.pieces[1]).to.deep.include({ owner: 1, size: 1 });
     });
 
-    it("refuses to use a uid that isn't a real card at all", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
+    it("refuses to use a uid that isn't a real card, one that isn't on the board, or a card the player has no minion on", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
+            hands: [filler, filler],
+        });
         expect(() => g.move("use ZZ")).to.throw(); // not a real card uid
-    });
-
-    it("refuses to use a real card uid that isn't currently on the board", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
-        const unplacedUid = g.drawPile[0]; // definitely not on the board
-        expect(() => g.move(`use ${unplacedUid}`)).to.throw();
-    });
-
-    it("refuses to use a card the acting player has no minion on", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2, elsewhere
-        // player 1's turn again after player 2's placement
-        g.move("discard draw 0");
-        // now player 2's turn - they have no piece on m0
-        expect(() => g.move(`use AC`)).to.throw();
+        expect(() => g.move(`use ${g.drawPile[0]}`)).to.throw(); // real card, but not on the board
+        expect(() => g.move(`use AR`)).to.throw(); // player 1 has no minion at n0
     });
 
     it("refuses to USE World's power against a malformed target", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => theWorld());
-        g.move("place m0 U");
-        g.move("place l0 U");
-        // "C" isn't any major arcana card's own uid - checkWorldChoosePower
-        // rejects it as NO_SUCH_MAJOR_ON_BOARD.
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "21", pieces: [[1, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        // "C" isn't any major arcana card's own uid - checkWorldChoosePower rejects it as NO_SUCH_MAJOR_ON_BOARD.
         expect(() => g.move(`use 21/with m0.1 C own m0 U`)).to.throw();
     });
-
 });
 
 describe("Gnostica: activate/play - major arcana chaining", () => {
