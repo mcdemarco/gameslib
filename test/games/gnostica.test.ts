@@ -3283,6 +3283,39 @@ describe("Gnostica: choose-step click messaging", () => {
         }
     });
 
+    // Regression: once a card STARTS with 2+ eligible minions (so the minion-picker fires), naming a specific one explicitly
+    // (`with <ref>`) must still get the special's own real message - the ambiguity check used to ignore the already-typed ref
+    // and re-decide from scratch, finding the pool "still ambiguous" forever and falling through to the generic CHOOSE_STEP
+    // wording (whose buttons don't even apply to these click-only specials) no matter which minion was actually picked.
+    it("orientMinion/orientAny/hierophantReplace still name their own targeting rule once a specific minion (from an originally-ambiguous pool) is explicitly typed", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 1, "E"], [1, 2, "U"]] }], // Empress, 2 eligible minions
+            hands: [filler, filler],
+        });
+        for (const ref of ["m0.1", "m0.2"]) {
+            const result = g.validateMove(`use 03/with ${ref}`);
+            expect(result.message, ref).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_ORIENT_MINION", { card: major(3).name, cell: "m0" }));
+        }
+
+        const devil = testGame({
+            board: [
+                { x: 0, y: 0, uid: "15", pieces: [[1, 1, "E"], [1, 2, "U"]] }, // Devil, 2 eligible minions
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "U"]] },
+            ],
+            hands: [filler, filler],
+        });
+        expect(devil.validateMove("use 15/with m0.2").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_FACING", { card: major(15).name, cell: "m0" }));
+
+        const hierophant = testGame({
+            board: [
+                { x: 0, y: 0, uid: "05", pieces: [[1, 1, "E"], [1, 2, "U"]] }, // Hierophant, 2 eligible minions
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "U"]] },
+            ],
+            hands: [filler, filler],
+        });
+        expect(hierophant.validateMove("use 05/with m0.2").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_FACING", { card: major(5).name, cell: "m0" }));
+    });
+
     it("activate: judgementDraw names the discard pile, not the game board, not the generic CHOOSE_STEP", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");

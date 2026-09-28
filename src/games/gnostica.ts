@@ -1715,7 +1715,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // #49/follow-up: which message a not-yet-finished use/play step carries, shared by hand-typed and click-driven moves alike; High Priestess is a special case.
-    private powerStepMessageKey(headArg: string, priorStepsCount: number, minions: IMinionRef[]): { key: string; params?: Record<string, unknown> } {
+    private powerStepMessageKey(headArg: string, priorStepsCount: number, minions: IMinionRef[], minionRef?: string): { key: string; params?: Record<string, unknown> } {
         if (headArg === "02") {
             return { key: priorStepsCount > 0
                 ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"
@@ -1732,8 +1732,12 @@ export class GnosticaGame extends GameBaseSequenced {
         // Every other card: name it explicitly - a card reached via a push was never clicked by the player, so this is the only place that tells them which one.
         const cardName = this.cardNameOrUid(headArg);
         // Once the acting minion is resolved, orientMinion/orientAny/hierophantReplace/tradeHands/judgementDraw have no button of their own - name the next click instead.
+        // minionRef, when already typed (e.g. a minion picked via the ambiguity picker), is trusted directly rather than
+        // re-deciding ambiguity from scratch - otherwise a card that STARTED with 2+ eligible minions never stops looking
+        // ambiguous here even once the player has genuinely already chosen one, falling through to the generic CHOOSE_STEP
+        // wording even though these specials have no button of their own to click.
         if (priorStepsCount === 0 && minions.length > 0) {
-            const { minion, ambiguous } = this.resolveStepMinion(undefined, minions);
+            const { minion, ambiguous } = this.resolveStepMinion(minionRef, minions);
             if (!ambiguous) {
                 const step = this.resolveFrameDef(headArg).powers[0];
                 if ("special" in step) {
@@ -4075,7 +4079,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const minion = result.ref;
         if ((step.complete ?? -1) < 0) {
-            const msg = this.primitiveIncompleteMessage(suitUid, step) ?? this.powerStepMessageKey(cardUid, 0, eligible);
+            const msg = this.primitiveIncompleteMessage(suitUid, step) ?? this.powerStepMessageKey(cardUid, 0, eligible, step.withPiece);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
         const stepResult = this.validateSuitPrimitive(suitUid, minion, step, {});
@@ -4519,7 +4523,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
                     }
                     const override = "primitive" in step && istep !== undefined ? this.primitiveIncompleteMessage(this.primitiveToSuit(step.primitive), istep) : undefined;
-                    const msg = override ?? this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions);
+                    const msg = override ?? this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions, istep?.withPiece);
                     return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                 }
                 // An earlier segment being incomplete means a later one couldn't legitimately exist - defensive, shouldn't fire.
