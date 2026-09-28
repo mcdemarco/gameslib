@@ -23,16 +23,18 @@ Miscellany:
 	- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)?
 	- #123 - Swords territory clicks seed values removed re Death shortcut. @done(2026-09-26)
 	- #124 - StepShape (powers.ts) incomplete/complete values replaced with parsed moves complete value. @done(2026-09-26)
-	- #127 - minorModeAvailability's "own" case for Cups only checks cell capacity, not whether the stash actually has a 1-pip piece left - the button isn't struck through when it should be, though the click is still correctly rejected. @done(2026-09-28)
+	- #127 - minorModeAvailability's "own" case for Cups only checks cell capacity, not stash. @done(2026-09-28)
 
 UX:
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
 	- #120 - Add another display mode for letters instead of icons.
 	- #125 - UI for using only second power of different-powered major arcana cards.
 	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups.
+	- #128 - After next merge, add text labels to hand cards (for major arcana names)
+	
 
 Refactoring:
-	- #90 - Replace this.liveMove with fields for render() to read, computed inside move(..., {partial: true}) itself rather than re-derived from scratch by 5 different render-side functions every render() call. @done(2026-09-27) The game now sets explicit preview fields (including the pending step and its clone) in move(partial); liveMove is gone.
+	- #90 - Replace this.liveMove with fields for render() to read. @done(2026-09-27)
 	- #95 - Replace cloneLive() with clone(). @done(2026-09-26)
 	- #99 - Remove one-liner wrappers like invalid() and failureResult().
 	- #107 - Tests should not assemble internal structures manually. Done? but some unit testing remains to be removed for #29.

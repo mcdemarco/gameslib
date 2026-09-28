@@ -5800,18 +5800,42 @@ export class GnosticaGame extends GameBaseSequenced {
             areas.push(discardArea);
         }
 
-        // Only the bidding variant can ever make turn order diverge from plain player-number order; with only 2 players it's trivially "you, then them" either way, no legend worth showing.
-        if (this.numplayers >= 3 && this.variants.includes("bidding")) {
+        // Shown whenever it has real content: a bidding game always has turn order to show (any player count - even at 2 players,
+        // "you, then them" is still worth confirming once icon rows can share the same key), and any game can have icon rows once a
+        // card is actively mid-build this turn, bidding or not.
+        {
             const list: AreaKey["list"] = [];
-            this.turnOrder!.forEach((p, i) => {
-                const key = `turnorder_p${p}`;
-                if (!(key in legend)) {
-                    legend[key] = { name: "pyramid-up-small", colour: p };
+            if (this.variants.includes("bidding")) {
+                this.turnOrder!.forEach((p, i) => {
+                    const key = `turnorder_p${p}`;
+                    if (!(key in legend)) {
+                        legend[key] = { name: "pyramid-up-small", colour: p };
+                    }
+                    list.push({ piece: key, name: GnosticaGame.ordinal(i + 1) });
+                });
+            }
+            // The card whose own step is CURRENTLY resolving (follows World's borrow/Fool's reveal, not pinned to the root card) -
+            // undefined once nothing is mid-build, including right after a commit (this.preview is cleared then).
+            const activeCard = allCards().find(c => c.uid === this.preview?.pending?.activeCardUid);
+            if (activeCard !== undefined) {
+                const icons = activeCard.major ? getMajorArcanaIcons(activeCard) : (activeCard.suit.glyph !== undefined ? [activeCard.suit.glyph] : []);
+                for (const icon of icons) {
+                    const key = `activecard_${icon}`;
+                    if (!(key in legend)) {
+                        // Circle-backed, matching every other place these icons appear (buildCardFace's own pushCircle) - a bare
+                        // icon glyph alone reads too thin/low-contrast next to the turn-order rows' own solid pyramids.
+                        legend[key] = [
+                            { name: "piece", colour: "_context_board" },
+                            { name: icon, scale: 0.5 },
+                        ];
+                    }
+                    list.push({ piece: key, name: "" });
                 }
-                list.push({ piece: key, name: GnosticaGame.ordinal(i + 1) });
-            });
-            // "left", not "right" - the action button bar already owns the right side, and the two don't stack cleanly on the same side.
-            areas.push({ type: "key", list, position: "left", height: 0.7, clickable: false });
+            }
+            if (list.length > 0) {
+                // "left", not "right" - the action button bar already owns the right side, and the two don't stack cleanly on the same side.
+                areas.push({ type: "key", list, position: "left", height: 0.7, clickable: false });
+            }
         }
 
         // The top-level turn choice as buttons rather than inferring intent from board clicks alone.

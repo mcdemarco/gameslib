@@ -295,9 +295,9 @@ describe("Gnostica: turn order / legend", () => {
         expect(g.currplayer).eq(1);
     });
 
-    it("the turn-order legend only appears for a 3+ player bidding game, and reorders to bid rank once it resolves", () => {
-        expect(keyArea(new GnosticaGame(3))).to.be.undefined; // non-bidding
-        expect(keyArea(new GnosticaGame(2, ["bidding"]))).to.be.undefined; // nothing to legend with 2 players
+    it("the turn-order legend appears for any bidding game (2+ players), never for a non-bidding one with nothing active, and reorders to bid rank once it resolves", () => {
+        expect(keyArea(new GnosticaGame(3))).to.be.undefined; // non-bidding, nothing active
+        expect(keyArea(new GnosticaGame(2, ["bidding"]))!.list!.map(e => e.name)).to.deep.equal(["1st", "2nd"]); // now shown even at 2 players
         const fresh = new GnosticaGame(3, ["bidding"]);
         expect(keyArea(fresh)!.list!.map(e => e.name)).to.deep.equal(["1st", "2nd", "3rd"]); // plain order mid-bid
 
@@ -309,6 +309,26 @@ describe("Gnostica: turn order / legend", () => {
         expect(g.bidWinner).eq(2);
         // Winner first, then King (player 1) over Queen (player 3) among the minors - not seating order.
         expect(keyArea(g)!.list!.map(e => e.piece)).to.deep.equal(["turnorder_p2", "turnorder_p1", "turnorder_p3"]);
+    });
+
+    it("appends the active card's own icons (unlabeled) after the turn-order rows - one per power for a major, the suit glyph for a minor - and follows a chain onto the active card, not the root", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 2, "E"]] }], // The Empress: orientMinion, then create - 2 powers
+            hands: [filler, filler],
+            variants: ["bidding"],
+        });
+        g.move("use 03/orient m0.2 N", { partial: true });
+        const area = keyArea(g)!;
+        expect(area.list!.slice(0, 2).map(e => e.name)).to.deep.equal(["1st", "2nd"]); // turn-order rows still first
+        const iconRows = area.list!.slice(2);
+        expect(iconRows.length).eq(2); // one row per Empress power
+        expect(iconRows.every(e => e.name === "")).to.be.true; // no labels
+
+        // A minor's own single suit glyph, and no key at all once nothing is active (non-bidding, here).
+        const minor = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
+        expect(keyArea(minor)).to.be.undefined; // non-bidding, nothing active yet
+        minor.move("use AC", { partial: true });
+        expect(keyArea(minor)!.list!.length).eq(1); // no turn-order rows (non-bidding) - just the one suit icon
     });
 });
 
