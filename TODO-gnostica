@@ -4,10 +4,10 @@ Some items were marked off at transfer here, not at completion.
 Mark items done with @done(date) only as they're confirmed.
 
 Pre-release:
-	- #29 - reduce test count towards 50-100. In progress: 514 -> 408 (test/games/gnostica.testState.ts's testGame() is the one supported way to seed a test's starting position now). All 82 tests skipped by the clone() switch are gone (deleted, not restored - most were redundant with the curated replacements). Converted/trimmed so far: setup/hand-sort/highlight/place/orient/discard/turn-order/bidding-reorder/announce-elimination/sidebarScores, minor-arcana suit powers, major-arcana chaining (shortcuts/second-power-alone/Death/Strength/Sun/Moon/Chariot/Devil), frame-stepping contract, handleClick minor-arcana power steps. Not yet reviewed: gnostica.randomMove.test.ts, "Fool and World" in gnostica.test.ts, full pass over gnostica.bidding.test.ts. Remaining game-level blocks I DID read (choose-step click messaging, major arcana special powers Phase B, chatLog other-player naming, High Priestess sequenced obligation) are already real-path/non-redundant - further cuts there mean losing distinct coverage, not fixing violations; needs a deliberate call, not a mechanical pass.
+	- #29 - reduce test count towards 50-100.  Progress so far: 514 -> 408  Not yet reviewed:  gnostica.bidding.test.ts, "Fool and World". Doomed: randomMove.
 	- #66 - test fool messaging on reload in production
 	- #86 - Once gnostica/randomMove.ts is deleted (or no longer needs them - see #85), revert these 28 gnostica.ts methods from public back to private (all were private before #85; only made public so randomMove.ts could call them cross-file): buildViaMove, cloneLive, computeShortcutOpts, eligibleMinionsForActivate, eligibleMinionsForPlay, hasPiecesOnBoard, minorModeAvailability, minorTargetCell, pickleMove, pieceRefStr, primitiveToSuit, renderWindow, scoreFor, targetScore, validateHermitStep, validateHierophantReplace, validateHighPriestess, validateJudgementDraw, validateMagicianChoice, validateMajorPower, validateMinorPower, validateOrientAny, validateOrientMinion, validateSuitPrimitive, validateTradeHands, victimRefStr, applyPowerStep, validatePowerStep.
-	- #87 - Remove randomMove.ts.
+	- #87 - Remove randomMove.ts and tests thereof.
 	- #88 - Also revert the IMinionRef/IStepOutcome/StepValidation/ALL_SUITS export/relocation changes #85 made once randomMove.ts is gone.
 	- #89 - Test mutating the game state with a manual move in production (e.g. via Emu Ranchers) to see what the errors look like.
 
@@ -35,7 +35,7 @@ Refactoring:
 	- #90 - Replace this.liveMove with fields for render() to read, computed inside move(..., {partial: true}) itself rather than re-derived from scratch by 5 different render-side functions every render() call. @done(2026-09-27) The game now sets explicit preview fields (including the pending step and its clone) in move(partial); liveMove is gone.
 	- #95 - Replace cloneLive() with clone(). @done(2026-09-26)
 	- #99 - Remove one-liner wrappers like invalid() and failureResult().
-	- #107 - Tests should not assemble internal structures manually. In progress, folded into #29: test/games/gnostica.testState.ts's testGame() (JSON round-trip through the real constructor, same path a saved-game reload uses) is now the one supported way to seed state, replacing clearBoard/forceCardAt/direct board+piece+hand+stash+currplayer pokes on a live game. gnostica.board.test.ts/gnostica.powers.test.ts/gnostica.majorArcana.test.ts are a separate, legitimate layer (pure unit tests of GnosticaBoard/Piece/powers.ts primitives, no GnosticaGame involved) - left alone for now per the user, but slated for eventual removal since they don't fit "real user path" either.
+	- #107 - Tests should not assemble internal structures manually. Done? but some unit testing remains to be removed for #29.
 	- #118 - Finish removing stepSegments. @done(2026-09-24)
 	- #119 - Remove all echos of stepSegments and rest from other structures.  Done?
 	- #121 - There's still an unprecendented amount of throwing of errors in the code.
