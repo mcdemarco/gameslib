@@ -2549,6 +2549,21 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const candidates2 = internal2.suitTargetCandidates(pending2, "C");
             expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy 1-pip pointing up");
         });
+
+        it("Create Minion is struck through once the acting player's own stash has no 1-pip piece left, and a click on it is rejected with the same STASH_EMPTY message as real validation", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }],
+                hands: [filler, filler],
+                stashes: { 1: [0, 5, 5], 2: [5, 5, 5] },
+            });
+            g.move("use AC", { partial: true });
+            const buttons = (g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            const ownBtn = buttons.find(b => b.value === "target_own")!;
+            expect(ownBtn.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
+            const click = g.handleClick("use AC", -1, -1, "_btn_target_own");
+            expect(click.valid).to.be.false;
+            expect(click.message).eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: 1, size: 1 }));
+        });
     });
 
     describe("Swords (tile) click flow: the shrink comes from the replacement card, or the Destroy button", () => {

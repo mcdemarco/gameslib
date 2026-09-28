@@ -12,7 +12,7 @@ import { GnosticaBoard, CellClass } from "./gnostica/board";
 import { CellContents, ICellContents, cardPointValue } from "./gnostica/cell";
 import { Piece, Orientation, Pips, allOrientations, cardinalOrientations } from "./gnostica/piece";
 import {
-    Stash, PowerContext, PowerFailure, takeFromStash, returnToStash,
+    Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
     createOwn, createEnemy, createTerritory,
     movePiece, moveTerritory,
     growPiece, growTerritory,
@@ -2596,10 +2596,16 @@ export class GnosticaGame extends GameBaseSequenced {
         const result = new Map<string, { key: string; params?: Record<string, unknown> } | undefined>();
         for (const mode of MINOR_MODE_NAMES[suitUid]) {
             switch (`${suitUid}.${mode}`) {
-                case "C.own":
-                    result.set(mode, (targetT === undefined || targetT.canAdd(pending.opts.ignoreCapacity === true))
-                        ? undefined : { key: "CELL_FULL" });
+                case "C.own": {
+                    if (!(targetT === undefined || targetT.canAdd(pending.opts.ignoreCapacity === true))) {
+                        result.set(mode, { key: "CELL_FULL" });
+                        break;
+                    }
+                    const ctx = this.buildPowerContext();
+                    const stashOk = pending.opts.skipStashCheck === true || hasStashAvailable(ctx, this.currplayer, 1);
+                    result.set(mode, stashOk ? undefined : { key: "STASH_EMPTY", params: { playerNum: this.currplayer, size: 1 } });
                     break;
+                }
                 case "C.enemy":
                     result.set(mode, (targetT?.pieces ?? []).some(p => p.owner !== this.currplayer)
                         ? undefined : { key: "NO_ENEMY_THERE", params: { cell } });
