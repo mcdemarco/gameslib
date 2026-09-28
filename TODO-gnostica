@@ -24,6 +24,7 @@ Miscellany:
 	- #123 - Swords territory clicks seed values removed re Death shortcut. @done(2026-09-26)
 	- #124 - StepShape (powers.ts) incomplete/complete values replaced with parsed moves complete value. @done(2026-09-26)
 	- #127 - minorModeAvailability's "own" case for Cups only checks cell capacity, not stash. @done(2026-09-28)
+	- #129 - A bug with passing on your last, winning turn.
 
 UX:
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.

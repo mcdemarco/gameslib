@@ -2135,13 +2135,13 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
     private pieceCandidateOptions(
-        pending: IPendingStep, labelFor: (piece: Piece) => string,
+        pending: IPendingStep, verb: string,
         opts: { disabledReason?: { key: string; params?: Record<string, unknown> }; includeSelf?: boolean; filter?: (piece: Piece) => boolean } = {},
     ): ChoiceOption[] {
         const { disabledReason, includeSelf = true, filter } = opts;
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
-        const entries: { option: ChoiceOption; owner: number }[] = [];
+        const options: ChoiceOption[] = [];
         const seen = new Set<string>();
         const pushPieceCandidate = (x: number, y: number, index: number): void => {
             const ref = this.pieceRefStr({ x, y, index });
@@ -2150,7 +2150,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             seen.add(ref);
             const piece = this.board.get(x, y)!.pieces[index];
-            entries.push({ option: { value: ref, label: labelFor(piece), disabledReason }, owner: piece.owner });
+            options.push({ value: ref, label: `${verb} ${this.ownerLabel(piece.owner)} ${this.textFormat(piece)}`, disabledReason });
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
         if (includeSelf) {
@@ -2161,31 +2161,21 @@ export class GnosticaGame extends GameBaseSequenced {
                 pushPieceCandidate(tx, ty, index);
             }
         });
-        GnosticaGame.disambiguateByOwner(entries);
-        return entries.map(e => e.option);
+        return options;
     }
 
-    // Two same-size, same-facing pieces read identically (textFormat carries no owner) - in a 3+ player game they can belong to different opponents, so
-    // append "(Player N)" to every option whose label collides with another's, leaving unambiguous ones untouched.
-    private static disambiguateByOwner(entries: { option: ChoiceOption; owner: number }[]): void {
-        const counts = new Map<string, number>();
-        for (const { option } of entries) {
-            counts.set(option.label, (counts.get(option.label) ?? 0) + 1);
-        }
-        for (const { option, owner } of entries) {
-            if ((counts.get(option.label) ?? 0) > 1) {
-                option.label = `${option.label} (Player ${owner})`;
-            }
-        }
+    // Every target-piece button names whose piece it is, since size/facing alone (textFormat) can match across different opponents.
+    private ownerLabel(owner: number): string {
+        return owner === this.currplayer ? "own" : `Player ${owner}'s`;
     }
 
     // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy, matching pickPieceTargetClick's own rule.
     private specialTargetCandidates(pending: IPendingStep): ChoiceOption[] {
         if (pending.special === "orientAny") {
-            return this.pieceCandidateOptions(pending, p => `Orient ${this.textFormat(p)}`);
+            return this.pieceCandidateOptions(pending, "Orient");
         }
         const verb = pending.special === "tradeHands" ? "Trade with" : "Replace";
-        return this.pieceCandidateOptions(pending, p => `${verb} ${this.textFormat(p)}`, { includeSelf: false, filter: p => p.owner !== this.currplayer });
+        return this.pieceCandidateOptions(pending, verb, { includeSelf: false, filter: p => p.owner !== this.currplayer });
     }
 
     // One candidate per real target for a fresh suit-power step - the tile at minorTargetCell plus every piece there, or Cups' "own"/every enemy piece/"new"; one click supplies mode + target.
@@ -2197,15 +2187,14 @@ export class GnosticaGame extends GameBaseSequenced {
             const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
             const options: ChoiceOption[] = [{ value: "own", label: "Create Minion", disabledReason: availability.get("own") }];
             // The new piece is a gift added to the referenced enemy's own side, not a capture of anything - see applyCups' "enemy" case.
-            const enemyEntries: { option: ChoiceOption; owner: number }[] = [];
+            const enemyEntries: ChoiceOption[] = [];
             cellPieces.forEach((p, index) => {
                 if (p.owner !== this.currplayer) {
-                    enemyEntries.push({ option: { value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Create Enemy ${this.textFormat(p)}`, disabledReason: availability.get("enemy") }, owner: p.owner });
+                    enemyEntries.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Create Enemy ${this.ownerLabel(p.owner)} ${this.textFormat(p)}`, disabledReason: availability.get("enemy") });
                 }
             });
-            GnosticaGame.disambiguateByOwner(enemyEntries);
             if (enemyEntries.length > 0) {
-                options.push(...enemyEntries.map(e => e.option));
+                options.push(...enemyEntries);
             } else {
                 // No enemy piece to reference right now - still show the option, struck through, matching "own"/"new"'s own always-present buttons.
                 options.push({ value: "enemy", label: "Create Enemy", disabledReason: availability.get("enemy") });
@@ -2216,7 +2205,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const { verb, tile } = RDS_TARGET_LABELS[suitUid];
         return [
             { value: targetCell, label: tile, disabledReason: availability.get("tile") },
-            ...this.pieceCandidateOptions(pending, p => `${verb} ${this.textFormat(p)}`, { disabledReason: availability.get("piece") }),
+            ...this.pieceCandidateOptions(pending, verb, { disabledReason: availability.get("piece") }),
         ];
     }
 
@@ -2226,7 +2215,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
         return [
             { value: targetCell, label: "Push Territory" },
-            ...this.pieceCandidateOptions(pending, p => `Teleport ${this.textFormat(p)}`),
+            ...this.pieceCandidateOptions(pending, "Teleport"),
         ];
     }
 

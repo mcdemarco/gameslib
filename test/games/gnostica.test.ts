@@ -2522,7 +2522,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 
     describe("Cups options after picking the final step's minion", () => {
-        it("offers Create Minion, a struck-through Create Territory (the cell is already one), and Create Enemy for the enemy piece there; the owner is only appended when needed to disambiguate", () => {
+        it("offers Create Minion, a struck-through Create Territory (the cell is already one), and Create Enemy naming the enemy piece's owner", () => {
             const g = testGame({
                 board: [
                     { x: 0, y: 0, uid: "AR", pieces: [[2, 1, "E"], [2, 1, "E"], [2, 2, "N"]] },
@@ -2537,14 +2537,14 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const buttons = (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.some(b => b.value === "target_own")).to.be.true;
             const enemyBtn = buttons.find(b => b.value === "target_n0.1")!;
-            expect(enemyBtn.label).to.eq("Create Enemy 1-pip pointing up");
+            expect(enemyBtn.label).to.eq("Create Enemy Player 1's 1-pip pointing up");
             const territory = buttons.find(b => b.value === "target_new")!;
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         });
 
         // "use AC" activates via a minion standing ON the Cups card itself (n0), which then targets
         // the cell it faces (o0) - unlike the Empress test above, whose minion sits elsewhere.
-        it("appends the owner to the label only when two candidates would otherwise read identically (3+ players); not when only one has that label (2 players)", () => {
+        it("always names the enemy piece's owner, in both 3+ player and 2-player games", () => {
             const g = testGame({
                 board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"], [3, 1, "U"]] }],
                 hands: [["03", "2S"], filler, filler],
@@ -2555,7 +2555,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             };
             const pending = internal.parsePendingStep("use AC")!;
             const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label).sort();
-            expect(enemyLabels).to.deep.equal(["Create Enemy 1-pip pointing up (Player 2)", "Create Enemy 1-pip pointing up (Player 3)"]);
+            expect(enemyLabels).to.deep.equal(["Create Enemy Player 2's 1-pip pointing up", "Create Enemy Player 3's 1-pip pointing up"]);
 
             const g2 = testGame({
                 board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
@@ -2567,7 +2567,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             };
             const pending2 = internal2.parsePendingStep("use AC")!;
             const candidates2 = internal2.suitTargetCandidates(pending2, "C");
-            expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy 1-pip pointing up");
+            expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy Player 2's 1-pip pointing up");
         });
 
         it("Create Minion is struck through once the acting player's own stash has no 1-pip piece left, and a click on it is rejected with the same STASH_EMPTY message as real validation", () => {
