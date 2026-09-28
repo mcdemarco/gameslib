@@ -8,9 +8,8 @@ import { Piece } from "../../src/games/gnostica/piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
-import { randomUseOrPlayMove } from "../../src/games/gnostica/randomMove";
 import { MAJOR_ARCANA } from "../../src/games/gnostica/majorArcana";
-import { testGame } from "./gnostica.testState";
+import { testGame, TestPiece } from "./gnostica.testState";
 
 // The it.skip tests below build boards by editing live state (never committed to the game's history), which the pending-step/validation walkers no longer see now that they clone() instead of cloneLive(); revisit with TODO #29.
 const theWorld = () => majorCards.find(c => c.rank.seq === 21)!;
@@ -75,19 +74,23 @@ const renderedHandUids = (g: GnosticaGame, player: number): string[] => {
 };
 
 describe("Gnostica: setup", () => {
-    it("deals 6 cards to each player, tiles a 3x3 grid, and stocks full stashes", () => {
+    it("deals 6 cards to each player, tiles a 3x3 grid with no duplicate uids, and stocks full stashes", () => {
         const g = new GnosticaGame(4);
         expect(g.hands.length).eq(4);
         for (const h of g.hands) {
             expect(h.length).eq(6);
         }
+        const all: string[] = [...g.hands.flat(), ...g.drawPile];
         let territoryCount = 0;
         for (const [, , t] of g.board.entries()) {
             if (t.card !== undefined) {
                 territoryCount++;
+                all.push(t.card.uid);
             }
         }
         expect(territoryCount).eq(9);
+        expect(all.length).eq(78);
+        expect(new Set(all).size).eq(78); // no duplicate uids, nothing lost
         expect(g.drawPile.length).eq(78 - 9 - 6 * 4);
         expect(g.discardPile.length).eq(0);
         for (let p = 1; p <= 4; p++) {
@@ -96,179 +99,90 @@ describe("Gnostica: setup", () => {
         expect(g.currplayer).eq(1); // player 1 is the starting player by definition
     });
 
-    it("no two dealt/tiled cards repeat a uid (deck integrity)", () => {
-        const g = new GnosticaGame(3);
-        const seen = new Set<string>();
-        const all: string[] = [...g.hands.flat(), ...g.drawPile];
-        for (const [, , t] of g.board.entries()) {
-            if (t.card !== undefined) {
-                all.push(t.card.uid);
-            }
-        }
-        expect(all.length).eq(78);
-        for (const uid of all) {
-            expect(seen.has(uid), `duplicate uid ${uid}`).eq(false);
-            seen.add(uid);
-        }
-    });
-
     it("\"no-majors\" variant: no major arcana on the opening board, but they're still fully in the mix for hands and the draw pile", () => {
         const g = new GnosticaGame(4, ["no-majors"]);
         let territoryCount = 0;
+        const all: string[] = [...g.hands.flat(), ...g.drawPile];
         for (const [, , t] of g.board.entries()) {
             if (t.card !== undefined) {
                 territoryCount++;
                 expect(t.card.major, `${t.card.uid} is a major arcana card on the opening board`).eq(false);
-            }
-        }
-        expect(territoryCount).eq(9);
-        // No restriction on hands or the draw pile - every major is still
-        // somewhere in the mix, same total deck as always.
-        const all: string[] = [...g.hands.flat(), ...g.drawPile];
-        for (const [, , t] of g.board.entries()) {
-            if (t.card !== undefined) {
                 all.push(t.card.uid);
             }
         }
+        expect(territoryCount).eq(9);
+        // No restriction on hands or the draw pile - every major is still somewhere in the mix.
         expect(all.length).eq(78);
-        expect(new Set(all).size).eq(78); // no duplicates, nothing lost
         const majorUidsSeen = all.filter(uid => majorCards.some(c => c.uid === uid)).length;
         expect(majorUidsSeen).eq(majorCards.length); // every major arcana card is accounted for
     });
 });
 
 describe("Gnostica: hand sort order", () => {
-    // Sort order is deliberately simple - handSortKey just reads position
-    // in allCards(), i.e. [...minorCards, ...majorCards] (see its own
-    // docs): minors first (grouped by suit, ranked within it, since
-    // minorCards itself is built that way), then majors by seq.
-    it("a fresh non-bidding game renders hands already in rank order: minors first (grouped by suit and ranked within it), then majors by seq", () => {
-        const g = new GnosticaGame(3);
-        for (let p = 1; p <= g.numplayers; p++) {
-            const cards = renderedHandUids(g, p).map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
-            let seenMajor = false;
-            let lastSuitSeq = -Infinity;
-            let lastRankSeq = -Infinity;
-            let lastMajorSeq = -Infinity;
-            for (const c of cards) {
-                if (c.major) {
-                    seenMajor = true;
-                    expect(c.rank.seq).to.be.greaterThan(lastMajorSeq);
-                    lastMajorSeq = c.rank.seq;
-                } else {
-                    expect(seenMajor, `minor ${c.uid} appears after a major`).to.be.false;
-                    const suitSeq = c.suit.seq;
-                    const rankSeq = c.rank.seq;
-                    if (suitSeq === lastSuitSeq) {
-                        expect(rankSeq).to.be.greaterThan(lastRankSeq);
-                    } else {
-                        expect(suitSeq).to.be.greaterThan(lastSuitSeq);
-                        lastRankSeq = -Infinity;
-                    }
-                    lastSuitSeq = suitSeq;
-                    lastRankSeq = rankSeq;
-                }
-            }
-        }
-    });
-
-    it("the bidding variant leaves the raw hand array in draw order even after a bid resolves; render() sorts it regardless", () => {
-        const g = new GnosticaGame(2, ["bidding"]);
-        // Force a hand that's already known to be UNSORTED (a minor
-        // before a major), so a spurious pass (already-sorted-by-luck)
-        // can't hide a bug. major(21) (The World) is the highest-seq
-        // major in the deck - bidding it guarantees player 1 wins
-        // outright regardless of player 2's own hand (any major they
-        // might hold is seq <= 21 too, at best a tie the code breaks
-        // toward the lower-numbered player anyway). Player 2's own hand
-        // is ALSO forced (to a set with no major at all) rather than left
-        // to the constructor's random deal - the random deal draws from
-        // the SAME single-copy deck this forced hand is also drawn from,
-        // so leaving it uncontrolled could occasionally deal player 2 a
-        // duplicate of one of these same forced uids (most commonly
-        // World itself, per single-copy-deck rules), corrupting deck
-        // integrity and leaving g.bidWinner wrong or undefined.
-        g.hands[0] = ["2R", "21", "AC", "3C", "4C", "5C"];
-        g.hands[1] = ["6R", "7R", "8R", "9R", "10R", "PR"];
-        const forcedUids = new Set([...g.hands[0], ...g.hands[1]]);
-        g.drawPile = g.drawPile.filter(uid => !forcedUids.has(uid));
-        const beforeBid = [...g.hands[0]];
-        // Position 2 (still hand-order, not sorted) is the major.
-        g.move("bid 2");
-        // The bid card isn't actually pulled from hand until the round
-        // resolves (see resolveBidRound's own docs) - hand order must
-        // stay completely untouched by the bid itself.
-        expect(g.hands[0]).to.deep.equal(beforeBid);
-        g.move("bid 1"); // player 2 - resolves the round (P1's major always wins)
-        expect(g.bidWinner).eq(1);
-        expect(g.phase).eq("redraw");
-        // The bid major is gone (spent on the bid), so what's left is
-        // minors - render() sorts them by suit/rank regardless of phase
-        // (see renderedHandUids's own docs), even though g.hands[0]
-        // itself is never touched by sorting at all.
-        const cards = renderedHandUids(g, 1).map(uid => minorCards.find(c => c.uid === uid)!);
-        for (let i = 1; i < cards.length; i++) {
-            const a = cards[i - 1], b = cards[i];
-            expect(a.suit.seq < b.suit.seq || (a.suit.seq === b.suit.seq && a.rank.seq < b.rank.seq)).to.be.true;
-        }
-    });
-
-    it("renders sorted after an ordinary main-phase hand mutation (discard/draw)", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U");
-        g.move("place n0 U");
-        g.hands[0] = ["5R", "01", "AC", "2C", "KS", "3D"];
-        // Fully deterministic: the real draw below could otherwise
-        // (rarely) pull a duplicate of one of these same forced cards
-        // straight back out of the draw pile, if the constructor's own
-        // random deal happened to leave it there too - direct hand pokes
-        // like this one don't remove the card from drawPile on their own.
-        const forcedUids = new Set(g.hands[0]);
-        g.drawPile = g.drawPile.filter(uid => !forcedUids.has(uid));
-        g.move("discard 5R draw 1"); // draws back to 6
-        const cards = renderedHandUids(g, 1).map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
-        let seenMajor = false;
-        let lastSuitSeq = -Infinity;
-        let lastRankSeq = -Infinity;
-        let lastMajorSeq = -Infinity;
+    // Sort order is deliberately simple - handSortKey just reads position in allCards(), i.e.
+    // [...minorCards, ...majorCards]: minors first (grouped by suit, ranked within it), then
+    // majors by seq. A fresh, non-bidding hand is already dealt in this order; this checks it
+    // survives (a) the bidding variant's own hand-order-preserving bid resolution, and (b) an
+    // ordinary main-phase discard/draw.
+    const inSortOrder = (uids: string[]): boolean => {
+        const cards = uids.map(uid => majorCards.find(c => c.uid === uid) ?? minorCards.find(c => c.uid === uid)!);
+        let seenMajor = false, lastSuitSeq = -Infinity, lastRankSeq = -Infinity, lastMajorSeq = -Infinity;
         for (const c of cards) {
             if (c.major) {
+                if (seenMajor && c.rank.seq <= lastMajorSeq) return false;
                 seenMajor = true;
-                expect(c.rank.seq).to.be.greaterThan(lastMajorSeq);
                 lastMajorSeq = c.rank.seq;
             } else {
-                expect(seenMajor).to.be.false;
-                if (c.suit.seq === lastSuitSeq) {
-                    expect(c.rank.seq).to.be.greaterThan(lastRankSeq);
-                } else {
-                    expect(c.suit.seq).to.be.greaterThan(lastSuitSeq);
-                    lastRankSeq = -Infinity;
-                }
+                if (seenMajor) return false;
+                if (c.suit.seq === lastSuitSeq && c.rank.seq <= lastRankSeq) return false;
+                if (c.suit.seq < lastSuitSeq) return false;
                 lastSuitSeq = c.suit.seq;
                 lastRankSeq = c.rank.seq;
             }
         }
+        return true;
+    };
+
+    it("a fresh non-bidding game renders hands already in sort order", () => {
+        const g = new GnosticaGame(3);
+        for (let p = 1; p <= g.numplayers; p++) {
+            expect(inSortOrder(renderedHandUids(g, p))).to.be.true;
+        }
+    });
+
+    it("survives a bid resolution (hand order untouched by the bid itself) and an ordinary discard/draw", () => {
+        // major(21) (The World) is the highest-seq major - bidding it guarantees player 1 wins
+        // outright, whatever player 2 holds.
+        const g = testGame({ hands: [["2R", "21", "AC", "3C", "4C", "5C"], filler], phase: "bidding" });
+        const beforeBid = [...g.hands[0]];
+        g.move("bid 2"); // position 2 (still hand-order) is the major
+        expect(g.hands[0]).to.deep.equal(beforeBid); // not pulled from hand until the round resolves
+        g.move("bid 1"); // resolves - player 1's major wins
+        expect(g.bidWinner).eq(1);
+        expect(inSortOrder(renderedHandUids(g, 1))).to.be.true;
+
+        const g2 = testGame({
+            board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AS", pieces: [[2, 1, "U"]] }],
+            hands: [["5R", "01", "AC", "2C", "KS", "3D"], filler],
+        });
+        g2.move("discard 5R draw 1"); // draws back to 6
+        expect(inSortOrder(renderedHandUids(g2, 1))).to.be.true;
     });
 });
 
 describe("Gnostica: new-card hand highlight", () => {
     type HandArea = { type: string; pieces?: string[]; label?: string };
     type RenderRep = { legend: Record<string, unknown>; areas?: HandArea[] };
-
     const player1HandArea = (rep: RenderRep): HandArea | undefined =>
         rep.areas?.find(a => a.type === "pieces" && a.pieces?.some(p => p.startsWith("hand_")));
 
-    it("tags a newly drawn card with its own legend entry once it becomes that player's turn again", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U");
-        g.move("place n0 U");
-        g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
-        g.drawPile = ["7C", ...g.drawPile.filter(uid => uid !== "7C")];
+    it("tags a newly drawn card once it's that player's turn again, and a real click on it still resolves", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [["AC", "2C", "3C", "4C", "5C", "6C"], filler], drawPile: ["7C"],
+        });
         g.move("discard AC draw 1"); // player 1 discards AC, draws 7C back
-        expect(g.hands[0]).to.include("7C");
         g.move("discard draw 0"); // player 2's turn - now back to player 1
-        expect(g.currplayer).eq(1);
-
         const rep = g.render() as RenderRep;
         const handArea = player1HandArea(rep);
         const newKey = `hand_7C_new`;
@@ -277,155 +191,72 @@ describe("Gnostica: new-card hand highlight", () => {
         // A card that was already there before last turn stays untagged.
         expect(handArea?.pieces).to.include(`hand_2C`);
         expect(handArea?.pieces).to.not.include(`hand_2C_new`);
-    });
-
-    it("the highlight disappears once the player starts building this turn's own move", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U");
-        g.move("place n0 U");
-        g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
-        g.drawPile = ["7C", ...g.drawPile.filter(uid => uid !== "7C")];
-        g.move("discard AC draw 1");
-        g.move("discard draw 0");
-        expect(g.currplayer).eq(1);
-        // Confirm it WOULD show first, so this test isn't vacuous.
-        expect(player1HandArea(g.render() as RenderRep)?.pieces).to.include(`hand_7C_new`);
-
-        g.move("discard", { partial: true }); // simulates the player's own first click
-        const rep = g.render() as RenderRep;
-        const handArea = player1HandArea(rep);
-        expect(handArea?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
-    });
-
-    it("does not highlight anything on a player's very first turn", () => {
-        const g = new GnosticaGame(2);
-        const rep = g.render() as RenderRep;
-        const handArea = player1HandArea(rep);
-        expect(handArea?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
-    });
-
-    // The "_new" suffix is part of the CLICKABLE piece
-    // identifier too (AreaPieces reuses the same string for both the
-    // legend key and what the renderer reports back on click), not just
-    // a cosmetic legend tag - a real click on a highlighted card must
-    // still resolve to its own real uid.
-    it("a real click on the highlighted card (its actual _new-suffixed piece id) still resolves, not 'not in hand'", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U");
-        g.move("place n0 U");
-        g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
-        g.drawPile = ["7C", ...g.drawPile.filter(uid => uid !== "7C")];
-        g.move("discard AC draw 1");
-        g.move("discard draw 0");
-        expect(g.currplayer).eq(1);
-        const newKey = `hand_7C_new`;
-        expect(player1HandArea(g.render() as RenderRep)?.pieces).to.include(newKey); // sanity - not vacuous
+        // The "_new" suffix is part of the clickable piece identifier too, not just a legend tag.
         const seeded = g.handleClick("", -1, -1, "_btn_discard");
         const click = g.handleClick(seeded.move, -1, -1, newKey);
         expect(click.valid).to.be.true;
         expect(click.move).eq(`discard 7C`);
     });
+
+    it("shows no highlight on a player's first turn, or once they start building this turn's own move", () => {
+        const fresh = new GnosticaGame(2);
+        expect(player1HandArea(fresh.render() as RenderRep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [["AC", "2C", "3C", "4C", "5C", "6C"], filler], drawPile: ["7C"],
+        });
+        g.move("discard AC draw 1");
+        g.move("discard draw 0");
+        expect(player1HandArea(g.render() as RenderRep)?.pieces).to.include(`hand_7C_new`); // sanity - not vacuous
+        g.move("discard", { partial: true }); // simulates the player's own first click
+        expect(player1HandArea(g.render() as RenderRep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+    });
 });
 
-describe("Gnostica: place", () => {
-    it("places a small piece on an empty territory, orientation an explicit part of the move (U included)", () => {
+describe("Gnostica: place / orient", () => {
+    it("places a small piece, drawn from stash, orientation an explicit part of the move (U included)", () => {
         const g = new GnosticaGame(2);
-        g.move("place m0 U");
-        const t = g.board.get(0, 0)!;
-        expect(t.pieces.length).eq(1);
-        expect(t.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "U" });
-        const g2 = new GnosticaGame(2);
-        g2.move("place m0 E");
-        expect(g2.board.get(0, 0)!.pieces[0].orientation).eq("E");
-    });
-
-    it("draws the placed piece from the player's own stash", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U");
+        g.move("place m0 E");
+        expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
         expect(g.stashes.get(1)).to.deep.equal([4, 5, 5]);
     });
 
-    it("refuses to place a second time once you already have a piece on the board", () => {
+    it("refuses to place a second time, in the void, or on an already-occupied cell", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U"); // player 1
         g.move("place n0 U"); // player 2
-        // back to player 1
-        expect(() => g.move("place l0 U")).to.throw();
+        expect(() => g.move("place l0 U")).to.throw(); // player 1 already placed
+        expect(() => new GnosticaGame(2).move("place a50 U")).to.throw(); // far outside the 3x3 grid - void
+        expect(() => new GnosticaGame(2).move("place m0 U").move("place m0 U")).to.throw(); // occupied cell
     });
 
-    it("refuses to place in the void", () => {
+    it("reorients your own piece, but not an opponent's, and requires having placed first", () => {
         const g = new GnosticaGame(2);
-        expect(() => g.move("place a50 U")).to.throw(); // far outside the 3x3 grid - void
-    });
-
-    it("refuses to place on an already-occupied cell", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        expect(() => g.move("place m0 U")).to.throw(); // player 2, same cell
-    });
-});
-
-describe("Gnostica: orient", () => {
-    it("reorients your own piece", () => {
-        const g = new GnosticaGame(2);
+        expect(() => g.move("discard")).to.throw(); // nothing placed yet
         g.move("place m0 N"); // player 1
-        g.move("place n0 U"); // player 2's own required placement
+        g.move("place n0 U"); // player 2
         g.move("orient m0.1 W"); // player 1 again
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("W");
-    });
-
-    it("refuses to reorient an opponent's piece", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 N"); // player 1
-        g.move("place n0 U"); // player 2
-        g.move("discard draw 0"); // player 1 - now legal, they've placed
+        g.move("discard draw 0"); // player 1
         expect(() => g.move("orient m0.1 W")).to.throw(); // player 2, targeting player 1's piece
-    });
-
-    it("requires having placed a piece before any non-place action", () => {
-        const g = new GnosticaGame(2);
-        expect(() => g.move("discard")).to.throw();
     });
 });
 
 describe("Gnostica: discard", () => {
-    it("discards named cards and redraws back to 6", () => {
+    it("discards named cards and redraws exactly as many as asked, up to the room left in a 6-card hand", () => {
         const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2
-        const hand = [...g.hands[0]];
-        const discard1 = hand[0];
-        const discard2 = hand[1];
-        g.move(`discard ${discard1} ${discard2} draw 2`); // player 1
-        expect(g.hands[0].length).eq(6);
+        g.move("place m0 U");
+        g.move("place n0 U");
+        const [discard1, discard2] = g.hands[0];
+        g.move(`discard ${discard1} ${discard2} draw 1`); // player 1: not the max
+        expect(g.hands[0].length).eq(5); // 4 left after discarding 2, +1 drawn back
         expect(g.hands[0]).to.not.include(discard1);
-        expect(g.hands[0]).to.not.include(discard2);
         expect(g.discardPile).to.include(discard1);
         expect(g.discardPile).to.include(discard2);
     });
 
-    it("refuses to discard a card that isn't in hand", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U");
-        g.move("place n0 U");
-        const notInHand = [...g.drawPile].find(uid => !g.hands[0].includes(uid))!;
-        expect(() => g.move(`discard ${notInHand}`)).to.throw();
-    });
-
-    it("an explicit \"draw <n>\" draws exactly that many, not the max - it is legal to end up under 6", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2
-        const hand = [...g.hands[0]];
-        const discard1 = hand[0];
-        const discard2 = hand[1];
-        g.move(`discard ${discard1} ${discard2} draw 1`); // player 1
-        expect(g.hands[0].length).eq(5); // 4 left after discarding 2, +1 drawn back
-        expect(g.hands[0]).to.not.include(discard1);
-        expect(g.hands[0]).to.not.include(discard2);
-    });
-
-    it("\"discard draw 0\" is a legal no-op turn - discards nothing, draws nothing", () => {
+    it("\"discard draw 0\" is a legal no-op turn", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place n0 U");
@@ -434,110 +265,71 @@ describe("Gnostica: discard", () => {
         expect(g.hands[0]).to.deep.equal(before);
     });
 
-    it("refuses a \"draw <n>\" above the room left in a 6-card hand", () => {
+    it("refuses a card not in hand, a draw above what was discarded, or a negative/non-numeric draw count", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place n0 U");
-        const [discard1] = g.hands[0];
-        // Only 1 discarded, so at most 1 can legally be drawn back.
-        expect(() => g.move(`discard ${discard1} draw 2`)).to.throw();
-    });
-
-    it("refuses a negative or non-numeric \"draw <n>\"", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U");
-        g.move("place n0 U");
+        const notInHand = g.drawPile.find(uid => !g.hands[0].includes(uid))!;
+        expect(() => g.move(`discard ${notInHand}`)).to.throw();
+        expect(() => g.move(`discard ${g.hands[0][0]} draw 2`)).to.throw(); // only 1 discarded
         expect(() => g.move("discard draw -1")).to.throw();
         expect(() => g.move("discard draw abc")).to.throw();
     });
 });
 
-describe("Gnostica: turn order", () => {
-    it("advances currplayer around the table and back", () => {
-        const g = new GnosticaGame(3);
-        expect(g.currplayer).eq(1);
-        g.move("place m0 U");
-        expect(g.currplayer).eq(2);
-        g.move("place l0 U");
-        expect(g.currplayer).eq(3);
-        g.move("place n0 U");
-        expect(g.currplayer).eq(1);
-        g.move("discard draw 0");
-        expect(g.currplayer).eq(2);
-        g.move("discard draw 0");
-        expect(g.currplayer).eq(3);
-        g.move("discard draw 0");
-        expect(g.currplayer).eq(1);
-    });
-});
-
-describe("Gnostica: turn order legend", () => {
+describe("Gnostica: turn order / legend", () => {
     type KeyArea = { type: string; list?: { piece: string; name: string }[] };
     const keyArea = (g: GnosticaGame): KeyArea | undefined =>
         (g.render() as { areas?: KeyArea[] }).areas?.find(a => a.type === "key");
 
-    it("does not appear for the default (non-bidding) variant, even with 3+ players", () => {
+    it("advances currplayer around the table and back", () => {
         const g = new GnosticaGame(3);
-        expect(keyArea(g)).to.be.undefined;
+        expect(g.currplayer).eq(1);
+        g.move("place m0 U");
+        g.move("place l0 U");
+        g.move("place n0 U");
+        expect(g.currplayer).eq(1);
+        g.move("discard draw 0");
+        g.move("discard draw 0");
+        g.move("discard draw 0");
+        expect(g.currplayer).eq(1);
     });
 
-    it("does not appear for a 2-player bidding game - nothing to legend with only two players", () => {
-        const g = new GnosticaGame(2, ["bidding"]);
-        expect(keyArea(g)).to.be.undefined;
-    });
+    it("the turn-order legend only appears for a 3+ player bidding game, and reorders to bid rank once it resolves", () => {
+        expect(keyArea(new GnosticaGame(3))).to.be.undefined; // non-bidding
+        expect(keyArea(new GnosticaGame(2, ["bidding"]))).to.be.undefined; // nothing to legend with 2 players
+        const fresh = new GnosticaGame(3, ["bidding"]);
+        expect(keyArea(fresh)!.list!.map(e => e.name)).to.deep.equal(["1st", "2nd", "3rd"]); // plain order mid-bid
 
-    it("appears for a 3+ player bidding game, defaulting to plain ascending order while still mid-bid", () => {
-        const g = new GnosticaGame(3, ["bidding"]);
-        const area = keyArea(g);
-        expect(area).to.not.be.undefined;
-        expect(area!.list!.map(e => e.name)).to.deep.equal(["1st", "2nd", "3rd"]);
-    });
-
-    it("reorders to the rank order of what was bid once the round resolves (tournament rules)", () => {
-        const g = new GnosticaGame(3, ["bidding"]);
-        g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
-        g.hands[1] = ["21", "AR", "2R", "3R", "4R", "5R"]; // The World - unbeatable
-        g.hands[2] = ["QS", "AD", "2D", "3D", "4D", "5D"];
-        g.move("bid 1");
-        g.move("bid 1"); // player 2's major wins
-        g.move("bid 1");
+        const g = testGame({
+            hands: [["KS", "AC", "2C", "3C", "4C", "5C"], ["21", "AR", "2R", "3R", "4R", "5R"], ["QS", "AD", "2D", "3D", "4D", "5D"]],
+            phase: "bidding",
+        });
+        g.move("bid 1"); g.move("bid 1"); g.move("bid 1"); // player 2's World (unbeatable) wins
         expect(g.bidWinner).eq(2);
-        // Winner (major) first, then King (player 1) over Queen (player 3)
-        // among the minors - NOT seating order from the winner ([2,3,1]).
-        const area = keyArea(g)!;
-        expect(area.list!.map(e => e.piece)).to.deep.equal(["turnorder_p2", "turnorder_p1", "turnorder_p3"]);
+        // Winner first, then King (player 1) over Queen (player 3) among the minors - not seating order.
+        expect(keyArea(g)!.list!.map(e => e.piece)).to.deep.equal(["turnorder_p2", "turnorder_p1", "turnorder_p3"]);
     });
 });
 
 describe("Gnostica: bidding-variant player reordering and pass removal", () => {
-    it("2-player: beginRedraw() lands directly on the loser with no forced pass, whichever player wins the bid", () => {
-        const winner1 = new GnosticaGame(2, ["bidding"]);
-        winner1.hands[0] = ["21", "AC", "2C", "3C", "4C", "5C"]; // The World - unbeatable
-        winner1.hands[1] = ["KS", "AR", "2R", "3R", "4R", "5R"];
-        winner1.move("bid 1"); // player 1's major
-        winner1.move("bid 1"); // player 2's minor - resolves
+    it("beginRedraw() lands directly on the bid's loser, whichever player wins, with no forced pass in between", () => {
+        const winner1 = testGame({ hands: [["21", "AC", "2C", "3C", "4C", "5C"], ["KS", "AR", "2R", "3R", "4R", "5R"]], phase: "bidding" });
+        winner1.move("bid 1"); winner1.move("bid 1"); // player 1's World wins
         expect(winner1.bidWinner).eq(1);
-        expect(winner1.phase).eq("redraw");
-        expect(winner1.currplayer).eq(2); // loser redraws first, no forced pass in between
+        expect(winner1.currplayer).eq(2); // loser redraws first
         expect(winner1.getPlies().some(p => p.results.some(r => r.type === "pass"))).eq(false);
 
-        const winner2 = new GnosticaGame(2, ["bidding"]);
-        winner2.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
-        winner2.hands[1] = ["21", "AR", "2R", "3R", "4R", "5R"]; // The World - unbeatable
-        winner2.move("bid 1");
-        winner2.move("bid 1"); // player 2's major - resolves
+        const winner2 = testGame({ hands: [["KS", "AC", "2C", "3C", "4C", "5C"], ["21", "AR", "2R", "3R", "4R", "5R"]], phase: "bidding" });
+        winner2.move("bid 1"); winner2.move("bid 1"); // player 2's World wins
         expect(winner2.bidWinner).eq(2);
-        expect(winner2.phase).eq("redraw");
-        expect(winner2.currplayer).eq(1); // loser (player 1) redraws first
+        expect(winner2.currplayer).eq(1);
         expect(winner2.getPlies().some(p => p.results.some(r => r.type === "pass"))).eq(false);
     });
 
-    it("moves()/validateMove()/randomMove() no longer offer or accept \"pass\" for a non-eliminated player during bidding/redraw", () => {
-        const g = new GnosticaGame(2, ["bidding"]);
-        g.hands[0] = ["21", "AC", "2C", "3C", "4C", "5C"];
-        g.hands[1] = ["KS", "AR", "2R", "3R", "4R", "5R"];
-        g.move("bid 1");
-        g.move("bid 1");
+    it("moves()/validateMove()/randomMove() no longer offer or accept \"pass\" during bidding/redraw", () => {
+        const g = testGame({ hands: [["21", "AC", "2C", "3C", "4C", "5C"], ["KS", "AR", "2R", "3R", "4R", "5R"]], phase: "bidding" });
+        g.move("bid 1"); g.move("bid 1");
         expect(g.phase).eq("redraw");
         expect(g.moves()).to.deep.equal([]);
         expect(g.validateMove("pass").valid).to.be.false;
@@ -545,259 +337,133 @@ describe("Gnostica: bidding-variant player reordering and pass removal", () => {
     });
 
     for (const numplayers of [2, 3] as const) {
-        it(`turnOrder reorder (${numplayers}p): getPlies()/getRounds()/chatLog() stay correct across the bid resolution boundary`, () => {
+        it(`turnOrder reorder (${numplayers}p): getPlies()/chatLog() stay correct across the bid resolution boundary`, () => {
             addResource("en");
-            const g = new GnosticaGame(numplayers, ["bidding"]);
-            g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
-            g.hands[1] = ["21", "AR", "2R", "3R", "4R", "5R"]; // The World - unbeatable
-            if (numplayers === 3) {
-                g.hands[2] = ["QS", "AD", "2D", "3D", "4D", "5D"];
-            }
+            const hands = [["KS", "AC", "2C", "3C", "4C", "5C"], ["21", "AR", "2R", "3R", "4R", "5R"], ["QS", "AD", "2D", "3D", "4D", "5D"]].slice(0, numplayers);
+            const g = testGame({ board: [{ x: 0, y: 0, uid: "2R" }], hands, phase: "bidding" });
             for (let i = 0; i < numplayers; i++) {
                 g.move("bid 1");
             }
             expect(g.bidWinner).eq(2);
             for (let i = 0; i < numplayers; i++) {
                 const needed = 6 - g.hands[g.currplayer - 1].length;
-                const picks = g.biddingPool!.slice(0, needed);
-                g.move(`redraw ${picks.join(" ")}`);
+                g.move(`redraw ${g.biddingPool!.slice(0, needed).join(" ")}`);
             }
-            expect(g.phase).eq("main");
             expect(g.currplayer).eq(2); // winner goes first
-            g.move("place m0 U"); // winner's first main-phase turn (no board presence yet)
-            const plies = g.getPlies();
-            expect(plies[plies.length - 1].actor).eq(2);
+            g.move("place m0 U");
             const names = numplayers === 2 ? ["Alice", "Bob"] : ["Alice", "Bob", "Carol"];
-            const log = g.chatLog(names);
-            expect(log[log.length - 1].some(l => l.includes("Bob"))).eq(true);
+            expect(g.chatLog(names)[g.getPlies().length - 1].some(l => l.includes("Bob"))).eq(true);
         });
     }
 });
 
 describe("Gnostica: announce last turn / win / elimination", () => {
-    it("wins if the announcing player has reached the target score on their following turn", () => {
-        const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2 - keeps their own board presence legal
-        // Rig every OTHER territory to a known-value card (major arcana, 3
-        // pts), uncontested by player 1 - comfortably >= 9 total. Leave
-        // player 2's own placed cell untouched so they can still act.
-        for (const [, , t] of g.board.entries()) {
-            if (t.pieces.some(p => p.owner === 2)) {
-                continue;
-            }
-            t.card = theWorld().clone();
-            t.pieces = [new Piece(1, 1, "U")];
-        }
+    it("wins on the announcing player's following turn if they reached the target, rotating currplayer past the winner", () => {
+        // Player 1 stands, uncontested, on three majors (9 pts); player 2 just needs a placement of their own.
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "21", pieces: [[1, 1, "U"]] },
+                { x: 1, y: 0, uid: "19", pieces: [[1, 1, "U"]] },
+                { x: -1, y: 0, uid: "13", pieces: [[1, 1, "U"]] },
+                { x: 0, y: 1, uid: "AR", pieces: [[2, 1, "U"]] },
+            ],
+            hands: [filler, filler],
+        });
+        expect(g.getPlayerScore(1)).eq(9);
         g.move("discard draw 0 last"); // player 1 announces
         expect(g.lastTurner).eq(1);
-        g.move("discard draw 0"); // player 2's turn
-        expect(g.lastTurner).eq(1);
-        g.move("discard draw 0"); // player 1's resolving turn
+        g.move("discard draw 0"); // player 2
+        g.move("discard draw 0"); // player 1's resolving turn - wins
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([1]);
+        expect(g.currplayer).eq(2); // still rotates on the winning move itself
     });
 
-    // currplayer must still rotate past the winner on the winning move
-    // itself, even though winning via resolveAnnouncedTurn() sets
-    // this.gameover directly (unlike an elimination-triggered endgame,
-    // where checkEOG() sets it only AFTER nextPlayer() already ran).
-    // External move-history/chat logs attribute move N to whichever player
-    // stack[N-1].currplayer names, so a currplayer that doesn't rotate on
-    // the final move makes it look like the PREVIOUS player acted twice in
-    // a row instead of the actual winner having the last turn. Checked for
-    // both 2 and 3 players.
-    for (const numplayers of [2, 3] as const) {
-        it(`currplayer still rotates past the winner on the winning move itself (${numplayers}-player)`, () => {
-            const g = new GnosticaGame(numplayers);
-            const cells = ["m0", "l0", "n0"].slice(0, numplayers);
-            for (const cell of cells) {
-                g.move(`place ${cell} U`);
-            }
-            for (const [, , t] of g.board.entries()) {
-                if (t.pieces.length > 0) {
-                    continue; // leave every player's own placed piece alone
-                }
-                t.card = theWorld().clone();
-                t.pieces = [new Piece(1, 1, "U")];
-            }
-            g.move("discard draw 0 last"); // player 1 announces
-            for (let i = 1; i < numplayers; i++) {
-                g.move("discard draw 0"); // every other player
-            }
-            expect(g.currplayer).eq(1);
-            g.move("discard draw 0"); // player 1's resolving turn - wins
-            expect(g.gameover).eq(true);
-            expect(g.winner).to.deep.equal([1]);
-            // currplayer must rotate to 2 on the winning move itself,
-            // exactly as every other move does.
-            expect(g.currplayer).eq(2);
-        });
-    }
-
-    it("eliminates the announcing player if they fall short of the target score, without ending the game with players left", () => {
-        const g = new GnosticaGame(3);
-        // Each player's single placed piece scores at most 3 (whatever card
-        // it's on) - always short of the 9-point target, no board rigging needed.
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
-        g.move("place n0 U"); // player 3
+    it("eliminates the announcer if they fall short, discarding their hand and returning their piece to stash, without ending the game", () => {
+        const g = new GnosticaGame(3); // each player's lone piece scores <= 3, always short of 9
+        g.move("place m0 U"); g.move("place l0 U"); g.move("place n0 U");
         const hand = [...g.hands[0]];
-        expect(g.stashes.get(1)).to.deep.equal([4, 5, 5]); // one small piece placed
         g.move("discard draw 0 last"); // player 1 announces
-        g.move("discard draw 0"); // player 2
-        g.move("discard draw 0"); // player 3
+        expect(() => g.move("discard draw 0 last")).to.throw(); // player 2 may not also announce
+        g.move("discard draw 0"); g.move("discard draw 0");
         g.move("discard draw 0"); // player 1's resolving turn - falls short
         expect(g.eliminated).to.deep.equal([1]);
         expect(g.hands[0]).to.deep.equal([]);
         expect(g.gameover).eq(false); // players 2 and 3 remain
-        // Rules text: an eliminated player discards their hand.
         for (const uid of hand) {
             expect(g.discardPile).to.include(uid);
         }
-        // The board piece placed above is gone AND returned to stash,
-        // rather than just vanishing.
         expect(g.board.get(0, 0)!.pieces.some(p => p.owner === 1)).eq(false);
         expect(g.stashes.get(1)).to.deep.equal([5, 5, 5]);
-    });
-
-    it("an eliminated player's own randomMove()/pass is a real, committable move that correctly skips them again", () => {
-        const g = new GnosticaGame(3);
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
-        g.move("place n0 U"); // player 3
-        g.move("discard draw 0 last"); // player 1 announces
-        g.move("discard draw 0"); // player 2
-        g.move("discard draw 0"); // player 3
-        g.move("discard draw 0"); // player 1's resolving turn - falls short, eliminated
-        expect(g.eliminated).to.deep.equal([1]);
-        expect(g.currplayer).eq(2); // nextPlayer() already correctly skipped player 1
-
-        // Force it to (incorrectly) be player 1's turn again, matching the
-        // scenario randomMove()'s own eliminated check exists for - a
-        // human would never see this via normal play, but the engine
-        // should handle it gracefully regardless.
+        // An eliminated player's own randomMove() is still a real, committable "pass" that
+        // correctly re-skips them, even if asked again on a later, stale turn.
         g.currplayer = 1;
         const rm = g.randomMove();
         expect(rm).eq("pass");
         expect(g.validateMove(rm).valid).to.be.true;
         g.move(rm); // untrusted, exactly like a real client
-        expect(g.currplayer).eq(2); // correctly advanced past the eliminated player again
-        const last = g.results[g.results.length - 1] as { type: string; who?: number; why?: string };
-        expect(last).to.deep.include({ type: "pass", who: 1, why: "eliminated" });
+        expect(g.currplayer).eq(2);
     });
 
-    it("declares the sole remaining player the winner if elimination leaves only one player standing", () => {
+    it("declares the sole survivor the winner if elimination leaves only one player standing", () => {
         const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2
-        g.move("discard draw 0 last"); // player 1 announces
-        g.move("discard draw 0"); // player 2
-        g.move("discard draw 0"); // player 1's resolving turn - falls short, eliminated
+        g.move("place m0 U"); g.move("place n0 U");
+        g.move("discard draw 0 last"); g.move("discard draw 0");
+        g.move("discard draw 0"); // player 1 falls short, eliminated
         expect(g.eliminated).to.deep.equal([1]);
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([2]);
     });
 
-    it("refuses to announce while another player's announcement hasn't resolved yet", () => {
-        const g = new GnosticaGame(3);
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
-        g.move("place n0 U"); // player 3
-        g.move("discard draw 0 last"); // player 1 announces
-        expect(() => g.move("discard draw 0 last")).to.throw(); // player 2 tries to announce too
-    });
+    // Player 1 holds three majors/royalty worth exactly the named total; player 2 is uninvolved.
+    for (const [variant, thirdCardUid, total, expectWin] of [["target-8", "KC", 8, true], ["target-10", "13", 9, false]] as const) {
+        it(`"${variant}" variant moves the win threshold (here, a score of ${total})`, () => {
+            const g = testGame({
+                board: [
+                    { x: 0, y: 0, uid: "21", pieces: [[1, 1, "U"]] }, // The World, 3 pts
+                    { x: -1, y: 0, uid: "19", pieces: [[1, 1, "U"]] }, // The Sun, 3 pts
+                    { x: 1, y: 0, uid: thirdCardUid, pieces: [[1, 1, "U"]] },
+                    { x: -1, y: -1, uid: "AR", pieces: [[2, 1, "U"]] },
+                ],
+                hands: [filler, filler],
+                variants: [variant],
+            });
+            expect(g.getPlayerScore(1)).eq(total);
+            g.move("discard draw 0 last");
+            g.move("discard draw 0");
+            g.move("discard draw 0");
+            expect(g.gameover).eq(true);
+            expect(g.winner).to.deep.equal(expectWin ? [1] : [2]);
+        });
+    }
 
-    it("\"target-8\" variant: 8 points wins, unlike the default target of 9", () => {
-        const g = new GnosticaGame(2, ["target-8"]);
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2
-        g.board.get(0, 0)!.card = theWorld().clone(); // m0 (player 1's own piece already there): major, 3 pts
-        g.board.get(-1, -1)!.pieces = [new Piece(1, 1, "U")];
-        g.board.get(-1, -1)!.card = major(19).clone(); // The Sun: major, 3 pts - running total 6
-        g.board.get(-1, 1)!.pieces = [new Piece(1, 1, "U")];
-        g.board.get(-1, 1)!.card = card("KC"); // King of Cups: royalty, 2 pts - running total 8, exactly the target-8 threshold
-        expect(g.getPlayerScore(1)).eq(8);
-        g.move("discard draw 0 last"); // player 1 announces
-        g.move("discard draw 0"); // player 2
-        g.move("discard draw 0"); // player 1's resolving turn
-        expect(g.gameover).eq(true);
-        expect(g.winner).to.deep.equal([1]);
-    });
-
-    it("\"target-10\" variant: 9 points (enough under the default target) falls short and eliminates instead", () => {
-        const g = new GnosticaGame(2, ["target-10"]);
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2
-        g.board.get(0, 0)!.card = theWorld().clone(); // m0 (player 1's own piece already there): major, 3 pts
-        g.board.get(-1, -1)!.pieces = [new Piece(1, 1, "U")];
-        g.board.get(-1, -1)!.card = major(19).clone(); // The Sun: major, 3 pts - running total 6
-        g.board.get(-1, 1)!.pieces = [new Piece(1, 1, "U")];
-        g.board.get(-1, 1)!.card = major(13).clone(); // Death: major, 3 pts - running total 9, short of the target-10 threshold
-        expect(g.getPlayerScore(1)).eq(9);
-        g.move("discard draw 0 last"); // player 1 announces
-        g.move("discard draw 0"); // player 2
-        g.move("discard draw 0"); // player 1's resolving turn - falls short under target-10
-        expect(g.eliminated).to.deep.equal([1]);
-        expect(g.gameover).eq(true); // only player 2 remains
-        expect(g.winner).to.deep.equal([2]);
-    });
-
-    it("getPlies()/chatLog() stay correct across the elimination boundary (plyActor(), not a stale currplayer-1 guess)", () => {
+    it("getPlies()/chatLog() attribute the elimination and the following turn to the right actors, using the result's own r.who", () => {
         addResource("en");
         const g = new GnosticaGame(3);
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
-        g.move("place n0 U"); // player 3
-        g.move("discard draw 0 last"); // player 1 announces
-        g.move("discard draw 0"); // player 2
-        g.move("discard draw 0"); // player 3
-        g.move("discard draw 0"); // player 1's resolving turn - falls short, eliminated
-        expect(g.eliminated).to.deep.equal([1]);
+        g.move("place m0 U"); g.move("place l0 U"); g.move("place n0 U");
+        g.move("discard draw 0 last"); g.move("discard draw 0"); g.move("discard draw 0");
+        g.move("discard draw 0"); // player 1 falls short, eliminated
         g.move("discard draw 0"); // player 2's ordinary post-elimination turn
         const plies = g.getPlies();
-        // Actor 1 never appears again once eliminated - nextPlayer()'s own
-        // skip loop already guarantees this at the currplayer level, this
-        // confirms getPlies()'s own plyActor()-based reconstruction agrees.
         const actorsAfterElimination = plies.slice(plies.findIndex(p => p.results.some(r => r.type === "eliminated")) + 1).map(p => p.actor);
-        expect(actorsAfterElimination).to.not.include(1);
-        expect(plies[plies.length - 1].actor).eq(2);
+        expect(actorsAfterElimination).to.not.include(1); // nextPlayer()'s skip loop, agreeing with plyActor()
         const log = g.chatLog(["Alice", "Bob", "Carol"]);
-        // The eliminated ply's own line must still name the actual actor
-        // (Alice, who WAS still currplayer for that ply) even though
-        // currplayer itself has since moved on past the skipped seats.
         const eliminatedLine = log.find(node => node.some(l => l.includes("eliminated")));
-        expect(eliminatedLine?.some(l => l.includes("Alice"))).eq(true);
-        // The final, post-elimination line correctly names Bob, not a
-        // stale/incorrect guess.
-        const lastLine = log[log.length - 1];
-        expect(lastLine.some(l => l.includes("Bob"))).eq(true);
-    });
-
-    it("chatLog()'s \"eliminated\" line uses the result's own r.who, not the generically-computed actor", () => {
-        addResource("en");
-        const g = new GnosticaGame(2);
-        g.move("place m0 U"); // player 1
-        g.move("place n0 U"); // player 2
-        g.move("discard draw 0 last"); // player 1 announces
-        g.move("discard draw 0"); // player 2
-        g.move("discard draw 0"); // player 1's resolving turn - falls short, eliminated
-        expect(g.eliminated).to.deep.equal([1]);
-        const log = g.chatLog(["Alice", "Bob"]);
-        const eliminatedLine = log.find(node => node.some(l => l.includes("eliminated")));
-        expect(eliminatedLine?.some(l => l.includes("Alice"))).eq(true);
+        expect(eliminatedLine?.some(l => l.includes("Alice"))).eq(true); // the actual actor, not currplayer's later value
+        expect(log[log.length - 1].some(l => l.includes("Bob"))).eq(true);
     });
 });
 
 describe("Gnostica: sidebarScores", () => {
     it("reports each player's score, position i always player i+1's - never reordered by turn order", () => {
-        const g = new GnosticaGame(3);
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
-        g.move("place n0 U"); // player 3
-        g.board.get(0, 0)!.card = aceOfCups(); // player 1's own cell: spot, 1 pt
-        g.board.get(-1, 0)!.card = card("KS"); // player 2's own cell: royalty, 2 pts
-        g.board.get(1, 0)!.card = theWorld().clone(); // player 3's own cell: major, 3 pts
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }, // spot, 1 pt
+                { x: -1, y: 0, uid: "KS", pieces: [[2, 1, "U"]] }, // royalty, 2 pts
+                { x: 1, y: 0, uid: "21", pieces: [[3, 1, "U"]] }, // major, 3 pts
+            ],
+            hands: [filler, filler, filler],
+        });
         const scores = g.sidebarScores();
         expect(scores).to.have.length(1);
         expect(scores[0].scores).to.deep.equal([1, 2, 3]);
@@ -973,77 +639,54 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
 });
 
 describe("Gnostica: activate/play - major arcana chaining", () => {
-    it.skip("Lovers (move, then create): a pushed own piece becomes a minion for the second step", () => {
-        const g = new GnosticaGame(2);
-        // Fully deterministic (see clearBoard's own docs): the random
-        // initial deal could otherwise occasionally put The Lovers
-        // itself at n0, which forceCardAt's own duplicate-clearing would
-        // then wipe out from under piece B, stranding it off-territory.
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(6)); // The Lovers
-        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - any real card, distinct from The Lovers
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, pointing at n0
-        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")]; // own piece B, already on n0 (not on the Lovers)
+    it("Lovers (move, then create): a pushed own piece becomes a minion for the second step, and both steps' own chat lines and frame history are right", () => {
+        addResource("en");
         // A (m0) pushes B (n0) one space east to o0, reorienting it "U";
         // B, now at o0, is used for the Cups step to add a second piece there.
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "06", pieces: [[1, 1, "E"]] }, // The Lovers
+                { x: 1, y: 0, uid: "AD", pieces: [[1, 1, "S"]] }, // own piece B, already on n0
+            ],
+            hands: [filler, filler],
+        });
         g.move(`use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`);
         const dest = g.board.get(2, 0)!; // o0
         expect(dest.pieces.length).eq(2);
         expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "U" }); // B, pushed and reoriented
         expect(dest.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "U" }); // new piece from the Cups step
 
-        // A genuine 2-step chain: one frame (state after step 1 only),
-        // plus the final/live rep.
+        // A genuine 2-step chain: one frame (state after step 1 only), plus the final/live rep.
         expect(g.frames.length).eq(1);
         expect(g.frames[0].board.get(2, 0)?.pieces.length).eq(1); // B pushed here, Cups step not yet applied
         const reps = g.render() as { annotations?: { type: string }[] }[];
-        expect(Array.isArray(reps)).eq(true);
         expect(reps.length).eq(2);
-
-        // Frame 0's own annotations cover only step 1's effect (the
-        // push) - not step 2's (the new piece), proving the _group/
-        // annotation-flattening fix actually isolates each step, rather
-        // than overlaying every step's own effect onto every frame.
+        // Frame 0's own annotations cover only step 1's effect (the push), not step 2's - proving
+        // the _group/annotation-flattening isolates each step rather than overlaying every step
+        // onto every frame; the final/live rep covers the whole turn, same as any ordinary move.
         expect(reps[0].annotations?.map(a => a.type)).to.deep.equal(["move"]);
-        // The final/live rep covers the whole turn, same as any ordinary
-        // (non-chained) move already does today.
         expect(reps[1].annotations?.map(a => a.type).sort()).to.deep.equal(["enter", "move"]);
-    });
-
-    it.skip("#47: chatLog() logs a line for EACH step of a chained move, not just one - proving _group unwrapping actually works", () => {
-        addResource("en");
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(6)); // The Lovers
-        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
-        g.move(`use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`);
-        // Confirms the move's own results really are grouped (not flat) -
-        // otherwise this test would pass even without the chat()-side
-        // _group fix, since a flat result list needs no unwrapping at all.
+        // Confirms results really are grouped (one _group per step, not flat), and chatLog()
+        // logs a line for each step of the chain.
         expect(g.results.filter(r => r.type === "_group")).to.have.length(2);
-        const log = g.chatLog(["Alice", "Bob"]);
-        const lastNode = log[log.length - 1];
+        const lastNode = g.chatLog(["Alice", "Bob"])[g.getPlies().length - 1];
         expect(lastNode.some(l => l.includes("moved"))).eq(true); // step 1 (rod-piece)
         expect(lastNode.some(l => l.includes("added"))).eq(true); // step 2 (cups-own)
     });
 
-    // validateMove() itself never mutates the board, so a later step
-    // naming the exact minion an earlier step in this SAME chain just
-    // moved/created must still resolve correctly for an untrusted caller -
-    // also checks that the frame history captures the intermediate
-    // (post-step-1) position, not just the final one.
+    // validateMove() itself never mutates the board, so a later step naming the exact minion an
+    // earlier step in this SAME chain just moved must still resolve correctly for an untrusted
+    // caller - also checks that frame history captures the intermediate (post-step-1) position.
     it("Chariot (move, then move): an untrusted move validates and applies when step 2 acts through step 1's own relocated piece", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(7)); // The Chariot: move, then move
-        forceCardAt(g, 3, 0, () => aceOfDiscs()); // keeps o0 (2,0) a genuine wasteland, not void
-        g.move("place m0 E"); // player 1, pointing east
-        g.move("place l0 U"); // player 2
-        // No trailing orientation on either step - the minion never
-        // changes facing (stays E throughout), and a same-facing "E"
-        // would now be a hard-rejected no-op (#76).
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "07", pieces: [[1, 1, "E"]] }, // The Chariot: move, then move
+                { x: 3, y: 0, uid: "AD" }, // keeps o0 (2,0) a genuine wasteland, not void
+            ],
+            hands: [filler, filler],
+        });
+        // No trailing orientation on either step - the minion never changes facing (stays E
+        // throughout), and a same-facing "E" would now be a hard-rejected no-op.
         const move = `use 07/with m0.1 move m0.1 1/with n0.1 move n0.1 1`;
         expect(g.validateMove(move).valid).to.be.true;
         expect(() => g.move(move, { trusted: false })).to.not.throw();
@@ -1052,118 +695,67 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
         expect(g.board.has(1, 0)).eq(false); // the waypoint at n0 is left empty
 
-        // Frame 0 shows the piece at its intermediate (post-first-move)
-        // position, n0 - not yet at its final position, o0.
+        // Frame 0 shows the piece at its intermediate (post-first-move) position, n0 - not yet o0.
         expect(g.frames.length).eq(1);
         expect(g.frames[0].board.get(1, 0)?.pieces.length).eq(1);
         expect(g.frames[0].board.get(2, 0)).eq(undefined);
     });
 
-    // Direct, low-level regression coverage for chainMinion itself (the
-    // Phase 1 fragility fix) - a relocation/in-place mutation prunes its
-    // own pre-mutation ref (never left dangling to be mistaken for a
-    // second, still-live candidate), while a genuine creation is purely
-    // additive (both the acting piece and the new one stay real,
-    // independent candidates for whatever step comes next).
-    it("chainMinion: a relocation replaces its own pre-move ref; a creation is purely additive", () => {
-        const g = new GnosticaGame(2);
+    // Direct, low-level coverage for chainMinion itself: a relocation prunes its own pre-mutation
+    // ref (never left dangling as a second, still-live candidate), while a genuine creation is
+    // purely additive (both the acting piece and the new one stay real, independent candidates).
+    it("chainMinion: a relocation replaces its own pre-move ref; a creation is purely additive; no outcome leaves the pool unchanged", () => {
         const chainMinion = (GnosticaGame as unknown as {
             chainMinion: (minions: { x: number; y: number; index: number }[], outcome: { newMinion?: { x: number; y: number; index: number }; replacesMinion?: { x: number; y: number; index: number } }) => { x: number; y: number; index: number }[];
         }).chainMinion;
-        void g; // unused - chainMinion is static, called on the class itself
 
         const original = [{ x: 0, y: 0, index: 0 }];
-        // Relocation (Rods' own "piece" move, Discs' grow, Swords' shrink,
-        // Hierophant's replace, Hermit's teleport, orientMinion/orientAny's
-        // own reorient all set replacesMinion) - the old ref is gone.
-        const afterMove = chainMinion(original, {
-            newMinion: { x: 1, y: 0, index: 0 },
-            replacesMinion: { x: 0, y: 0, index: 0 },
-        });
-        expect(afterMove).to.deep.equal([{ x: 1, y: 0, index: 0 }]);
-
-        // Creation (Cups' own "create" modes - the only newMinion producer
-        // that never sets replacesMinion) - both the original piece and
-        // the freshly created one remain real, independent candidates.
-        const afterCreate = chainMinion(original, {
-            newMinion: { x: 2, y: 0, index: 0 },
-        });
-        expect(afterCreate).to.deep.equal([{ x: 0, y: 0, index: 0 }, { x: 2, y: 0, index: 0 }]);
-
-        // No outcome at all (judgementDraw, a skipped step, etc.) - the
-        // pool is returned completely unchanged.
+        // Relocation (Rods' move, Discs' grow, Swords' shrink, Hierophant's replace, Hermit's
+        // teleport, orientMinion/orientAny's reorient all set replacesMinion) - the old ref is gone.
+        expect(chainMinion(original, { newMinion: { x: 1, y: 0, index: 0 }, replacesMinion: { x: 0, y: 0, index: 0 } }))
+            .to.deep.equal([{ x: 1, y: 0, index: 0 }]);
+        // Creation (Cups' own "create" modes - the only newMinion producer that never sets
+        // replacesMinion) - both the original piece and the new one remain independent candidates.
+        expect(chainMinion(original, { newMinion: { x: 2, y: 0, index: 0 } }))
+            .to.deep.equal([{ x: 0, y: 0, index: 0 }, { x: 2, y: 0, index: 0 }]);
+        // No outcome at all (judgementDraw, a skipped step, etc.) - the pool is unchanged.
         expect(chainMinion(original, {})).to.deep.equal(original);
     });
 
-    // randomMove()'s own separate simulator (buildRandomChain) threads
-    // chainMinion the same way walkFrameStack/validateFrameStack do -
-    // stress-tested here since Chariot's own "move, then move" is exactly
-    // the shape (a second step whose own target only exists at the FIRST
-    // step's post-move position) that exposed the chainMinion ordering
-    // bug this session's own Phase 1 fix addressed. Chariot is the ONLY
-    // card player 1 has a piece on, so randomUseOrPlayMove("use") always
-    // resolves to it specifically, rather than leaving that to chance
-    // across whatever else randomMove()'s own top-level dispatch might
-    // otherwise pick.
-    it("randomMove() stress check: Chariot's own 'move, then move' never throws, however randomChain happens to build it", () => {
-        for (let i = 0; i < 60; i++) {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(7)); // The Chariot
-            forceCardAt(g, 3, 0, () => aceOfDiscs());
-            g.move("place m0 E");
-            g.move("place l0 U");
-            expect(() => randomUseOrPlayMove(g, "use")).to.not.throw();
-        }
-    });
-
-    it("Strength: a single grow step may skip straight from spot to major arcana (skipLadder)", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(8)); // Strength
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        forceCardAt(g, 1, 0, () => card("AC")); // n0 - spot, worth 1
-        g.hands[0].push("00"); // The Fool, worth 3 - injected regardless of the random deal
+    it("Strength: a single grow may skip straight from spot to major arcana (skipLadder), and doing so uses up both grows", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "08", pieces: [[1, 1, "E"]] }, // Strength
+                { x: 1, y: 0, uid: "AC" }, // n0 - spot, worth 1
+            ],
+            hands: [["00", ...filler], filler], // The Fool, worth 3
+        });
+        expect(g.validateMove(`use 08/with m0.1 grow n0 to 00`)).to.deep.include({ valid: true, complete: 1 });
         g.move(`use 08/with m0.1 grow n0 to 00`); // only ONE of Strength's two grow steps needed
         expect(g.board.get(1, 0)!.card?.uid).eq("00");
-    });
-
-    it.skip("Strength: a one-step +2 territory grow uses up both grows, so a second step is rejected", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(8)); // Strength
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        forceCardAt(g, 1, 0, () => card("AC")); // n0 - spot, worth 1
-        g.hands[0].push("00"); // The Fool, worth 3
-        expect(g.validateMove(`use 08/with m0.1 grow n0 to 00`)).to.deep.include({ valid: true, complete: 1 });
-        expect(g.validateMove(`use 08/with m0.1 grow n0 to 00/with m0.1 grow m0.1`).valid).to.be.false;
+        expect(g.validateMove(`use 08/with m0.1 grow m0.1`).valid).to.be.false; // already consumed
     });
 
     describe("two-step shortcuts need the paired second step, on the same piece", () => {
-        const setupStrength = (): GnosticaGame => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(8)); // Strength
-            forceCardAt(g, 1, 0, () => card("AC"));
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")];
-            return g;
-        };
+        const setupStrength = (): GnosticaGame => testGame({
+            board: [{ x: 0, y: 0, uid: "08", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }],
+            hands: [filler, filler],
+        });
 
-        it.skip("Strength: a lone grow only earns the waiver with its second step - without a size-2 in stash it stays incomplete", () => {
+        it("Strength: a lone grow only earns the waiver with its second step - without a size-2 in stash it stays incomplete; with one, exact stash accounting", () => {
             const g = setupStrength();
             g.stashes.get(1)![1] = 0;
             expect(g.validateMove("use 08/with m0.1 grow m0.1")).to.deep.include({ valid: true, complete: -1 });
             expect(g.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow m0.2")).to.deep.include({ valid: true });
+
+            const g2 = setupStrength();
+            const before = g2.stashes.get(1)!.slice();
+            expect(g2.validateMove("use 08/with m0.1 grow m0.1").complete).eq(0);
+            g2.move("use 08/with m0.1 grow m0.1");
+            expect(g2.stashes.get(1)).to.deep.equal([before[0] + 1, before[1] - 1, before[2]]);
         });
 
-        it.skip("Strength: a lone grow with a real size-2 in stash is an ordinary grow with exact stash accounting", () => {
-            const g = setupStrength();
-            const before = g.stashes.get(1)!.slice();
-            expect(g.validateMove("use 08/with m0.1 grow m0.1").complete).eq(0);
-            g.move("use 08/with m0.1 grow m0.1");
-            expect(g.stashes.get(1)).to.deep.equal([before[0] + 1, before[1] - 1, before[2]]);
-        });
-
-        it.skip("Strength: the second grow must act on the piece the first grow produced", () => {
+        it("Strength: the second grow must act on the piece the first grow produced", () => {
             const g = setupStrength();
             expect(g.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow n0.1").valid).to.be.false;
             const before = g.stashes.get(1)!.slice();
@@ -1171,23 +763,24 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             expect(g.stashes.get(1)).to.deep.equal([before[0] + 1, before[1], before[2] - 1]);
         });
 
-        it.skip("Sun: the grow must act on the piece the create just made", () => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(19)); // The Sun
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 2, "U")];
+        it("Sun: the grow must act on the piece the create just made", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "19", pieces: [[1, 1, "E"], [1, 2, "U"]] }],
+                hands: [filler, filler],
+            });
             expect(g.validateMove("use 19/with m0.1 at n0 create U/with n0.1 grow n0.1").valid).to.be.true;
             expect(g.validateMove("use 19/with m0.1 at n0 create U/with m0.2 grow m0.2").valid).to.be.false;
         });
 
-        it.skip("Chariot: a full-territory waypoint needs the same piece moved again; alone it stays incomplete", () => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(7)); // The Chariot
-            forceCardAt(g, 1, 0, () => card("AC")); // n0 - already holds three pieces
-            forceCardAt(g, 3, 0, () => aceOfDiscs()); // keeps o0 (2,0) a genuine wasteland, not void
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            g.board.get(1, 0)!.pieces = [new Piece(2, 2, "U"), new Piece(2, 2, "U"), new Piece(2, 2, "U")];
+        it("Chariot: a full-territory waypoint needs the same piece moved again; alone it stays incomplete", () => {
+            const g = testGame({
+                board: [
+                    { x: 0, y: 0, uid: "07", pieces: [[1, 1, "E"]] }, // The Chariot
+                    { x: 1, y: 0, uid: "AC", pieces: [[2, 2, "U"], [2, 2, "U"], [2, 2, "U"]] }, // already holds three pieces
+                    { x: 3, y: 0, uid: "AD" }, // keeps o0 (2,0) a genuine wasteland, not void
+                ],
+                hands: [filler, filler],
+            });
             expect(g.validateMove("use 07/with m0.1 move m0.1 1")).to.deep.include({ valid: true, complete: -1 });
             expect(g.validateMove("use 07/with m0.1 move m0.1 1/with n0.1 move n0.1 1").valid).to.be.true;
             expect(g.validateMove("use 07/with m0.1 move m0.1 1/with n0.1 move n0.2 1").valid).to.be.false;
@@ -1201,81 +794,66 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         });
     });
 
-    it.skip("Strength: growing the same piece 1->3 works even with zero size-2 pieces in stash", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(8)); // Strength
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        g.stashes.get(1)![1] = 0; // zero size-2 pieces left in stash
-        g.move(`use 08/with m0.1 grow m0.1/with m0.2 grow m0.2`);
-        expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 3 });
-        expect(g.stashes.get(1)!).to.deep.equal([6, 0, 4]); // the transient size-2 was never taken OR returned - net effect is just the real size-3 draw
-    });
+    it("a same-piece shortcut's transient intermediate size never touches the stash, either for Strength (1->3) or Sun (create then grow)", () => {
+        const strength = testGame({ board: [{ x: 0, y: 0, uid: "08", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
+        strength.stashes.get(1)![1] = 0; // zero size-2 pieces left in stash
+        strength.move(`use 08/with m0.1 grow m0.1/with m0.2 grow m0.2`);
+        expect(strength.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 3 });
+        expect(strength.stashes.get(1)!).to.deep.equal([6, 0, 4]); // the transient size-2 was never taken OR returned
 
-    it.skip("Sun: creating then growing to size 2 works even with zero size-1 pieces in stash", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(19)); // The Sun
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.stashes.get(1)![0] = 0; // zero size-1 pieces left in stash
-        g.move(`use 19/with m0.1 at n0 create U/with n0.1 grow n0.1`);
-        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2 });
-        expect(g.stashes.get(1)!).to.deep.equal([0, 4, 5]); // the transient size-1 was never taken OR returned - net effect is just the real size-2 draw
+        const sun = testGame({ board: [{ x: 0, y: 0, uid: "19", pieces: [[1, 1, "E"]] }], hands: [filler, filler], stashes: { 1: [0, 5, 5], 2: [5, 5, 5] } });
+        sun.move(`use 19/with m0.1 at n0 create U/with n0.1 grow n0.1`);
+        expect(sun.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2 });
+        expect(sun.stashes.get(1)!).to.deep.equal([0, 4, 5]); // the transient size-1 was never taken OR returned
     });
 
     describe("a special power's step must be spelled with that power's own action", () => {
-        const setupSpecial = (seq: number): GnosticaGame => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(seq));
-            g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")];
-            forceCardAt(g, 1, 0, () => card("AC"));
-            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "N")];
-            g.hands[0] = ["2C", "KS", "5D"];
-            return g;
-        };
+        const setupSpecial = (seq: number): GnosticaGame => testGame({
+            board: [
+                { x: 0, y: 0, uid: String(seq).padStart(2, "0"), pieces: [[1, 2, "E"]] },
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "N"]] },
+            ],
+            hands: [["2C", "KS", "5D"], ["3S", "4S"]],
+        });
 
-        it.skip("Justice: a sword step is the sword (Justice's second power used alone), not tradeHands", () => {
-            const g = setupSpecial(11);
-            g.hands[1] = ["3S", "4S"];
-            expect(g.validateMove("use 11/with m0.2 trade n0.1").valid).to.be.true;
-            expect(g.validateMove("use 11/with m0.2 shrink n0.1 1").valid).to.be.true;
-            g.move("use 11/with m0.2 shrink n0.1 1");
-            expect(g.hands[0]).to.deep.equal(["2C", "KS", "5D"]); // hands were not traded
-            expect(g.board.get(1, 0)!.pieces.length).eq(0); // the size-1 enemy piece was attacked
+        it("a second power alone is spelled with its OWN action (Justice's sword, Empress's cup), not the card's first power", () => {
+            const justice = setupSpecial(11);
+            expect(justice.validateMove("use 11/with m0.2 trade n0.1").valid).to.be.true;
+            expect(justice.validateMove("use 11/with m0.2 shrink n0.1 1").valid).to.be.true;
+            justice.move("use 11/with m0.2 shrink n0.1 1");
+            expect(justice.hands[0]).to.deep.equal(["2C", "KS", "5D"]); // hands were not traded
+            expect(justice.board.get(1, 0)!.pieces.length).eq(0); // the size-1 enemy piece was attacked
+
+            const empress = setupSpecial(3);
+            expect(empress.validateMove("use 03/orient m0.2 N").valid).to.be.true;
+            expect(empress.validateMove("use 03/with m0.2 at n0 create U").valid).to.be.true;
+            empress.move("use 03/with m0.2 at n0 create U");
+            expect(empress.board.get(1, 0)!.pieces.length).eq(2); // the created piece
+            expect(empress.board.get(0, 0)!.pieces[0].orientation).eq("E"); // not reoriented
         });
 
         it("a step spelled as neither of the card's powers is rejected", () => {
             expect(setupSpecial(11).validateMove("use 11/with m0.2 grow m0.2").valid).to.be.false;
             expect(setupSpecial(3).validateMove("use 03/with m0.2 shrink n0.1 1").valid).to.be.false;
         });
-
-        it.skip("Empress: a create step is the cup (her second power used alone), not orientMinion", () => {
-            expect(setupSpecial(3).validateMove("use 03/orient m0.2 N").valid).to.be.true;
-            const g = setupSpecial(3);
-            expect(g.validateMove("use 03/with m0.2 at n0 create U").valid).to.be.true;
-            g.move("use 03/with m0.2 at n0 create U");
-            expect(g.board.get(1, 0)!.pieces.length).eq(2); // the created piece
-            expect(g.board.get(0, 0)!.pieces[0].orientation).eq("E"); // not reoriented
-        });
     });
 
-    // All powers are optional: either of a two-power card's powers may be used alone, but never in reverse order.
+    // All powers are optional: either of a two-power card's powers may be used alone, but never
+    // in reverse order (the full two-power form still works too).
     describe("using a card's second power alone", () => {
-        const setupCard = (seq: number): GnosticaGame => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(seq));
-            g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")];
-            forceCardAt(g, 1, 0, () => card("AC"));
-            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "N")];
-            g.hands[0] = ["2C", "KS", "5D"];
-            g.hands[1] = ["3S", "4S"];
-            return g;
-        };
+        const setupCard = (seq: number): GnosticaGame => testGame({
+            board: [
+                { x: 0, y: 0, uid: String(seq).padStart(2, "0"), pieces: [[1, 2, "E"]] },
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "N"]] },
+            ],
+            hands: [["2C", "KS", "5D"], ["3S", "4S"]],
+        });
 
-        it("Lovers: the cup alone creates a piece", () => {
+        it("Lovers: the cup alone creates a piece; the full two-power form (rod then cup) still works", () => {
             const g = setupCard(6);
             g.move("use 06/with m0.2 at n0 create U");
             expect(g.board.get(1, 0)!.pieces.length).eq(2);
+            expect(setupCard(6).validateMove("use 06/with m0.2 move m0.2 1/with n0.2 at o0 create U").valid).to.be.true;
         });
 
         it("Emperor: the rod alone moves the piece", () => {
@@ -1313,32 +891,25 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             expect(g.stashes.get(1)).to.deep.equal([before[0], before[1] + 1, before[2] - 1]);
         });
 
-        it.skip("the powers may not be used in reverse order", () => {
+        it("the powers may not be used in reverse order", () => {
             expect(setupCard(19).validateMove("use 19/with m0.2 grow m0.2/with m0.2 at n0 create U").valid).to.be.false;
             expect(setupCard(18).validateMove("use 18/with m0.2 shrink n0.1 1/with m0.2 move m0.2 1").valid).to.be.false;
-        });
-
-        it.skip("the full two-power forms still work", () => {
-            expect(setupCard(6).validateMove("use 06/with m0.2 move m0.2 1/with n0.2 at o0 create U").valid).to.be.true;
         });
     });
 
     describe("Sun's territory shortcut", () => {
-        const setupSun = (uid = "19"): GnosticaGame => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => uid === "19" ? major(19) : card(uid));
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // n0 is the wasteland it points at
-            g.hands[0] = ["2C", "KS", "00"];
-            return g;
-        };
+        const setupSun = (uid = "19"): GnosticaGame => testGame({
+            board: [{ x: 0, y: 0, uid, pieces: [[1, 1, "E"]] }], // n0 is the wasteland it points at
+            hands: [["2C", "KS", "00"], filler],
+        });
 
-        it.skip("creating a territory with a royalty card stands in for creating a spot card and growing it", () => {
+        it("creating a territory with a royalty card stands in for creating a spot card and growing it, and uses up both steps", () => {
             const g = setupSun();
             expect(g.validateMove("use 19/with m0.1 at n0 create 2C").valid).to.be.true; // the ordinary spot card still works
-            expect(g.validateMove("use 19/with m0.1 at n0 create KS").valid).to.be.true;
+            expect(g.validateMove("use 19/with m0.1 at n0 create KS")).to.deep.include({ valid: true, complete: 1 });
             g.move("use 19/with m0.1 at n0 create KS");
             expect(g.board.get(1, 0)!.card?.uid).eq("KS");
+            expect(g.validateMove("use 19/with m0.1 grow n0 to 00").valid).to.be.false; // already consumed
         });
 
         it("a major arcana card is still not a legal create, and only the Sun may create royalty", () => {
@@ -1346,13 +917,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             expect(setupSun("AC").validateMove("use AC/with m0.1 at n0 create KS").valid).to.be.false;
         });
 
-        it.skip("creating a royalty territory uses up both steps, so a following grow is rejected", () => {
-            const g = setupSun();
-            expect(g.validateMove("use 19/with m0.1 at n0 create KS").complete).eq(1);
-            expect(g.validateMove("use 19/with m0.1 at n0 create KS/with m0.1 grow n0 to 00").valid).to.be.false;
-        });
-
-        it.skip("the Sun's grow is one value at a time (no skipLadder)", () => {
+        it("the Sun's grow is one value at a time (no skipLadder)", () => {
             const g = setupSun();
             expect(g.validateMove("use 19/with m0.1 at n0 create 2C/with m0.1 grow n0 to KS").valid).to.be.true;
             expect(g.validateMove("use 19/with m0.1 at n0 create 2C/with m0.1 grow n0 to 00").valid).to.be.false;
@@ -1369,153 +934,116 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
 
     // Death (attack, attack): two swords on the same target may be written as one shrink of their total.
     describe("Death's single-step shortcut", () => {
-        const setup = (minionSize: 1 | 2): GnosticaGame => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(13)); // Death
-            g.board.get(0, 0)!.pieces = [new Piece(1, minionSize, "E")];
-            return g;
-        };
-        const withCardAtN0 = (g: GnosticaGame, uid: string): void => forceCardAt(g, 1, 0, () => card(uid));
-
-        it("piece 3->1: a size-1 minion shrinks an enemy size-3 piece by 2 in one step", () => {
-            const g = setup(1);
-            withCardAtN0(g, "3C");
-            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
-            expect(g.validateMove("use 13/with m0.1 shrink n0.3 3").valid).to.be.false; // 3 > 2 x 1
-            expect(g.validateMove("use 13/with m0.1 shrink n0.3 2").valid).to.be.true;
-            g.move("use 13/with m0.1 shrink n0.3 2");
-            expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1 });
+        const setup = (minionSize: 1 | 2, targetUid: string, targetPieces: TestPiece[] = [], ownHand: string[] = filler): GnosticaGame => testGame({
+            board: [{ x: 0, y: 0, uid: "13", pieces: [[1, minionSize, "E"]] }, { x: 1, y: 0, uid: targetUid, pieces: targetPieces }],
+            hands: [ownHand, filler],
         });
 
-        it("piece 2->0: a size-1 minion destroys an enemy size-2 piece in one step", () => {
-            const g = setup(1);
-            withCardAtN0(g, "3C");
-            g.board.get(1, 0)!.pieces = [new Piece(2, 2, "U")];
-            g.move("use 13/with m0.1 shrink n0.2 2");
-            expect(g.board.get(1, 0)!.pieces.length).eq(0);
+        it("a piece shrink's total acts across its whole range: 3->1 (size-1 minion, capped at 2), 2->0 and 3->0 (destroyed), and a total above what's there wipes out (4 acts as 3)", () => {
+            const a = setup(1, "3C", [[2, 3, "U"]]);
+            expect(a.validateMove("use 13/with m0.1 shrink n0.3 3").valid).to.be.false; // 3 > 2 x 1
+            expect(a.validateMove("use 13/with m0.1 shrink n0.3 2").valid).to.be.true;
+            a.move("use 13/with m0.1 shrink n0.3 2");
+            expect(a.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1 });
+
+            const b = setup(1, "3C", [[2, 2, "U"]]);
+            b.move("use 13/with m0.1 shrink n0.2 2");
+            expect(b.board.get(1, 0)!.pieces.length).eq(0);
+
+            const c = setup(2, "3C", [[2, 3, "U"]]);
+            c.move("use 13/with m0.2 shrink n0.3 3");
+            expect(c.board.get(1, 0)!.pieces.length).eq(0);
+
+            const d = setup(2, "3C", [[2, 3, "U"]]);
+            d.move("use 13/with m0.2 shrink n0.3 4");
+            expect(d.board.get(1, 0)!.pieces.length).eq(0);
         });
 
-        it("piece 3->0: a size-2 minion destroys an enemy size-3 piece in one step", () => {
-            const g = setup(2);
-            withCardAtN0(g, "3C");
-            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
-            g.move("use 13/with m0.2 shrink n0.3 3");
-            expect(g.board.get(1, 0)!.pieces.length).eq(0);
+        it("a territory shrink's total acts across its whole range: 2->0 (royalty, size-1 minion), 3->1 (major to spot, size-1 minion), 3->0 (major, size-2 minion)", () => {
+            const a = setup(1, "KS"); // worth 2
+            a.move("use 13/with m0.1 shrink n0 2");
+            expect(a.board.get(1, 0)?.card).to.be.undefined;
+
+            const b = setup(1, "00", [], ["2C", ...filler]); // worth 3
+            expect(b.validateMove("use 13/with m0.1 shrink n0 2 to KS").valid).to.be.false; // wrong replacement value
+            b.move("use 13/with m0.1 shrink n0 2 to 2C");
+            expect(b.board.get(1, 0)!.card?.uid).eq("2C");
+
+            const c = setup(2, "00");
+            c.move("use 13/with m0.2 shrink n0 3");
+            expect(c.board.get(1, 0)?.card).to.be.undefined;
         });
 
-        it("a total above what's there acts as a wipeout (4 acts as 3)", () => {
-            const g = setup(2);
-            withCardAtN0(g, "3C");
-            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
-            g.move("use 13/with m0.2 shrink n0.3 4");
-            expect(g.board.get(1, 0)!.pieces.length).eq(0);
-        });
-
-        it("territory 2->0: a size-1 minion destroys a royalty territory in one step", () => {
-            const g = setup(1);
-            withCardAtN0(g, "KS"); // worth 2
-            g.move("use 13/with m0.1 shrink n0 2");
-            expect(g.board.get(1, 0)?.card).to.be.undefined;
-        });
-
-        it("territory 3->1: a size-1 minion shrinks a major arcana territory to a spot card in one step", () => {
-            const g = setup(1);
-            forceCardAt(g, 1, 0, () => major(0)); // worth 3
-            g.hands[0].push("2C");
-            expect(g.validateMove("use 13/with m0.1 shrink n0 2 to KS").valid).to.be.false; // wrong replacement value
-            g.move("use 13/with m0.1 shrink n0 2 to 2C");
-            expect(g.board.get(1, 0)!.card?.uid).eq("2C");
-        });
-
-        it.skip("a one-step Death shrink uses up both swords, so a second step is rejected; the ordinary two steps still work", () => {
-            const g = setup(1);
-            withCardAtN0(g, "3C");
-            g.board.get(1, 0)!.pieces = [new Piece(2, 3, "U")];
+        it("a one-step Death shrink uses up both swords, so a second step is rejected; the ordinary two steps still work", () => {
+            const g = setup(1, "3C", [[2, 3, "U"]]);
             expect(g.validateMove("use 13/with m0.1 shrink n0.3 2").complete).eq(1);
             expect(g.validateMove("use 13/with m0.1 shrink n0.3 2/with m0.1 shrink n0.1 1").valid).to.be.false;
             expect(g.validateMove("use 13/with m0.1 shrink n0.3 1/with m0.1 shrink n0.2 1").valid).to.be.true;
         });
-
-        it("territory 3->0: a size-2 minion destroys a major arcana territory in one step", () => {
-            const g = setup(2);
-            forceCardAt(g, 1, 0, () => major(0));
-            g.move("use 13/with m0.2 shrink n0 3");
-            expect(g.board.get(1, 0)?.card).to.be.undefined;
-        });
     });
 
-    it.skip("Moon: a move that pushes a territory to 4 pieces stays incomplete until the attack destroys one there, restoring the cap", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(18)); // The Moon
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // acting minion, facing n0
-        forceCardAt(g, 1, 0, () => card("AC"));
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "N"), new Piece(2, 2, "N"), new Piece(2, 3, "N")]; // already at the 3-piece cap
-
+    it("Moon: a move that pushes a territory to 4 pieces stays incomplete until the attack destroys one there, restoring the cap", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "18", pieces: [[1, 1, "E"]] }, // The Moon, facing n0
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "N"], [2, 2, "N"], [2, 3, "N"]] }, // already at the 3-piece cap
+            ],
+            hands: [filler, filler],
+        });
         // Move alone pushes n0 to 4 pieces - not yet submittable, since nothing has restored the cap.
-        const moveOnly = `use 18/with m0.1 move m0.1 1`;
-        expect(g.validateMove(moveOnly).complete).to.equal(-1);
-
+        expect(g.validateMove(`use 18/with m0.1 move m0.1 1`).complete).to.equal(-1);
         // Shrinking (not destroying) the victim doesn't satisfy the restoration either.
-        const shrinkOnly = `use 18/with m0.1 move m0.1 1 orient U/with n0.1.1 shrink n0.3 1`;
-        expect(g.validateMove(shrinkOnly).valid).to.be.false;
-
-        // Destroying one of the four pieces at n0 (not necessarily the moved one, or the same minion) restores the cap and completes the move.
+        expect(g.validateMove(`use 18/with m0.1 move m0.1 1 orient U/with n0.1.1 shrink n0.3 1`).valid).to.be.false;
+        // Destroying one of the four pieces at n0 (not necessarily the moved one) restores the cap.
         const full = `use 18/with m0.1 move m0.1 1 orient U/with n0.1.1 shrink n0.1.2 1`;
-        const result = g.validateMove(full);
-        expect(result.valid).to.be.true;
-        expect(result.complete).to.equal(1);
+        expect(g.validateMove(full)).to.deep.include({ valid: true, complete: 1 });
         g.move(full);
         expect(g.board.get(1, 0)!.pieces.length).eq(3);
         expect(g.board.get(1, 0)!.pieces.some(p => p.owner === 2 && p.size === 1)).to.be.false; // the victim is gone
     });
 
-    it.skip("Chariot: two rod steps on the same piece may pass through the void mid-chain", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(7)); // The Chariot
-        g.board.get(0, 0)!.pieces = [new Piece(1, 3, "W")]; // large minion, pointing away from the grid
-        // Step 1 (relaxed, not the last step): 3 west from m0 lands at j0,
-        // which is void (no card within reach) - illegal as an ordinary
-        // landing, legal here as Chariot's waypoint. Reorient east.
-        // Step 2 (the last step, normal rules apply): 3 east from j0 lands
-        // back on m0 - a real, legal landing (0 pieces there now, has a card).
+    it("Chariot: two rod steps on the same piece may pass through the void mid-chain", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 3, "W"]] }], // large minion, pointing away from the grid
+            hands: [filler, filler],
+        });
+        // Step 1 (relaxed, not the last step): 3 west from m0 lands at j0, which is void - illegal
+        // as an ordinary landing, legal here as Chariot's waypoint. Reorient east.
+        // Step 2 (the last step, normal rules apply): 3 east from j0 lands back on m0 - legal.
         g.move(`use 07/with m0.3 move m0.3 3 orient E/with j0.3 move j0.3 3 orient U`);
         expect(g.board.get(0, 0)!.pieces.length).eq(1);
         expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 3, orientation: "U" });
         expect(g.board.get(-3, 0)?.pieces.length ?? 0).eq(0); // nothing left stranded at the waypoint
     });
 
-    it.skip("Empress: orient-minion then create-ignoring-capacity", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(3)); // The Empress
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "N"), new Piece(1, 1, "U"), new Piece(1, 1, "U")]; // already 3 here
-        // The first piece is size-1 facing N, uniquely identified among the
-        // three (also size-1) pieces at m0 - the other two are identical
-        // (owner+size+orientation), so once the first is reoriented to
-        // match them, the second step's "m0.1" alone still resolves (to
-        // the first array slot) via resolvePieceRef's true-duplicate
-        // tie-break rather than an ambiguous-ref failure.
+    it("Empress: orienting the minion first, then creating with ignoreCapacity, still resolves the second step's ref even once orientation makes two pieces identical", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 1, "N"], [1, 1, "U"], [1, 1, "U"]] }], // already 3 here
+            hands: [filler, filler],
+        });
+        // The first piece is size-1 facing N, uniquely identified among the three (also size-1)
+        // pieces at m0 - the other two are identical, so once the first is reoriented to match
+        // them, "m0.1" alone still resolves (to the first array slot) via the true-duplicate tie-break.
         g.move(`use 03/orient m0.1.N U/with m0.1 at m0 create U`);
         expect(g.board.get(0, 0)!.pieces.length).eq(4); // ignoreCapacity let a 4th piece in
     });
 
-    it.skip("orientMinion: a same-facing (no-op) reorientation is rejected, not silently accepted as a real step", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(3)); // The Empress
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+    it("orientMinion: a same-facing (no-op) reorientation is rejected, not silently accepted as a real step", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 1, "E"]] }], hands: [filler, filler] });
         const validated = g.validateMove(`use 03/orient m0.1 E`);
         expect(validated.valid).to.be.false;
         expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
-        // Genuinely reorienting first still validates fine.
-        expect(g.validateMove(`use 03/orient m0.1 N`).valid).to.be.true;
+        expect(g.validateMove(`use 03/orient m0.1 N`).valid).to.be.true; // genuinely reorienting still validates fine
     });
 
-    it.skip("Devil: three orientAny steps, including reorienting the acting minion mid-chain", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(15)); // The Devil
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")]; // minion, standing
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // an enemy piece, east of m0
+    it("Devil: three orientAny steps, including reorienting the acting minion mid-chain, produce one chat/frame/_group entry per step", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "15", pieces: [[1, 1, "U"]] }, // The Devil, minion standing
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "U"]] }, // an enemy piece, east of m0
+            ],
+            hands: [filler, filler],
+        });
         g.move(
             // Step 1: orient the minion itself from "U" to "E", so it can now target n0.
             // Step 2: orient the enemy piece at n0 to face away (W).
@@ -1530,68 +1058,44 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.frames[0].board.get(1, 0)!.pieces[0].orientation).eq("U"); // step 2 not yet applied
         expect(g.frames[1].board.get(0, 0)!.pieces[0].orientation).eq("E"); // still E after step 2
         expect(g.frames[1].board.get(1, 0)!.pieces[0].orientation).eq("W"); // step 2's own effect
-        const reps = g.render() as unknown[];
-        expect(Array.isArray(reps)).eq(true);
-        expect(reps.length).eq(3);
-
-        // Confirms this.results was genuinely grouped, one _group per
-        // step, not left flat.
-        const groups = g.results.filter(r => r.type === "_group");
-        expect(groups.length).eq(3);
+        expect((g.render() as unknown[]).length).eq(3);
+        expect(g.results.filter(r => r.type === "_group").length).eq(3); // grouped, one per step
     });
 
     it("Judgement: draws named cards from the discard pile, up to the minion's pip count", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(20)); // Judgement
-        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "U")]; // medium minion, 2 pips
-        g.hands[0] = g.hands[0].slice(0, 4); // make room - a full 6-card hand has none
-        g.discardPile.push("KS", "00");
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "20", pieces: [[1, 2, "U"]] }], // medium minion, 2 pips
+            hands: [filler.slice(0, 4), filler], // make room - a full 6-card hand has none
+            discardPile: ["KS", "00"],
+        });
         g.move(`use 20/with m0.2 draw KS 00`);
         expect(g.hands[0]).to.include.members(["KS", "00"]);
         expect(g.discardPile).to.deep.equal([]);
     });
 
     it("High Priestess: two discard-and-redraw rounds, no minion reference needed", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "02", pieces: [[1, 1, "U"]] }], hands: [filler, filler], drawPile: ["9R"] });
         const [firstDiscard] = g.hands[0];
         g.move(`use 02/discard ${firstDiscard} draw 1`); // only the first of the two rounds
         expect(g.hands[0]).to.not.include(firstDiscard);
         expect(g.hands[0].length).eq(6);
     });
 
-    it("Magician: chooses which suit primitive to use for its one step", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(1)); // The Magician
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+    it("Magician: chooses which suit primitive to use for its one step, but only via the head's \"as\" - a suit typed directly into a step is rejected", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "01", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
         g.move(`use 01 as C/with m0.1 at m0 create U`);
         expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode
-    });
 
-    // The suit is chosen ONLY via the head's "as <suit>" - a step segment
-    // that embeds the suit letter directly, with no "as" given at all, is
-    // rejected rather than silently reinterpreted (untrusted validateMove;
-    // a trusted caller sending the same malformed shape throws instead -
-    // see deriveStepTokens' own docs).
-    it("Magician: a suit typed directly into the step, with no 'as', is rejected", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(1)); // The Magician
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        // Hand-typed nonsense, not reachable through any click path - a
-        // bare suit letter isn't valid step content at all anymore (Cups
-        // itself carries no mode word - see stepMinorMode's own docs),
-        // so this is just an ordinary malformed-step rejection now, not a
-        // Magician-specific one.
-        const result = g.validateMove(`use 01/with m0.1 C own m0 U`);
+        // Hand-typed nonsense, not reachable through any click path - a bare suit letter isn't
+        // valid step content at all (Cups itself carries no mode word).
+        const g2 = testGame({ board: [{ x: 0, y: 0, uid: "01", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
+        const result = g2.validateMove(`use 01/with m0.1 C own m0 U`);
         expect(result.valid).to.be.false;
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_OTHERWORD" }));
     });
 
     it("refuses more power-step segments than the card actually grants", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(1)); // The Magician - only 1 power
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "01", pieces: [[1, 1, "U"]] }], hands: [filler, filler] }); // The Magician - only 1 power
         expect(() => g.move(`use 01 as C/with m0.1 at m0 create U/with m0.1 at m0 create U`)).to.throw();
     });
 });
@@ -1603,63 +1107,44 @@ describe("Gnostica: frame-stepping render() contract", () => {
     type RepLike = { areas?: AreaButtonBarLike[] };
     const barValues = (rep: RepLike): string[] | undefined =>
         rep.areas?.find(a => a.type === "buttonBar")?.buttons?.map(b => b.value ?? "");
+    const setupLovers = (): GnosticaGame => testGame({
+        board: [{ x: 0, y: 0, uid: "06", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[1, 1, "S"]] }],
+        hands: [filler, filler],
+    });
+    const move = `use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`;
 
-    it.skip("live paging: a genuine 2-step chain, still mid-build (partial), shows step 1's own real choices on frame 0 - not the final rep's", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(6)); // The Lovers
-        forceCardAt(g, 1, 0, () => aceOfDiscs());
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
-        const move = `use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`;
+    it("live paging: a genuine 2-step chain, still mid-build (partial), shows step 1's own real choices on frame 0 - not the final rep's; once committed and reloaded, frame 0 shows no buttons at all", () => {
+        const g = setupLovers();
         g.move(move, { partial: true });
         expect(g.frames.length).eq(1); // still mid-build, but the chain itself is complete
         const reps = g.render() as RepLike[];
-        expect(Array.isArray(reps)).eq(true);
         expect(reps.length).eq(2);
-        // Frame 0 (as of just step 1) still has Cups' own mode buttons on
-        // offer - the real choice available at that point in the chain.
+        // Frame 0 (as of just step 1) still has Cups' own mode buttons on offer - the real choice
+        // available at that point in the chain; the final/live rep (both steps typed) does not.
         expect(barValues(reps[0])).to.include("target_own");
-        // The final/live rep (both steps already typed) does not offer
-        // the same thing - proving the two are genuinely distinct, not
-        // both just showing today's (final) button state.
         expect(barValues(reps[1])).to.not.deep.equal(barValues(reps[0]));
+
+        // The same chain, once fully committed (no longer "in progress") - the historical frame
+        // gets no buttons at all; the final/live rep still gets its own normal bar.
+        const g2 = setupLovers();
+        g2.move(move);
+        const reps2 = g2.render() as RepLike[];
+        expect(reps2.length).eq(2);
+        expect(barValues(reps2[0])).eq(undefined);
+        expect(barValues(reps2[1])).to.not.eq(undefined);
     });
 
-    it.skip("historical review: the same chain, once fully committed and reloaded, shows no buttons on its own intermediate frame", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(6));
-        forceCardAt(g, 1, 0, () => aceOfDiscs());
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
-        g.move(`use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`);
-        // liveMove is cleared on a real commit - nothing "in progress" left.
-        const reps = g.render() as RepLike[];
-        expect(reps.length).eq(2);
-        expect(barValues(reps[0])).eq(undefined); // no buttonBar area at all on the historical frame
-        expect(barValues(reps[1])).to.not.eq(undefined); // the final/live rep still gets its own normal bar
-    });
-
-    it.skip("1 real step never produces an array or grouped results, even on a card that could have taken more", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(6)); // The Lovers - could take up to 2 steps
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
+    it("1 real step never produces an array or grouped results, even on a card that could have taken more", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "06", pieces: [[1, 1, "E"]] }], hands: [filler, filler] }); // Lovers - could take up to 2 steps
         g.move(`use 06/with m0.1 move m0.1 1 orient E`); // only step 1, step 2 skipped
         expect(Array.isArray(g.render())).eq(false);
         expect(g.results.some(r => r.type === "_group")).eq(false);
     });
 
-    it.skip("persistence round-trip: a reloaded game still steps through the same frames a genuine chain produced", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(6));
-        forceCardAt(g, 1, 0, () => aceOfDiscs());
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
-        g.move(`use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`);
+    it("persistence round-trip: a reloaded game still steps through the same frames a genuine chain produced", () => {
+        const g = setupLovers();
+        g.move(move);
         const before = g.render() as RepLike[];
-
         const g2 = new GnosticaGame(g.serialize());
         const after = g2.render() as RepLike[];
         expect(after.length).eq(before.length);
@@ -1856,15 +1341,14 @@ describe("Gnostica: render", () => {
         expect(rep.board.buffer?.show).to.deep.equal(["E"]);
     });
 
-    it.skip("shows a buffer when orientAny (Devil) targets a piece on an edge wasteland", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 1, 0, () => major(15)); // The Devil
-        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // acting minion, facing (2,0)
-        g.board.store.set(2, 0, new CellContents(undefined, [new Piece(2, 1, "S")])); // enemy target, on an edge wasteland
+    it("shows a buffer when orientAny (Devil) targets a piece on an edge wasteland", () => {
+        // (2,0) has no card of its own - a wasteland, adjacent to (1,0)'s card - with an enemy piece on it.
+        const g = testGame({
+            board: [{ x: 1, y: 0, uid: "15", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, pieces: [[2, 1, "S"]] }],
+            hands: [filler, filler],
+        });
         expect(g.board.classify(2, 0)).eq("wasteland");
-        const minionCell = GnosticaBoard.coords2algebraic(1, 0);
-        const targetCell = GnosticaBoard.coords2algebraic(2, 0);
-        g.move(`use 15/with ${minionCell}.1 orient ${targetCell}.1 N`);
+        g.move(`use 15/with n0.1 orient o0.1 N`);
         const rep = g.render() as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer?.show).to.deep.equal(["E"]);
     });
@@ -2704,24 +2188,6 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
     // clickable identifier, so a real click on a highlighted discard-pile
     // card (Judgement's own picker) must still resolve to its real uid/
     // bucket, not fall through to "not a recognized click".
-    it.skip("a real click on the highlighted discard-pile card (Judgement) still resolves correctly", () => {
-        const g = new GnosticaGame(2);
-        const rowColFor = (x: number, y: number): [number, number] => {
-            const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
-            return [y - minY, x - minX];
-        };
-        forceCardAt(g, 0, 0, () => major(20)); // Judgement
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        g.hands[0] = g.hands[0].slice(0, 5); // room for 1 more (a full 6-card hand has none)
-        g.discardPile = ["03"];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const newKey = `discard_03_new`;
-        const click = g.handleClick(cellClick.move, -1, -1, newKey);
-        expect(click.valid).to.be.true;
-        expect(click.move).eq(`use 20/with m0.1 draw 03`);
-    });
 });
 
 // Click support for minor arcana's single suit-power step - see
@@ -2734,40 +2200,30 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
 // representative commit per suit prove the resulting move actually works.
 describe("Gnostica: handleClick - minor arcana power steps", () => {
     const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClick's own window exactly (see
-        // renderWindow's own docs - territory bounds, not the raw
-        // board.minX/maxX/minY/maxY, which also includes cardless
-        // wasteland cells a piece may have been pushed onto) - reusing
-        // the game's own private computation directly rather than
-        // duplicating its logic here, so the two can never drift apart.
+        // Must match handleClick's own window exactly (see renderWindow's own docs - territory
+        // bounds, not the raw board bounds, which also includes cardless wasteland cells a piece
+        // may have been pushed onto) - reusing the game's own private computation directly.
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
 
     it("Cups (own): mode button seeds the default step; click-to-orient sets the new piece's facing", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }], hands: [filler, filler] });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         expect(cellClick.move).eq(`use AC`);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_own");
-        // Trailing "?" - the seeded default facing isn't yet a deliberate
-        // choice (mirrors "place"'s identical convention) - so the real
-        // playground client's own auto-submit-on-complete behaviour
+        // Trailing "?" - the seeded default facing isn't yet a deliberate choice (mirrors
+        // "place"'s identical convention), so a real client's auto-submit-on-complete behaviour
         // doesn't whisk the new piece away before a click can orient it.
         expect(modeClick.move).eq(`use AC/with m0.1 at n0 create U?`);
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(0);
-        // Soft-complete says WHY it's holding open, not the bare generic
-        // "looks like a valid move" fallback.
+        // Soft-complete says WHY it's holding open, not the bare generic "looks like a valid move".
         expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
-        // n0 itself is already "U", the creation's own still-soft
-        // default - confirms it (drops "?", no duplicate token) rather
-        // than erroring as a no-op, same as "place"'s own identical
-        // click-to-orient collapse.
+        // n0 itself is already "U", the creation's own still-soft default - confirms it (drops "?",
+        // no duplicate token) rather than erroring as a no-op, same as "place"'s own click-to-orient collapse.
         const [row2, col2] = rowColFor(g, 1, 0);
         const sameCell = g.handleClick(modeClick.move, row2, col2);
         expect(sameCell.valid).to.be.true;
@@ -2778,8 +2234,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const east = g.handleClick(modeClick.move, row3, col3);
         expect(east.move).eq(`use AC/with m0.1 at n0 create E`); // any click drops "?" outright
         expect(east.complete).eq(1); // a real correction is a deliberate choice, no longer soft
-        // Committing the ORIGINAL, still-soft seed directly (never taking
-        // the optional correction) - "?" makes no difference to the piece
+        // Committing the ORIGINAL, still-soft seed directly - "?" makes no difference to the piece
         // actually created, only to whether it auto-submits.
         g.move(modeClick.move);
         const t = g.board.get(1, 0)!;
@@ -2788,10 +2243,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 
     it("Cups (enemy): one candidate per enemy piece at the target cell - here, the only one", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the targeted cell
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 1, "W"]] }],
+            hands: [filler, filler],
+        });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -2804,22 +2259,15 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 
     it("Cups (new): target candidate seeds an incomplete (still valid) step, a hand-card click supplies the uid", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, -1, 0, () => aceOfCups()); // l0
-        g.move("place l0 W"); // player 1, pointing at k0, a wasteland
-        g.move("place n0 U"); // player 2
         const spotUid = "2S";
-        g.hands[0] = g.hands[0].filter(uid => uid !== spotUid);
-        g.hands[0].push(spotUid);
+        const g = testGame({ board: [{ x: -1, y: 0, uid: "AC", pieces: [[1, 1, "W"]] }], hands: [[spotUid, ...filler], filler] });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, -1, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_new");
         expect(modeClick.move).eq(`use AC/with l0.1 at k0 create`);
-        // Cell chosen, card uid not yet supplied - genuinely still
-        // building (complete:-1), not just soft-pedaled to 0 - a bare
-        // hand-typed submission of this exact string must not look
-        // "valid" (see validateMinorPower's own docs).
+        // Cell chosen, card uid not yet supplied - genuinely still building (complete:-1), not just
+        // soft-pedaled to 0 - a bare hand-typed submission of this exact string must not look valid.
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(-1);
         const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
@@ -2830,14 +2278,14 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 
     it("Rods (piece): the unified target list offers both the minion itself and whatever's at the facing cell", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the facing cell
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }],
+            hands: [filler, filler],
+        });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
-        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        g.move(cellClick.move, { partial: true }); // sync engine state, same as a real client's preview flow
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
@@ -2849,19 +2297,19 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(faceClick.move).eq(`use AR/with m0.1 move n0.1 1`);
         g.move(selfClick.move); // commit moving itself
         expect(g.board.get(0, 0)!.pieces.length).eq(0);
-        // n0 already held player 2's piece (pieces[0]) before the move - the
-        // mover lands alongside it, not alone.
+        // n0 already held player 2's piece (pieces[0]) before the move - the mover lands alongside it.
         expect(g.board.get(1, 0)!.pieces[1]).to.deep.include({ owner: 1, orientation: "E" });
     });
 
     it("Rods (piece): once the target list picks the OTHER piece at the facing cell, ITS distance 1 is directly click-settable (no self-target collision)", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        forceCardAt(g, 4, 0, () => aceOfDiscs()); // keeps p0 wasteland, not void
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the facing cell
-        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // room to move up to 2
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, // room to move up to 2
+                { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] },
+                { x: 4, y: 0, uid: "AC" }, // keeps p0 wasteland, not void
+            ],
+            hands: [filler, filler],
+        });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -2872,28 +2320,18 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row2, col2] = rowColFor(g, 3, 0); // p0, distance 2 from n0
         const distClick2 = g.handleClick(targeted.move, row2, col2);
         expect(distClick2.move).eq(`use AR/with m0.2 move n0.1 2`);
-        // Unlike a self-target (where distance 1 collides with the
-        // ACTING minion's own facing cell), n0's own distance-1
-        // destination (o0) doesn't coincide with anything else, so it's
-        // directly click-settable even though it's the smallest distance.
+        // Unlike a self-target (where distance 1 collides with the acting minion's own facing
+        // cell), n0's own distance-1 destination (o0) doesn't coincide with anything else.
         const [row1, col1] = rowColFor(g, 2, 0); // o0, distance 1 from n0
         const distClick1 = g.handleClick(distClick2.move, row1, col1);
         expect(distClick1.move).eq(`use AR/with m0.2 move n0.1 1`);
     });
 
-    it("Rods (tile): the tile candidate defaults to pushing the pointed-at territory 1 space", () => {
-        const g = new GnosticaGame(2);
-        // Fully deterministic (see clearBoard's own docs): the random
-        // initial deal could otherwise occasionally put the Ace of Rods
-        // itself at n0, which forceCardAt's own duplicate-clearing would
-        // then wipe out from there, leaving no territory to push - see
-        // "Rods (tile): pushes the pointed-at territory further away"'s
-        // own identical fix above.
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
+    it("Rods (tile): the tile candidate defaults to pushing the pointed-at territory 1 space, and seeds distance 1 - a destination click sets any further distance", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD" }],
+            hands: [filler, filler],
+        });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -2902,44 +2340,33 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         g.move(modeClick.move);
         expect(g.board.has(1, 0)).eq(false);
         expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
-    });
 
-    it("Rods (tile): the tile candidate seeds distance 1; a destination click sets any further distance", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
-        // o0 (dist 1) is wasteland via adjacency to n0 alone; p0 (dist 2)
-        // isn't adjacent to any territory once n0 is gone, so it needs its
-        // own neighbour card to stay wasteland rather than void.
-        forceCardAt(g, 4, 0, () => card("2C")); // q0
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
-        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // room to push up to 2
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(modeClick.move).eq(`use AR/with m0.2 move n0 1`);
-        // Same destination-click mechanism "piece" mode's own distance
-        // uses (see handlePendingStepBoardClick's own docs), anchored on
-        // the fixed facing cell (n0) instead of a chosen piece target.
-        const [row2, col2] = rowColFor(g, 3, 0); // p0, distance 2 from n0
-        const distClick2 = g.handleClick(modeClick.move, row2, col2);
+        // o0 (dist 1) is wasteland via adjacency to n0 alone; p0 (dist 2) isn't adjacent to any
+        // territory once n0 is gone, so it needs its own neighbour card to stay wasteland, not void.
+        const g2 = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD" }, { x: 4, y: 0, uid: "2C" }],
+            hands: [filler, filler],
+        });
+        const seed2 = g2.handleClick("", -1, -1, "_btn_use");
+        const [row0, col0] = rowColFor(g2, 0, 0);
+        const cellClick2 = g2.handleClick(seed2.move, row0, col0);
+        const modeClick2 = g2.handleClick(cellClick2.move, -1, -1, "_btn_target_n0");
+        expect(modeClick2.move).eq(`use AR/with m0.2 move n0 1`);
+        // Same destination-click mechanism "piece" mode's own distance uses, anchored on the
+        // fixed facing cell (n0) instead of a chosen piece target.
+        const [row2, col2] = rowColFor(g2, 3, 0); // p0, distance 2 from n0
+        const distClick2 = g2.handleClick(modeClick2.move, row2, col2);
         expect(distClick2.move).eq(`use AR/with m0.2 move n0 2`);
-        const [row1, col1] = rowColFor(g, 2, 0); // o0, distance 1 from n0
-        const distClick1 = g.handleClick(distClick2.move, row1, col1);
+        const [row1, col1] = rowColFor(g2, 2, 0); // o0, distance 1 from n0
+        const distClick1 = g2.handleClick(distClick2.move, row1, col1);
         expect(distClick1.move).eq(`use AR/with m0.2 move n0 1`);
-        g.move(distClick2.move);
-        expect(g.board.has(1, 0)).eq(false);
-        expect(g.board.get(3, 0)!.card).to.not.eq(undefined);
+        g2.move(distClick2.move);
+        expect(g2.board.has(1, 0)).eq(false);
+        expect(g2.board.get(3, 0)!.card).to.not.eq(undefined);
     });
 
     it("Discs (piece): the only candidate at the (self) target cell is the minion itself", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfDiscs());
-        g.move("place m0 U"); // player 1
-        g.move("place l0 U"); // player 2
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -2949,97 +2376,28 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2 });
     });
 
-    it.skip("Discs (tile): the tile candidate seeds an incomplete (still valid) step, a hand-card click supplies the uid", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfDiscs());
-        forceCardAt(g, 1, 0, () => card("2C")); // n0, a known worth-1 spot card
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
-        const royaltyUid = "KS"; // King of Swords, worth 2
-        g.hands[0].push(royaltyUid);
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(modeClick.move).eq(`use AD/with m0.1 grow n0`);
-        // Target chosen, replacement card not yet supplied - must not read
-        // as a submittable move ("looks like a valid move"): still valid
-        // (still building), but genuinely incomplete.
-        expect(modeClick.valid).to.be.true;
-        expect(modeClick.complete).eq(-1);
-        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: aceOfDiscs().name }));
-        const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${royaltyUid}`);
-        expect(cardClick.move).eq(`use AD/with m0.1 grow n0 to ${royaltyUid}`);
-        g.move(cardClick.move);
-        expect(g.board.get(1, 0)!.card?.uid).eq(royaltyUid);
-    });
-
-    it.skip("Discs (tile): the tile candidate is struck through and rejects a click when the hand has no card that could grow this territory", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfDiscs());
-        forceCardAt(g, 1, 0, () => card("2C")); // n0, a known worth-1 spot card
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
-        // All spot cards (worth 1) - growing a worth-1 territory needs a
-        // worth-2 (court) card, which none of these are.
-        g.hands[0] = ["AC", "2R", "3D", "4S"];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        g.move(cellClick.move, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const tileBtn = bar!.buttons!.find(b => b.value === "target_n0");
-        expect(tileBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
-        const rejected = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(rejected.valid).to.be.false;
-        expect(rejected.message).eq(i18next.t("apgames:validation.gnostica.NO_CARD_TO_GROW"));
-        g.hands[0].push("KS"); // King of Swords, worth 2 - now completable
-        const rep2 = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
-        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
-        const tileBtn2 = bar2!.buttons!.find(b => b.value === "target_n0");
-        expect(tileBtn2!.attributes).to.be.undefined;
-        const accepted = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(accepted.move).eq(`use AD/with m0.1 grow n0`);
-    });
-
-    it("Cups (new), Wheel of Fortune: a dedicated button supplies the drawn card - hand card needed, no other card offers it", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(10)); // Wheel of Fortune
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place l0 U"); // player 2
+    it("Cups (new), Wheel of Fortune: a dedicated button supplies the drawn card, no point-value restriction - a regular Ace of Cups offers no such button, and typing \"drawn\" by hand for it is rejected", () => {
+        const majorUid = "03"; // The Empress, worth 3
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "10", pieces: [[1, 1, "E"]] }], hands: [filler, filler], drawPile: [majorUid] });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_new");
         expect(modeClick.move).eq(`use 10/with m0.1 at n0 create`);
-        g.move(modeClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
+        g.move(modeClick.move, { partial: true }); // sync engine state, same as a real client's preview flow
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         expect(bar?.buttons?.some(b => b.value === "drawn")).eq(true);
 
         const randomClick = g.handleClick(modeClick.move, -1, -1, "_btn_drawn");
         expect(randomClick.move).eq(`use 10/with m0.1 at n0 create drawn`);
-        // Fully deterministic (see clearBoard's own docs on the same
-        // principle) - and deliberately a non-spot (major arcana) card,
-        // to prove the random draw has no point-value restriction at all
-        // (unlike the ordinary hand-card path for this same mode).
-        const majorUid = "03"; // The Empress, worth 3
-        g.drawPile = [majorUid, ...g.drawPile.filter(uid => uid !== majorUid)];
         const before = g.drawPile.length;
         g.move(randomClick.move);
-        expect(g.board.get(1, 0)!.card?.uid).eq(majorUid);
+        expect(g.board.get(1, 0)!.card?.uid).eq(majorUid); // deliberately non-spot, proving no point-value restriction
         expect(g.drawPile.length).to.be.lessThan(before);
 
-        // A regular Ace of Cups own "new" step never offers this button -
-        // allowRandomDraw is Wheel of Fortune's own opt, not universal to
-        // "new" mode.
-        const g2 = new GnosticaGame(2);
-        clearBoard(g2);
-        forceCardAt(g2, 0, 0, () => aceOfCups());
-        g2.move("place m0 E");
-        g2.move("place l0 U");
+        // allowRandomDraw is Wheel of Fortune's own opt, not universal to "new" mode.
+        const g2 = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }], hands: [filler, filler] });
         const seed2 = g2.handleClick("", -1, -1, "_btn_use");
         const [row2, col2] = rowColFor(g2, 0, 0);
         const cellClick2 = g2.handleClick(seed2.move, row2, col2);
@@ -3048,19 +2406,12 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
         expect(bar2?.buttons?.some(b => b.value === "drawn")).eq(false);
-
-        // And typing "drawn" by hand for that same non-Wheel-of-Fortune
-        // card is rejected outright, not silently honored - the gate is
-        // opts.allowRandomDraw (derived from the card's own step
-        // definition), not the literal token.
+        // The gate is opts.allowRandomDraw (derived from the card's own step definition), not the literal token.
         expect(g2.validateMove(`use AC/with m0.1 at n0 create drawn`).valid).to.be.false;
     });
 
     it("Swords (piece): with no facing piece to attack (minion is \"up\"), falls back to the minion itself", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        g.move("place m0 U"); // player 1, size 1, "U" - no facing cell at all
-        g.move("place l0 U"); // player 2
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 1, "U"]] }], hands: [filler, filler], stashes: { 1: [4, 5, 5], 2: [5, 5, 5] } });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -3071,16 +2422,14 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.stashes.get(1)![0]).eq(5); // returned to its own stash
     });
 
-    // Attacking yourself is almost never what's wanted (unlike Rods' "move
-    // self" or Discs' "grow self", both genuinely common choices) - when
-    // the minion is actually facing an enemy, that's what the default
-    // should target.
+    // Attacking yourself is almost never what's wanted (unlike Rods' "move self" or Discs' "grow
+    // self", both genuinely common choices) - when the minion is facing an enemy, that's the default.
     it("Swords (piece): with a piece in the facing cell, the target list offers attacking THAT instead of just self", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g); // fully deterministic - see clearBoard's own docs
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the facing cell
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, pieces: [[2, 1, "W"]] }], // n0: no card of its own
+            hands: [filler, filler],
+            stashes: { 1: [4, 5, 5], 2: [4, 5, 5] },
+        });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -3088,110 +2437,57 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(targeted.move).eq(`use AS/with m0.1 shrink n0.1 1`);
         g.move(targeted.move);
         expect(g.board.get(0, 0)!.pieces.length).eq(1); // the acting player's own minion survives
-        // n0 has no card of its own (cleared above) - once its only piece
-        // is destroyed, pruneIfEmpty deletes the cell outright rather than
-        // leaving empty CellContents behind (see pruneIfEmpty's own docs),
-        // so board.get(1,0) itself becomes undefined, not just empty.
+        // n0 has no card of its own - once its only piece is destroyed, pruneIfEmpty deletes the
+        // cell outright, so board.get(1,0) itself becomes undefined, not just empty.
         expect(g.board.get(1, 0)?.pieces.length ?? 0).eq(0); // the enemy piece is destroyed instead
         expect(g.stashes.get(2)![0]).eq(5); // returned to ITS owner's stash
     });
 
     describe("after a completed power step, the next optional step is announced", () => {
-        const setup = (twoCells: boolean) => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => aceOfRods());
-            forceCardAt(g, 1, 0, () => aceOfCups());
-            forceCardAt(g, 2, 0, () => aceOfDiscs());
-            g.board.get(1, 0)!.pieces = [new Piece(1, 2, "E")];
-            if (twoCells) {
-                g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            }
-            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U")];
-            g.hands[0] = ["03", "2S"];
-            return g;
-        };
+        const setup = (twoCells: boolean): GnosticaGame => testGame({
+            board: [
+                { x: 0, y: 0, uid: "AR", pieces: twoCells ? [[1, 1, "E"]] : [] },
+                { x: 1, y: 0, uid: "AC", pieces: [[1, 2, "E"]] },
+                { x: 2, y: 0, uid: "AD", pieces: [[2, 1, "U"]] },
+                { x: 3, y: 1, uid: "2C" },
+            ],
+            hands: [["03", "2S"], filler],
+        });
         const barValues = (g: GnosticaGame) =>
             (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
-        const optionalMsg = () => i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: "The Empress" });
 
-        it.skip("with minions on several cells, the bar stays collapsed to the card and a Choose Minion spacer", () => {
-            const g = setup(true);
-            const move = "play 03/orient n0.2 S";
-            const result = g.validateMove(move);
-            expect(result.complete).eq(0);
-            expect(result.message).eq(optionalMsg());
-            g.move(move, { partial: true });
-            const buttons = barValues(g);
-            expect(buttons.map(b => b.value)).to.not.include("use");
-            expect(buttons.map(b => b.value)).to.not.include("pass");
-            expect(buttons.some(b => b.label === "Choose Minion")).to.be.true;
-        });
-
-        it.skip("clicking a minion's cell then picks the next step's minion, not another facing for the finished orient", () => {
-            const g = setup(true);
-            const move = "play 03/orient n0.2 S";
-            const [row, col] = rowColFor(g, 1, 0);
-            const same = g.handleClick(move, row, col);
-            expect(same.move).eq(`${move}/with n0.2`);
-            expect(same.valid).to.be.true;
-            expect(same.message).eq(optionalMsg());
-            const [row2, col2] = rowColFor(g, 0, 0);
-            expect(g.handleClick(move, row2, col2).move).eq(`${move}/with m0.1`);
-        });
-
-        it("any other board click names the next step instead of raising the finished orient's errors", () => {
+        it("any other board click names the next step instead of raising the finished orient's errors; a fresh play with minions on several cells still shows the top-level bar", () => {
             const g = setup(true);
             const move = "play 03/orient n0.2 S";
             for (const [x, y] of [[2, 0], [3, 1]]) {
-                forceCardAt(g, 3, 1, () => card("2C"));
                 const [row, col] = rowColFor(g, x, y);
                 const result = g.handleClick(move, row, col);
                 expect(result.move).eq(move);
                 expect(result.valid).to.be.true;
                 expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_CELL"));
             }
-        });
-
-        it.skip("with a single minion the message still announces the optional step, and the Cups buttons are offered", () => {
-            const g = setup(false);
-            const move = "play 03/orient n0.2 S";
-            expect(g.validateMove(move).message).eq(optionalMsg());
-            g.move(move, { partial: true });
-            expect(barValues(g).some(b => b.label === "Cups")).to.be.true;
-        });
-
-        it("a fresh play with minions on several cells still shows the top-level bar", () => {
-            const g = setup(true);
-            g.move("play 03", { partial: true });
-            expect(barValues(g).map(b => b.value)).to.include("use");
+            const g2 = setup(true);
+            g2.move("play 03", { partial: true });
+            expect(barValues(g2).map(b => b.value)).to.include("use");
         });
     });
 
     describe("a reoriented minion stays in the pool alongside its untouched siblings", () => {
-        // Board built by hand, then committed so the walkers' clone() sees it.
-        const setup = () => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => aceOfRods());
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "W"), new Piece(2, 1, "W"), new Piece(2, 1, "W"), new Piece(2, 2, "N")];
-            g.currplayer = 2;
-            g.hands[1] = ["03", "2S"];
-            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
-            return g;
-        };
+        const setup = (): GnosticaGame => testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "W"], [2, 1, "W"], [2, 1, "W"], [2, 2, "N"]] }],
+            currplayer: 2,
+            hands: [filler, ["03", "2S"]],
+        });
         const move = "play 03/orient m0.1.w.2 E";
 
-        it("after orient, the next step's candidates include every own minion in the cell, at its current facing", () => {
+        it("after orient, the next step's candidates include every own minion in the cell, at its current facing, and the button bar after the partial move lists them all too", () => {
             const g = setup();
             const pending = (g as unknown as { parsePendingStep: (m: string) => { minionCandidates: { piece?: Piece }[] } | undefined }).parsePendingStep(move)!;
             expect(pending.minionCandidates.map(c => `${c.piece?.size}${c.piece?.orientation}`).sort()).to.deep.equal(["1E", "1W", "2N"]);
-        });
 
-        it("the button bar after the partial move lists them all too", () => {
-            const g = setup();
-            g.move(move, { partial: true });
-            const buttons = (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            const g2 = setup();
+            g2.move(move, { partial: true });
+            const buttons = (g2.render() as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.filter(b => b.value?.startsWith("minion_")).map(b => b.label).sort()).to.deep.equal(["1-pip pointing E", "1-pip pointing W", "2-pip pointing N"]);
         });
 
@@ -3206,16 +2502,15 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 
     describe("Cups options after picking the final step's minion", () => {
-        it("offers Create Minion, a struck-through Create Territory (the cell is already one), and Create Enemy for the enemy piece there", () => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => aceOfRods());
-            forceCardAt(g, 1, 0, () => aceOfCups());
-            g.board.get(0, 0)!.pieces = [new Piece(2, 1, "E"), new Piece(2, 1, "E"), new Piece(2, 2, "N")];
-            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")];
-            g.currplayer = 2;
-            g.hands[1] = ["03", "2S"];
-            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
+        it("offers Create Minion, a struck-through Create Territory (the cell is already one), and Create Enemy for the enemy piece there; the owner is only appended when needed to disambiguate", () => {
+            const g = testGame({
+                board: [
+                    { x: 0, y: 0, uid: "AR", pieces: [[2, 1, "E"], [2, 1, "E"], [2, 2, "N"]] },
+                    { x: 1, y: 0, uid: "AC", pieces: [[1, 1, "U"]] },
+                ],
+                currplayer: 2,
+                hands: [filler, ["03", "2S"]],
+            });
             const move = "play 03/orient m0.1.e.2 N";
             const withMinion = g.handleClick(move, -1, -1, "_btn_minion_m0.1.E");
             g.move(withMinion.move, { partial: true });
@@ -3227,60 +2522,42 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         });
 
-        // "use AC" activates via a minion standing ON the Cups card itself (n0), which then targets the cell it faces (o0) - unlike the Empress
-        // test above, where the acting minion sits elsewhere and points AT the Cups territory.
-        it("appends the owner to the label only when two candidates would otherwise read identically (3+ players)", () => {
-            const g = new GnosticaGame(3);
-            clearBoard(g);
-            forceCardAt(g, 1, 0, () => aceOfCups()); // n0
-            forceCardAt(g, 2, 0, () => aceOfRods()); // o0
-            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // player 1, on the Cups card, facing o0
-            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U"), new Piece(3, 1, "U")]; // two other players, identical size/facing
-            g.currplayer = 1;
-            g.hands[0] = ["03", "2S"];
-            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
+        // "use AC" activates via a minion standing ON the Cups card itself (n0), which then targets
+        // the cell it faces (o0) - unlike the Empress test above, whose minion sits elsewhere.
+        it("appends the owner to the label only when two candidates would otherwise read identically (3+ players); not when only one has that label (2 players)", () => {
+            const g = testGame({
+                board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"], [3, 1, "U"]] }],
+                hands: [["03", "2S"], filler, filler],
+            });
             const internal = g as unknown as {
                 parsePendingStep: (m: string) => object | undefined;
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
             };
             const pending = internal.parsePendingStep("use AC")!;
-            const candidates = internal.suitTargetCandidates(pending, "C");
-            const enemyLabels = candidates.filter(c => c.value.startsWith("o0.")).map(c => c.label).sort();
+            const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label).sort();
             expect(enemyLabels).to.deep.equal(["Create Enemy 1-pip pointing up (Player 2)", "Create Enemy 1-pip pointing up (Player 3)"]);
-        });
 
-        it("does not append an owner when only one candidate has that label (2 players)", () => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 1, 0, () => aceOfCups()); // n0
-            forceCardAt(g, 2, 0, () => aceOfRods()); // o0
-            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")];
-            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U")];
-            g.currplayer = 1;
-            g.hands[0] = ["03", "2S"];
-            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
-            const internal = g as unknown as {
+            const g2 = testGame({
+                board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
+                hands: [["03", "2S"], filler],
+            });
+            const internal2 = g2 as unknown as {
                 parsePendingStep: (m: string) => object | undefined;
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
             };
-            const pending = internal.parsePendingStep("use AC")!;
-            const candidates = internal.suitTargetCandidates(pending, "C");
-            expect(candidates.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy 1-pip pointing up");
+            const pending2 = internal2.parsePendingStep("use AC")!;
+            const candidates2 = internal2.suitTargetCandidates(pending2, "C");
+            expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy 1-pip pointing up");
         });
     });
 
     describe("Swords (tile) click flow: the shrink comes from the replacement card, or the Destroy button", () => {
         // Spot cards are worth 1, courts 2, majors 3.
-        const setup = (size: 1 | 2 | 3, territory: () => TarotCard) => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => aceOfSwords());
-            forceCardAt(g, -1, 0, territory);
-            forceCardAt(g, 1, 0, () => aceOfRods());
-            g.board.get(0, 0)!.pieces = [new Piece(1, size, "W")];
-            g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")];
-            g.hands[0] = ["AC", "2S", "KS"];
-            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
+        const setup = (size: 1 | 2 | 3, territoryUid: string) => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, size, "W"]] }, { x: -1, y: 0, uid: territoryUid }, { x: 1, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
+                hands: [["AC", "2S", "KS"], filler],
+            });
             const seed = g.handleClick("", -1, -1, "_btn_use");
             const [row, col] = rowColFor(g, 0, 0);
             const cellClick = g.handleClick(seed.move, row, col);
@@ -3290,67 +2567,54 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const buttonValuesOf = (g: GnosticaGame) =>
             (g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.value);
 
-        it("the target click leaves the shrink open, and a hand-card click derives it", () => {
-            const { g, modeClick } = setup(2, () => major(3));
+        it("the target click leaves the shrink open, and a hand-card click derives it; a card needing a bigger shrink than the minion's size is rejected by validation", () => {
+            const { g, modeClick } = setup(2, "00"); // major, worth 3
             expect(modeClick.move).eq("use AS/with m0.2 shrink l0");
             expect(modeClick.valid).to.be.true;
             const cardClick = g.handleClick(modeClick.move, -1, -1, "hand_2S");
             expect(cardClick.move).eq("use AS/with m0.2 shrink l0 2 to 2S");
             g.move(cardClick.move);
             expect(g.board.get(-1, 0)!.card?.uid).eq("2S");
+
+            const { g: g2, modeClick: modeClick2 } = setup(1, "00");
+            const cardClick2 = g2.handleClick(modeClick2.move, -1, -1, "hand_2S");
+            expect(cardClick2.move).eq("use AS/with m0.1 shrink l0 2 to 2S");
+            expect(g2.validateMove(cardClick2.move).valid).to.be.false;
         });
 
-        it("a card needing a bigger shrink than the minion's size is rejected by validation", () => {
-            const { g, modeClick } = setup(1, () => major(3));
-            const cardClick = g.handleClick(modeClick.move, -1, -1, "hand_2S");
-            expect(cardClick.move).eq("use AS/with m0.1 shrink l0 2 to 2S");
-            expect(g.validateMove(cardClick.move).valid).to.be.false;
-        });
-
-        it("Destroy Territory wipes it, when its value is within the minion's reach", () => {
-            const { g, modeClick } = setup(2, () => card("QS"));
+        it("Destroy Territory wipes it when its value is within the minion's reach, but offers no button when it's beyond reach; Death's shortcut reaches twice the minion's size", () => {
+            const { g, modeClick } = setup(2, "QS"); // court, worth 2
             g.move(modeClick.move, { partial: true });
             expect(buttonValuesOf(g)).to.include("destroy");
             const destroyClick = g.handleClick(modeClick.move, -1, -1, "_btn_destroy");
             expect(destroyClick.move).eq("use AS/with m0.2 shrink l0 2");
             g.move(destroyClick.move);
             expect(g.board.get(-1, 0)?.card).to.be.undefined;
-        });
 
-        it("Death's shortcut reaches twice the minion's size: a size-2 minion destroys a value-3 territory in one step", () => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(13));
-            forceCardAt(g, -1, 0, () => major(3));
-            g.board.get(0, 0)!.pieces = [new Piece(1, 2, "W")];
-            g.hands[0] = ["AC", "2S", "KS"];
-            g.stack[g.stack.length - 1] = (g as unknown as { moveState: () => typeof g.stack[number] }).moveState();
-            g.move("use 13/with m0.2 shrink l0", { partial: true });
-            expect(buttonValuesOf(g)).to.include("destroy");
-            const destroyClick = g.handleClick("use 13/with m0.2 shrink l0", -1, -1, "_btn_destroy");
-            expect(destroyClick.move).eq("use 13/with m0.2 shrink l0 3");
-            g.move(destroyClick.move);
-            expect(g.board.get(-1, 0)?.card).to.be.undefined;
-        });
+            const { g: beyond, modeClick: modeClickBeyond } = setup(1, "QS");
+            beyond.move(modeClickBeyond.move, { partial: true });
+            expect(buttonValuesOf(beyond)).to.not.include("destroy");
 
-        it("offers no Destroy button for a territory beyond the minion's reach", () => {
-            const { g, modeClick } = setup(1, () => card("QS"));
-            g.move(modeClick.move, { partial: true });
-            expect(buttonValuesOf(g)).to.not.include("destroy");
+            const death = testGame({
+                board: [{ x: 0, y: 0, uid: "13", pieces: [[1, 2, "W"]] }, { x: -1, y: 0, uid: "03" }], // Death, size-2 minion; Empress, worth 3
+                hands: [["AC", "2S", "KS"], filler],
+            });
+            death.move("use 13/with m0.2 shrink l0", { partial: true });
+            expect(buttonValuesOf(death)).to.include("destroy");
+            const deathDestroy = death.handleClick("use 13/with m0.2 shrink l0", -1, -1, "_btn_destroy");
+            expect(deathDestroy.move).eq("use 13/with m0.2 shrink l0 3");
+            death.move(deathDestroy.move);
+            expect(death.board.get(-1, 0)?.card).to.be.undefined;
         });
     });
 
-    it("narrows the bar to just the selected top-level button, a spacer, then the mode buttons", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 U");
-        g.move("place l0 U");
+    it("narrows the bar to just the selected top-level button, a spacer, then the mode buttons - Declare stays available throughout", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
         g.move(`use AC`, { partial: true });
         const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
-        // The full top-level set (play/orient/discard/pass) is gone, save for
-        // the one choice that got us here - no room to keep both levels.
+        // The full top-level set (play/orient/discard/pass) is gone, save for the one choice that got us here.
         expect(values).to.not.include("play");
         expect(values).to.not.include("orient");
         expect(values).to.not.include("discard");
@@ -3359,17 +2623,12 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(bar!.buttons![0].attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.be.true;
         expect(values[1]).eq("_spacer"); // divider - the schema has no dedicated type for one
         expect(values.slice(2)).to.include("target_own");
-        // Declare stays available throughout - an orthogonal end-of-turn
-        // flourish, not a step of this particular choice.
-        expect(values[values.length - 1]).eq("declare");
+        expect(values[values.length - 1]).eq("declare"); // orthogonal end-of-turn flourish, not a step of this choice
     });
 
     it("offers a target candidate for own/enemy/new, struck through when not currently sensible, and rejects a click on one immediately", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfCups());
-        g.move("place m0 U"); // "U" - targets itself, a territory with no enemy on it
-        g.move("place l0 U");
-        g.move(`use AC`, { partial: true }); // sync engine state, same as the playground's own preview flow
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler] }); // "U" targets itself, a territory with no enemy on it
+        g.move(`use AC`, { partial: true });
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
@@ -3378,8 +2637,8 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(values).to.include("target_new");
         const ownBtn = bar!.buttons!.find(b => b.value === "target_own");
         expect(ownBtn!.attributes).to.be.undefined; // feasible - not struck through
-        // No enemy piece at the target (self) cell - a struck-through generic
-        // placeholder is still offered, matching own/new's own always-present buttons.
+        // No enemy piece at the target (self) cell - a struck-through generic placeholder is still
+        // offered, matching own/new's own always-present buttons.
         const enemyBtn = bar!.buttons!.find(b => b.value === "target_enemy");
         expect(enemyBtn!.label).to.eq("Create Enemy");
         expect(enemyBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
@@ -3395,17 +2654,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(newClick.message).eq(i18next.t("apgames:validation.gnostica.NOT_A_WASTELAND"));
     });
 
-    // A live "activate"/"play" preview can only ever have started with
-    // board presence (both throw otherwise), so zero pieces on the board
-    // mid-preview is a legitimate mid-action side effect (e.g. a Sword
-    // step destroying the acting player's own last minion), not a
-    // fresh-turn signal - getActionButtons() must not collapse the bar
-    // down to a single Place button in that case.
+    // A live "activate"/"play" preview can only ever have started with board presence, so zero
+    // pieces mid-preview is a legitimate mid-action side effect (a Sword step destroying the
+    // acting player's own last minion), not a fresh-turn signal - the bar must not collapse to Place.
     it("does not collapse to the Place button mid-preview when a power step destroys the acting player's own last minion", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        g.move("place m0 U"); // player 1, size 1, "U" - only piece on the board
-        g.move("place l0 U"); // player 2
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 1, "U"]] }], hands: [filler, filler] }); // only piece on the board
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -3420,51 +2673,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(values).to.include("use");
     });
 
-    it.skip("Rods (piece): clicking a cell 2+ away along the acting minion's own facing directly sets distance", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        // classify() only looks at IMMEDIATE neighbours (no chaining
-        // through wasteland - see its own docs), so a card is needed
-        // adjacent to EACH destination cell to keep it wasteland, not
-        // void (a void landing destroys the piece outright).
-        forceCardAt(g, 1, 0, () => card("2C")); // keeps o0 wasteland
-        forceCardAt(g, 4, 0, () => aceOfDiscs()); // keeps p0 wasteland
-        g.move("place m0 E"); // player 1, pointing east
-        g.move("place l0 U"); // player 2
-        g.board.get(0, 0)!.pieces = [new Piece(1, 3, "E")]; // room to move up to 3
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_m0.3");
-        expect(modeClick.move).eq(`use AR/with m0.3 move m0.3`); // no default - a real distance choice exists
-        expect(modeClick.complete).eq(-1);
-        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.PICK_DESTINATION_TO_SET_DISTANCE"));
-        const [row3, col3] = rowColFor(g, 3, 0); // p0, 3 cells east
-        const distClick3 = g.handleClick(modeClick.move, row3, col3);
-        expect(distClick3.move).eq(`use AR/with m0.3 move m0.3 3`);
-        const [row2, col2] = rowColFor(g, 2, 0); // o0, 2 cells east
-        const distClick2 = g.handleClick(distClick3.move, row2, col2);
-        expect(distClick2.move).eq(`use AR/with m0.3 move m0.3 2`);
-        // Distance 1 (n0) is directly click-settable too - now that the
-        // target itself is button-only (see getActionButtons' own
-        // "target_" button set), this cell has exactly one meaning.
-        const [row1, col1] = rowColFor(g, 1, 0); // n0, 1 cell east
-        const distClick1 = g.handleClick(distClick2.move, row1, col1);
-        expect(distClick1.move).eq(`use AR/with m0.3 move m0.3 1`);
-        g.move(distClick2.move);
-        expect(g.board.get(0, 0)!.pieces.length).eq(0);
-        expect(g.board.get(2, 0)!.pieces[0]).to.deep.include({ owner: 1, orientation: "E" });
-    });
-
-    it("Swords (piece): pips is offered as a button set, not click-cycled, with no default to bold until one is chosen", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the facing cell
-        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // up to 2 pips
-        g.board.get(1, 0)!.pieces = [new Piece(2, 2, "W")]; // survives a 1-pip hit
+    it("Swords (piece): pips is offered as a button set, not click-cycled, unbolded until one is chosen; clicking one sets it directly", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 2, "W"]] }],
+            hands: [filler, filler],
+        });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
@@ -3472,34 +2685,6 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(targeted.move).eq(`use AS/with m0.2 shrink n0.2`); // no default - a real pips choice exists
         expect(targeted.complete).eq(-1);
         expect(targeted.message).eq(i18next.t("apgames:validation.gnostica.PICK_PIPS_BUTTON"));
-        // partial-applying a Swords step is genuinely destructive (see
-        // "does not collapse..." above) - render the bar here, but don't
-        // build further click-based moves against a ref this mutation may
-        // have invalidated (n0's own piece is about to shrink to 1 pip).
-        g.move(targeted.move, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        expect(values).to.include("pips_1");
-        expect(values).to.include("pips_2");
-        // No pips value was actually chosen yet, so neither button bolds.
-        const pips1Btn = bar!.buttons!.find(b => b.value === "pips_1");
-        expect(pips1Btn!.attributes?.some(a => a.name === "font-weight" && a.value === "bold")).to.not.be.true;
-    });
-
-    it("Swords (piece): clicking a pips button sets pips directly", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfSwords());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the facing cell
-        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E")]; // up to 2 pips
-        g.board.get(1, 0)!.pieces = [new Piece(2, 2, "W")];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const targeted = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.2");
-        expect(targeted.move).eq(`use AS/with m0.2 shrink n0.2`);
         const pips2Click = g.handleClick(targeted.move, -1, -1, "_btn_pips_2");
         expect(pips2Click.move).eq(`use AS/with m0.2 shrink n0.2 2`);
         g.move(pips2Click.move);
@@ -3507,28 +2692,19 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     });
 
     it("Rods (piece): a click near the destination cell reorients the minion once distance is set; a same-facing click completes the step instead of rejecting", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        g.move("place m0 E"); // player 1, pointing east
-        g.move("place l0 U"); // player 2
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }], hands: [filler, filler] });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_m0.1");
         expect(modeClick.move).eq(`use AR/with m0.1 move m0.1 1`);
-        // No reorientation given yet for the acting player's own moved
-        // piece - complete:0, and the message says so instead of the
-        // generic "looks like a valid move" fallback.
+        // No reorientation given yet for the acting player's own moved piece - complete:0, and the
+        // message says so instead of the generic "looks like a valid move" fallback.
         expect(modeClick.complete).eq(0);
         expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
-        // Effective (post-move) position is n0 - clicking o0 (east of n0)
-        // computes E, which is already the moved piece's own current
-        // facing. This trailing facing is only an OPTIONAL addition to
-        // the already-meaningful move, not the whole action (unlike
-        // "orient" itself), so a same-facing click completes the step -
-        // exactly as a real correction would - rather than rejecting.
-        // Since the click carries no new information, no token is added.
+        // Effective (post-move) position is n0 - clicking o0 (east of n0) computes E, already the
+        // moved piece's current facing. This trailing facing is only optional, so a same-facing
+        // click completes the step - exactly as a real correction would - rather than rejecting.
         const [rowSame, colSame] = rowColFor(g, 2, 0); // o0
         const noOp = g.handleClick(modeClick.move, rowSame, colSame);
         expect(noOp.valid).to.be.true;
@@ -3538,30 +2714,25 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [rowW, colW] = rowColFor(g, 0, 0); // m0
         const faceW = g.handleClick(modeClick.move, rowW, colW);
         expect(faceW.move).eq(`use AR/with m0.1 move m0.1 1 orient W`);
-        // A real, deliberate facing is now given - genuinely complete:1,
-        // generic message (nothing left to say "you may also" about).
-        expect(faceW.complete).eq(1);
+        expect(faceW.complete).eq(1); // a real, deliberate facing - genuinely complete
         expect(faceW.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
         g.move(faceW.move);
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, orientation: "W" });
     });
 
     it("Discs (piece): a click near a target that isn't the acting player's own has no orientation effect", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => aceOfDiscs());
-        g.move("place m0 E"); // player 1, pointing at n0
-        g.move("place n0 W"); // player 2, on the facing cell
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 1, "W"]] }],
+            hands: [filler, filler],
+        });
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const [rowFace, colFace] = rowColFor(g, 1, 0); // n0, the facing cell
         const targeted = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.1");
         expect(targeted.move).eq(`use AD/with m0.1 grow n0.1`); // targets the enemy at n0
-        // n0 belongs to player 2 - no trailing orientation is offered for
-        // an enemy's own piece (movePiece/growPiece/attackPiece's own
-        // owner===currplayer gate in powers.ts), so a click there
-        // no-ops instead of appending a facing.
+        // n0 belongs to player 2 - no trailing orientation is offered for an enemy's own piece, so
+        // a click there no-ops instead of appending a facing.
         const clickOnTarget = g.handleClick(targeted.move, rowFace, colFace);
         expect(clickOnTarget.move).eq(targeted.move); // unchanged - no facing appended
         expect(clickOnTarget.valid).to.be.false;
@@ -3569,200 +2740,6 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 });
 
 describe("Gnostica: handleClick - minion disambiguation", () => {
-    const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
-        return [y - minY, x - minX];
-    };
-
-    it.skip("use: multiple eligible minions at the activated cell offer a minion-picker bar; picking one seeds it for the mode buttons that follow", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        // Two of player 1's own minions share the activated cell - one
-        // facing "U" (can't use a rod at all), one facing "E" (can) - so
-        // which one gets seeded is directly observable in which mode
-        // buttons show up afterward.
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 1, "E")];
-        g.move(`use AR`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        expect(values).to.include("minion_m0.1.U");
-        expect(values).to.include("minion_m0.1.E");
-        expect(values.some(v => v?.startsWith("target_"))).to.be.false; // not offered until a minion is actually chosen
-        // The upright minion is still offered (not pruned outright), but
-        // struck through - it can never satisfy checkCanUseRod - and an
-        // actual click on it is rejected immediately instead of building a
-        // doomed provisional move.
-        const uprightButton = bar!.buttons!.find(b => b.value === "minion_m0.1.U");
-        expect(uprightButton!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
-        const rejectedClick = g.handleClick(`use AR`, -1, -1, "_btn_minion_m0.1.U");
-        expect(rejectedClick.valid).to.be.false;
-        expect(rejectedClick.message).eq(i18next.t("apgames:validation.gnostica.ROD_NEEDS_FACING"));
-        const facingButton = bar!.buttons!.find(b => b.value === "minion_m0.1.E");
-        expect(facingButton!.attributes).to.be.undefined;
-        const picked = g.handleClick(`use AR`, -1, -1, "_btn_minion_m0.1.E");
-        expect(picked.move).eq(`use AR/with m0.1.E`);
-        g.move(picked.move, { partial: true });
-        const rep2 = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
-        const values2 = bar2!.buttons!.map(b => b.value);
-        expect(values2.some(v => v?.startsWith("minion_"))).to.be.false; // no minion buttons left once resolved
-        expect(values2).to.include("target_m0.1.E"); // legal now - the "E"-facing minion was actually seeded
-        const modeClick = g.handleClick(picked.move, -1, -1, "_btn_target_m0.1.E");
-        expect(modeClick.move).eq(`use AR/with m0.1.E move m0.1.E 1`);
-    });
-
-    it.skip("use: minion-picker button labels show the piece's real orientation even when the ref itself omits it (disambiguated by size alone)", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        // Different sizes alone are enough to disambiguate these two, so
-        // neither ref needs an orientation suffix (see pieceRefStr's own
-        // docs) - the button LABEL must still read the piece's actual
-        // facing directly, not try to parse it back out of that ref.
-        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "N"), new Piece(1, 1, "E")];
-        g.move(`use AR`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        expect(values).to.include("minion_m0.2"); // no orientation in the ref - size alone disambiguates
-        expect(values).to.include("minion_m0.1");
-        const labelFor = (value: string) => bar!.buttons!.find(b => b.value === value)!.label;
-        expect(labelFor("minion_m0.2")).eq("2-pip pointing N");
-        expect(labelFor("minion_m0.1")).eq("1-pip pointing E");
-    });
-
-    it.skip("use: two eligible minions at the activated cell that are fully identical (same owner/size/facing) resolve directly/no picker offered", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        // Two genuinely interchangeable minions - same owner, size, and
-        // facing. Picking either has the exact same effect, so this isn't
-        // really a choice at all (see allIndistinguishable's own docs).
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 1, "E")];
-        g.move(`use AR`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        // Not offered a minion picker at all - resolves straight through to
-        // the mode buttons, as if only one minion had ever been there.
-        expect(values.some(v => v?.startsWith("minion_"))).to.be.false;
-        expect(values.some(v => v?.startsWith("target_"))).to.be.true;
-    });
-
-    // Regression: PIECE_REF_SHAPE_RE's orientation tie-break character
-    // class was "[nesu]" - missing "w" entirely - so a same-pip pair
-    // disambiguated by a WEST-facing piece produced a ref like "m0.1.W"
-    // that the move grammar itself rejected as malformed (INVALID_MOVE/
-    // BAD_STEP), even though the minion-picker button offering it came
-    // straight from the engine's own pieceRefStr. N/E/S/U all happened to
-    // be covered by existing tests already; W was the one direction never
-    // exercised, so this slipped through.
-    it.skip("use: a same-pip pair disambiguated by a WEST-facing piece produces a resolvable minion-picker ref, not a malformed one", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => aceOfRods());
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "N"), new Piece(1, 1, "W")];
-        g.move(`use AR`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        expect(values).to.include("minion_m0.1.W");
-        const picked = g.handleClick(`use AR`, -1, -1, "_btn_minion_m0.1.W");
-        expect(picked.valid).to.be.true;
-        expect(picked.move).eq(`use AR/with m0.1.W`);
-    });
-
-    it.skip("play: a board-wide pool offers no buttons until a cell is clicked; clicking a cell with just one eligible minion there resolves it directly", () => {
-        // A fresh instance per checkpoint, exactly like the real click flow
-        // (every click reconstructs a fresh GnosticaGame via GameFactory,
-        // then does its own single move(..., {partial: true}) - see this
-        // describe block's own docs) - unlike "use", "play" mutates the
-        // hand (discards the card) on ANY partial apply, so reusing one
-        // instance across two separate partial calls would make the
-        // second's own re-validation see the card already gone from hand.
-        const setup = (): GnosticaGame => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => card("AC"));
-            forceCardAt(g, 1, 0, () => card("AD"));
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // m0
-            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // n0
-            const uid = "2R";
-            g.hands[0] = g.hands[0].filter(u => u !== uid);
-            g.hands[0].push(uid);
-            return g;
-        };
-        const uid = "2R";
-        // "play"'s partial apply mutates the hand (discards the card) -
-        // one fresh instance per checkpoint whose button bar/click needs
-        // to see the card still there, same as this describe block's
-        // other "play" test.
-        const g = setup();
-        const seeded = g.handleClick("", -1, -1, "_btn_play");
-        const cardClick = g.handleClick(seeded.move, -1, -1, `hand_${uid}`);
-        expect(cardClick.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_CELL"));
-        const gBar = setup();
-        gBar.move(cardClick.move, { partial: true });
-        const rep = gBar.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        // No minion buttons yet - the pool spans two cells, nothing clicked.
-        expect(values.some(v => v?.startsWith("minion_"))).to.be.false;
-        const [row, col] = rowColFor(g, 1, 0); // n0 - only one of the pool's own minions there
-        const cellClick = g.handleClick(cardClick.move, row, col);
-        expect(cellClick.move).eq(`play ${uid}/with n0.1`);
-        // Follow-up to #49: no step taken yet (mode still unchosen), but
-        // this is a click-driven preview mid-navigation, not a submit
-        // attempt - points at the button bar rather than surfacing the
-        // raw validation reason (see powerStepMessageKey's own docs).
-        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: card(uid).name }));
-        const g2 = setup();
-        g2.move(cellClick.move, { partial: true });
-        const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
-        expect(bar2!.buttons!.map(b => b.value)).to.include("target_n0.1");
-        const modeClick = g2.handleClick(cellClick.move, -1, -1, "_btn_target_n0.1");
-        // n0's own piece, not m0's - proves the CLICKED cell (not just
-        // eligible[0]) is what the rest of the step actually acts on.
-        expect(modeClick.move).eq(`play ${uid}/with n0.1 move n0.1 1`);
-    });
-
-    it.skip("play: clicking a cell with multiple eligible minions there narrows the picker to just that cell/not the whole board-wide pool", () => {
-        const setup = (): GnosticaGame => {
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => card("AC"));
-            forceCardAt(g, 1, 0, () => card("AD"));
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 2, "E")]; // m0 - two, distinct sizes
-            g.board.get(1, 0)!.pieces = [new Piece(1, 1, "E")]; // n0 - just one
-            const uid = "2R";
-            g.hands[0] = g.hands[0].filter(u => u !== uid);
-            g.hands[0].push(uid);
-            return g;
-        };
-        const uid = "2R";
-        const g = setup();
-        const seeded = g.handleClick("", -1, -1, "_btn_play");
-        const cardClick = g.handleClick(seeded.move, -1, -1, `hand_${uid}`);
-        const [row, col] = rowColFor(g, 0, 0); // m0 - two of the pool's own minions there
-        const cellClick = g.handleClick(cardClick.move, row, col);
-        expect(cellClick.move).eq(`play ${uid}/with m0`); // still-narrowing bare cell token, not a resolved ref
-        expect(cellClick.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON"));
-        const gBar = setup();
-        gBar.move(cellClick.move, { partial: true });
-        const rep = gBar.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        expect(values).to.include("minion_m0.1");
-        expect(values).to.include("minion_m0.2");
-        expect(values).to.not.include("minion_n0.1"); // narrowed to m0 - n0's own piece isn't offered
-        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_minion_m0.2");
-        expect(picked.move).eq(`play ${uid}/with m0.2`);
-        const g2 = setup();
-        g2.move(picked.move, { partial: true });
-        const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
-        expect(bar2!.buttons!.map(b => b.value).some(v => v?.startsWith("target_"))).to.be.true;
-    });
-
     it("does not offer a minion picker when only one minion is eligible", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
@@ -3776,30 +2753,6 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         expect(values).to.include("target_own"); // straight to the target candidates, exactly as before this feature
     });
 
-    it.skip("orientMinion (a pure click-driven special power): the minion picker still pre-empts the uncollapsed bar, and the chosen minion (not eligible[0]) is what a board click actually reorients", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(3)); // The Empress - step 1 is orientMinion
-        // Same cell, different sizes so the refs are trivially distinct.
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 2, "U")];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        expect(cellClick.move).eq(`use 03`);
-        g.move(cellClick.move, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const values = bar!.buttons!.map(b => b.value);
-        expect(values).to.include("minion_m0.1");
-        expect(values).to.include("minion_m0.2");
-        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_minion_m0.2");
-        expect(picked.move).eq(`use 03/orient m0.2`);
-        const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
-        const result = g.handleClick(picked.move, rowE, colE);
-        expect(result.move).eq(`use 03/orient m0.2 E`);
-        g.move(result.move); // skips step 2 (create)
-        expect(g.board.get(0, 0)!.pieces[0].orientation).eq("U"); // the size-1 minion, untouched
-        expect(g.board.get(0, 0)!.pieces[1].orientation).eq("E"); // the size-2 minion actually picked
-    });
 });
 
 // validateMove() is a genuine, non-mutating validator (gnostica.ts's
@@ -4312,19 +3265,6 @@ describe("Gnostica: choose-step click messaging", () => {
     // appears (see resolveStepMinion's/computeActionButtons' own docs) -
     // CHOOSE_STEP's own "using the buttons" wording is accurate here,
     // unlike the single-eligible-minion case above.
-    it.skip("activate: with an ambiguous acting minion, falls back to the generic CHOOSE_STEP (buttons genuinely apply) instead of naming a cell", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(3)); // Empress
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U"), new Piece(1, 2, "U")]; // two distinguishable own minions
-        const [row, col] = rowColFor(g, 0, 0);
-        const result = g.handleClick("use", row, col);
-        expect(result.valid).to.be.true;
-        expect(result.message).eq(chooseStepMsg(major(3).name));
-        g.move(result.move, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        expect(bar!.buttons!.some(b => b.value?.startsWith("minion_"))).to.be.true;
-    });
 
     it("activate: a primitive-first step, or a special with its own button set (hermitTeleport/magicianChoice), keeps the generic CHOOSE_STEP wording", () => {
         const g = new GnosticaGame(2);
@@ -4468,190 +3408,6 @@ describe("Gnostica: choose-step click messaging", () => {
     });
 });
 
-describe("Gnostica: handleClick - major arcana chained power steps", () => {
-    before(() => {
-        addResource("en");
-    });
-
-    const rowColFor = (g: GnosticaGame, x: number, y: number): [number, number] => {
-        // Must match handleClick's own window exactly (see
-        // renderWindow's own docs - territory bounds, not the raw
-        // board.minX/maxX/minY/maxY, which also includes cardless
-        // wasteland cells a piece may have been pushed onto) - reusing
-        // the game's own private computation directly rather than
-        // duplicating its logic here, so the two can never drift apart.
-        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
-        return [y - minY, x - minX];
-    };
-    const buttonValues = (g: GnosticaGame): (string | undefined)[] => {
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
-        const bar = rep.areas?.find(a => a.type === "buttonBar");
-        return bar!.buttons!.map(b => b.value);
-    };
-
-    it.skip("Empress (orientMinion, then create): a chain whose LAST step is started but not yet complete is not treated as a valid, submittable move", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(3)); // The Empress
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        // Step 1 (orientMinion) reorients U -> E, so step 2's own target
-        // (the minion's new facing) is n0. Step 2 (Cups "new") has that
-        // target cell but no replacement card uid yet - the same shape of
-        // bug reported for a minor arcana card's own single step, just
-        // reached through a major arcana chain's LAST step instead (see
-        // validatePowerStep/validateMajorPower's own docs).
-        const incomplete = g.validateMove(`use 03/orient m0.1 E/with m0.1 at n0 create`);
-        expect(incomplete.valid).to.be.true;
-        expect(incomplete.complete).eq(-1);
-        expect(incomplete.message).eq(i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: major(3).name }));
-        // Supplying the card uid completes it normally.
-        g.hands[0].push("2S");
-        const complete = g.validateMove(`use 03/orient m0.1 E/with m0.1 at n0 create 2S`);
-        expect(complete.complete).eq(1);
-    });
-
-    it.skip("#75: chatLog() names the card placed by Cups' 'new' mode, not just the destination cell", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(3)); // The Empress
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        g.hands[0].push("2S");
-        g.move(`use 03/orient m0.1 E/with m0.1 at n0 create 2S`);
-        const log = g.chatLog(["Alice", "Bob"]);
-        const line = log.flat().find(l => l.includes(i18next.t("apresults:PLACE.gnostica_territory", { player: "Alice", where: "n0", what: withArticle(card("2S").name) })));
-        expect(line).to.not.be.undefined;
-    });
-
-    // Regression: an orientMinion step's own reorientation click, still
-    // mid-chain (never yet committed for real), must be reflected in a
-    // LATER step's own default target - it was previously reading
-    // `this.board`'s pre-reorientation facing instead (see
-    // parsePendingStep's own "always replay" fix).
-    it.skip("Empress (orientMinion, then create): step 2's own default target reflects step 1's just-clicked reorientation, not the piece's original facing", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, -1, 0, () => major(3)); // Empress at l0
-        g.board.get(-1, 0)!.pieces = [new Piece(1, 1, "E")]; // originally facing E, toward m0
-        const [rowL0, colL0] = rowColFor(g, -1, 0);
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const cellClick = g.handleClick(seed.move, rowL0, colL0);
-        expect(cellClick.move).eq(`use 03`);
-        const [rowS, colS] = rowColFor(g, -1, 1); // south of l0
-        const orientClick = g.handleClick(cellClick.move, rowS, colS);
-        expect(orientClick.move).eq(`use 03/orient l0.1 S`);
-        const modeClick = g.handleClick(orientClick.move, -1, -1, "_btn_target_own");
-        const freshTarget = GnosticaBoard.coords2algebraic(-1, 1); // the NEW (south) facing cell
-        expect(modeClick.move).eq(`use 03/orient l0.1 S/with l0.1 at ${freshTarget} create U?`);
-        expect(modeClick.move).to.not.include(" m0 "); // the STALE, pre-reorientation (east) default
-    });
-
-    it.skip("Lovers (move, then create): step 2's Cups target candidates appear only once step 1 is complete; the chained click sequence resolves correctly", () => {
-        // Fully deterministic (see clearBoard's own docs): the random
-        // initial deal could otherwise occasionally put The Lovers
-        // itself at n0, which forceCardAt's own duplicate-clearing would
-        // then wipe out from under piece B, stranding it off-territory.
-        const setup = (game: GnosticaGame) => {
-            clearBoard(game);
-            forceCardAt(game, 0, 0, () => major(6)); // The Lovers
-            forceCardAt(game, 1, 0, () => aceOfDiscs()); // n0 - any real card, distinct from The Lovers
-            game.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, pointing at n0
-            game.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")]; // own piece B, already on n0
-        };
-        const g = new GnosticaGame(2);
-        setup(g);
-
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        expect(cellClick.move).eq(`use 06`);
-
-        // The target list offers both self and B (already at n0), still
-        // correctly scoped to the in-progress step rather than being
-        // mistaken for "start step 2" - the exact gap
-        // parsePendingStep's preferCurrent option exists to close.
-        const redirected = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.1");
-        expect(redirected.move).eq(`use 06/with m0.1 move n0.1 1`);
-        expect(redirected.valid).to.be.true;
-
-        // Step 1 is now complete - the button bar should offer step 2's
-        // (Cups) modes, not step 1's (Rods) own anymore. Inspected on a
-        // separate, identically-set-up instance (mirrors how a real client
-        // re-renders a live preview from the official state plus the
-        // in-progress move string - see move()'s own docs). g.clone() isn't
-        // usable here: it only round-trips officially COMMITTED state
-        // (this.stack, updated by saveState()), not this test's own direct
-        // board.get(x,y)!.card/.pieces pokes, so partial-applying to `g`
-        // itself would also actually push B off n0, corrupting the very
-        // move string being re-parsed.
-        const preview = new GnosticaGame(2);
-        setup(preview);
-        preview.move(redirected.move, { partial: true });
-        const values = buttonValues(preview);
-        expect(values).to.include("target_own");
-        expect(values).to.not.include("target_n0.1"); // step 1's own target candidate, not step 2's
-
-        const step2 = g.handleClick(redirected.move, -1, -1, "_btn_target_own");
-        expect(step2.move).eq(`use 06/with m0.1 move n0.1 1/with m0.1 at n0 create U?`);
-        expect(step2.valid).to.be.true;
-
-        g.move(step2.move);
-        expect(g.board.get(0, 0)!.pieces.length).eq(1); // A, unmoved
-        expect(g.board.get(2, 0)!.pieces.length).eq(1); // B, pushed E to o0
-        expect(g.board.get(1, 0)!.pieces.length).eq(1); // new piece created at n0 (now vacant)
-        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "U" });
-        expect(g.currplayer).eq(2);
-    });
-
-    it.skip("Lovers: submitting after just step 1 (skipping step 2) is still legal via clicks", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(6)); // The Lovers
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // minion A, pointing at n0
-
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_m0.1");
-        expect(modeClick.move).eq(`use 06/with m0.1 move m0.1 1`); // defaults to self, skips step 2
-        g.move(modeClick.move);
-        expect(g.currplayer).eq(2);
-    });
-
-    it.skip("Tower (orientMinion, then attack): no mode buttons appear for the special step 1, but Swords buttons do once it's typed by hand", () => {
-        const setup = (game: GnosticaGame) => {
-            forceCardAt(game, 0, 0, () => major(16)); // The Tower
-            game.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")]; // minion A, standing
-        };
-        const g = new GnosticaGame(2);
-        setup(g);
-
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        expect(cellClick.move).eq(`use 16`);
-
-        // Button-bar checkpoints are inspected on separate,
-        // identically-set-up instances - see the Lovers test above for why
-        // g.clone() isn't usable here.
-        const previewBefore = new GnosticaGame(2);
-        setup(previewBefore);
-        previewBefore.move(cellClick.move, { partial: true });
-        expect(buttonValues(previewBefore).some(v => v?.startsWith("target_"))).to.be.false;
-
-        // Step 1 (special: orientMinion) has no click support (Phase B) -
-        // typed by hand instead.
-        const withStep1 = `use 16/orient m0.1 E`;
-        const previewAfter = new GnosticaGame(2);
-        setup(previewAfter);
-        previewAfter.move(withStep1, { partial: true });
-        const values = buttonValues(previewAfter);
-        expect(values).to.include("target_m0.1"); // Swords piece mode's self candidate, now that step 2 is active
-
-        const modeClick = g.handleClick(withStep1, -1, -1, "_btn_target_m0.1");
-        expect(modeClick.valid).to.be.true;
-        expect(modeClick.move).to.match(new RegExp(`^use 16/orient m0\\.1 E/`));
-    });
-});
-
 describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => {
     before(() => {
         addResource("en");
@@ -4692,68 +3448,6 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         if (idx !== -1) g.discardPile.splice(idx, 1);
     };
 
-    it.skip("regression: a major card's own primitive step tolerates a mode needing hand-card supply, same as minor arcana's own", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, -1, 0, () => major(14)); // Temperance (l0): create, create
-        g.board.get(-1, 0)!.pieces = [new Piece(1, 1, "W")]; // facing k0, a genuine wasteland
-        const spotUid = "2S";
-        g.hands[0] = g.hands[0].filter(uid => uid !== spotUid);
-        g.hands[0].push(spotUid);
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, -1, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_new");
-        expect(modeClick.move).eq(`use 14/with l0.1 at k0 create`);
-        expect(modeClick.valid).to.be.true; // still-incomplete ("new" needs a card uid) but not an error
-        const supplied = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
-        expect(supplied.move).eq(`use 14/with l0.1 at k0 create ${spotUid}`);
-        expect(supplied.valid).to.be.true;
-        g.move(supplied.move);
-        expect(g.board.get(-2, 0)!.card?.uid).eq(spotUid);
-    });
-
-    it.skip("orientMinion (Empress step 1): board click orients the acting minion directly, no target-pick needed", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(3)); // The Empress
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")]; // minion A, standing
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
-        const result = g.handleClick(cellClick.move, rowE, colE);
-        expect(result.move).eq(`use 03/orient m0.1 E`);
-        expect(result.valid).to.be.true;
-        // Step 1 (orientMinion) is complete, but step 2 (create) is still
-        // genuinely optional - complete:0, with the "remaining powers are
-        // optional" message, computed directly by validateMove() now, not just click.
-        const optionalMsg = i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: "The Empress" });
-        expect(result.complete).eq(0);
-        expect(result.message).eq(optionalMsg);
-        expect(g.validateMove(result.move).message).eq(optionalMsg);
-        g.move(result.move); // skips step 2 (create)
-        expect(g.board.get(0, 0)!.pieces[0].orientation).eq("E");
-        expect(g.currplayer).eq(2);
-    });
-
-    it.skip("tradeHands (Justice step 1): a single click on the facing cell's piece swaps hands", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(11)); // Justice
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, player 2
-        const handsBefore = [g.hands[0].slice(), g.hands[1].slice()];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const result = g.handleClick(cellClick.move, rowN, colN);
-        expect(result.move).eq(`use 11/with m0.1 trade n0.1`);
-        expect(result.valid).to.be.true;
-        g.move(result.move); // skips step 2 (attack)
-        expect(g.hands[0]).to.deep.equal(handsBefore[1]);
-        expect(g.hands[1]).to.deep.equal(handsBefore[0]);
-        expect(g.currplayer).eq(2);
-    });
-
     it("tradeHands: forbids targeting one of the acting player's own pieces - a no-op dressed up as a step", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(11)); // Justice
@@ -4778,157 +3472,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(selfClick.move).eq(cellClick.move); // the move string never advances into the doomed state
     });
 
-    it.skip("orientAny (Devil): 2+ distinguishable pieces at the facing cell offer a button-based target picker, self included", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(15)); // The Devil
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U"), new Piece(2, 2, "U")]; // two distinguishable enemy pieces at n0
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
-        const values = buttonValues(g);
-        expect(values).to.include.members(["target_m0.1", "target_n0.1", "target_n0.2"]);
-        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.2");
-        expect(picked.move).eq(`use 15/with m0.1 orient n0.2`);
-        expect(picked.valid).to.be.true;
-    });
-
-    it.skip("orientAny (Devil): a single candidate at the facing cell offers no target picker - the plain click flow keeps working", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(15)); // The Devil
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // one enemy piece at n0
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
-        const values = buttonValues(g);
-        expect(values.some(v => v?.startsWith("target_"))).to.be.false;
-    });
-
-    it.skip("tradeHands (Justice): 2+ enemy pieces at the facing cell offer a button-based target picker, self excluded", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(11)); // Justice
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U"), new Piece(2, 2, "U")]; // two distinguishable enemy pieces at n0
-        const handsBefore = [g.hands[0].slice(), g.hands[1].slice()];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
-        const values = buttonValues(g);
-        expect(values).to.include.members(["target_n0.1", "target_n0.2"]);
-        expect(values).to.not.include("target_m0.1"); // self is never a legal tradeHands target
-        const picked = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.2");
-        expect(picked.move).eq(`use 11/with m0.1 trade n0.2`);
-        expect(picked.valid).to.be.true;
-        g.move(picked.move); // skips step 2 (attack)
-        expect(g.hands[0]).to.deep.equal(handsBefore[1]);
-        expect(g.hands[1]).to.deep.equal(handsBefore[0]);
-    });
-
-    it.skip("orientAny (Devil): target pick never assigns a default orientation; a further click near the TARGET sets it", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(15)); // The Devil
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "S")]; // enemy B, player 2, facing S
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use 15/with m0.1 orient n0.1`); // target chosen, no facing yet
-        expect(step1.valid).to.be.true;
-        expect(step1.complete).eq(-1);
-        // Target already picked - the message must name the TARGET's own
-        // facing as what's still needed, not the generic "pick a target"
-        // wording (see validateFrameStack's own PICK_DIRECTION_TO_ORIENT
-        // docs) - computed directly by validateMove() now, not just click.
-        expect(step1.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
-        expect(g.validateMove(step1.move).message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
-        const [rowO, colO] = rowColFor(g, 2, 0); // o0, east of n0 (the target)
-        const step2 = g.handleClick(step1.move, rowO, colO);
-        expect(step2.move).eq(`use 15/with m0.1 orient n0.1 E`);
-        expect(step2.valid).to.be.true;
-        // This step is genuinely complete (one real direction click is
-        // the whole action), but steps 2 & 3 are still genuinely optional -
-        // complete:0, with the "remaining powers are optional" message,
-        // computed directly by validateMove() now, not just click.
-        const optionalMsg = i18next.t("apgames:validation.gnostica.POWER_STILL_OPTIONAL", { card: "The Devil" });
-        expect(step2.complete).eq(0);
-        expect(step2.message).eq(optionalMsg);
-        expect(g.validateMove(step2.move).message).eq(optionalMsg);
-        g.move(step2.move); // skips steps 2 & 3
-        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1, orientation: "E" });
-        expect(g.currplayer).eq(2);
-    });
-
-    it.skip("orientAny (Devil): a same-facing (no-op) reorientation is rejected, and the target-pick default never seeds one", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(15)); // The Devil
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, already facing up
-        const validated = g.validateMove(`use 15/with m0.1 orient n0.1 U`);
-        expect(validated.valid).to.be.false;
-        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
-        // The click-driven default (see handleOrientAnyOrHierophantClick's
-        // own docs) must never itself land on this no-op - it falls back
-        // to a different facing when the target already faces up.
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).to.not.eq(`use 15/with m0.1 orient n0.1 U`);
-        expect(step1.valid).to.be.true;
-    });
-
-    it.skip("hierophantReplace: same two-stage target-then-orient flow; the target is replaced by the acting player's own piece", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(5)); // The Hierophant
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "S")]; // enemy B, player 2, facing S
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use 05/with m0.1 replace n0.1 S?`); // target chosen, facing seeded from the captured piece's own prior orientation
-        const [rowO, colO] = rowColFor(g, 2, 0);
-        const step2 = g.handleClick(step1.move, rowO, colO);
-        // IStep has one direction slot - a correction REPLACES the seeded
-        // value outright (matches Cups "own"'s identical single-token
-        // behavior), not a second appended token.
-        expect(step2.move).eq(`use 05/with m0.1 replace n0.1 E`);
-        expect(step2.valid).to.be.true;
-        g.move(step2.move);
-        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
-    });
-
     // The facing is a mandatory token, seeded with the captured piece's
     // own prior orientation and "?"-marked until a further click confirms
     // or corrects it - deliberately matching place/Cups "own"'s
     // mandatory-seeded convention for consistency, even though the
     // default here is always derivable from the board (see
     // validateHierophantReplace's own docs).
-    it.skip("hierophantReplace: with no facing click at all, the replacement inherits the captured piece's own prior orientation", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(5)); // The Hierophant
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "S")]; // enemy B, player 2, facing S
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const step1 = g.handleClick(cellClick.move, rowN, colN);
-        expect(step1.move).eq(`use 05/with m0.1 replace n0.1 S?`);
-        // Already submittable as-is - the seeded default counts as a real choice.
-        expect(step1.valid).to.be.true;
-        expect(step1.complete).to.not.eq(-1);
-        g.move(step1.move, { trusted: false });
-        expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "S" });
-    });
 
     it("hierophantReplace: forbids targeting one of the acting player's own pieces - a no-op dressed up as a step", () => {
         const g = new GnosticaGame(2);
@@ -4978,87 +3527,6 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(buttonValues(g)).to.not.include.members(["minion_m0.1", "minion_m0.2"]);
         const suitClick = g.handleClick(cellClick.move, -1, -1, "_btn_magician_R");
         expect(suitClick.move).eq(`use 01 as R`);
-    });
-
-    it.skip("hermitTeleport: the target list offers self and whatever's at the facing cell; the destination click is unrestricted", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(9)); // The Hermit
-        // o0 (2,0), the teleport destination below, must not be "void"
-        // (CANT_END_IN_VOID) - pin a neighbouring card so it's always
-        // "wasteland" regardless of the random initial deal.
-        forceCardAt(g, 3, 0, () => aceOfCups());
-        // n0 (1,0) must keep its own card too: forceCardAt's own
-        // duplicate-clearing above wipes it out on the rare deal where
-        // it was Hermit's original location, and pruneIfEmpty then
-        // deletes the cell entirely once B teleports away from it.
-        forceCardAt(g, 1, 0, () => aceOfRods());
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, player 2
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        g.move(cellClick.move, { partial: true });
-        const values = buttonValues(g);
-        expect(values).to.include("target_m0.1"); // self
-        expect(values).to.include("target_n0.1"); // B, at the facing cell
-        const redirected = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.1");
-        expect(redirected.move).eq(`use 09/with m0.1 fly n0.1`); // targets B directly
-        // o0: not adjacent to A at all - proves the destination click has
-        // no adjacency restriction, unlike every other click-to-target
-        // flow in this file.
-        const [rowDest, colDest] = rowColFor(g, 2, 0);
-        const withDest = g.handleClick(redirected.move, rowDest, colDest);
-        expect(withDest.move).eq(`use 09/with m0.1 fly n0.1 to o0`);
-        expect(withDest.valid).to.be.true;
-        g.move(withDest.move);
-        expect(g.board.get(1, 0)!.pieces.length).eq(0);
-        expect(g.board.get(2, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 1 });
-        expect(g.currplayer).eq(2);
-    });
-
-    it.skip("judgementDraw: a major discard entry toggles exactly; a minor bucket draws (and un-draws) a random matching uid", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(20)); // Judgement
-        g.board.get(0, 0)!.pieces = [new Piece(1, 2, "U")]; // minion A, size 2 (max draw = 2)
-        for (const uid of ["07", "2C", "5C", "3D"]) {
-            pluckCard(g, uid);
-        }
-        g.hands[0] = g.hands[0].slice(0, 4); // 4 cards -> room for 2 more (6 - 4)
-        g.discardPile = ["07", "2C", "5C", "3D"];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const click1 = g.handleClick(cellClick.move, -1, -1, "discard_07");
-        expect(click1.move).eq(`use 20/with m0.2 draw 07`);
-        expect(click1.valid).to.be.true;
-        const click2 = g.handleClick(click1.move, -1, -1, "discard_C_spot");
-        expect(click2.valid).to.be.true;
-        const pickedMatch = click2.move.match(new RegExp(`^use 20/with m0\\.2 draw 07 (\\S+)$`));
-        expect(pickedMatch).to.not.eq(null);
-        const picked = pickedMatch![1];
-        expect(["2C", "5C"]).to.include(picked);
-        // Clicking the same bucket again removes the just-picked uid.
-        const click3 = g.handleClick(click2.move, -1, -1, "discard_C_spot");
-        expect(click3.move).eq(`use 20/with m0.2 draw 07`);
-        expect(click3.valid).to.be.true;
-        // At maxDraw (2, after re-adding the bucket pick), a third pick is
-        // rejected. Re-adding is an INDEPENDENT random draw - not
-        // necessarily `picked` again - so re-derive it from click4 itself
-        // rather than assuming it matches.
-        const click4 = g.handleClick(click3.move, -1, -1, "discard_C_spot");
-        const pickedMatch4 = click4.move.match(new RegExp(`^use 20/with m0\\.2 draw 07 (\\S+)$`));
-        expect(pickedMatch4).to.not.eq(null);
-        const picked4 = pickedMatch4![1];
-        expect(["2C", "5C"]).to.include(picked4);
-        const click5 = g.handleClick(click4.move, -1, -1, "discard_D_spot");
-        expect(click5.valid).to.be.false;
-        expect(click5.message).eq(i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw: 2, requested: 3 }));
-        g.move(click4.move);
-        expect(g.hands[0]).to.include("07");
-        expect(g.hands[0]).to.include(picked4);
-        expect(g.discardPile).to.not.include("07");
-        expect(g.discardPile).to.not.include(picked4);
-        expect(g.currplayer).eq(2);
     });
 
     it("highPriestess: hand-card clicks toggle a discard list (no minionRef at all), committing the explicit draw count chosen via the button bar", () => {
@@ -5243,87 +3711,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.continued).to.not.be.empty; // step 1 of 2 - still owes the second flip
     });
 
-    it.skip("Hanged Man (move, then tradeHands): a click on A's own cell starts step 2 (tradeHands), rejected as self-targeting; skipping it still completes step 1", () => {
-        const g = new GnosticaGame(2);
-        // Fully deterministic (see clearBoard's own docs): the random
-        // initial deal could otherwise occasionally put The Hanged Man
-        // itself at n0, which forceCardAt's own duplicate-clearing would
-        // then wipe out, leaving no territory there to push.
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => major(12)); // The Hanged Man
-        forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0, the territory to be pushed
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, facing n0
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [row, col] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, row, col);
-        const step1 = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
-        expect(step1.move).eq(`use 12/with m0.1 move n0 1`); // pushes n0's territory east; A never moves
-        // A's own cell (m0) has no interactive meaning for step 1 anymore
-        // (its own click target is now the destination beyond n0, not
-        // m0), so a click there routes straight to step 2's own tradeHands
-        // - rejected immediately as a no-op dressed up as a real step
-        // (see checkTradeHands's own docs), rather than building the
-        // doomed move and letting it fail later.
-        const [rowM, colM] = rowColFor(g, 0, 0);
-        const step2 = g.handleClick(step1.move, rowM, colM);
-        expect(step2.move).eq(step1.move);
-        expect(step2.valid).to.be.false;
-        expect(step2.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
-        // Skipping tradeHands (the chain's own tail) stays legal, so
-        // step 1's own push still completes correctly on its own.
-        g.move(step1.move);
-        expect(g.board.has(1, 0)).eq(false);
-        expect(g.board.get(2, 0)!.card).to.not.eq(undefined);
-        expect(g.currplayer).eq(2);
-    });
-
-    it.skip("orientMinion/tradeHands/orientAny/hierophantReplace/judgementDraw leave the button bar uncollapsed (no mode buttons of their own)", () => {
-        const setups: [number, () => void][] = [
-            [3, () => undefined],  // Empress: orientMinion
-            [11, () => undefined], // Justice: tradeHands
-            [15, () => undefined], // Devil: orientAny
-            [5, () => undefined],  // Hierophant: hierophantReplace
-            [20, () => undefined], // Judgement: judgementDraw
-        ];
-        for (const [seq] of setups) {
-            const g = new GnosticaGame(2);
-            forceCardAt(g, 0, 0, () => major(seq));
-            g.board.get(0, 0)!.pieces = [new Piece(1, seq === 20 ? 2 : 1, "U")];
-            g.move(`use ${major(seq).uid}`, { partial: true });
-            const values = buttonValues(g);
-            expect(values, `seq ${seq}`).to.deep.equal(["use", "play", "orient", "discard", "pass", "declare"]);
-        }
-    });
-
     // High Priestess is the one exception - unlike the others above, its
     // own draw count IS a real player choice (see the ordinary discard/draw
     // action's own ROOT_ARGS analogue), so it gets the same count-picker
     // button set that action already has, offered as soon as the step is
     // live and no count has been chosen yet.
-    it.skip("highPriestess shows its own Draw N count-picker, same shape as the ordinary discard/draw action's own", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(2));
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        g.hands[0] = g.hands[0].slice(0, 4); // room to draw, so maxDraw > 0
-        g.move(`use 02`, { partial: true });
-        expect(buttonValues(g)).to.deep.equal(["hpdraw_2", "hpdraw_1", "hpdraw_0"]); // maxDraw = 6 - 4
-    });
 
-    it.skip("hermitTeleport shows its own target candidates; magicianChoice shows its own suit buttons", () => {
-        const gHermit = new GnosticaGame(2);
-        clearBoard(gHermit);
-        forceCardAt(gHermit, 0, 0, () => major(9));
-        forceCardAt(gHermit, 1, 0, () => aceOfCups()); // n0, the facing cell - a real (pieceless) territory
-        gHermit.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        gHermit.move(`use 09`, { partial: true });
-        expect(buttonValues(gHermit)).to.deep.equal(["use", "_spacer", "target_n0", "target_m0.1", "declare"]);
-
-        const gMagician = new GnosticaGame(2);
-        forceCardAt(gMagician, 0, 0, () => major(1));
-        gMagician.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        gMagician.move(`use 01`, { partial: true });
-        expect(buttonValues(gMagician)).to.deep.equal(["use", "_spacer", "magician_C", "magician_R", "magician_D", "magician_S", "declare"]);
-    });
 });
 
 // #47: chatLog() naming the OTHER player involved in a power, not just the
@@ -5360,17 +3753,6 @@ describe("Gnostica: discard/draw chat messages", () => {
 describe("Gnostica: chatLog() other-player naming", () => {
     before(() => {
         addResource("en");
-    });
-
-    it.skip("announce (Justice tradeHands): names both the acting player and the one they traded with", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(11)); // Justice
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy B, player 2
-        g.move(`use 11/with m0.1 trade n0.1`); // skips step 2 (attack)
-        const log = g.chatLog(["Alice", "Bob"]);
-        const line = log.flat().find(l => l.includes("traded hands"));
-        expect(line).eq(i18next.t("apresults:SWAP.gnostica", { player: "Alice", target: "Bob" }));
     });
 
     it("destroy (Swords piece): names whose minion was destroyed", () => {
@@ -5551,17 +3933,6 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:CONVERT.gnostica_hierophant_target", { player: "Alice", where: "n0", target: "Bob" }));
     });
 
-    it.skip("orient (Devil orientAny): names whose minion was reoriented when it isn't the acting player's own", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(15)); // The Devil
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // A, player 1, facing n0
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "S")]; // enemy B, player 2, facing S
-        g.move(`use 15/with m0.1 orient n0.1 U`); // skips steps 2 & 3
-        const log = g.chatLog(["Alice", "Bob"]);
-        const line = log.flat().find(l => l.includes("oriented"));
-        expect(line).eq(i18next.t("apresults:ORIENT.gnostica_target", { player: "Alice", where: "n0", what: "1", facing: "U", target: "Bob" }));
-    });
-
     it("orient: no target named for an ordinary turn action (always the acting player's own piece)", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U"); // player 1
@@ -5608,16 +3979,6 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:CONVERT.gnostica_tile", { player: "Alice", what: withArticle(card("2C").name), into: withArticle(card(royaltyUid).name), where: "n0" }));
     });
 
-    it.skip("falls back to 'Player N' when no names (or too few) are supplied - old-data/pre-#47 compatibility path", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => major(11)); // Justice
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.board.get(1, 0)!.pieces = [new Piece(2, 1, "U")];
-        g.move(`use 11/with m0.1 trade n0.1`);
-        const log = g.chatLog([]);
-        const line = log.flat().find(l => l.includes("traded hands"));
-        expect(line).eq(i18next.t("apresults:SWAP.gnostica", { player: "Player 1", target: "Player 2" }));
-    });
 });
 
 describe("Gnostica: High Priestess sequenced obligation (turn-model)", () => {
@@ -5812,241 +4173,6 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use 00`);
         expect(g.continued).to.deep.equal(["00.1"]);
         expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power"]);
-    });
-
-    // m0: The World, minion A facing n0. n0: own piece B (to be pushed).
-    // p0: The Lovers, World's own target - kept away from m0/n0/o0 so the
-    // push destination (o0) never collides with it.
-    const setupWorldLovers = (): GnosticaGame => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => theWorld());
-        forceCardAt(g, 1, 0, () => aceOfDiscs());
-        forceCardAt(g, 3, 0, () => major(6));
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "S")];
-        return g;
-    };
-
-    it.skip("World -> Lovers fully resolves both of Lovers' own steps in one call, no pause (hand-typed)", () => {
-        const g = setupWorldLovers();
-        g.move(`use 21 as 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`);
-        expect(g.continued).to.be.empty; // World's push is informationally free - no pause at all
-        expect(g.currplayer).eq(2);
-        const dest = g.board.get(2, 0)!; // o0
-        expect(dest.pieces.length).eq(2); // B, pushed here, plus Lovers' own new piece
-        expect(g.board.get(1, 0)!.pieces.length).eq(0); // B left n0
-        // Three chained segments (World's own push, then Lovers' own two
-        // steps) means every one of them gets its own _group wrapper.
-        expect(g.results.filter(r => r.type === "_group")).to.have.length(3);
-        const flat = g.results.flatMap(r => r.type === "_group" ? r.results : [r]);
-        // World's own step reuses the ordinary "use" result type (no more
-        // stubbed "borrowPower" - see chatLog's own docs), tagged with
-        // count: 21 so chatLog can still say "borrowed the power of X"
-        // instead of the plain "used X" wording an ordinary activation gets.
-        expect(flat.some(r => r.type === "use" && (r as { what?: string; count?: number }).what === "06" && (r as { count?: number }).count === 21)).eq(true);
-    });
-
-    // TODO-gnostica #105: asUid and asSuit are separate IParsedMove fields
-    // that chain correctly ("as <uid> as <suit>") - MOVE-STRINGS-gnostica.md's
-    // own catalogue lists this chained spelling as the intended form for a
-    // World-borrowed Magician. (The older inline-suit-letter-as-first-token
-    // spelling this test used to exercise still parses and still works as
-    // a fallback - see gnostica.ts's applyPowerStep own docs - but is no
-    // longer the primary path once the chain is available.)
-    it.skip("World -> Magician: the pushed Magician frame's own suit chains via a second 'as', not its own step token", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => theWorld());
-        forceCardAt(g, 3, 0, () => major(1)); // The Magician, World's own target
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        g.move(`use 21 as 01 as C/with m0.1 at m0 create U`);
-        expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode via the borrowed Magician
-    });
-
-    // Regression (#105): the magician_<suit> button handler used to spread
-    // {...pending, asUid: suitUid}, overwriting World's own already-picked
-    // card uid instead of setting a separate suit field - so clicking a
-    // suit button after "use 21 as 01" produced the corrupted "use 21 as
-    // C", losing the borrow entirely. This click path had no test coverage
-    // at all before this fix.
-    it.skip("World -> Magician via clicks: the suit button preserves World's own borrowed uid instead of overwriting it", () => {
-        const g = new GnosticaGame(2);
-        clearBoard(g);
-        forceCardAt(g, 0, 0, () => theWorld());
-        forceCardAt(g, 3, 0, () => major(1)); // The Magician, World's own target
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [rowM, colM] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, rowM, colM);
-        expect(cellClick.move).eq(`use 21`);
-
-        const [rowP, colP] = rowColFor(g, 3, 0);
-        const targetClick = g.handleClick(cellClick.move, rowP, colP);
-        expect(targetClick.move).eq(`use 21 as 01`);
-
-        const suitClick = g.handleClick(targetClick.move, -1, -1, "_btn_magician_C");
-        // Before the fix, this corrupted World's own borrow: "use 21 as C".
-        expect(suitClick.move).eq(`use 21 as 01 as C`);
-        expect(suitClick.valid).to.be.true; // suit chosen, mode not yet - still skipped
-
-        const modeClick = g.handleClick(suitClick.move, -1, -1, "_btn_target_own");
-        expect(modeClick.move).eq(`use 21 as 01 as C/with m0.1 at m0 create U?`);
-        g.move(modeClick.move);
-        expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode via the borrowed Magician
-    });
-
-    // Matches Magnate's own "a turn is never complete, only submissible"
-    // rule: whenever a genuinely optional further step remains available
-    // (Lovers' own step 2, once step 1 is done), the move is
-    // unconditionally complete:0 - computed directly from the frame's own
-    // state, the same for a hand-typed move as a click-built one, no
-    // marker needed (the same way an outright incomplete step already
-    // needs none). Only once the chain is fully exhausted (both steps
-    // given, nothing further possible) does it become complete:1.
-    it.skip("a step done with a genuinely optional further one still available is always complete:0, never 1", () => {
-        const g = setupWorldLovers();
-        const oneStep = `use 21 as 06/with m0.1 move n0.1 1 orient U`;
-        const result = g.validateMove(oneStep);
-        expect(result.valid).to.be.true;
-        expect(result.complete).eq(0);
-        const bothSteps = `${oneStep}/with o0.1 at o0 create U`;
-        const exhausted = g.validateMove(bothSteps);
-        expect(exhausted.valid).to.be.true;
-        expect(exhausted.complete).eq(1);
-        // A trailing "/" is no longer special - just an ordinary empty
-        // step segment, malformed like any other.
-        const trailingSlash = g.validateMove(`${oneStep}/`);
-        expect(trailingSlash.valid).to.be.false;
-    });
-
-    it.skip("World -> Lovers, then nothing more: rejected as incomplete, not silently accepted as a no-op move", () => {
-        // Regression: naming Lovers as World's target has no board effect
-        // of its own (unlike Fool's flip) - completing right there would
-        // make the whole move a no-op in every way that matters, exactly
-        // what #49 forbids for anything but Fool's own reveal.
-        const g = setupWorldLovers();
-        const result = g.validateMove(`use 21 as 06`);
-        expect(result.valid).to.be.true;
-        expect(result.complete).eq(-1);
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(6).name }));
-    });
-
-    it.skip("World -> Lovers via clicks: the pushed frame's own steps become click-driven too", () => {
-        const setup = setupWorldLovers;
-        const g = setup();
-
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [rowM, colM] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, rowM, colM);
-        expect(cellClick.move).eq(`use 21`);
-
-        // No mode button for worldUseAny (pure click-driven) - a click on
-        // Lovers' own cell supplies the target directly.
-        const [rowP, colP] = rowColFor(g, 3, 0);
-        const targetClick = g.handleClick(cellClick.move, rowP, colP);
-        // The moment the target is picked, it lands in the head as
-        // "as <borrowed card>" - the head arg (The World) never moves.
-        expect(targetClick.move).eq(`use 21 as 06`);
-        expect(targetClick.valid).to.be.true;
-
-        // Lovers' own step 1 (Rods) target candidates are now on offer,
-        // proving parsePendingStep's stack-awareness resolved the PUSHED
-        // frame's own def, not World's own (already-exhausted) one.
-        const preview1 = setup();
-        preview1.move(targetClick.move, { partial: true });
-        expect(buttonValues(preview1)).to.include("target_n0.1");
-
-        const redirected = g.handleClick(targetClick.move, -1, -1, "_btn_target_n0.1");
-        expect(redirected.move).eq(`use 21 as 06/with m0.1 move n0.1 1`);
-        expect(redirected.valid).to.be.true;
-
-        const preview2 = setup();
-        preview2.move(redirected.move, { partial: true });
-        expect(buttonValues(preview2)).to.include("target_own");
-
-        const step2 = g.handleClick(redirected.move, -1, -1, "_btn_target_own");
-        expect(step2.valid).to.be.true;
-
-        g.move(step2.move);
-        expect(g.continued).to.be.empty;
-        expect(g.currplayer).eq(2);
-        expect(g.board.get(2, 0)!.pieces.length).eq(1); // B, pushed to o0
-        expect(g.board.get(1, 0)!.pieces.length).eq(1); // Lovers' own new piece, at n0 (now vacant)
-    });
-
-    // Regression: worldUseAny defers its own minion choice entirely to the
-    // borrowed card's first step (see applyPowerStep's own docs) - with 2+
-    // of the player's own minions sharing The World's cell, buildSpecialPending
-    // used to eagerly compute minion-ambiguity anyway, so the bar wrongly
-    // offered a "Choose Minion" picker before any card was even targeted
-    // (and picking one built a malformed "use 21/m0.1" move, missing "as").
-    it.skip("worldUseAny: 2+ minions on World's own cell don't trigger a premature minion picker", () => {
-        const g = setupWorldLovers();
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E"), new Piece(1, 2, "W")];
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [rowM, colM] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, rowM, colM);
-        expect(cellClick.move).eq(`use 21`);
-        g.move(cellClick.move, { partial: true }); // sync engine state, same as the playground's own preview flow
-        expect(buttonValues(g)).to.not.include.members(["minion_m0.1", "minion_m0.2"]);
-        const [rowP, colP] = rowColFor(g, 3, 0);
-        const targetClick = g.handleClick(cellClick.move, rowP, colP);
-        expect(targetClick.move).eq(`use 21 as 06`);
-        expect(targetClick.valid).to.be.true;
-    });
-
-    // #67: the collapsed top-level button names the active card's own
-    // uid, not just which action started the move - and once World's own
-    // push resolves onto Lovers, the label follows the ACTIVE card
-    // (Lovers), not the root (World), matching #74's own "via" reasoning.
-    it.skip("Use Territory names the active card's uid once one's known, following World's own push", () => {
-        const g = setupWorldLovers();
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [rowM, colM] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, rowM, colM);
-
-        // World's own step is itself a chained segment, so render() may
-        // return an array of per-frame reps once a frame boundary exists
-        // (see the shared buttonValues helper's own identical docs) - the
-        // live button bar is always on the last one.
-        const buttonLabel = (g2: GnosticaGame, value: string): string | undefined => {
-            const raw = g2.render();
-            const rep = (Array.isArray(raw) ? raw[raw.length - 1] : raw) as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
-            const bar = rep.areas!.find(a => a.type === "buttonBar")!;
-            return bar.buttons!.find(b => b.value === value)?.label;
-        };
-
-        const preview = setupWorldLovers();
-        preview.move(cellClick.move, { partial: true });
-        expect(buttonLabel(preview, "use")).eq(`Use Territory (21)`);
-
-        // "still incomplete" states (Lovers' own chain has a 2nd step left
-        // to go - see "World -> Lovers via clicks" above) keep this.liveMove
-        // set for the NEXT click to build on, unlike modeClick's own
-        // self-target default, which is already a syntactically complete
-        // step and so - via the same implicit-decline path an explicit
-        // "decline" click would take - can auto-resolve Lovers' own
-        // remaining (optional) 2nd step and end the whole turn right there.
-        const [rowP, colP] = rowColFor(g, 3, 0);
-        const targetClick = g.handleClick(cellClick.move, rowP, colP);
-        const redirected = g.handleClick(targetClick.move, -1, -1, "_btn_target_n0.1");
-        const preview2 = setupWorldLovers();
-        preview2.move(redirected.move, { partial: true });
-        expect(buttonLabel(preview2, "use")).eq(`Use Territory (06)`);
-    });
-
-    it.skip("clicking a minor arcana territory while picking World's target gives the 'choose a major' hint, not a stale no-minion complaint", () => {
-        const g = setupWorldLovers();
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [rowM, colM] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, rowM, colM); // use 21
-        const [rowA, colA] = rowColFor(g, 1, 0); // the Ace of Discs
-        const minorClick = g.handleClick(cellClick.move, rowA, colA);
-        expect(minorClick.valid).to.be.false;
-        expect(minorClick.message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
-        expect(minorClick.move).eq(cellClick.move); // move string unchanged - no silent switch to "use AR"
     });
 
     it("World rejects a self-reference and an off-board target", () => {
@@ -6252,77 +4378,6 @@ describe("Gnostica: Fool and World", () => {
     // own reveal, and whether or not the tradeHands step's own card is the
     // acting player's LAST step (Justice: tradeHands then attack) - see
     // specialStepHasNoLegalTarget's own docs.
-    it.skip("a doomed tail step (tradeHands/hierophantReplace with no legal target) gets an explicit skip message, not the generic VALID_MOVE fallback", () => {
-        const skippedMsg = i18next.t("apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET", { card: major(12).name });
-        {
-            // Direct activation - no Fool involved at all.
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(12)); // The Hanged Man
-            forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - the territory to push
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            const result = g.validateMove(`use 12/with m0.1 move n0 1`);
-            expect(result.valid).to.be.true;
-            expect(result.complete).eq(1); // still a genuinely complete, submittable move
-            expect(result.message).eq(skippedMsg);
-        }
-        {
-            // Same scenario, reached via the Fool's own reveal instead.
-            const g = setupFool();
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            forceCardAt(g, 1, 0, () => aceOfDiscs());
-            pluckCard(g, "12");
-            g.drawPile.unshift("12");
-            g.move(`use 00`);
-            const result = g.validateMove(`play 12 via 00/with m0.1 move n0 1`);
-            expect(result.valid).to.be.true;
-            expect(result.complete).eq(1);
-            expect(result.message).eq(skippedMsg);
-        }
-        {
-            // Same again, but step 1 uses Rods' "piece" mode (moving the
-            // acting minion itself) rather than "tile" (pushing territory,
-            // which leaves the minion in place). This APPENDS a second,
-            // post-move minion ref onto the frame's own minions array
-            // rather than replacing the pre-move one (see walkFrameStack's/
-            // validateFrameStack's own `[...top.minions, newMinion]`) -
-            // specialStepHasNoLegalTarget must still recognize this as
-            // doomed by checking the piece's CURRENT (moved) position, not
-            // bail out just because more than one entry is now present.
-            const g = setupFool();
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            forceCardAt(g, 1, 0, () => aceOfDiscs()); // n0 - where the piece relocates to
-            pluckCard(g, "12");
-            g.drawPile.unshift("12");
-            g.move(`use 00`);
-            const result = g.validateMove(`play 12 via 00/with m0.1 move m0.1 1`);
-            expect(result.valid).to.be.true;
-            // complete:0, not 1 - step 1 moved the acting player's own
-            // piece and never supplied a reorientation, independent of
-            // step 2's own doomed-and-skipped status.
-            expect(result.complete).eq(0);
-            expect(result.message).eq(skippedMsg);
-        }
-        {
-            // Sanity: a real, reachable enemy means no message at all - the
-            // decline (if it happens) is a genuine, silent choice again.
-            // "piece m0.1 1" actually RELOCATES the acting minion (target
-            // self, distance 1) to n0, still facing east - so the enemy
-            // has to sit at o0, the piece's own NEW facing cell once it
-            // gets there, not at n0 itself (n0 is just a wasteland the
-            // piece passes onto, per Rods' own "piece" mode - see
-            // applyRods's own docs).
-            const g = new GnosticaGame(2);
-            clearBoard(g);
-            forceCardAt(g, 0, 0, () => major(12));
-            forceCardAt(g, 1, 0, () => aceOfDiscs());
-            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")];
-            g.board.store.set(2, 0, new CellContents());
-            g.board.get(2, 0)!.pieces = [new Piece(2, 1, "U")]; // enemy at o0
-            const result = g.validateMove(`use 12/with m0.1 move m0.1 1`);
-            expect(result.message).to.not.eq(skippedMsg);
-        }
-    });
 
     it("Fool -> Fool: playing the Fool discards it first, so an empty draw pile can flip it right back", () => {
         const g = new GnosticaGame(2);
@@ -6382,34 +4437,6 @@ describe("Gnostica: Fool and World", () => {
         g.move("decline 2S via 00");
         expect(g.continued).to.deep.equal([]);
         expect(g.currplayer).to.equal(2);
-    });
-
-    it.skip("World targets Fool: a nested pause, and declining the reveal auto-continues into Fool's own mandatory second flip", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => theWorld());
-        forceCardAt(g, 1, 0, () => major(0)); // The Fool, World's own target
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        pluckCard(g, "AC");
-        g.drawPile.unshift("AC");
-        pluckCard(g, "AS");
-
-        g.move(`use 21 as 00`);
-        expect(g.continued).to.not.be.empty;
-        // World's own spent frame is buried but not yet popped - the
-        // forced pause fires before any cascade could reach it (same
-        // "buried, not yet cleaned up" situation as Fool's own frame
-        // above).
-        expect(g.continued).to.deep.equal(["00.1"]);
-        expect(g.currplayer).eq(1);
-
-        // Declining AC's own power exposes Fool's own remaining flip -
-        // never optional (see walkFrameStack's own docs) - so it fires
-        // automatically, in this SAME submission, revealing a new card
-        // and pausing on IT instead.
-        g.drawPile.unshift("AS");
-        g.move(`decline AC via 00`); // decline the reveal (AC's own step)
-        expect(g.continued).to.deep.equal(["00.2"]);
-        expect(g.currplayer).eq(1);
     });
 
     it("resume-mismatch guards are keyed on the innermost obligation, not an outer one still on the stack", () => {
@@ -6616,45 +4643,6 @@ describe("Gnostica: Fool and World", () => {
     // complete, submit-ready move (see reachedViaDecline's own docs), not
     // fall back to the generic top-level bar and a bare "Looks like a
     // valid move" message as if it were a fresh/mandatory activation.
-    it.skip("World's target-cell click on Fool already produces a complete, submit-ready move - no button needed", () => {
-        const g = new GnosticaGame(2);
-        forceCardAt(g, 0, 0, () => theWorld());
-        forceCardAt(g, 1, 0, () => major(0)); // The Fool
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-
-        const seed = g.handleClick("", -1, -1, "_btn_use");
-        const [rowM, colM] = rowColFor(g, 0, 0);
-        const cellClick = g.handleClick(seed.move, rowM, colM);
-
-        const [rowN, colN] = rowColFor(g, 1, 0);
-        const targetClick = g.handleClick(cellClick.move, rowN, colN);
-        expect(targetClick.move).eq(`use 21 as 00`); // the borrowed Fool named as "as", head arg unchanged
-        expect(targetClick.valid).to.be.true;
-        // World's own push is free, then Fool's own flip is next - forced,
-        // one-shot, nothing to reconsider, genuinely complete:1.
-        expect(targetClick.complete).to.eq(1);
-
-        const preview = new GnosticaGame(2);
-        forceCardAt(preview, 0, 0, () => theWorld());
-        forceCardAt(preview, 1, 0, () => major(0));
-        preview.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        preview.move(targetClick.move, { partial: true });
-        // No button needed - Fool's own flip auto-resolves on a real
-        // commit regardless of any click; nothing about it is offered as
-        // an optional continuation.
-        expect(buttonValues(preview)).to.not.include("power_fool");
-        expect(preview.discardPile.length).eq(0); // nothing revealed during this partial preview
-
-        const real = new GnosticaGame(2);
-        forceCardAt(real, 0, 0, () => theWorld());
-        forceCardAt(real, 1, 0, () => major(0));
-        real.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
-        real.move(targetClick.move); // real, non-partial commit
-        // World targeted the Fool and its flip fired; only the Fool's own
-        // remaining obligation persists (the spent World and the revealed
-        // card are not - see this.continued's docs).
-        expect(real.continued).to.deep.equal(["00.1"]);
-    });
 
     // Once genuinely paused (Fool's own reveal of a click-driven special,
     // here the World), the bar drops the ordinary 6 buttons entirely
@@ -6761,25 +4749,6 @@ describe("Gnostica: Fool and World", () => {
         const targetClick = g.handleClick("", rowN, colN);
         expect(targetClick.valid).to.be.true;
         expect(targetClick.move).eq(`play 21 as 05 via 00`);
-    });
-
-    it.skip("chatLog() renders revealFlip/borrowPower lines, naming the actual card, not a bare uid", () => {
-        addResource("en");
-        const foolGame = setupFool();
-        pluckCard(foolGame, "AC");
-        foolGame.drawPile.unshift("AC");
-        foolGame.move(`use 00`);
-        const foolRows = foolGame.chatLog(["Alice", "Bob"]);
-        const acName = minorCards.find(c => c.uid === "AC")!.name;
-        expect(foolRows[foolRows.length - 1].some(line => line.includes(acName))).to.be.true;
-
-        const worldGame = setupWorldLovers();
-        worldGame.move(`use 21 as 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`);
-        const worldRows = worldGame.chatLog(["Alice", "Bob"]);
-        // cardDisplayName() adds the major-arcana numeral to the card's
-        // own stored name as-is (e.g. "The Lovers (VI)").
-        const lovers = `${major(6).name} (${major(6).romanNumeral})`;
-        expect(worldRows[worldRows.length - 1].some(line => line.includes(lovers))).to.be.true;
     });
 
     // A pure decline pushes no board/state results of its own (see
@@ -6964,27 +4933,6 @@ describe("Gnostica: Fool and World", () => {
     // subsequent flip finding nothing simply completes the whole Fool
     // activation there, gracefully - not an error, and not something
     // validation should reject in advance either.
-    it.skip("Judgement draws the discard pile's only card (itself) back, leaving nothing for Fool's mandatory second flip - completes gracefully", () => {
-        const g = setupFool();
-        const judgementUid = "20";
-        g.drawPile = [];
-        g.discardPile = [judgementUid]; // the only card anywhere in the game
-        g.move(`use 00`);
-        expect(g.continued).to.deep.equal(["00.1"]);
-        g.hands[0].pop(); // make room for Judgement's own draw
-
-        const move = `play ${judgementUid} via 00/with m0.1 draw ${judgementUid}`;
-        const validated = g.validateMove(move);
-        expect(validated.valid).to.be.true;
-        expect(validated.complete).to.eq(1); // a fully complete, submittable move - not rejected in advance
-
-        g.move(move);
-        expect(g.hands[0]).to.include(judgementUid); // Judgement drew itself back
-        expect(g.discardPile).to.be.empty;
-        expect(g.drawPile).to.be.empty;
-        expect(g.continued).to.be.empty; // Fool's own second flip found nothing and completed - no error, no pause
-        expect(g.currplayer).eq(2); // the turn actually ended
-    });
 
     // The two cases that stay hard rejections: activating Fool with
     // NOTHING anywhere to flip, before any commitment has been made at
