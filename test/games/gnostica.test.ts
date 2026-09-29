@@ -226,20 +226,21 @@ describe("Gnostica: place / orient", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U"); // player 1
         g.move("place n0 U"); // player 2
-        expect(() => g.move("place l0 U")).to.throw(); // player 1 already placed
-        expect(() => new GnosticaGame(2).move("place a50 U")).to.throw(); // far outside the 3x3 grid - void
-        expect(() => new GnosticaGame(2).move("place m0 U").move("place m0 U")).to.throw(); // occupied cell
+        expect(g.validateMove("place l0 U").message).eq(i18next.t("apgames:validation.gnostica.ALREADY_ON_BOARD")); // player 1 already placed
+        expect(new GnosticaGame(2).validateMove("place a50 U").message).eq(i18next.t("apgames:validation.gnostica.PLACE_VOID", { cell: "a50" })); // far outside the 3x3 grid - void
+        const g2 = new GnosticaGame(2);
+        g2.move("place m0 U");
+        expect(g2.validateMove("place m0 U").message).eq(i18next.t("apgames:validation.gnostica.PLACE_OCCUPIED", { cell: "m0" })); // occupied cell
     });
 
     it("reorients your own piece, but not an opponent's, and requires having placed first", () => {
         const g = new GnosticaGame(2);
-        expect(() => g.move("discard")).to.throw(); // nothing placed yet
+        expect(g.validateMove("discard").message).eq(i18next.t("apgames:validation.gnostica.MUST_PLACE_FIRST")); // nothing placed yet
         g.move("place m0 N"); // player 1
         g.move("place n0 U"); // player 2
-        g.move("orient m0.1 W"); // player 1 again
+        g.move("orient m0.1 W"); // player 1 reorients their own piece, ending their turn
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("W");
-        g.move("discard draw 0"); // player 1
-        expect(() => g.move("orient m0.1 W")).to.throw(); // player 2, targeting player 1's piece
+        expect(g.validateMove("orient m0.1 N").message).eq(i18next.t("apgames:validation.gnostica.NOT_YOUR_MINION")); // now player 2's turn - can't touch player 1's piece
     });
 });
 
@@ -270,10 +271,11 @@ describe("Gnostica: discard", () => {
         g.move("place m0 U");
         g.move("place n0 U");
         const notInHand = g.drawPile.find(uid => !g.hands[0].includes(uid))!;
-        expect(() => g.move(`discard ${notInHand}`)).to.throw();
-        expect(() => g.move(`discard ${g.hands[0][0]} draw 2`)).to.throw(); // only 1 discarded
-        expect(() => g.move("discard draw -1")).to.throw();
-        expect(() => g.move("discard draw abc")).to.throw();
+        expect(g.validateMove(`discard ${notInHand}`).message).eq(i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid: notInHand }));
+        expect(g.validateMove(`discard ${g.hands[0][0]} draw 2`).message).eq(i18next.t("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: "2", max: 1 })); // only 1 discarded
+        // A negative or non-numeric draw count isn't even grammatically a valid "draw <n>" token - rejected by parseMove itself, before checkDiscardDraw's own range check ever runs.
+        expect(g.validateMove("discard draw -1").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_DRAW_COUNT" }));
+        expect(g.validateMove("discard draw abc").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_DRAW_COUNT" }));
     });
 });
 
@@ -404,7 +406,7 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.move("place m0 U"); g.move("place l0 U"); g.move("place n0 U");
         const hand = [...g.hands[0]];
         g.move("discard draw 0 last"); // player 1 announces
-        expect(() => g.move("discard draw 0 last")).to.throw(); // player 2 may not also announce
+        expect(g.validateMove("discard draw 0 last").message).eq(i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED")); // player 2 may not also announce
         g.move("discard draw 0"); g.move("discard draw 0");
         g.move("discard draw 0"); // player 1's resolving turn - falls short
         expect(g.eliminated).to.deep.equal([1]);
@@ -692,10 +694,12 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
             hands: [filler, filler],
+            drawPile: ["AS"], // a real card, deliberately not placed on the board
         });
-        expect(() => g.move("use ZZ")).to.throw(); // not a real card uid
-        expect(() => g.move(`use ${g.drawPile[0]}`)).to.throw(); // real card, but not on the board
-        expect(() => g.move(`use AR`)).to.throw(); // player 1 has no minion at n0
+        // "ZZ" isn't even grammatically a valid card-uid token - rejected by parseMove itself, before validateActivate's own UNKNOWN_CARD check ever runs.
+        expect(g.validateMove("use ZZ").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_CARD_ID" })); // not a real card uid
+        expect(g.validateMove(`use AS`).message).eq(i18next.t("apgames:validation.gnostica.CARD_NOT_ON_BOARD", { uid: "AS" })); // real card, but not on the board
+        expect(g.validateMove(`use AR`).message).eq(i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: "AR" })); // player 1 has no minion at n0
     });
 
     it("refuses to USE World's power against a malformed target", () => {
@@ -703,8 +707,8 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
             board: [{ x: 0, y: 0, uid: "21", pieces: [[1, 1, "U"]] }],
             hands: [filler, filler],
         });
-        // "C" isn't any major arcana card's own uid - checkWorldChoosePower rejects it as NO_SUCH_MAJOR_ON_BOARD.
-        expect(() => g.move(`use 21/with m0.1 C own m0 U`)).to.throw();
+        // "C" isn't a valid token in this grammar slot at all - rejected by parseMove itself, before checkWorldChoosePower's own NO_SUCH_MAJOR_ON_BOARD check ever runs.
+        expect(g.validateMove(`use 21/with m0.1 C own m0 U`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_OTHERWORD" }));
     });
 });
 
@@ -1166,7 +1170,9 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
 
     it("refuses more power-step segments than the card actually grants", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "01", pieces: [[1, 1, "U"]] }], hands: [filler, filler] }); // The Magician - only 1 power
-        expect(() => g.move(`use 01 as C/with m0.1 at m0 create U/with m0.1 at m0 create U`)).to.throw();
+        const result = g.validateMove(`use 01 as C/with m0.1 at m0 create U/with m0.1 at m0 create U`);
+        expect(result.valid).to.be.false;
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
     });
 
     // Regression: SUIT_RE is case-insensitive by design (a hand-typed "as c" is legal), but the parsed
@@ -4018,9 +4024,8 @@ describe("Gnostica: chatLog() other-player naming", () => {
     // Regression: neither checkCreateOwn nor checkCreateEnemy verified the
     // relevant player's own stash had a small left before createOwn/
     // createEnemy's own takeFromStash call ran - an empty stash reached
-    // validateMove() with no complaint at all, only to THROW a raw,
-    // internal GnosticaRulesError once a real (or even untrusted, properly
-    // routed-through-validation) commit actually tried to apply it.
+    // validateMove() with no complaint at all, only to throw once a
+    // commit actually tried to apply it.
     it("Cups (own): validateMove() itself rejects when the acting player's own stash is empty", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfCups());
@@ -4030,11 +4035,6 @@ describe("Gnostica: chatLog() other-player naming", () => {
         const validated = g.validateMove(`use AC/with m0.1 at n0 create U`);
         expect(validated.valid).to.be.false;
         expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: 1, size: 1 }));
-        // An untrusted commit still throws (same as any other illegal move -
-        // see every other ".to.throw()" case in this file) - the fix is
-        // that validateMove() above already caught it, not that move()
-        // silently succeeds.
-        expect(() => g.move(`use AC/with m0.1 at n0 create U`, { trusted: false })).to.throw();
     });
 
     it("Cups (enemy): validateMove() itself rejects when the TARGETED enemy's own stash is empty", () => {
@@ -4046,7 +4046,6 @@ describe("Gnostica: chatLog() other-player naming", () => {
         const validated = g.validateMove(`use AC/with m0.1 at n0 create n0.1`);
         expect(validated.valid).to.be.false;
         expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: 2, size: 1 }));
-        expect(() => g.move(`use AC/with m0.1 at n0 create n0.1`, { trusted: false })).to.throw();
     });
 
     it("convert (Hierophant replace): names whose piece was displaced", () => {
