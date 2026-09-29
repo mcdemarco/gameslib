@@ -1168,6 +1168,15 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "01", pieces: [[1, 1, "U"]] }], hands: [filler, filler] }); // The Magician - only 1 power
         expect(() => g.move(`use 01 as C/with m0.1 at m0 create U/with m0.1 at m0 create U`)).to.throw();
     });
+
+    // Regression: SUIT_RE is case-insensitive by design (a hand-typed "as c" is legal), but the parsed
+    // asSuit value used to stay lowercase - now normalized to uppercase in parseMove, so this must still
+    // dispatch to Cups' "own" mode exactly like the uppercase form.
+    it("a lowercase suit letter in \"as\" still validates and applies correctly", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "01", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
+        g.move(`use 01 as c/with m0.1 at m0 create U`);
+        expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode
+    });
 });
 
 // The frame-array API contract itself (see render()'s own docs) - not

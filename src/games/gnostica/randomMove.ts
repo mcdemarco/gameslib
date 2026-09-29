@@ -31,7 +31,7 @@ import { cardPointValue } from "./cell";
 import { Orientation, allOrientations } from "./piece";
 import { GnosticaBoard } from "./board";
 import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana";
-import { ALL_SUITS, RDS_VERBS } from "./powers";
+import { ALL_SUITS, RDS_VERBS, MinorSuitUid, MinorMode } from "./powers";
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
 // docs there, including #98/#100's own) - duplicated rather than imported
@@ -51,11 +51,11 @@ function chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[]
 }
 
 // The verb a suit's primitive step spells; Cups' is "create", the others come from RDS_VERBS.
-function suitAction(suitUid: string): string {
-    return suitUid === "C" ? "create" : RDS_VERBS[suitUid];
+function suitAction(suitUid: MinorSuitUid): string {
+    return suitUid === "C" ? "create" : RDS_VERBS[suitUid]!;
 }
 
-function suitStep(suitUid: string, minionRef: string, fields: Partial<IStep>): IStep {
+function suitStep(suitUid: MinorSuitUid, minionRef: string, fields: Partial<IStep>): IStep {
     return { action: suitAction(suitUid), withPiece: minionRef, ...fields };
 }
 
@@ -66,12 +66,12 @@ function reparsedStep(game: GnosticaGame, step: IStep): IStep {
 }
 
 // A fresh "use"/"play" move on card `uid`: the head step, then the chain (pickleMove writes the "with"/"orient" subheads and "as" annotations).
-function pickleBotMove(game: GnosticaGame, head: "use" | "play", uid: string, chain: IStep[], asUid?: string, asSuit?: string): string {
+function pickleBotMove(game: GnosticaGame, head: "use" | "play", uid: string, chain: IStep[], asUid?: string, asSuit?: MinorSuitUid): string {
     return game.pickleMove({ announceLast: false, valid: true, head, asUid, asSuit, steps: [{ action: head, card: uid }, ...chain] });
 }
 
 // A resume submission for the current obligation: "discard ... via 02" for High Priestess, otherwise "play <revealed card> via <uid>" plus the chain.
-export function buildViaMove(game: GnosticaGame, chain: IStep[], asUid?: string, asSuit?: string): string {
+export function buildViaMove(game: GnosticaGame, chain: IStep[], asUid?: string, asSuit?: MinorSuitUid): string {
     const activeUid = game.getContinuedUid()!;
     if (activeUid === "02") {
         return game.pickleMove({ announceLast: false, valid: true, head: "discard", viaUid: activeUid, steps: [chain[0] ?? { action: "discard" }] });
@@ -538,7 +538,7 @@ function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible
 // branch). The suit goes in the head's "as <suit>", never in the step
 // itself. findRandomPrimitiveChoice does the real legality search, same
 // as an ordinary suit card's own single step (buildRandomSuitStep's twin).
-function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { suitUid: string; chain: IStep[] } | undefined {
+function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { suitUid: MinorSuitUid; chain: IStep[] } | undefined {
     for (const suit of shuffle([...ALL_SUITS]) as typeof ALL_SUITS) {
         const choice = findRandomPrimitiveChoice(game, suit.uid, minions, {});
         if (choice === undefined) {
@@ -625,7 +625,7 @@ function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IMinionRef):
 // Best-effort pre-filter only, same as minorModeAvailability itself -
 // buildRandomModeArgCandidates + validateSuitPrimitive remain the real
 // gate.
-function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: string, opts: Record<string, unknown>): string[] {
+function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: MinorSuitUid, opts: Record<string, unknown>): MinorMode[] {
     return [...game.minorModeAvailability({ suitUid, minion, opts }).entries()]
         .filter(([, reason]) => reason === undefined)
         .map(([mode]) => mode);
@@ -647,7 +647,7 @@ function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: st
 // no self/other choice at all in their own target set (C.own/C.enemy/
 // C.new/R.tile, each always self-only, enemy-only, or plain territory)
 // get a flat weight of 1 throughout.
-function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, suitUid: string, mode: string): { fields: Partial<IStep>; weight: number }[] {
+function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, suitUid: MinorSuitUid, mode: MinorMode): { fields: Partial<IStep>; weight: number }[] {
     const piece = minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index];
     const [tx, ty] = game.minorTargetCell(minion);
     const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
@@ -750,7 +750,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
 // buildRandomSuitStep below is the thin wrapper that builds the step
 // for direct suit-mode use.
 function findRandomPrimitiveChoice(
-    game: GnosticaGame, suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>,
+    game: GnosticaGame, suitUid: MinorSuitUid, minions: IMinionRef[], opts: Record<string, unknown>,
 ): { minion: IMinionRef; fields: Partial<IStep> } | undefined {
     const pool = shuffle([...minions]) as IMinionRef[];
     for (const minion of pool) {
@@ -801,7 +801,7 @@ function findRandomPrimitiveChoice(
     return undefined;
 }
 
-function buildRandomSuitStep(game: GnosticaGame, suitUid: string, minions: IMinionRef[], opts: Record<string, unknown>): IStep | undefined {
+function buildRandomSuitStep(game: GnosticaGame, suitUid: MinorSuitUid, minions: IMinionRef[], opts: Record<string, unknown>): IStep | undefined {
     const choice = findRandomPrimitiveChoice(game, suitUid, minions, opts);
     if (choice === undefined) {
         return undefined;
@@ -1010,7 +1010,8 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         if (eligible.length === 0 || Math.random() < 0.2) {
             return []; // skip outright - always legal
         }
-        const suitUid = card.suit.uid;
+        // card.suit.uid is plain `string` in the shared tarot infra, but always one of the 4 minor suits in practice - see gnostica.ts's own suitUidOf for the same assertion.
+        const suitUid = card.suit.uid as MinorSuitUid;
         const built = buildRandomSuitStep(game, suitUid, eligible, {});
         if (built === undefined) {
             return [];

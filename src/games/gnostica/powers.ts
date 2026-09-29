@@ -1019,19 +1019,27 @@ export const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArc
 
 // ---- Power step grammar: suit/mode constants and IStep-based mode inference (never legality) ----
 
+// The four minor-arcana suits - a closed set in practice (card data, not user input), typed as such so
+// every switch/if-chain over a suit uid is compile-time exhaustive instead of needing a runtime fallback.
+export type MinorSuitUid = "C" | "R" | "D" | "S";
+// Rods/Discs/Swords' own step target, and Hermit's fly mode (same shape, different power).
+export type TargetMode = "piece" | "tile";
+export type CupsMode = "own" | "enemy" | "new";
+export type MinorMode = CupsMode | TargetMode;
+
 // The four minor-arcana suits, shared by gnostica.ts and randomMove.ts (which can't import values from gnostica.ts).
-export const ALL_SUITS: { uid: string; label: string }[] = [
+export const ALL_SUITS: { uid: MinorSuitUid; label: string }[] = [
     { uid: "C", label: "Cups" },
     { uid: "R", label: "Rods" },
     { uid: "D", label: "Discs" },
     { uid: "S", label: "Swords" },
 ];
 
-// The verb each of Rods/Discs/Swords spells its step with.
-export const RDS_VERBS: Record<string, string> = { R: "move", D: "grow", S: "shrink" };
+// The verb each of Rods/Discs/Swords spells its step with; Cups has none (no entry).
+export const RDS_VERBS: Partial<Record<MinorSuitUid, string>> = { R: "move", D: "grow", S: "shrink" };
 
 // A suit step's mode (Cups own/enemy/new; the others piece/tile), read from the fields parseMove already resolved; undefined if the action isn't this suit's verb or no target is named.
-export function stepMinorMode(suitUid: string, step: IStep): string | undefined {
+export function stepMinorMode(suitUid: MinorSuitUid, step: IStep): MinorMode | undefined {
     const verb = RDS_VERBS[suitUid];
     if (verb !== undefined) {
         if (step.action !== verb) {
@@ -1053,7 +1061,7 @@ export function stepMinorMode(suitUid: string, step: IStep): string | undefined 
 }
 
 // Hermit's mode from the step's fields; targetCell is reserved exclusively for the destination in both modes.
-export function stepHermitMode(step: IStep): string | undefined {
+export function stepHermitMode(step: IStep): TargetMode | undefined {
     if (step.action !== "fly") {
         return undefined;
     }
