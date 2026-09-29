@@ -212,6 +212,9 @@ interface IMoveState extends IIndividualState {
     stashes: Map<playerid, Stash>;
     eliminated: playerid[];
     lastTurner: playerid | undefined;
+    // A "last" declared on a move that leaves `continued` non-empty (e.g. via the Fool) - staged here until that same turn's own chain
+    // finally closes, so it isn't mistaken for an ALREADY-closed declarer's turn while the declaring turn is still mid-flight.
+    pendingLastTurner?: playerid;
     lastmove?: string;
     // Present only for a move that chained 2+ major-arcana steps - optional so stack entries predating this feature still deserialize fine.
     frames?: FrameState[];
@@ -279,6 +282,7 @@ export class GnosticaGame extends GameBaseSequenced {
     public stashes!: Map<playerid, Stash>;
     public eliminated: playerid[] = [];
     public lastTurner: playerid | undefined;
+    public pendingLastTurner: playerid | undefined;
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
@@ -377,6 +381,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 stashes,
                 eliminated: [],
                 lastTurner: undefined,
+                pendingLastTurner: undefined,
                 phase: this.variants.includes("bidding") ? "bidding" : "main",
                 bidPositions: this.variants.includes("bidding") ? new Array(this.numplayers).fill(null) as (number | null)[] : undefined,
                 biddingPool: this.variants.includes("bidding") ? [] : undefined,
@@ -426,6 +431,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.stashes = new Map([...state.stashes.entries()].map(([k, v]) => [k, [...v] as Stash]));
         this.eliminated = [...state.eliminated];
         this.lastTurner = state.lastTurner;
+        this.pendingLastTurner = state.pendingLastTurner;
         this.lastmove = state.lastmove;
         this.phase = state.phase;
         this.bidPositions = state.bidPositions !== undefined ? [...state.bidPositions] : undefined;
@@ -450,6 +456,7 @@ export class GnosticaGame extends GameBaseSequenced {
             stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
             eliminated: [...this.eliminated],
             lastTurner: this.lastTurner,
+            pendingLastTurner: this.pendingLastTurner,
             lastmove: this.lastmove,
             phase: this.phase,
             bidPositions: this.bidPositions !== undefined ? [...this.bidPositions] : undefined,
@@ -581,8 +588,9 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "place" && hasPieces) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
         }
-        // Concurrent lastTurners aren't allowed, so no need to check *who* it is.
-        if (parsed.announceLast && this.lastTurner !== undefined) {
+        // Concurrent lastTurners aren't allowed, so no need to check *who* it is. pendingLastTurner also counts - a declare mid-chain (e.g. the Fool) is
+        // already locked in even before its own turn's chain finishes closing.
+        if (parsed.announceLast && (this.lastTurner !== undefined || this.pendingLastTurner !== undefined)) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
         switch (head) {
@@ -618,7 +626,8 @@ export class GnosticaGame extends GameBaseSequenced {
         this.frames = [];
         this.cardsDrawn[this.currplayer - 1] = 0;
         let head;
-        let newLast = this.lastTurner;
+        // Carries forward a declare already staged on an earlier sub-move of this same still-open turn (pendingLastTurner), not yet lastTurner itself - see the tail below.
+        let newLast = this.pendingLastTurner ?? this.lastTurner;
         // The frame stack walkFrameStack hands back, serialized into this.continued once past the partial boundary below.
         let residualFrames: IPowerFrame[] | undefined;
         let preview: IPreview | undefined;
@@ -699,7 +708,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "bid" || head === "redraw" || head === "pass") {
             //Need to rewrite these to remove this exception.
         } else if (this.continued.length > 0) {
-            // Same seat still owes a follow-up submission - stay put; checkEOG() doesn't need to run either, since nothing it reads could have changed.
+            // Same seat still owes a follow-up submission - stay put; checkEOG() doesn't need to run either, since nothing it reads could have changed. A "last" declared on
+            // THIS sub-move is staged in pendingLastTurner rather than lastTurner itself (e.g. the Fool spanning turns) - lastTurner must stay untouched until this whole
+            // turn's chain actually closes below, or the end-of-turn check just below would mistake this still-open declaring turn for the declarer's own later return turn.
+            this.pendingLastTurner = newLast;
         } else {
             // Only on a real end-of-turn do we check the last turn announcement.
             if (this.lastTurner === this.currplayer) {
@@ -715,6 +727,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
 
             this.lastTurner = newLast;
+            this.pendingLastTurner = undefined;
             this.nextPlayer();
             this.checkEOG();
         }
@@ -2009,7 +2022,7 @@ export class GnosticaGame extends GameBaseSequenced {
             { label: "Discard/Draw", value: "discard" },
             { label: "Pass", value: "pass" },
         ];
-        if (this.lastTurner === undefined) {
+        if (this.lastTurner === undefined && this.pendingLastTurner === undefined) {
             topLevel.push({ label: "(Declare)", value: "declare" });
         }
         const highlighted = this.preview?.highlighted ?? new Set<string>();
@@ -5730,7 +5743,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 areas.push({
                     type: "pieces",
                     pieces: handKeys as [string, ...string[]],
-                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurner && this.lastTurner === p ? "(declarer)" : "" }),
+                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: (this.lastTurner ?? this.pendingLastTurner) === p ? "(declarer)" : "" }),
                     // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter than default spacing, fixed width since hands are always <=6 cards.
                     spacing: 0.25,
                     width: 6,
@@ -5760,7 +5773,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         // The declaration round banner.
-        if (this.lastTurner !== undefined) {
+        if (this.lastTurner !== undefined || this.pendingLastTurner !== undefined) {
             if (!("Warning" in legend)) {
                 legend.Warning = [
                     { name: "piece-borderless", colour: "_context_background" },

@@ -472,6 +472,56 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         expect(eliminatedLine?.some(l => l.includes("Alice"))).eq(true); // the actual actor, not currplayer's later value
         expect(log[log.length - 1].some(l => l.includes("Bob"))).eq(true);
     });
+
+    // Regression: a "last" declared on a move that itself leaves `continued` open (e.g. the
+    // High Priestess's own second discard round) used to vanish entirely - move()'s tail only
+    // ever committed it once the WHOLE turn's chain closed, which never ran on a still-open
+    // sub-move. pendingLastTurner stages it across such sub-moves without letting the chain's
+    // own closing sub-move (still the declaring turn itself) be mistaken for the declarer's
+    // later, genuine return turn.
+    it("a 'last' declared on a move that leaves continued open (High Priestess) still lands, and only wins on the declarer's later return turn, not the same turn's own closing sub-move", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, 1, 0, () => major(21)); // The World, 3 pts
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, -1, 0, () => major(19)); // The Sun, 3 pts
+        g.board.get(-1, 0)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, 0, 1, () => major(13)); // Death, 3 pts
+        g.board.get(0, 1)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, 0, -1, () => aceOfDiscs());
+        g.board.get(0, -1)!.pieces = [new Piece(2, 1, "U")]; // player 2's own piece, so they can act
+        expect(g.getPlayerScore(1)).eq(12); // 4 majors (including the High Priestess itself) - comfortably past the 9-point target
+
+        for (const uid of ["2C", "5C", "AR"]) {
+            for (const hand of g.hands) {
+                const idx = hand.indexOf(uid);
+                if (idx !== -1) hand.splice(idx, 1);
+            }
+            let idx = g.drawPile.indexOf(uid);
+            if (idx !== -1) g.drawPile.splice(idx, 1);
+            idx = g.discardPile.indexOf(uid);
+            if (idx !== -1) g.discardPile.splice(idx, 1);
+        }
+        g.hands[0] = ["2C", "5C", "AR"];
+
+        g.move("use 02/discard 5C draw 4 last"); // player 1 declares mid-chain
+        expect(g.continued).to.not.be.empty;
+        expect(g.lastTurner).to.be.undefined; // not yet locked in - the turn's chain isn't closed
+        expect(g.pendingLastTurner).eq(1);
+
+        g.move("discard AR draw 1 via 02"); // resolves the High Priestess's own chain, same turn
+        expect(g.continued).to.be.empty;
+        expect(g.lastTurner).eq(1); // now locked in
+        expect(g.pendingLastTurner).to.be.undefined;
+        expect(g.gameover).eq(false); // still just the declaring turn's own close, not the "following turn" yet
+        expect(g.currplayer).eq(2);
+
+        g.move("discard draw 0"); // player 2's ordinary turn
+        g.move("discard draw 0"); // player 1's return turn (the reported "Pass" click) - now wins
+        expect(g.gameover).eq(true);
+        expect(g.winner).to.deep.equal([1]);
+    });
 });
 
 describe("Gnostica: sidebarScores", () => {
