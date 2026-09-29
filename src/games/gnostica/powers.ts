@@ -25,23 +25,10 @@ export interface PowerFailure {
     params?: Record<string, unknown>;
 }
 
-// Thrown only when a `trusted: true` caller skipped validation and the move turns out illegal anyway - never player-facing.
-export class GnosticaRulesError extends Error {}
-
-const cardByUid = (uid: string): TarotCard => {
-    const found = allCards().find(c => c.uid === uid);
-    if (found === undefined) {
-        throw new GnosticaRulesError(`Unknown card uid "${uid}".`);
-    }
-    return found;
-};
+const cardByUid = (uid: string): TarotCard => allCards().find(c => c.uid === uid)!;
 
 const takeFromPile = (pile: string[], uid: string): TarotCard => {
-    const idx = pile.indexOf(uid);
-    if (idx === -1) {
-        throw new GnosticaRulesError(`Card "${uid}" is not in the expected pile.`);
-    }
-    pile.splice(idx, 1);
+    pile.splice(pile.indexOf(uid), 1);
     return cardByUid(uid);
 };
 
@@ -54,21 +41,11 @@ const reshuffle = (ctx: PowerContext): void => {
     ctx.discardPile.length = 0;
 };
 
-const stashOf = (ctx: PowerContext, player: number): Stash => {
-    const s = ctx.stashes.get(player);
-    if (s === undefined) {
-        throw new GnosticaRulesError(`No stash tracked for player ${player}.`);
-    }
-    return s;
-};
+const stashOf = (ctx: PowerContext, player: number): Stash => ctx.stashes.get(player)!;
 
 // Exported: the engine needs this directly for the base "place" turn action too.
 export const takeFromStash = (ctx: PowerContext, player: number, size: Pips): void => {
-    const s = stashOf(ctx, player);
-    if (s[size - 1] <= 0) {
-        throw new GnosticaRulesError(`Player ${player} has no stash pieces of size ${size}.`);
-    }
-    s[size - 1] -= 1;
+    stashOf(ctx, player)[size - 1] -= 1;
 };
 
 export const returnToStash = (ctx: PowerContext, player: number, size: Pips): void => {
@@ -81,22 +58,9 @@ export const hasStashAvailable = (ctx: PowerContext, player: number, size: Pips)
     return s !== undefined && s[size - 1] > 0;
 };
 
-const getCellContents = (ctx: PowerContext, x: number, y: number): CellContents => {
-    const t = ctx.board.get(x, y);
-    if (t === undefined) {
-        throw new GnosticaRulesError(`No territory at (${x}, ${y}).`);
-    }
-    return t;
-};
+const getCellContents = (ctx: PowerContext, x: number, y: number): CellContents => ctx.board.get(x, y)!;
 
-const getPiece = (ctx: PowerContext, x: number, y: number, index: number): Piece => {
-    const t = getCellContents(ctx, x, y);
-    const p = t.pieces[index];
-    if (p === undefined) {
-        throw new GnosticaRulesError(`No piece at (${x}, ${y}) index ${index}.`);
-    }
-    return p;
-};
+const getPiece = (ctx: PowerContext, x: number, y: number, index: number): Piece => getCellContents(ctx, x, y).pieces[index];
 
 // A cell "has an enemy" if any piece there belongs to someone other than `player`.
 const hasEnemyPieces = (ctx: PowerContext, x: number, y: number, player: number): boolean => {
@@ -191,13 +155,8 @@ export const checkCreateOwn = (
 };
 
 export const createOwn = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, orientation: Orientation, opts: PrimitiveOpts = {},
+    ctx: PowerContext, targetX: number, targetY: number, orientation: Orientation, opts: PrimitiveOpts = {},
 ): void => {
-    const failure = checkCreateOwn(ctx, minionX, minionY, minionIndex, targetX, targetY, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     // Sun's own shortcut: the size-1 form is only ever transient, so skip taking a real stash piece for it.
     if (!opts.skipStashCheck) {
         takeFromStash(ctx, ctx.currplayer, 1);
@@ -242,13 +201,8 @@ export const checkCreateEnemy = (
 };
 
 export const createEnemy = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
+    ctx: PowerContext, targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
 ): void => {
-    const failure = checkCreateEnemy(ctx, minionX, minionY, minionIndex, targetX, targetY, victimIndex, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const t = getCellContents(ctx, targetX, targetY);
     const victim = t.pieces[victimIndex];
     takeFromStash(ctx, victim.owner, 1);
@@ -295,13 +249,8 @@ export const checkCreateTerritory = (
 };
 
 export const createTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
+    ctx: PowerContext, targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
 ): void => {
-    const failure = checkCreateTerritory(ctx, minionX, minionY, minionIndex, targetX, targetY, cardUid, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     let card: TarotCard;
     if (opts.allowRandomDraw) {
         reshuffle(ctx);
@@ -357,10 +306,6 @@ export const movePiece = (
     targetX: number, targetY: number, targetIndex: number, dist: number,
     newOrientation: Orientation | undefined, opts: PrimitiveOpts & { skipLandingCheck?: boolean } = {},
 ): void => {
-    const failure = checkMovePiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex, dist, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
     const destX = targetX + dx * dist;
@@ -433,10 +378,6 @@ export const moveTerritory = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     srcX: number, srcY: number, dist: number,
 ): void => {
-    const failure = checkMoveTerritory(ctx, minionX, minionY, minionIndex, srcX, srcY, dist);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
     const destX = srcX + dx * dist;
@@ -475,14 +416,9 @@ export const checkGrowPiece = (
 };
 
 export const growPiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number,
+    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number,
     newOrientation: Orientation | undefined, opts: { skipStashCheck?: boolean; skipStashReturn?: boolean } = {},
 ): void => {
-    const failure = checkGrowPiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const t = getCellContents(ctx, targetX, targetY);
     const target = t.pieces[targetIndex];
     const grownSize = nextSize(target.size);
@@ -534,13 +470,8 @@ export const checkGrowTerritory = (
 };
 
 export const growTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
+    ctx: PowerContext, targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
 ): void => {
-    const failure = checkGrowTerritory(ctx, minionX, minionY, minionIndex, targetX, targetY, newCardUid, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const t = getCellContents(ctx, targetX, targetY);
     const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
     const newCard = takeFromPile(pile, newCardUid);
@@ -580,14 +511,9 @@ export const checkAttackPiece = (
 };
 
 export const attackPiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, pips: number,
-    newOrientation: Orientation | undefined, opts: { bothSwords?: boolean } = {},
+    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, pips: number,
+    newOrientation: Orientation | undefined,
 ): void => {
-    const failure = checkAttackPiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex, pips, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const t = getCellContents(ctx, targetX, targetY);
     const victim = t.pieces[targetIndex];
     const resultSize = victim.size - pips;
@@ -655,14 +581,9 @@ export const checkAttackTerritory = (
 };
 
 export const attackTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
+    ctx: PowerContext, targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
     opts: PrimitiveOpts & { bothSwords?: boolean } = {},
 ): void => {
-    const failure = checkAttackTerritory(ctx, minionX, minionY, minionIndex, targetX, targetY, pips, newCardUid, opts);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const t = getCellContents(ctx, targetX, targetY);
     const current = t.pointValue();
     const oldUid = (t.card as TarotCard).uid;
@@ -697,10 +618,6 @@ const setPieceOrientation = (
 export const orientMinion = (
     ctx: PowerContext, x: number, y: number, index: number, newOrientation: Orientation,
 ): void => {
-    const failure = checkOrientMinion(ctx, x, y, index);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     setPieceOrientation(ctx, x, y, index, newOrientation);
 };
 
@@ -721,13 +638,8 @@ export const checkOrientAny = (
 };
 
 export const orientAny = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
+    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
 ): void => {
-    const failure = checkOrientAny(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     setPieceOrientation(ctx, targetX, targetY, targetIndex, newOrientation);
 };
 
@@ -756,13 +668,8 @@ export const checkHierophantReplace = (
 };
 
 export const hierophantReplace = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
+    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
 ): void => {
-    const failure = checkHierophantReplace(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const t = getCellContents(ctx, targetX, targetY);
     const target = t.pieces[targetIndex];
     takeFromStash(ctx, ctx.currplayer, target.size);
@@ -792,14 +699,9 @@ export const checkHermitMovePiece = (
 };
 
 export const hermitMovePiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number,
+    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number,
     destX: number, destY: number, newOrientation: Orientation | undefined,
 ): void => {
-    const failure = checkHermitMovePiece(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex, destX, destY);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const srcT = getCellContents(ctx, targetX, targetY);
     const moved = srcT.removeAt(targetIndex);
     ctx.board.pruneIfEmpty(targetX, targetY);
@@ -837,13 +739,8 @@ export const checkHermitMoveTerritory = (
 };
 
 export const hermitMoveTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, destX: number, destY: number,
+    ctx: PowerContext, targetX: number, targetY: number, destX: number, destY: number,
 ): void => {
-    const failure = checkHermitMoveTerritory(ctx, minionX, minionY, minionIndex, targetX, targetY, destX, destY);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const evictions = ctx.board.pushTerritory(targetX, targetY, destX, destY);
     returnEvictedPieces(ctx, evictions);
 };
@@ -871,13 +768,8 @@ export const checkTradeHands = (
 
 // Returns the target's owner so the caller can double-check it passed the right array.
 export const tradeHands = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, otherHand: string[],
+    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, otherHand: string[],
 ): number => {
-    const failure = checkTradeHands(ctx, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     const target = getPiece(ctx, targetX, targetY, targetIndex);
     const mine = [...ctx.hand];
     ctx.hand.length = 0;
@@ -911,13 +803,7 @@ export const checkJudgementDraw = (
     return undefined;
 };
 
-export const judgementDraw = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number, cardUids: string[],
-): void => {
-    const failure = checkJudgementDraw(ctx, minionX, minionY, minionIndex, cardUids);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
+export const judgementDraw = (ctx: PowerContext, cardUids: string[]): void => {
     for (const uid of cardUids) {
         const idx = ctx.discardPile.indexOf(uid);
         ctx.discardPile.splice(idx, 1);
@@ -949,10 +835,6 @@ export const checkDiscardDraw = (ctx: PowerContext, discardUids: string[], drawC
 
 // `partial` mirrors cmdDiscard: discard happens eagerly, but draw (genuinely random) is skipped in preview; returns the actual count drawn.
 export const discardDraw = (ctx: PowerContext, discardUids: string[], drawCountStr: string | undefined, partial: boolean): number => {
-    const failure = checkDiscardDraw(ctx, discardUids, drawCountStr);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     for (const uid of discardUids) {
         const idx = ctx.hand.indexOf(uid);
         ctx.hand.splice(idx, 1);
@@ -979,15 +861,8 @@ export const checkFool = (ctx: PowerContext): PowerFailure | undefined =>
 
 // Fool: flip the top draw-pile card straight to discard; dispatching its power is the caller's job (the engine's full per-card dispatcher).
 export const fool = (ctx: PowerContext): TarotCard => {
-    const failure = checkFool(ctx);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     reshuffle(ctx);
-    const uid = ctx.drawPile.shift();
-    if (uid === undefined) {
-        throw new GnosticaRulesError("Draw pile and discard pile are both empty.");
-    }
+    const uid = ctx.drawPile.shift()!;
     const flipped = cardByUid(uid);
     ctx.discardPile.push(uid);
     return flipped;
@@ -1010,10 +885,6 @@ export const checkWorldChoosePower = (ctx: PowerContext, chosenUid: string): Pow
 
 // World: validates `chosenUid` names a major arcana card on the board (not World itself) and returns its MajorArcanaDef for the engine to dispatch.
 export const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArcanaDef => {
-    const failure = checkWorldChoosePower(ctx, chosenUid);
-    if (failure) {
-        throw new GnosticaRulesError(`Move rejected by checkX: ${failure.key}`);
-    }
     return MAJOR_ARCANA[chosenUid];
 };
 

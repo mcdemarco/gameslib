@@ -4900,7 +4900,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
                 const orientation = orientationStr as Orientation;
-                createOwn(ctx, minion.x, minion.y, minion.index, tx, ty, orientation, opts);
+                createOwn(ctx, tx, ty, orientation, opts);
                 this.addBufferIfWasteland(tx, ty);
                 this.results.push({ type: "place", where: cellStr, how: "cups-own" });
                 const newIndex = this.board.get(tx, ty)!.pieces.length - 1;
@@ -4913,7 +4913,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // victimRef is a full piece ref (#106) - validateCups already confirmed it names a piece at this cell, so its index is trusted directly.
                 const { index: victimIndex } = this.resolvePieceRefTrusted(victimRef);
                 const victimOwner = this.board.get(tx, ty)!.pieces[victimIndex].owner;
-                createEnemy(ctx, minion.x, minion.y, minion.index, tx, ty, victimIndex, opts);
+                createEnemy(ctx, tx, ty, victimIndex, opts);
                 this.results.push({ type: "place", where: cellStr, how: "cups-enemy", who: victimOwner });
                 return {}; // the new piece belongs to the targeted enemy, not the acting player
             }
@@ -4923,9 +4923,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 // "drawn" is parsed as step.amount === 1 (pickleMove's own sentinel, since step.card must always be a real card uid), and is only honored when THIS card's own step genuinely grants it (opts.allowRandomDraw), not just because the literal token was typed.
                 if (step.amount === 1 && opts.allowRandomDraw) {
-                    createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts);
+                    createTerritory(ctx, tx, ty, undefined, opts);
                 } else {
-                    createTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
+                    createTerritory(ctx, tx, ty, cardArg, opts);
                 }
                 // Read the placed card back off the board rather than trusting cardArg directly - a "drawn" card isn't the literal token typed.
                 this.results.push({ type: "place", where: cellStr, how: "territory", what: this.board.get(tx, ty)!.card!.uid });
@@ -5100,7 +5100,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
-                growPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, newOrientation, opts);
+                growPiece(ctx, target.x, target.y, target.index, newOrientation, opts);
                 this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: owner });
                 if (owner === this.currplayer) {
                     const grown = this.board.get(target.x, target.y)!.pieces;
@@ -5116,7 +5116,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const beforeUid = this.board.get(tx, ty)!.card!.uid;
                 const jumpsTwo = opts.skipLadder === true && this.cardValueByUid(newCardUid) - this.board.get(tx, ty)!.pointValue() === 2;
-                growTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, newCardUid, opts);
+                growTerritory(ctx, tx, ty, newCardUid, opts);
                 this.results.push({ type: "convert", what: beforeUid, into: newCardUid, where: cellStr });
                 return jumpsTwo ? { consumesRest: true } : {};
             }
@@ -5192,7 +5192,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const pips = this.effectiveShrink(step.amount!, targetPiece.size, opts);
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
-                attackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, newOrientation, opts);
+                attackPiece(ctx, target.x, target.y, target.index, pips, newOrientation);
                 const bothSwordsUsed = opts.bothSwords === true && pips > this.minionSize(minion);
                 const resultSize = beforeSize - pips;
                 const where = GnosticaBoard.coords2algebraic(target.x, target.y);
@@ -5215,7 +5215,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const beforeUid = this.board.get(tx, ty)!.card!.uid;
                 const pips = this.effectiveShrink(step.amount!, this.board.get(tx, ty)!.pointValue(), opts);
-                attackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
+                attackTerritory(ctx, tx, ty, pips, newCardUid, opts);
                 const bothSwordsUsed = opts.bothSwords === true && pips > this.minionSize(minion);
                 // A replacement card means the territory survived, shrunk; only a true wipeout (no replacement) is a "destroy".
                 if (newCardUid === undefined) {
@@ -5311,7 +5311,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const target = this.resolvePieceRefTrusted(targetRef);
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const orientation = orientationStr as Orientation;
-        orientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
+        orientAny(this.buildPowerContext(), target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
         this.pushOrientResult(target.x, target.y, target.index, targetRef, orientation);
         return owner === this.currplayer ? { newMinion: target, replacesMinion: target } : {};
@@ -5354,7 +5354,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const previousOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
         const orientation = orientationStr as Orientation;
-        hierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, orientation);
+        hierophantReplace(this.buildPowerContext(), target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
         this.results.push({ type: "convert", what: this.getPipsFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: previousOwner });
         const replaced = this.board.get(target.x, target.y)!.pieces;
@@ -5402,7 +5402,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
                 const newOrientation = step.direction as Orientation | undefined;
                 const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
-                hermitMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY, newOrientation);
+                hermitMovePiece(ctx, target.x, target.y, target.index, destX, destY, newOrientation);
                 this.results.push({ type: "move", from: origin, to: destCellStr, what: this.getPipsFromRef(targetRef), how: "hermit-piece", who: owner });
                 if (owner === this.currplayer) {
                     const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
@@ -5413,7 +5413,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const { x: tx, y: ty } = this.resolveTileCard(step.card)!;
                 const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
-                hermitMoveTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, destX, destY);
+                hermitMoveTerritory(ctx, tx, ty, destX, destY);
                 this.results.push({ type: "move", from: GnosticaBoard.coords2algebraic(tx, ty), to: destCellStr, how: "hermit-tile" });
                 return {};
             }
@@ -5470,7 +5470,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const target = this.resolvePieceRefTrusted(targetRef);
         const targetOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const otherHand = this.hands[targetOwner - 1];
-        tradeHands(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index, otherHand);
+        tradeHands(this.buildPowerContext(), target.x, target.y, target.index, otherHand);
         this.results.push({ type: "swap", where: GnosticaBoard.coords2algebraic(target.x, target.y), who: targetOwner });
         return {};
     }
@@ -5492,7 +5492,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Judgement: <minionRef> draw <discardUid...>
     private applyJudgementDraw(minion: IMinionRef, step: IStep): void {
         const uids = step.cardList ?? [];
-        judgementDraw(this.buildPowerContext(), minion.x, minion.y, minion.index, uids);
+        judgementDraw(this.buildPowerContext(), uids);
         this.results.push({ type: "deckDraw", count: uids.length, from: "discard" });
     }
 
