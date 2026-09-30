@@ -43,6 +43,7 @@ Refactoring:
 	- #119 - Remove all echos of stepSegments and rest from other structures.  Done?
 	- #121 - There's still an unprecendented amount of throwing of errors in the code. @done(2026-09-29)
 	- #122 - Determine whether the initial structural stepShapes are still needed, and whether the rest is as well. @done(2026-09-24)
+	- #130 - Remove pendingLastTurner.
 	
 Rebasing:
 	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.

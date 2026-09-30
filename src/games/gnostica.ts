@@ -330,7 +330,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Transient click-UI hints, not part of persisted game state; set by move(..., {partial: true}) and cleared by a committed move.
     private preview: IPreview | undefined;
-    private framePreviews: IPreview[] = [];
     private buffers: Direction[] = [];
     private discarded: string[] = [];
 
@@ -697,10 +696,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
             this.preview = preview;
-            // A mid-build chain's earlier frames each get the preview they'd have had at that step, typed segments truncated to match.
-            this.framePreviews = partial
-                ? this.frames.map((f, i) => this.frameSnapshot(f, []).buildPreview({ ...parsed, steps: parsed.steps.slice(0, i + 2) }))
-                : [];
 
         }
  
@@ -6003,8 +5998,9 @@ export class GnosticaGame extends GameBaseSequenced {
         // this.results holds one _group entry per step of the chain - pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
         const snapshot = this.frameSnapshot(frame, groups[stepIndex] !== undefined ? [groups[stepIndex]] : []);
-        // Still mid-build - the snapshot offers the real choices available as of this step.
-        snapshot.preview = this.framePreviews[stepIndex];
+        // Still mid-build - recompute this step's own preview fresh (only ever a handful of frames), rather than caching one per frame in game state.
+        const parsed = this.parseMove(this.preview!.seed);
+        snapshot.preview = snapshot.buildPreview({ ...parsed, steps: parsed.steps.slice(0, stepIndex + 2) });
         return snapshot;
     }
 
