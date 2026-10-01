@@ -478,7 +478,7 @@ describe("Gnostica: announce last turn / win / elimination", () => {
     // Regression: a "last" declared on a move that itself leaves `continued` open (e.g. the
     // High Priestess's own second discard round) used to vanish entirely - move()'s tail only
     // ever committed it once the WHOLE turn's chain closed, which never ran on a still-open
-    // sub-move. A "LAST" marker riding at the front of this.continued stages it across such
+    // sub-move. A "last" marker riding at the front of this.continued stages it across such
     // sub-moves without letting the chain's own closing sub-move (still the declaring turn
     // itself) be mistaken for the declarer's later, genuine return turn.
     it("a 'last' declared on a move that leaves continued open (High Priestess) still lands, and only wins on the declarer's later return turn, not the same turn's own closing sub-move", () => {
@@ -510,7 +510,7 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.move("use 02/discard 5C draw 4 last"); // player 1 declares mid-chain
         expect(g.continued).to.not.be.empty;
         expect(g.lastTurner).to.be.undefined; // not yet locked in - the turn's chain isn't closed
-        expect(g.continued).to.include("LAST");
+        expect(g.continued).to.include("last");
 
         g.move("discard AR draw 1 via 02"); // resolves the High Priestess's own chain, same turn
         expect(g.continued).to.be.empty;

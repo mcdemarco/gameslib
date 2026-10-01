@@ -44,11 +44,6 @@ const suitUidOf = (card: TarotCard): MinorSuitUid => card.suit.uid as MinorSuitU
 type MoveHow = "rod-piece" | "rod-tile" | "hermit-piece" | "hermit-tile";
 type PlaceHow = "cups-own" | "cups-enemy" | "territory" | "initial" | "discard";
 
-// A "last" declared on any sub-move of a still-open continued turn (the Fool, High Priestess) rides at the front of
-// this.continued until that turn's own chain closes - never a real cardUid.stepIndex token (those always contain "."),
-// so getContinuedUid() can tell the two apart.
-const LAST_MARKER = "LAST";
-
 // The modes each suit's power can take: Cups infers own/enemy/new from its target, the others piece vs tile.
 const MINOR_MODE_NAMES: Record<MinorSuitUid, MinorMode[]> = {
     C: ["own", "enemy", "new"],
@@ -555,8 +550,8 @@ export class GnosticaGame extends GameBaseSequenced {
             const allowed = activeUid === "02" ? ["discard"] : ["decline", "play"];
             if (! allowed.includes(parsed.head!))
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "WRONG_CONTINUED_ACTION"});
-            // A "last" may be declared on any sub-move of a still-open chain, not just its first - but still only once overall.
-            if (parsed.announceLast && (this.lastTurner !== undefined || this.continued.includes(LAST_MARKER)))
+            // Cannot announce when a different player has announced.  Has nothing to do your own declaration, continued or not.
+            if (parsed.announceLast && (this.lastTurner !== undefined))
                 return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
             return this.validateResumePendingPower(parsed);
         } else if (head === "decline") {
@@ -598,8 +593,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "place" && hasPieces) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
         }
-        // Concurrent lastTurners aren't allowed, so no need to check *who* it is. A fresh dispatch only ever reaches here with
-        // this.continued still empty (the continued-branch above already returned), so no LAST_MARKER could exist yet either.
+        // Concurrent lastTurners aren't allowed, so no need to check *who* it is. 
         if (parsed.announceLast && this.lastTurner !== undefined) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
@@ -636,9 +630,8 @@ export class GnosticaGame extends GameBaseSequenced {
         this.frames = [];
         this.cardsDrawn[this.currplayer - 1] = 0;
         let head;
-        // A "last" already staged on an earlier sub-move of this same still-open turn rides at the front of this.continued (LAST_MARKER) - read before
-        // persistContinued() rebuilds that array below. Carries forward into newLast, not yet lastTurner itself - see the tail below.
-        const hadDeclareMarker = this.continued.includes(LAST_MARKER);
+        // A "last" already staged on an earlier sub-move of this same still-open turn rides at the front of this.continued.
+        const hadDeclareMarker = this.continued.length > 0 && this.continued[0] === "last";
         let newLast = hadDeclareMarker ? this.currplayer : this.lastTurner;
         // The frame stack walkFrameStack hands back, serialized into this.continued once past the partial boundary below.
         let residualFrames: IPowerFrame[] | undefined;
@@ -717,12 +710,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "bid" || head === "redraw" || head === "pass") {
             //Need to rewrite these to remove this exception.
         } else if (this.continued.length > 0) {
-            // Same seat still owes a follow-up submission - stay put; checkEOG() doesn't need to run either, since nothing it reads could have changed. A "last"
-            // declared on this or an earlier sub-move rides at the front of this.continued (LAST_MARKER) rather than touching lastTurner itself - lastTurner must
-            // stay untouched until this whole turn's chain actually closes below, or the end-of-turn check just below would mistake this still-open declaring
-            // turn for the declarer's own later return turn.
-            if (newLast === this.currplayer && this.lastTurner !== this.currplayer) {
-                this.continued = [LAST_MARKER, ...this.continued];
+            // Same seat still owes a follow-up submission - stay put; checkEOG() doesn't need to run either, since nothing it reads could have changed.
+            // A "last" declared on this or an earlier sub-move is stored at the front of this.continued rather than in lastTurner itself.
+            if (newLast === this.currplayer && this.lastTurner !== this.currplayer && this.continued[0] !== "last") {
+                this.continued = ["last", ...this.continued];
             }
         } else {
             // Only on a real end-of-turn do we check the last turn announcement - this is also the ONE place a pending declare ever gets promoted into
@@ -1535,16 +1526,16 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The innermost continued obligation's own uid ("00" or "02") - the one a resume submission addresses and demotes into "via <uid>".
-    // Ignores a leading LAST_MARKER (a declare staged mid-chain) rather than relying on it always sitting exactly at the front.
+    // Ignores a leading "last" (a declare staged mid-chain) rather than relying on it always sitting exactly at the front.
     public getContinuedUid(): string | undefined {
-        const real = this.continued.filter(t => t !== LAST_MARKER);
+        const real = this.continued.filter(t => t !== "last");
         return real[real.length - 1]?.split(".")[0];
     }
 
-    // Who has declared "last" so far, whether already promoted into lastTurner or still staged mid-chain via LAST_MARKER (always the currplayer whose own
+    // Who has declared "last" so far, whether already promoted into lastTurner or still staged mid-chain via "last" (always the currplayer whose own
     // still-open turn it rides along with, since a continued chain only ever belongs to one seat at a time).
     private declaredPlayer(): playerid | undefined {
-        return this.lastTurner ?? (this.continued.includes(LAST_MARKER) ? this.currplayer : undefined);
+        return this.lastTurner ?? (this.continued.includes("last") ? this.currplayer : undefined);
     }
 
     // The ordinary card a Fool continuation is waiting on: what the last flip revealed (discard pile's top), or the in-progress resume move's own card. undefined when nothing is pending.
@@ -4238,7 +4229,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Rebuilds the throwaway IPendingMajorPower-shaped view the resume machinery expects, from the minimal persisted this.continued tokens; one frame per token, minions recomputed fresh.
     private buildPendingFromContinued(): IPendingMajorPower | undefined {
-        const tokens = this.continued.filter(t => t !== LAST_MARKER);
+        const tokens = this.continued.filter(t => t !== "last");
         if (tokens.length === 0) {
             return undefined;
         }
