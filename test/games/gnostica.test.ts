@@ -5133,3 +5133,26 @@ describe("Gnostica: Fool and World", () => {
         // is validate-only by design, not mirrored in cmdPlay itself.
     });
 });
+
+describe("Gnostica: handleClick window", () => {
+    // Regression: the client computes row/col from the board it displays WITH the move applied; a step that creates
+    // a territory beyond the current edge widens that window, so handleClick() must convert against the same one.
+    it("a facing click after Temperance creates a territory at the board edge lands on the displayed cell", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: -1, pieces: [[1, 1, "U"]] }, // m1: edge wasteland, player 1's minion
+                { x: 0, y: 0, uid: "AD" },
+                { x: 0, y: 1, uid: "AR" },
+            ],
+            hands: [["14", "3R", ...filler.slice(0, 4)], filler],
+        });
+        const seed = "play 14/with m1.1 at m1 create 3R/with m1.1 at m1 create U?";
+        const shown = g.clone();
+        shown.move(seed, { partial: true });
+        const { minX, minY } = shown.renderWindow();
+        // The existing card at m0 (0,0) is directly "south" of m1 (0,-1).
+        const result = g.handleClick(seed, 0 - minY, 0 - minX, undefined);
+        expect(result.valid).to.be.true;
+        expect(result.move).eq("play 14/with m1.1 at m1 create 3R/with m1.1 at m1 create S");
+    });
+});

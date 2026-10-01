@@ -33,7 +33,6 @@ UX:
 	- #125 - UI for using only second power of different-powered major arcana cards.
 	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups.
 	- #128 - After next merge, add text labels to hand cards (for major arcana names)
-	
 
 Refactoring:
 	- #90 - Replace this.liveMove with fields for render() to read. @done(2026-09-27)

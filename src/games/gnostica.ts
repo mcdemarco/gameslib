@@ -3108,6 +3108,17 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.describePendingMove({ ...pending, asUid: t.card.uid }, pending.priorSteps);
     }
 
+    // The board as the client currently shows it: `move` applied on a scratch clone whenever it's previewable, otherwise this.board unchanged.
+    private previewBoard(move: string): GnosticaBoard {
+        const result = this.validateMove(move);
+        if (!result.valid || (result.complete ?? -1) < 0 && result.canrender !== true) {
+            return this.board;
+        }
+        const scratch = this.clone();
+        scratch.move(move, { partial: true });
+        return scratch.board;
+    }
+
     // Click support for the top-level turn choice.  "Declare" is handled up front.
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         const parsed = this.parseMove(move);
@@ -3387,7 +3398,8 @@ export class GnosticaGame extends GameBaseSequenced {
                         return rebuildDiscard([...selected, picked]);
                     }
 
-                    const { minX, minY } = this.renderWindow();
+                    // The client displays the board with the current move already applied, so row/col are relative to THAT window - an earlier step's new territory can widen it.
+                    const { minX, minY } = this.renderWindow(this.previewBoard(move));
                     // A click on a rendered buffer segment (same contract as pacru.ts/azacru.ts): out-of-window row/col, coords via `piece` as "col,row", still WINDOW-RELATIVE.
                     let x: number;
                     let y: number;
