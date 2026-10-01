@@ -1117,6 +1117,35 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.board.get(1, 0)!.pieces.some(p => p.owner === 2 && p.size === 1)).to.be.false; // the victim is gone
     });
 
+    it("replacing a piece in place still commits in a cell Empress left over capacity", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "05", pieces: [[1, 1, "E"]] }, // The Hierophant
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "N"], [2, 2, "N"], [2, 3, "N"], [1, 2, "N"]] }, // 4 pieces
+            ],
+            hands: [filler, filler],
+        });
+        const move = `use 05/with m0.1 replace n0.1 U`;
+        expect(g.validateMove(move).valid).to.be.true;
+        g.move(move);
+        const cell = g.board.get(1, 0)!;
+        expect(cell.pieces.length).eq(4);
+        expect(cell.pieces.some(p => p.owner === 1 && p.size === 1 && p.orientation === "U")).to.be.true;
+    });
+
+    it("validateMove of a chained move leaves the game untouched", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "18", pieces: [[1, 1, "E"]] },
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "N"], [2, 2, "N"], [2, 3, "N"]] },
+            ],
+            hands: [filler, filler],
+        });
+        const before = g.serialize();
+        expect(g.validateMove(`use 18/with m0.1 move m0.1 1 orient U/with n0.1.1 shrink n0.1.2 1`).valid).to.be.true;
+        expect(g.serialize()).eq(before);
+    });
+
     it("Chariot: two rod steps on the same piece may pass through the void mid-chain", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 3, "W"]] }], // large minion, pointing away from the grid

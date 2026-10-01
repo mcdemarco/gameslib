@@ -432,7 +432,8 @@ export const growPiece = (
     }
     const orientation = target.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
     t.removeAt(targetIndex);
-    t.add(new Piece(target.owner, grownSize, orientation));
+    // Net count is unchanged, so a cell already over capacity (Empress) mustn't reject its own re-add.
+    t.add(new Piece(target.owner, grownSize, orientation), true);
 };
 
 // Grow the targeted territory by one point of value (or two, opts.skipLadder), replacing its card from hand or discard (opts.replacementSource).
@@ -527,7 +528,8 @@ export const attackPiece = (
     returnToStash(ctx, victim.owner, victim.size);
     const orientation = victim.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
     t.removeAt(targetIndex);
-    t.add(new Piece(victim.owner, resultSize as Pips, orientation));
+    // Net count is unchanged, so a cell already over capacity (Empress) mustn't reject its own re-add.
+    t.add(new Piece(victim.owner, resultSize as Pips, orientation), true);
 };
 
 // Shrink the targeted territory's value by up to `pips`, replacing its card, or destroying it outright if `newCardUid` is omitted.
@@ -675,7 +677,8 @@ export const hierophantReplace = (
     takeFromStash(ctx, ctx.currplayer, target.size);
     returnToStash(ctx, target.owner, target.size);
     t.removeAt(targetIndex);
-    t.add(new Piece(ctx.currplayer, target.size, newOrientation));
+    // Net count is unchanged, so a cell already over capacity (Empress) mustn't reject its own re-add.
+    t.add(new Piece(ctx.currplayer, target.size, newOrientation), true);
 };
 
 // Hermit, piece variant: move a targeted piece to ANY completely empty territory or wasteland, ignoring adjacency/distance limits.
