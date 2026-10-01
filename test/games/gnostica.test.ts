@@ -478,9 +478,9 @@ describe("Gnostica: announce last turn / win / elimination", () => {
     // Regression: a "last" declared on a move that itself leaves `continued` open (e.g. the
     // High Priestess's own second discard round) used to vanish entirely - move()'s tail only
     // ever committed it once the WHOLE turn's chain closed, which never ran on a still-open
-    // sub-move. pendingLastTurner stages it across such sub-moves without letting the chain's
-    // own closing sub-move (still the declaring turn itself) be mistaken for the declarer's
-    // later, genuine return turn.
+    // sub-move. A "LAST" marker riding at the front of this.continued stages it across such
+    // sub-moves without letting the chain's own closing sub-move (still the declaring turn
+    // itself) be mistaken for the declarer's later, genuine return turn.
     it("a 'last' declared on a move that leaves continued open (High Priestess) still lands, and only wins on the declarer's later return turn, not the same turn's own closing sub-move", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
@@ -510,17 +510,58 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         g.move("use 02/discard 5C draw 4 last"); // player 1 declares mid-chain
         expect(g.continued).to.not.be.empty;
         expect(g.lastTurner).to.be.undefined; // not yet locked in - the turn's chain isn't closed
-        expect(g.pendingLastTurner).eq(1);
+        expect(g.continued).to.include("LAST");
 
         g.move("discard AR draw 1 via 02"); // resolves the High Priestess's own chain, same turn
         expect(g.continued).to.be.empty;
         expect(g.lastTurner).eq(1); // now locked in
-        expect(g.pendingLastTurner).to.be.undefined;
         expect(g.gameover).eq(false); // still just the declaring turn's own close, not the "following turn" yet
         expect(g.currplayer).eq(2);
 
         g.move("discard draw 0"); // player 2's ordinary turn
         g.move("discard draw 0"); // player 1's return turn (the reported "Pass" click) - now wins
+        expect(g.gameover).eq(true);
+        expect(g.winner).to.deep.equal([1]);
+    });
+
+    // A "last" can be declared on ANY sub-move of a still-open chain, not just its first - including the very
+    // sub-move that closes the chain, which must still wait for the player's later return turn to check the score.
+    it("a 'last' declared on the closing sub-move of a continued chain (not the first) still only wins on the later return turn", () => {
+        const g = new GnosticaGame(2);
+        forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
+        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, 1, 0, () => major(21)); // The World, 3 pts
+        g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, -1, 0, () => major(19)); // The Sun, 3 pts
+        g.board.get(-1, 0)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, 0, 1, () => major(13)); // Death, 3 pts
+        g.board.get(0, 1)!.pieces = [new Piece(1, 1, "U")];
+        forceCardAt(g, 0, -1, () => aceOfDiscs());
+        g.board.get(0, -1)!.pieces = [new Piece(2, 1, "U")]; // player 2's own piece, so they can act
+
+        for (const uid of ["2C", "5C", "AR"]) {
+            for (const hand of g.hands) {
+                const idx = hand.indexOf(uid);
+                if (idx !== -1) hand.splice(idx, 1);
+            }
+            let idx = g.drawPile.indexOf(uid);
+            if (idx !== -1) g.drawPile.splice(idx, 1);
+            idx = g.discardPile.indexOf(uid);
+            if (idx !== -1) g.discardPile.splice(idx, 1);
+        }
+        g.hands[0] = ["2C", "5C", "AR"];
+
+        g.move("use 02/discard 5C draw 4"); // player 1 opens the High Priestess round - no declare yet
+        expect(g.continued).to.not.include("LAST");
+
+        g.move("discard AR draw 1 via 02 last"); // declares on the CLOSING sub-move instead
+        expect(g.continued).to.be.empty;
+        expect(g.lastTurner).eq(1); // locked in immediately - this same call already closed the chain
+        expect(g.gameover).eq(false); // still the declaring turn itself, not the "following turn" yet
+        expect(g.currplayer).eq(2);
+
+        g.move("discard draw 0"); // player 2's ordinary turn
+        g.move("discard draw 0"); // player 1's return turn - now wins
         expect(g.gameover).eq(true);
         expect(g.winner).to.deep.equal([1]);
     });

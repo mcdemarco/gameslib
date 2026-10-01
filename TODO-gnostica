@@ -25,6 +25,7 @@ Miscellany:
 	- #124 - StepShape (powers.ts) incomplete/complete values replaced with parsed moves complete value. @done(2026-09-26)
 	- #127 - minorModeAvailability's "own" case for Cups only checks cell capacity, not stash. @done(2026-09-28)
 	- #129 - A bug with passing on your last, winning turn after Fool. @done(2026-09-28)
+	- #131 - More analysis of this.preview.
 
 UX:
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
@@ -43,7 +44,7 @@ Refactoring:
 	- #119 - Remove all echos of stepSegments and rest from other structures.  Done?
 	- #121 - There's still an unprecendented amount of throwing of errors in the code. @done(2026-09-29)
 	- #122 - Determine whether the initial structural stepShapes are still needed, and whether the rest is as well. @done(2026-09-24)
-	- #130 - Remove pendingLastTurner.
+	- #130 - Remove pendingLastTurner. @done(2026-10-01)
 	
 Rebasing:
 	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.

@@ -44,6 +44,11 @@ const suitUidOf = (card: TarotCard): MinorSuitUid => card.suit.uid as MinorSuitU
 type MoveHow = "rod-piece" | "rod-tile" | "hermit-piece" | "hermit-tile";
 type PlaceHow = "cups-own" | "cups-enemy" | "territory" | "initial" | "discard";
 
+// A "last" declared on any sub-move of a still-open continued turn (the Fool, High Priestess) rides at the front of
+// this.continued until that turn's own chain closes - never a real cardUid.stepIndex token (those always contain "."),
+// so getContinuedUid() can tell the two apart.
+const LAST_MARKER = "LAST";
+
 // The modes each suit's power can take: Cups infers own/enemy/new from its target, the others piece vs tile.
 const MINOR_MODE_NAMES: Record<MinorSuitUid, MinorMode[]> = {
     C: ["own", "enemy", "new"],
@@ -222,9 +227,6 @@ interface IMoveState extends IIndividualState {
     stashes: Map<playerid, Stash>;
     eliminated: playerid[];
     lastTurner: playerid | undefined;
-    // A "last" declared on a move that leaves `continued` non-empty (e.g. via the Fool) - staged here until that same turn's own chain
-    // finally closes, so it isn't mistaken for an ALREADY-closed declarer's turn while the declaring turn is still mid-flight.
-    pendingLastTurner?: playerid;
     lastmove?: string;
     // Present only for a move that chained 2+ major-arcana steps - optional so stack entries predating this feature still deserialize fine.
     frames?: FrameState[];
@@ -292,7 +294,6 @@ export class GnosticaGame extends GameBaseSequenced {
     public stashes!: Map<playerid, Stash>;
     public eliminated: playerid[] = [];
     public lastTurner: playerid | undefined;
-    public pendingLastTurner: playerid | undefined;
     public gameover = false;
     public winner: playerid[] = [];
     public variants: string[] = [];
@@ -390,7 +391,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 stashes,
                 eliminated: [],
                 lastTurner: undefined,
-                pendingLastTurner: undefined,
                 phase: this.variants.includes("bidding") ? "bidding" : "main",
                 bidPositions: this.variants.includes("bidding") ? new Array(this.numplayers).fill(null) as (number | null)[] : undefined,
                 biddingPool: this.variants.includes("bidding") ? [] : undefined,
@@ -440,7 +440,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.stashes = new Map([...state.stashes.entries()].map(([k, v]) => [k, [...v] as Stash]));
         this.eliminated = [...state.eliminated];
         this.lastTurner = state.lastTurner;
-        this.pendingLastTurner = state.pendingLastTurner;
         this.lastmove = state.lastmove;
         this.phase = state.phase;
         this.bidPositions = state.bidPositions !== undefined ? [...state.bidPositions] : undefined;
@@ -465,7 +464,6 @@ export class GnosticaGame extends GameBaseSequenced {
             stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
             eliminated: [...this.eliminated],
             lastTurner: this.lastTurner,
-            pendingLastTurner: this.pendingLastTurner,
             lastmove: this.lastmove,
             phase: this.phase,
             bidPositions: this.bidPositions !== undefined ? [...this.bidPositions] : undefined,
@@ -557,6 +555,9 @@ export class GnosticaGame extends GameBaseSequenced {
             const allowed = activeUid === "02" ? ["discard"] : ["decline", "play"];
             if (! allowed.includes(parsed.head!))
                 return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "WRONG_CONTINUED_ACTION"});
+            // A "last" may be declared on any sub-move of a still-open chain, not just its first - but still only once overall.
+            if (parsed.announceLast && (this.lastTurner !== undefined || this.continued.includes(LAST_MARKER)))
+                return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
             return this.validateResumePendingPower(parsed);
         } else if (head === "decline") {
             // "decline" can only appear when continued is populated.
@@ -597,9 +598,9 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "place" && hasPieces) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ON_BOARD");
         }
-        // Concurrent lastTurners aren't allowed, so no need to check *who* it is. pendingLastTurner also counts - a declare mid-chain (e.g. the Fool) is
-        // already locked in even before its own turn's chain finishes closing.
-        if (parsed.announceLast && (this.lastTurner !== undefined || this.pendingLastTurner !== undefined)) {
+        // Concurrent lastTurners aren't allowed, so no need to check *who* it is. A fresh dispatch only ever reaches here with
+        // this.continued still empty (the continued-branch above already returned), so no LAST_MARKER could exist yet either.
+        if (parsed.announceLast && this.lastTurner !== undefined) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
         switch (head) {
@@ -635,8 +636,10 @@ export class GnosticaGame extends GameBaseSequenced {
         this.frames = [];
         this.cardsDrawn[this.currplayer - 1] = 0;
         let head;
-        // Carries forward a declare already staged on an earlier sub-move of this same still-open turn (pendingLastTurner), not yet lastTurner itself - see the tail below.
-        let newLast = this.pendingLastTurner ?? this.lastTurner;
+        // A "last" already staged on an earlier sub-move of this same still-open turn rides at the front of this.continued (LAST_MARKER) - read before
+        // persistContinued() rebuilds that array below. Carries forward into newLast, not yet lastTurner itself - see the tail below.
+        const hadDeclareMarker = this.continued.includes(LAST_MARKER);
+        let newLast = hadDeclareMarker ? this.currplayer : this.lastTurner;
         // The frame stack walkFrameStack hands back, serialized into this.continued once past the partial boundary below.
         let residualFrames: IPowerFrame[] | undefined;
         let preview: IPreview | undefined;
@@ -687,12 +690,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         break;
                     // "decline" with nothing pending, or any other head with no business here, falls through with no case - a caller bug, not this dispatch's job.
                 }
+            }
 
-                if (parsed.announceLast) {
-                    newLast = this.currplayer;
-                    this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
-                }
-
+            // A "last" may be declared on any sub-move of a still-open chain, not just the first - validateMove's own ALREADY_ANNOUNCED guards (both the
+            // fresh-dispatch and continued-branch copies) are the only gate; bid/redraw/pass reject announceLast outright before ever reaching here.
+            if (parsed.announceLast) {
+                newLast = this.currplayer;
+                this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
             }
             // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
             this.preview = preview;
@@ -713,12 +717,16 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "bid" || head === "redraw" || head === "pass") {
             //Need to rewrite these to remove this exception.
         } else if (this.continued.length > 0) {
-            // Same seat still owes a follow-up submission - stay put; checkEOG() doesn't need to run either, since nothing it reads could have changed. A "last" declared on
-            // THIS sub-move is staged in pendingLastTurner rather than lastTurner itself (e.g. the Fool spanning turns) - lastTurner must stay untouched until this whole
-            // turn's chain actually closes below, or the end-of-turn check just below would mistake this still-open declaring turn for the declarer's own later return turn.
-            this.pendingLastTurner = newLast;
+            // Same seat still owes a follow-up submission - stay put; checkEOG() doesn't need to run either, since nothing it reads could have changed. A "last"
+            // declared on this or an earlier sub-move rides at the front of this.continued (LAST_MARKER) rather than touching lastTurner itself - lastTurner must
+            // stay untouched until this whole turn's chain actually closes below, or the end-of-turn check just below would mistake this still-open declaring
+            // turn for the declarer's own later return turn.
+            if (newLast === this.currplayer && this.lastTurner !== this.currplayer) {
+                this.continued = [LAST_MARKER, ...this.continued];
+            }
         } else {
-            // Only on a real end-of-turn do we check the last turn announcement.
+            // Only on a real end-of-turn do we check the last turn announcement - this is also the ONE place a pending declare ever gets promoted into
+            // lastTurner, at the same spot (and no sooner) a single-call declare-and-close always has been.
             if (this.lastTurner === this.currplayer) {
                 this.results.push({ type: "announce", payload: ["declore", this.getPlayerScore(this.currplayer)] });
                 const targetScore = (this.variants.includes("target-8") ? 8 : (this.variants.includes("target-10") ? 10 : 9));
@@ -732,7 +740,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
 
             this.lastTurner = newLast;
-            this.pendingLastTurner = undefined;
             this.nextPlayer();
             this.checkEOG();
         }
@@ -1528,8 +1535,16 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The innermost continued obligation's own uid ("00" or "02") - the one a resume submission addresses and demotes into "via <uid>".
+    // Ignores a leading LAST_MARKER (a declare staged mid-chain) rather than relying on it always sitting exactly at the front.
     public getContinuedUid(): string | undefined {
-        return this.continued[this.continued.length - 1]?.split(".")[0];
+        const real = this.continued.filter(t => t !== LAST_MARKER);
+        return real[real.length - 1]?.split(".")[0];
+    }
+
+    // Who has declared "last" so far, whether already promoted into lastTurner or still staged mid-chain via LAST_MARKER (always the currplayer whose own
+    // still-open turn it rides along with, since a continued chain only ever belongs to one seat at a time).
+    private declaredPlayer(): playerid | undefined {
+        return this.lastTurner ?? (this.continued.includes(LAST_MARKER) ? this.currplayer : undefined);
     }
 
     // The ordinary card a Fool continuation is waiting on: what the last flip revealed (discard pile's top), or the in-progress resume move's own card. undefined when nothing is pending.
@@ -1843,7 +1858,7 @@ export class GnosticaGame extends GameBaseSequenced {
             found.add("pass");
         } else if (this.continued.length > 0) {
             // The top-level button matches the resume: "Discard/Draw" for High Priestess, "Play Card" for Fool.
-            found.add(this.continued[this.continued.length - 1].split(".")[0] === "02" ? "discard" : "play");
+            found.add(this.getContinuedUid() === "02" ? "discard" : "play");
         } else if (head !== undefined && ["place", "use", "play", "orient", "discard"].includes(head)) {
             found.add(head);
         }
@@ -2032,7 +2047,7 @@ export class GnosticaGame extends GameBaseSequenced {
             { label: "Discard/Draw", value: "discard" },
             { label: "Pass", value: "pass" },
         ];
-        if (this.lastTurner === undefined && this.pendingLastTurner === undefined) {
+        if (this.declaredPlayer() === undefined) {
             topLevel.push({ label: "(Declare)", value: "declare" });
         }
         const highlighted = this.preview?.highlighted ?? new Set<string>();
@@ -4211,12 +4226,13 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Rebuilds the throwaway IPendingMajorPower-shaped view the resume machinery expects, from the minimal persisted this.continued tokens; one frame per token, minions recomputed fresh.
     private buildPendingFromContinued(): IPendingMajorPower | undefined {
-        if (this.continued.length === 0) {
+        const tokens = this.continued.filter(t => t !== LAST_MARKER);
+        if (tokens.length === 0) {
             return undefined;
         }
         const pool = this.eligibleMinionsForPlay();
         // Every non-outermost obligation got here via a Fool reveal (the only card that nests one on top of another), so it stays declinable.
-        const stack = this.continued.map((token, idx) => {
+        const stack = tokens.map((token, idx) => {
             const [cardUid, step] = token.split(".");
             return { cardUid, nextStepIndex: Number(step), minions: [...pool], viaFool: idx > 0 } as IPowerFrame;
         });
@@ -5736,7 +5752,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 areas.push({
                     type: "pieces",
                     pieces: handKeys as [string, ...string[]],
-                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: (this.lastTurner ?? this.pendingLastTurner) === p ? "(declarer)" : "" }),
+                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.declaredPlayer() === p ? "(declarer)" : "" }),
                     // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter than default spacing, fixed width since hands are always <=6 cards.
                     spacing: 0.25,
                     width: 6,
@@ -5766,7 +5782,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         // The declaration round banner.
-        if (this.lastTurner !== undefined || this.pendingLastTurner !== undefined) {
+        if (this.declaredPlayer() !== undefined) {
             if (!("Warning" in legend)) {
                 legend.Warning = [
                     { name: "piece-borderless", colour: "_context_background" },
