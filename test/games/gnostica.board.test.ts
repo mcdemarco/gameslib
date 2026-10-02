@@ -33,21 +33,14 @@ describe("Gnostica: Piece", () => {
 });
 
 describe("Gnostica: CellContents", () => {
-    it("enforces the 3-piece capacity by default", () => {
+    it("reports when the 3-piece capacity is reached, but leaves enforcing it to validation", () => {
         const t = new CellContents(aceOfCups());
         t.add(new Piece(1, 1));
         t.add(new Piece(1, 1));
         t.add(new Piece(2, 1));
         expect(t.canAdd()).eq(false);
-        expect(() => t.add(new Piece(1, 1))).to.throw();
-    });
-
-    it("can bypass capacity when told to (Empress/Emperor)", () => {
-        const t = new CellContents(aceOfCups());
+        expect(t.canAdd(true)).eq(true); // Empress/Emperor
         t.add(new Piece(1, 1));
-        t.add(new Piece(1, 1));
-        t.add(new Piece(1, 1));
-        expect(() => t.add(new Piece(1, 1), true)).to.not.throw();
         expect(t.pieces.length).eq(4);
     });
 
@@ -125,7 +118,6 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         b.store.set(0, 0, new CellContents(aceOfCups()));
         b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "W")]));
 
-        expect(() => b.createTerritory(2, 0, twoOfCups())).to.throw(); // void, not wasteland
         b.createTerritory(1, 0, twoOfCups());
         const t = b.get(1, 0)!;
         expect(t.card?.uid).eq("2C");

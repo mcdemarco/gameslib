@@ -19,7 +19,7 @@ export interface PowerContext {
     drawPile: string[];
 }
 
-// An i18next key suffix + params; every checkX function returns undefined ("legal") or one of these, shared by validate and apply so they can't drift.
+// An i18next key suffix + params; every checkX function returns undefined ("legal") or one of these; only validation calls them.
 export interface PowerFailure {
     key: string;
     params?: Record<string, unknown>;
@@ -52,7 +52,7 @@ export const returnToStash = (ctx: PowerContext, player: number, size: Pips): vo
     stashOf(ctx, player)[size - 1] += 1;
 };
 
-// Non-mutating check used by checkX functions and validatePlace before their mutating twins commit (takeFromStash is the enforcement backstop).
+// Non-mutating check used by checkX functions and validatePlace; the mutators just do the arithmetic.
 export const hasStashAvailable = (ctx: PowerContext, player: number, size: Pips): boolean => {
     const s = ctx.stashes.get(player);
     return s !== undefined && s[size - 1] > 0;
@@ -154,19 +154,14 @@ export const checkCreateOwn = (
     return undefined;
 };
 
-export const createOwn = (
-    ctx: PowerContext, targetX: number, targetY: number, orientation: Orientation, opts: PrimitiveOpts = {},
-): void => {
-    // Sun's own shortcut: the size-1 form is only ever transient, so skip taking a real stash piece for it.
-    if (!opts.skipStashCheck) {
-        takeFromStash(ctx, ctx.currplayer, 1);
-    }
+export const createOwn = (ctx: PowerContext, targetX: number, targetY: number, orientation: Orientation): void => {
+    takeFromStash(ctx, ctx.currplayer, 1);
     let t = ctx.board.get(targetX, targetY);
     if (t === undefined) {
         t = new CellContents(undefined);
         ctx.board.store.set(targetX, targetY, t);
     }
-    t.add(new Piece(ctx.currplayer, 1, orientation), opts.ignoreCapacity);
+    t.add(new Piece(ctx.currplayer, 1, orientation));
 };
 
 // Add one of the TARGETED enemy's own small pieces to the same cell, matching its orientation, drawn from the enemy's stash.
@@ -200,13 +195,11 @@ export const checkCreateEnemy = (
     return undefined;
 };
 
-export const createEnemy = (
-    ctx: PowerContext, targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
-): void => {
+export const createEnemy = (ctx: PowerContext, targetX: number, targetY: number, victimIndex: number): void => {
     const t = getCellContents(ctx, targetX, targetY);
     const victim = t.pieces[victimIndex];
     takeFromStash(ctx, victim.owner, 1);
-    t.add(new Piece(victim.owner, 1, victim.orientation), opts.ignoreCapacity);
+    t.add(new Piece(victim.owner, 1, victim.orientation));
 };
 
 // Create a territory on a wasteland with a spot card from hand, or (Wheel of Fortune's allowRandomDraw) an unrestricted draw-pile card instead.
@@ -333,8 +326,7 @@ export const movePiece = (
         destT = new CellContents(undefined);
         ctx.board.store.set(destX, destY, destT);
     }
-    // A relaxed landing (Chariot's waypoint) must also bypass CellContents.add()'s own capacity enforcement, briefly exceeding it.
-    destT.add(moved, opts.ignoreCapacity || opts.skipLandingCheck);
+    destT.add(moved);
 };
 
 // Push the territory at the minion-facing (srcX, srcY) `dist` spaces further, same direction; srcX/srcY are caller-supplied so the move string names it.
@@ -415,24 +407,16 @@ export const checkGrowPiece = (
 };
 
 export const growPiece = (
-    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number,
-    newOrientation: Orientation | undefined, opts: { skipStashCheck?: boolean; skipStashReturn?: boolean } = {},
+    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation | undefined,
 ): void => {
     const t = getCellContents(ctx, targetX, targetY);
     const target = t.pieces[targetIndex];
     const grownSize = nextSize(target.size);
-    // A same-target shortcut's intermediate size is only ever transient - skip taking a real stash piece for it, mirroring attackPiece's own skipStashCheck.
-    if (!opts.skipStashCheck) {
-        takeFromStash(ctx, target.owner, grownSize);
-    }
-    // Symmetric case: if THIS piece's own current size was itself never really taken (an earlier step in the same chain skipped it), returning it now would over-credit the stash.
-    if (!opts.skipStashReturn) {
-        returnToStash(ctx, target.owner, target.size);
-    }
+    takeFromStash(ctx, target.owner, grownSize);
+    returnToStash(ctx, target.owner, target.size);
     const orientation = target.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
     t.removeAt(targetIndex);
-    // Net count is unchanged, so a cell already over capacity (Empress) mustn't reject its own re-add.
-    t.add(new Piece(target.owner, grownSize, orientation), true);
+    t.add(new Piece(target.owner, grownSize, orientation));
 };
 
 // Grow the targeted territory by one point of value (or two, opts.skipLadder), replacing its card from hand or discard (opts.replacementSource).
@@ -527,8 +511,7 @@ export const attackPiece = (
     returnToStash(ctx, victim.owner, victim.size);
     const orientation = victim.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
     t.removeAt(targetIndex);
-    // Net count is unchanged, so a cell already over capacity (Empress) mustn't reject its own re-add.
-    t.add(new Piece(victim.owner, resultSize as Pips, orientation), true);
+    t.add(new Piece(victim.owner, resultSize as Pips, orientation));
 };
 
 // Shrink the targeted territory's value by up to `pips`, replacing its card, or destroying it outright if `newCardUid` is omitted.
@@ -676,8 +659,7 @@ export const hierophantReplace = (
     takeFromStash(ctx, ctx.currplayer, target.size);
     returnToStash(ctx, target.owner, target.size);
     t.removeAt(targetIndex);
-    // Net count is unchanged, so a cell already over capacity (Empress) mustn't reject its own re-add.
-    t.add(new Piece(ctx.currplayer, target.size, newOrientation), true);
+    t.add(new Piece(ctx.currplayer, target.size, newOrientation));
 };
 
 // Hermit, piece variant: move a targeted piece to ANY completely empty territory or wasteland, ignoring adjacency/distance limits.

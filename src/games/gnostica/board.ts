@@ -109,9 +109,6 @@ export class GnosticaBoard {
 
     // Only legal on a wasteland. Never strands anyone - adding a card only ever promotes void neighbours.
     public createTerritory(x: number, y: number, card: TarotCard): void {
-        if (this.classify(x, y) !== "wasteland") {
-            throw new Error(`Cannot create a territory at (${x},${y}): not a wasteland.`);
-        }
         const existing = this.cells.get(x, y);
         if (existing !== undefined) {
             existing.card = card;
@@ -122,10 +119,7 @@ export class GnosticaBoard {
 
     // Removes the card; returns every cell that consequently collapsed into the void, with its evicted pieces (crediting the stash is powers.ts's job).
     public destroyTerritory(x: number, y: number): IEvicted[] {
-        const t = this.cells.get(x, y);
-        if (t === undefined || t.card === undefined) {
-            throw new Error(`No territory to destroy at (${x},${y}).`);
-        }
+        const t = this.cells.get(x, y)!;
         t.card = undefined;
         if (t.pieces.length === 0) {
             this.cells.delete(x, y);
@@ -135,11 +129,7 @@ export class GnosticaBoard {
 
     // In-place value change; the cell still has a card throughout, so this never changes classification.
     public growTerritory(x: number, y: number, newCard: TarotCard): void {
-        const t = this.cells.get(x, y);
-        if (t === undefined || t.card === undefined) {
-            throw new Error(`No territory to grow at (${x},${y}).`);
-        }
-        t.card = newCard;
+        this.cells.get(x, y)!.card = newCard;
     }
 
     // Same in-place swap as growTerritory; shrinking all the way to nothing is destroyTerritory, not this method.
@@ -149,11 +139,8 @@ export class GnosticaBoard {
 
     // Moves only the CARD; pieces stay put. Destination is always wasteland, possibly already holding pieces of its own.
     public pushTerritory(fromX: number, fromY: number, toX: number, toY: number): IEvicted[] {
-        const src = this.cells.get(fromX, fromY);
-        if (src === undefined || src.card === undefined) {
-            throw new Error(`No territory to push at (${fromX},${fromY}).`);
-        }
-        const card = src.card;
+        const src = this.cells.get(fromX, fromY)!;
+        const card = src.card!;
 
         // Card must land FIRST - evicting before it arrives would wrongly treat the in-between state as void.
         let dest = this.cells.get(toX, toY);

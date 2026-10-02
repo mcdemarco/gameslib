@@ -47,22 +47,15 @@ export class CellContents {
         return ignoreCapacity || this.pieces.length < 3;
     }
 
-    public add(piece: Piece, ignoreCapacity = false): CellContents {
-        if (!this.canAdd(ignoreCapacity)) {
-            throw new Error("This cell already holds 3 pieces.");
-        }
+    // Capacity is a legality question (see canAdd), not something a cell enforces: several powers may exceed it.
+    public add(piece: Piece): CellContents {
         this.pieces.push(piece);
         return this;
     }
 
     // Caller is responsible for having identified which same-id piece it means, if more than one.
     public removeAt(idx: number): Piece {
-        const found = this.pieces[idx];
-        if (found === undefined) {
-            throw new Error(`No piece at index ${idx}.`);
-        }
-        this.pieces.splice(idx, 1);
-        return found;
+        return this.pieces.splice(idx, 1)[0];
     }
 
     public playersPresent(): Set<number> {

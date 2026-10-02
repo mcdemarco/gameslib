@@ -4428,10 +4428,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 if ("special" in step && step.special === "magicianChoice") {
                     borrowedForThisStep = asSuit;
-                    if (borrowedForThisStep === undefined) {
-                        // Should never reach a trusted commit - validateFrameStack rejects this same shape outright.
-                        throw new Error("magicianChoice step typed without a borrowed suit (\"as <suit>\").");
-                    }
                 }
                 istep = steps[i];
                 i++;
@@ -4846,12 +4842,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.applyHermitStep(minion, istep!);
             case "tradeHands":
                 return this.applyTradeHands(minion, istep!);
-            case "judgementDraw":
+            default: // judgementDraw
                 this.applyJudgementDraw(minion, istep!);
                 // A real (if empty) outcome, is not marked undefined.
                 return {};
-            default:
-                throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "SPECIAL_NOT_FOUND" }));
         }
     }
 
@@ -5039,7 +5033,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
                 const orientation = orientationStr as Orientation;
-                createOwn(ctx, tx, ty, orientation, opts);
+                createOwn(ctx, tx, ty, orientation);
                 this.addBufferIfWasteland(tx, ty);
                 this.results.push({ type: "place", where: cellStr, how: "cups-own" });
                 const newIndex = this.board.get(tx, ty)!.pieces.length - 1;
@@ -5052,7 +5046,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // victimRef is a full piece ref (#106) - validateCups already confirmed it names a piece at this cell, so its index is trusted directly.
                 const { index: victimIndex } = this.resolvePieceRefTrusted(victimRef);
                 const victimOwner = this.board.get(tx, ty)!.pieces[victimIndex].owner;
-                createEnemy(ctx, tx, ty, victimIndex, opts);
+                createEnemy(ctx, tx, ty, victimIndex);
                 this.results.push({ type: "place", where: cellStr, how: "cups-enemy", who: victimOwner });
                 return {}; // the new piece belongs to the targeted enemy, not the acting player
             }
@@ -5211,7 +5205,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
-                growPiece(ctx, target.x, target.y, target.index, newOrientation, opts);
+                growPiece(ctx, target.x, target.y, target.index, newOrientation);
                 this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: owner });
                 if (owner === this.currplayer) {
                     const grown = this.board.get(target.x, target.y)!.pieces;
@@ -6468,8 +6462,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         const sizeNames = ["small", "medium", "large"];
+        // A previewed first step of Strength or the Sun can dip an empty size below zero until the second step returns it.
         return stash.map((count, i) => ({
-            count,
+            count: Math.max(0, count),
             glyph: { name: `pyramid-up-${sizeNames[i]}`, colour: player },
             movePart: (i + 1).toString(),
         }));
