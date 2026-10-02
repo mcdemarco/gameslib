@@ -2428,6 +2428,12 @@ export class GnosticaGame extends GameBaseSequenced {
         return { current: held === undefined ? advancedStep : { ...held.pending, game: held.game }, advanced: advancedStep };
     }
 
+    // The walk goes on to apply the held step's own segment, which reorients the very Piece objects its minion snapshots point at; the held view needs its own copies.
+    private static detachPieces(pending: Omit<IPendingStep, "game">): Omit<IPendingStep, "game"> {
+        const detach = (m: IMinionRef): IMinionRef => m.piece === undefined ? m : { ...m, piece: m.piece.clone() };
+        return { ...pending, eligible: pending.eligible.map(detach), minions: pending.minions.map(detach), minion: detach(pending.minion), minionCandidates: pending.minionCandidates.map(detach) };
+    }
+
     // `held` is the step as it stood BEFORE the complete last segment was walked past (with its own copy of the game, since the walk goes on mutating `holder.clone`).
     private walkPendingStep(parsed: IParsedMove, holder: { clone?: GnosticaGame }): { held?: { pending: Omit<IPendingStep, "game">; game: GnosticaGame }; advanced?: Omit<IPendingStep, "game"> } {
         // A "via <uid>" marker dispatches from the Fool/HP anchor for a genuine resume; otherwise the front card token. "as <x>" never moves the head arg.
@@ -2539,7 +2545,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { advanced: stepHere() };
                 }
                 if (isLastSegment) {
-                    held = { pending: stepHere(), game: (holder.clone ?? this).scratchClone() };
+                    held = { pending: GnosticaGame.detachPieces(stepHere()), game: (holder.clone ?? this).scratchClone() };
                 }
                 completedStep = istepSoFar;
             } else {
@@ -2555,7 +2561,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { advanced: stepHere() };
                 }
                 if (isLastSegment) {
-                    held = { pending: stepHere(), game: (holder.clone ?? this).scratchClone() };
+                    held = { pending: GnosticaGame.detachPieces(stepHere()), game: (holder.clone ?? this).scratchClone() };
                 }
                 completedStep = istepSoFar;
             }

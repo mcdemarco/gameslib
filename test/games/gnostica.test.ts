@@ -1174,6 +1174,27 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.board.get(2, 0)!.pieces.map(p => p.id())).to.deep.equal(["12E"]);
     });
 
+    it("a pending step's minion snapshots always match its own game's board, in both views, even when the last typed step reorients that minion (Devil)", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "15", pieces: [[1, 1, "S"]] }, { x: 1, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        const chain = "use 15/with m0.1 orient m0.1 N/with m0.1.N orient m0.1.N E";
+        const internal = g as unknown as {
+            parseMove: (m: string) => unknown;
+            parsePendingStep: (p: unknown) => { current?: PendingLike; advanced?: PendingLike };
+        };
+        type PendingLike = { minions: { x: number; y: number; index: number; piece?: Piece }[]; game: GnosticaGame };
+        for (let k = 1; k <= 3; k++) {
+            const views = internal.parsePendingStep(internal.parseMove(chain.split("/").slice(0, k).join("/")));
+            for (const view of [views.current, views.advanced]) {
+                for (const m of view?.minions ?? []) {
+                    expect(m.piece?.id()).eq(view!.game.board.get(m.x, m.y)!.pieces[m.index].id());
+                }
+            }
+        }
+    });
+
     it("Chariot: two rod steps on the same piece may pass through the void mid-chain", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 3, "W"]] }], // large minion, pointing away from the grid
