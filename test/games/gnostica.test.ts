@@ -1209,6 +1209,26 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.board.get(-3, 0)?.pieces.length ?? 0).eq(0); // nothing left stranded at the waypoint
     });
 
+    it("a preview with a bare-cell with-token only waits for the minion on verbs that read it", () => {
+        // Two of the player's pieces share the card's cell, so "m0" doesn't yet say which acts.
+        const strength = testGame({ board: [{ x: 0, y: 0, uid: "08", pieces: [[1, 1, "E"], [1, 2, "N"]] }], hands: [filler, filler] });
+        strength.move(`use 08/with m0 grow m0.1`, { partial: true });
+        expect(strength.board.get(0, 0)!.pieces.map(p => p.size).sort()).to.deep.equal([2, 2]); // Discs never reads the actor: the grow shows
+        const chariot = testGame({ board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 1, "E"], [1, 2, "N"]] }, { x: 1, y: 0, uid: "AR" }], hands: [filler, filler] });
+        chariot.move(`use 07/with m0 move m0.1 1`, { partial: true });
+        expect(chariot.board.get(0, 0)!.pieces.length).eq(2); // Rods reads the actor's facing: nothing moves yet
+    });
+
+    it("a Chariot's first move into the void stands as a waypoint in the preview, while another card's destroys the piece", () => {
+        const waypoint = testGame({ board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 3, "W"]] }], hands: [filler, filler] });
+        waypoint.move(`use 07/with m0.3 move m0.3 3 orient E`, { partial: true });
+        expect(waypoint.board.get(-3, 0)?.pieces.length).eq(1); // waiting there for the second move
+
+        const lovers = testGame({ board: [{ x: 0, y: 0, uid: "06", pieces: [[1, 3, "W"]] }], hands: [filler, filler] });
+        lovers.move(`use 06/with m0.3 move m0.3 3 orient E`, { partial: true });
+        expect(lovers.board.get(-3, 0)?.pieces.length ?? 0).eq(0); // a final landing in the void destroys it
+    });
+
     it("Empress: orienting the minion first, then creating with ignoreCapacity, still resolves the second step's ref even once orientation makes two pieces identical", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 1, "N"], [1, 1, "U"], [1, 1, "U"]] }], // already 3 here

@@ -296,7 +296,7 @@ export const checkMovePiece = (
 export const movePiece = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
     targetX: number, targetY: number, targetIndex: number, dist: number,
-    newOrientation: Orientation | undefined, opts: PrimitiveOpts & { skipLandingCheck?: boolean } = {},
+    newOrientation: Orientation | undefined, waypoint = false,
 ): void => {
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
@@ -311,10 +311,10 @@ export const movePiece = (
     // doesn't linger in the board's own stored map (see
     // GnosticaBoard.pruneIfEmpty's own docs).
     ctx.board.pruneIfEmpty(targetX, targetY);
-    // A genuine final landing in the void destroys the piece. A relaxed
-    // mid-chain waypoint (skipLandingCheck, Chariot) must NOT - the piece
-    // still needs to be sitting there for the chain's next step to act on.
-    if (!opts.skipLandingCheck && ctx.board.classify(destX, destY) === "void") {
+    // A genuine final landing in the void destroys the piece. A mid-chain
+    // waypoint (Chariot) must NOT - the piece still needs to be sitting
+    // there for the chain's next step to act on.
+    if (!waypoint && ctx.board.classify(destX, destY) === "void") {
         returnToStash(ctx, moved.owner, moved.size);
         return;
     }
@@ -453,12 +453,12 @@ export const checkGrowTerritory = (
     return undefined;
 };
 
-export const growTerritory = (
-    ctx: PowerContext, targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
-): void => {
+// The replacement card comes from wherever it is: the hand, or (Tower/Star) the discards.
+const replacementPile = (ctx: PowerContext, uid: string): string[] => ctx.hand.includes(uid) ? ctx.hand : ctx.discardPile;
+
+export const growTerritory = (ctx: PowerContext, targetX: number, targetY: number, newCardUid: string): void => {
     const t = getCellContents(ctx, targetX, targetY);
-    const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
-    const newCard = takeFromPile(pile, newCardUid);
+    const newCard = takeFromPile(replacementPile(ctx, newCardUid), newCardUid);
     ctx.discardPile.push((t.card as TarotCard).uid);
     ctx.board.growTerritory(targetX, targetY, newCard);
 };
@@ -566,7 +566,6 @@ export const checkAttackTerritory = (
 
 export const attackTerritory = (
     ctx: PowerContext, targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
-    opts: PrimitiveOpts & { bothSwords?: boolean } = {},
 ): void => {
     const t = getCellContents(ctx, targetX, targetY);
     const current = t.pointValue();
@@ -578,8 +577,7 @@ export const attackTerritory = (
         returnEvictedPieces(ctx, evictions);
         return;
     }
-    const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
-    const newCard = takeFromPile(pile, newCardUid as string);
+    const newCard = takeFromPile(replacementPile(ctx, newCardUid as string), newCardUid as string);
     ctx.discardPile.push(oldUid);
     ctx.board.shrinkTerritory(targetX, targetY, newCard);
 };
