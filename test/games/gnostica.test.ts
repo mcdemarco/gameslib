@@ -1274,9 +1274,11 @@ describe("Gnostica: frame-stepping render() contract", () => {
         expect(g.frames.length).eq(1); // still mid-build, but the chain itself is complete
         const reps = g.render() as RepLike[];
         expect(reps.length).eq(2);
-        // Frame 0 (as of just step 1) still has Cups' own mode buttons on offer - the real choice
-        // available at that point in the chain; the final/live rep (both steps typed) does not.
-        expect(barValues(reps[0])).to.include("target_own");
+        // Frame 0 (as of just step 1) offers exactly what a fresh preview of just step 1 does - here the
+        // minion picker, since the moved piece joined the pool - and the final/live rep (both steps typed) does not.
+        const stepOne = setupLovers();
+        stepOne.move(`use 06/with m0.1 move n0.1 1 orient U`, { partial: true });
+        expect(barValues(reps[0])).to.deep.equal(barValues(stepOne.render() as RepLike));
         expect(barValues(reps[1])).to.not.deep.equal(barValues(reps[0]));
 
         // The same chain, once fully committed (no longer "in progress") - the historical frame

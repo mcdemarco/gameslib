@@ -6049,9 +6049,17 @@ export class GnosticaGame extends GameBaseSequenced {
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
         const snapshot = this.frameSnapshot(frame, groups[stepIndex] !== undefined ? [groups[stepIndex]] : []);
         // Still mid-build - recompute this step's own preview fresh (only ever a handful of frames), rather than caching one per frame in game state.
+        // Built from the committed state: the snapshot's board already holds the earlier steps, which the preview's walk would otherwise apply a second time.
         const parsed = this.preview!.seed;
-        snapshot.preview = snapshot.buildPreview({ ...parsed, steps: parsed.steps.slice(0, stepIndex + 2) });
+        snapshot.preview = this.committedClone().buildPreview({ ...parsed, steps: parsed.steps.slice(0, stepIndex + 2) });
         return snapshot;
+    }
+
+    // The state this move started from; a partial move mutates the live state, so replaying its steps must not start there.
+    private committedClone(): GnosticaGame {
+        const raw = this.state();
+        raw.stack = [this.stack[this.stack.length - 1]];
+        return new GnosticaGame(JSON.stringify(raw, replacer));
     }
 
     // A disposable copy for applying steps onto, without the full-history serialization clone() pays - nothing here reads earlier stack entries.
