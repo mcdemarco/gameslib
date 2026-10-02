@@ -2677,6 +2677,20 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         });
 
+        it("Swords lists the acting player's own pieces after the enemy ones", () => {
+            const g = testGame({
+                board: [{ x: 1, y: 0, uid: "AS", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[1, 2, "U"], [2, 1, "U"], [2, 3, "U"]] }],
+                hands: [["03", "2S"], filler],
+            });
+            const internal = g as unknown as {
+                parsePendingStep: (m: unknown) => { advanced?: object };
+                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
+            };
+            const pending = internal.parsePendingStep(g.parseMove("use AS")).advanced!;
+            const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => c.label.includes(" own ") ? "own" : "enemy");
+            expect(owners).to.deep.equal(["enemy", "enemy", "own", "own"]);
+        });
+
         // "use AC" activates via a minion standing ON the Cups card itself (n0), which then targets
         // the cell it faces (o0) - unlike the Empress test above, whose minion sits elsewhere.
         it("always names the enemy piece's owner, in both 3+ player and 2-player games", () => {

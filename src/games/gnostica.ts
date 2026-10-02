@@ -1406,8 +1406,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pm.error !== undefined)
             pm.valid = false;
 
-        //console.log(pm.steps);
-            
         return pm;
     }
 
@@ -2179,14 +2177,16 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
+    // `ownLast` moves the acting player's own pieces after everyone else's (Swords: destroying your own minion is the least likely pick).
     private pieceCandidateOptions(
         pending: IPendingStep, verb: string,
-        opts: { disabledReason?: { key: string; params?: Record<string, unknown> }; includeSelf?: boolean; filter?: (piece: Piece) => boolean } = {},
+        opts: { disabledReason?: { key: string; params?: Record<string, unknown> }; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean } = {},
     ): ChoiceOption[] {
-        const { disabledReason, includeSelf = true, filter } = opts;
+        const { disabledReason, includeSelf = true, filter, ownLast = false } = opts;
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
         const options: ChoiceOption[] = [];
+        const own: ChoiceOption[] = [];
         const seen = new Set<string>();
         const pushPieceCandidate = (x: number, y: number, index: number): void => {
             const ref = this.pieceRefStr({ x, y, index });
@@ -2195,7 +2195,8 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             seen.add(ref);
             const piece = this.board.get(x, y)!.pieces[index];
-            options.push({ value: ref, label: `${verb} ${this.ownerLabel(piece.owner)} ${this.textFormat(piece)}`, disabledReason });
+            const option = { value: ref, label: `${verb} ${this.ownerLabel(piece.owner)} ${this.textFormat(piece)}`, disabledReason };
+            (ownLast && piece.owner === this.currplayer ? own : options).push(option);
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
         if (includeSelf) {
@@ -2206,7 +2207,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 pushPieceCandidate(tx, ty, index);
             }
         });
-        return options;
+        return [...options, ...own];
     }
 
     // Every target-piece button names whose piece it is, since size/facing alone (textFormat) can match across different opponents.
@@ -2250,7 +2251,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const { verb, tile } = RDS_TARGET_LABELS[suitUid];
         return [
             { value: targetCell, label: tile, disabledReason: availability.get("tile") },
-            ...this.pieceCandidateOptions(pending, verb, { disabledReason: availability.get("piece") }),
+            ...this.pieceCandidateOptions(pending, verb, { disabledReason: availability.get("piece"), ownLast: suitUid === "S" }),
         ];
     }
 
