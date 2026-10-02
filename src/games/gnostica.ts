@@ -2654,13 +2654,22 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Inverse of resolvePieceRef: the shortest ref that resolves back to this exact piece in the pool. Tries pips, then pips+orientation, then pips+player, then all three.
+    // With a pool, the owner's other pieces in the cell count too: a later step may resolve the ref against all of the owner's pieces, not only the pool.
     public pieceRefStr(minion: IMinionRef, pool?: IMinionRef[]): string {
         const { x, y, index } = minion;
         const piece = minion.piece ?? this.board.get(x, y)!.pieces[index];
         const cell = GnosticaBoard.coords2algebraic(x, y);
-        const candidateRefs = pool !== undefined
-            ? pool.filter(p => p.x === x && p.y === y)
-            : (this.board.get(x, y)?.pieces ?? []).map((_, i): IMinionRef => ({ x, y, index: i }));
+        let candidateRefs: IMinionRef[];
+        if (pool === undefined) {
+            candidateRefs = (this.board.get(x, y)?.pieces ?? []).map((_, i): IMinionRef => ({ x, y, index: i }));
+        } else {
+            candidateRefs = pool.filter(p => p.x === x && p.y === y);
+            (this.board.get(x, y)?.pieces ?? []).forEach((p, i) => {
+                if (p.owner === piece.owner && !candidateRefs.some(r => r.index === i)) {
+                    candidateRefs.push({ x, y, index: i });
+                }
+            });
+        }
         const byPips = candidateRefs
             .map(r => r.piece ?? this.board.get(r.x, r.y)!.pieces[r.index])
             .filter(p => p.size === piece.size);
