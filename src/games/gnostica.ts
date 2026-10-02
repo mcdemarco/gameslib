@@ -2565,19 +2565,14 @@ export class GnosticaGame extends GameBaseSequenced {
             const clone = holder.clone;
             // A magicianChoice step needs its suit passed as `borrowedPower` here.
             const magicianAs = "special" in step && step.special === "magicianChoice" && asSuit !== undefined;
-            try {
-                const outcome = clone.applyPowerStep(step, top.minions, completedStep, frameDef, stepIndex, frameDef.powers.length, true, magicianAs ? asSuit : undefined, true, priorTaken);
-                priorTaken = true;
-                top.minions = GnosticaGame.chainMinion(top.minions, outcome ?? {});
-                top.nextStepIndex = outcome?.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
-                if (outcome?.pushFrame !== undefined) {
-                    stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, eligible: [...outcome.pushFrame.minions], minions: [...outcome.pushFrame.minions] });
-                }
-                GnosticaGame.popExhaustedFrames(clone, stack);
-            } catch {
-                // Every other step's tokens failing to resolve against a clone seeded from `this.board` means `this.board` has advanced past this step.
-                top.nextStepIndex++;
+            const outcome = clone.applyPowerStep(step, top.minions, completedStep, frameDef, stepIndex, frameDef.powers.length, true, magicianAs ? asSuit : undefined, true, priorTaken);
+            priorTaken = true;
+            top.minions = GnosticaGame.chainMinion(top.minions, outcome ?? {});
+            top.nextStepIndex = outcome?.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
+            if (outcome?.pushFrame !== undefined) {
+                stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, eligible: [...outcome.pushFrame.minions], minions: [...outcome.pushFrame.minions] });
             }
+            GnosticaGame.popExhaustedFrames(clone, stack);
         }
         const top = stack[stack.length - 1];
         if (top === undefined) {
@@ -3251,36 +3246,32 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.phase !== "main") {
             return this.handleBiddingClick(parsed, piece);
         }
-        try {
-            // A pending obligation's own real click targets show up directly, so the move may still be leftover from before it existed - seed it uniformly here.
-            if (this.continued.length > 0 && parsed.head === undefined) {
-                parsed = this.freshResumeMove(false, parsed.announceLast);
-            }
-            const move = this.pickleMove(parsed);
-            let views: { current?: IPendingStep; advanced?: IPendingStep } | undefined;
-            const ctx: IClickContext = {
-                move, parsed, row, col, piece,
-                last: parsed.announceLast ? " last" : "",
-                noop: { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") },
-                pending: () => views ??= this.parsePendingStep(parsed),
-            };
-            if (piece !== undefined && piece.startsWith("_btn_")) {
-                return this.clickButton(ctx, piece.slice("_btn_".length));
-            }
-            // Hand-card clicks arrive as `piece`, independent of row/col.  If no action is selected, the click is rejected.
-            if (piece !== undefined && piece.startsWith("hand_")) {
-                // TODO: render these cards as desired WITHOUT adding an unnecessary "_new" suffix which needs stripping.
-                return this.clickHandCard(ctx, piece.slice("hand_".length).replace(/_new$/, ""));
-            }
-            // Discard-pile clicks drive judgementDraw only; a minor-arcana bucket has no individual identity, so clicking one draws a uniformly-random not-yet-selected uid from it.
-            if (piece !== undefined && piece.startsWith("discard_")) {
-                // Same "_new" stripping as the hand-card click above - neither a bare major uid nor a bucket key can end in "_new" for real, so this is unambiguous too.
-                return this.clickDiscardPile(ctx, piece.slice("discard_".length).replace(/_new$/, ""));
-            }
-            return this.clickBoard(ctx);
-        } catch {
-            return { move: this.pickleMove(parsed), valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+        // A pending obligation's own real click targets show up directly, so the move may still be leftover from before it existed - seed it uniformly here.
+        if (this.continued.length > 0 && parsed.head === undefined) {
+            parsed = this.freshResumeMove(false, parsed.announceLast);
         }
+        const move = this.pickleMove(parsed);
+        let views: { current?: IPendingStep; advanced?: IPendingStep } | undefined;
+        const ctx: IClickContext = {
+            move, parsed, row, col, piece,
+            last: parsed.announceLast ? " last" : "",
+            noop: { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") },
+            pending: () => views ??= this.parsePendingStep(parsed),
+        };
+        if (piece !== undefined && piece.startsWith("_btn_")) {
+            return this.clickButton(ctx, piece.slice("_btn_".length));
+        }
+        // Hand-card clicks arrive as `piece`, independent of row/col.  If no action is selected, the click is rejected.
+        if (piece !== undefined && piece.startsWith("hand_")) {
+            // TODO: render these cards as desired WITHOUT adding an unnecessary "_new" suffix which needs stripping.
+            return this.clickHandCard(ctx, piece.slice("hand_".length).replace(/_new$/, ""));
+        }
+        // Discard-pile clicks drive judgementDraw only; a minor-arcana bucket has no individual identity, so clicking one draws a uniformly-random not-yet-selected uid from it.
+        if (piece !== undefined && piece.startsWith("discard_")) {
+            // Same "_new" stripping as the hand-card click above - neither a bare major uid nor a bucket key can end in "_new" for real, so this is unambiguous too.
+            return this.clickDiscardPile(ctx, piece.slice("discard_".length).replace(/_new$/, ""));
+        }
+        return this.clickBoard(ctx);
     }
 
     private clickButton(ctx: IClickContext, value: string): string | IClickResult {
