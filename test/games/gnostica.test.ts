@@ -1268,24 +1268,18 @@ describe("Gnostica: frame-stepping render() contract", () => {
     });
     const move = `use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U`;
 
-    it("live paging: a genuine 2-step chain, still mid-build (partial), shows step 1's own real choices on frame 0 - not the final rep's; once committed and reloaded, frame 0 shows no buttons at all", () => {
-        const g = setupLovers();
-        g.move(move, { partial: true });
-        expect(g.frames.length).eq(1); // still mid-build, but the chain itself is complete
-        const reps = g.render() as RepLike[];
+    it("a genuine 2-step chain gives only its final rep any buttons, whether still mid-build (partial) or committed and reloaded", () => {
+        const midBuild = setupLovers();
+        midBuild.move(move, { partial: true });
+        expect(midBuild.frames.length).eq(1); // still mid-build, but the chain itself is complete
+        const reps = midBuild.render() as RepLike[];
         expect(reps.length).eq(2);
-        // Frame 0 (as of just step 1) offers exactly what a fresh preview of just step 1 does - here the
-        // minion picker, since the moved piece joined the pool - and the final/live rep (both steps typed) does not.
-        const stepOne = setupLovers();
-        stepOne.move(`use 06/with m0.1 move n0.1 1 orient U`, { partial: true });
-        expect(barValues(reps[0])).to.deep.equal(barValues(stepOne.render() as RepLike));
-        expect(barValues(reps[1])).to.not.deep.equal(barValues(reps[0]));
+        expect(barValues(reps[0])).eq(undefined);
+        expect(barValues(reps[1])).to.not.eq(undefined);
 
-        // The same chain, once fully committed (no longer "in progress") - the historical frame
-        // gets no buttons at all; the final/live rep still gets its own normal bar.
-        const g2 = setupLovers();
-        g2.move(move);
-        const reps2 = g2.render() as RepLike[];
+        const committed = setupLovers();
+        committed.move(move);
+        const reps2 = committed.render() as RepLike[];
         expect(reps2.length).eq(2);
         expect(barValues(reps2[0])).eq(undefined);
         expect(barValues(reps2[1])).to.not.eq(undefined);

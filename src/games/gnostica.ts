@@ -224,7 +224,6 @@ interface IPreview {
     // The revealed card a Fool resume is playing, when the move names one.
     foolCard: string | undefined;
     // The resume seed move string, including whatever was typed against the pending obligation.
-    seed: IParsedMove;
     pending: IPendingStep | undefined;
 }
 
@@ -1667,7 +1666,6 @@ export class GnosticaGame extends GameBaseSequenced {
             discardNeedsCount: head === "discard" && step0?.amount === undefined,
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
-            seed,
             pending: this.parsePendingStep(this.continued.length > 0 ? seed : parsed).advanced,
         };
     }
@@ -5695,7 +5693,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     //TODO: reword the following comment.
     // The actual, single-state render body, renamed so the public render() dispatcher can call it directly; a historical frame is built entirely from renderFrame() instead.
-    private renderCurrent(opts?: IRenderOpts, suppressHands = false): APRenderRep {
+    private renderCurrent(opts?: IRenderOpts): APRenderRep {
         let altDisplay: string | undefined;
         if (opts !== undefined) {
             altDisplay = opts.altDisplay;
@@ -5757,42 +5755,40 @@ export class GnosticaGame extends GameBaseSequenced {
             rowLabels.push((y === 0 ? 0 : -y).toString());
         }
 
-        // One area per player's hand, full-size (non-spaced) card faces - skipped entirely for an intermediate frame.
+        // One area per player's hand, full-size (non-spaced) card faces.
         const areas: (AreaPieces | AreaButtonBar | AreaKey)[] = [];
-        if (!suppressHands) {
-            for (let p = 1; p <= this.numplayers; p++) {
-                const hand = this.hands[p - 1].slice() ?? [];
-                if (hand.length === 0) {
+        for (let p = 1; p <= this.numplayers; p++) {
+            const hand = this.hands[p - 1].slice() ?? [];
+            if (hand.length === 0) {
+                continue;
+            }
+            //Hand sorting is now done in the render only.
+            hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
+            const newUids = this.newHandCardUids(p as playerid);
+            const handKeys: string[] = [];
+            for (const uid of hand) {
+                const card = allCards().find(c => c.uid === uid);
+                if (card === undefined) {
+                    handKeys.push("hand_UNKNOWN");
                     continue;
                 }
-                //Hand sorting is now done in the render only.
-                hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
-                const newUids = this.newHandCardUids(p as playerid);
-                const handKeys: string[] = [];
-                for (const uid of hand) {
-                    const card = allCards().find(c => c.uid === uid);
-                    if (card === undefined) {
-                        handKeys.push("hand_UNKNOWN");
-                        continue;
-                    }
-                    // A card just added to hand gets its own tagged legend entry - same face, just tinted so it's easy to spot regardless of sort order.
-                    const isNew = newUids.has(uid);
-                    const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
-                    if (!(key in legend)) {
-                        legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
-                    }
-                    handKeys.push(key);
+                // A card just added to hand gets its own tagged legend entry - same face, just tinted so it's easy to spot regardless of sort order.
+                const isNew = newUids.has(uid);
+                const key = isNew ? `hand_${uid}_new` : `hand_${uid}`;
+                if (!(key in legend)) {
+                    legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
                 }
-                areas.push({
-                    type: "pieces",
-                    pieces: handKeys as [string, ...string[]],
-                    label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.declaredPlayer() === p ? "(declarer)" : "" }),
-                    // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter than default spacing, fixed width since hands are always <=6 cards.
-                    spacing: 0.25,
-                    width: 6,
-                    ownerMark: p,
-                });
+                handKeys.push(key);
             }
+            areas.push({
+                type: "pieces",
+                pieces: handKeys as [string, ...string[]],
+                label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.declaredPlayer() === p ? "(declarer)" : "" }),
+                // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter than default spacing, fixed width since hands are always <=6 cards.
+                spacing: 0.25,
+                width: 6,
+                ownerMark: p,
+            });
         }
 
         // The "bidding" variant's shared pool - every card revealed by the opening bid procedure, available for anyone to redraw; fully public, no redaction needed.
@@ -5939,7 +5935,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
-    // Builds a finished/historical chain's own intermediate frame DIRECTLY from FrameState's board/discardPile, without hand/pool/button areas.
+    // Builds a chain's intermediate frame directly from FrameState's board/discardPile, without hand/pool/button areas - the same whether the chain is committed or still being built.
     private renderFrame(frame: FrameState, stepIndex: number, opts?: IRenderOpts): APRenderRep {
         let altDisplay: string | undefined;
         if (opts !== undefined) {
@@ -6042,36 +6038,10 @@ export class GnosticaGame extends GameBaseSequenced {
         return rep;
     }
 
-    // A second, disposable GnosticaGame instance whose board is overridden to `frame.board` (one intermediate step's snapshot), not the real current board.
-    // Its own `.frames` is left empty (it isn't itself mid-chain), so call `.renderCurrent()` on it directly - never the public `.render()` - to always get one rep back.
-    private renderFrameSnapshot(frame: FrameState, stepIndex: number): GnosticaGame {
-        // this.results holds one _group entry per step of the chain - pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
-        const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
-        const snapshot = this.frameSnapshot(frame, groups[stepIndex] !== undefined ? [groups[stepIndex]] : []);
-        // Still mid-build - recompute this step's own preview fresh (only ever a handful of frames), rather than caching one per frame in game state.
-        // Built from the committed state: the snapshot's board already holds the earlier steps, which the preview's walk would otherwise apply a second time.
-        const parsed = this.preview!.seed;
-        snapshot.preview = this.committedClone().buildPreview({ ...parsed, steps: parsed.steps.slice(0, stepIndex + 2) });
-        return snapshot;
-    }
-
-    // The state this move started from; a partial move mutates the live state, so replaying its steps must not start there.
-    private committedClone(): GnosticaGame {
-        const raw = this.state();
-        raw.stack = [this.stack[this.stack.length - 1]];
-        return new GnosticaGame(JSON.stringify(raw, replacer));
-    }
-
     // A disposable copy for applying steps onto, without the full-history serialization clone() pays - nothing here reads earlier stack entries.
     private scratchClone(): GnosticaGame {
         const raw = this.state();
         raw.stack = [this.moveState()];
-        return new GnosticaGame(JSON.stringify(raw, replacer));
-    }
-
-    private frameSnapshot(frame: FrameState, results: APMoveResult[]): GnosticaGame {
-        const raw = this.state();
-        raw.stack = [{ ...this.moveState(), board: frame.board, _results: results }];
         return new GnosticaGame(JSON.stringify(raw, replacer));
     }
 
@@ -6080,11 +6050,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.frames.length === 0) {
             return this.renderCurrent(opts);
         }
-        // Historical (fully committed) frames get no buttons, via renderFrame(); a still-mid-build chain gets real ones instead, via renderCurrent() on a snapshot.
-        const historical = this.preview === undefined;
-        const reps = historical
-            ? this.frames.map((f, i) => this.renderFrame(f, i, opts))
-            : this.frames.map((f, i) => this.renderFrameSnapshot(f, i).renderCurrent(opts, true));
+        // Only the final rep carries buttons and hands; every earlier frame is just its step's board.
+        const reps = this.frames.map((f, i) => this.renderFrame(f, i, opts));
         reps.push(this.renderCurrent(opts));
         return reps;
     }
