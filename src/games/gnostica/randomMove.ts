@@ -1010,7 +1010,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]
         if (eligible.length === 0 || Math.random() < 0.2) {
             return []; // skip outright - always legal
         }
-        // card.suit.uid is plain `string` in the shared tarot infra, but always one of the 4 minor suits in practice - see gnostica.ts's own suitUidOf for the same assertion.
+        // card.suit.uid is plain `string` in the shared tarot infra, but always one of the 4 minor suits
         const suitUid = card.suit.uid as MinorSuitUid;
         const built = buildRandomSuitStep(game, suitUid, eligible, {});
         if (built === undefined) {

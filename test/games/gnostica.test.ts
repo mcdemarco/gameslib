@@ -2677,6 +2677,33 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         });
 
+        it("choosing a territory target names the hand-card click as the next step (Cups new, Discs tile)", () => {
+            addResource("en"); // without resources, every message is empty and the comparisons below would pass vacuously
+            const cups = testGame({
+                board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }],
+                hands: [["03", "2S"], filler],
+            });
+            expect(cups.handleClick("use AC", -1, -1, "_btn_target_new").message).eq(i18next.t("apgames:validation.gnostica.PICK_CARD_FOR_NEW_TERRITORY"));
+
+            const discs = testGame({
+                board: [{ x: 1, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "2R", pieces: [] }],
+                hands: [["KR", "2S"], filler],
+            });
+            expect(discs.handleClick("use AD", -1, -1, "_btn_target_o0").message).eq(i18next.t("apgames:validation.gnostica.PICK_CARD_TO_GROW_TERRITORY"));
+        });
+
+        it("Hermit names the destination click once its target (piece or territory) is chosen", () => {
+            addResource("en");
+            const g = testGame({
+                board: [{ x: 1, y: 0, uid: "09", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
+                hands: [["03", "2S"], filler],
+            });
+            const expected = i18next.t("apgames:validation.gnostica.PICK_HERMIT_DESTINATION");
+            expect(expected).to.not.eq("");
+            expect(g.handleClick("use 09", -1, -1, "_btn_target_o0.1").message).eq(expected);
+            expect(g.handleClick("use 09", -1, -1, "_btn_target_o0").message).eq(expected);
+        });
+
         it("Swords lists the acting player's own pieces after the enemy ones", () => {
             const g = testGame({
                 board: [{ x: 1, y: 0, uid: "AS", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[1, 2, "U"], [2, 1, "U"], [2, 3, "U"]] }],

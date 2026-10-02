@@ -1819,6 +1819,14 @@ export class GnosticaGame extends GameBaseSequenced {
         if (mode === "tile" && suitUid === "S" && step.card === undefined && step.amount === undefined) {
             return { key: "apgames:validation.gnostica.PICK_REPLACEMENT_OR_DESTROY" };
         }
+        if (step.card === undefined && step.amount === undefined) {
+            if (suitUid === "C" && mode === "new") {
+                return { key: "apgames:validation.gnostica.PICK_CARD_FOR_NEW_TERRITORY" };
+            }
+            if (suitUid === "D" && mode === "tile") {
+                return { key: "apgames:validation.gnostica.PICK_CARD_TO_GROW_TERRITORY" };
+            }
+        }
         return undefined;
     }
 
@@ -2260,7 +2268,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
         return [
-            { value: targetCell, label: "Push Territory" },
+            { value: targetCell, label: "Teleport Territory" },
             ...this.pieceCandidateOptions(pending, "Teleport"),
         ];
     }
@@ -4595,6 +4603,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     // orientAny/hierophantReplace's own target is already chosen but its facing isn't yet - name the real next click, not the generic "pick a target" wording.
                     if ("special" in step && (step.special === "orientAny" || step.special === "hierophantReplace") && istep?.targetPiece !== undefined) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT") };
+                    }
+                    // hermitTeleport's target is already chosen; only the destination click is left.
+                    if ("special" in step && step.special === "hermitTeleport" && istep !== undefined && stepHermitMode(istep) !== undefined) {
+                        return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HERMIT_DESTINATION") };
                     }
                     const override = "primitive" in step && istep !== undefined ? this.primitiveIncompleteMessage(this.primitiveToSuit(step.primitive), istep) : undefined;
                     const msg = override ?? this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions, istep?.withPiece);
