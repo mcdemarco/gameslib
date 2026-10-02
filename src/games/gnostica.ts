@@ -171,8 +171,24 @@ interface IPendingStep {
     opts: Record<string, unknown>;
     // The current step's own content as typed so far, already resolved into an IStep - completeness gates and click handlers read it directly.
     istep: IStep;
+    // Whether the move string being clicked on already declares "last" - rebuilt moves must carry it forward.
+    announceLast: boolean;
     // The game as it stands after every completed step above was applied to a clone of the committed state; refs, candidates and lookups for this step resolve against its board.
     game: GnosticaGame;
+}
+
+// What each click handler needs: the move being clicked on, as parsed, and a once-per-click, lazily computed view of its in-progress power step.
+interface IClickContext {
+    move: string;
+    parsed: IParsedMove;
+    row: number;
+    col: number;
+    piece?: string;
+    // " last" when the move already declares it, else "" - appended to every move string a handler builds by hand.
+    last: string;
+    // The "this click means nothing right now" result.
+    noop: IClickResult;
+    pending: () => { current?: IPendingStep; advanced?: IPendingStep };
 }
 
 // What the click UI needs to know about an in-progress (partial) move, computed once inside move(..., {partial: true}) from the pre-move state.
@@ -186,7 +202,7 @@ interface IPreview {
     // The revealed card a Fool resume is playing, when the move names one.
     foolCard: string | undefined;
     // The resume seed move string, including whatever was typed against the pending obligation.
-    seed: string;
+    seed: IParsedMove;
     pending: IPendingStep | undefined;
 }
 
@@ -1553,24 +1569,23 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The two trivial resume-seed shapes gnostica.ts itself ever needs: nothing typed yet, or a bare decline. Only randomMove.ts's own bot-move construction
     // (arbitrary raw-token chains, built with no move string to parse one from) needs the general buildViaMove found there.
-    private freshResumeSeed(decline = false): string {
+    private freshResumeMove(decline = false, announceLast = false): IParsedMove {
         const activeUid = this.getContinuedUid()!;
         if (activeUid === "02") {
             // High Priestess can never decline (validateHighPriestess only accepts "discard"; no Decline button is ever offered for it).
-            return `discard via ${activeUid}`;
+            return { announceLast, valid: true, head: "discard", viaUid: activeUid, steps: [{ action: "discard", complete: -1 }] };
         }
         // "via 00" only ever names the Fool itself, so a Fool decline still has to name the REVEALED card separately ("decline AC via 00") - parseMove requires it to validate as complete.
-        const head: IParsedMove = {
-            announceLast: false, valid: true,
+        return {
+            announceLast, valid: true,
             head: decline ? "decline" : "play",
             viaUid: activeUid,
             steps: [{ action: decline ? "decline" : "play", card: this.activeCardUid() }],
         };
-        return this.pickleMove(head);
     }
 
     private buildPreview(parsed: IParsedMove): IPreview {
-        const seed = parsed.viaUid === this.getContinuedUid() ? this.pickleMove(parsed) : this.freshResumeSeed();
+        const seed = parsed.viaUid === this.getContinuedUid() ? parsed : this.freshResumeMove();
         const step0 = parsed.steps[0];
         const head = parsed.head?.toLowerCase();
         return {
@@ -1580,7 +1595,7 @@ export class GnosticaGame extends GameBaseSequenced {
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
             seed,
-            pending: this.parsePendingStep(this.continued.length > 0 ? seed : this.pickleMove(parsed)),
+            pending: this.parsePendingStep(this.continued.length > 0 ? seed : parsed).advanced,
         };
     }
 
@@ -2098,7 +2113,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.preview !== undefined) {
             return this.preview.pending;
         }
-        return this.continued.length > 0 ? this.parsePendingStep(this.freshResumeSeed()) : undefined;
+        return this.continued.length > 0 ? this.parsePendingStep(this.freshResumeMove()).advanced : undefined;
     }
 
     // Every remaining candidate minion for THIS step already sits on the same cell AND there's more than one, so a real choice is still needed - one button each.
@@ -2322,25 +2337,28 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Reconstructs the in-progress power step (if any) purely from a move string.  Checks step segments for STRUCTURAL completeness,  also stopping at Fool or World.
-    private parsePendingStep(moveStr: string, callOpts: { preferCurrent?: boolean } = {}): IPendingStep | undefined {
+    // `current` treats a complete last-typed segment as still the step being refined (board clicks keep adjusting it); `advanced` walks past it to the next step.
+    // They are the same object unless that last segment is already complete.
+    private parsePendingStep(parsed: IParsedMove): { current?: IPendingStep; advanced?: IPendingStep } {
         const holder: { clone?: GnosticaGame } = {};
-        const pending = this.walkPendingStep(moveStr, callOpts, holder);
-        return pending === undefined ? undefined : { ...pending, game: holder.clone ?? this.clone() };
+        const { held, advanced } = this.walkPendingStep(parsed, holder);
+        const advancedStep = advanced === undefined ? undefined : { ...advanced, game: holder.clone ?? this.scratchClone() };
+        return { current: held === undefined ? advancedStep : { ...held.pending, game: held.game }, advanced: advancedStep };
     }
 
-    private walkPendingStep(moveStr: string, callOpts: { preferCurrent?: boolean }, holder: { clone?: GnosticaGame }): Omit<IPendingStep, "game"> | undefined {
-        const parsed = this.parseMove(moveStr);
+    // `held` is the step as it stood BEFORE the complete last segment was walked past (with its own copy of the game, since the walk goes on mutating `holder.clone`).
+    private walkPendingStep(parsed: IParsedMove, holder: { clone?: GnosticaGame }): { held?: { pending: Omit<IPendingStep, "game">; game: GnosticaGame }; advanced?: Omit<IPendingStep, "game"> } {
         // A "via <uid>" marker dispatches from the Fool/HP anchor for a genuine resume; otherwise the front card token. "as <x>" never moves the head arg.
         let headArg = parsed.viaUid ?? parsed.steps[0]?.card;
         if (headArg === undefined) {
-            return undefined;
+            return {};
         }
         // asUid (World's borrow) and asSuit (Magician's suit) are separate fields throughout; a World-pushed Magician frame can have both set at once.
         const { asUid, asSuit } = parsed;
         const worldBorrow = asUid !== undefined;
         // "decline" is already a complete choice - no step for a button set to configure, so the bar falls back to plain top-level context.
         if (parsed.head === "decline") {
-            return undefined;
+            return {};
         }
         // A genuine resume is detected from the "via <root>" anchor matching this.continued; for button-building it always plays the active card, so `head` is "play".
         const isGenuineResume = this.continued.length > 0 && parsed.viaUid === this.getContinuedUid();
@@ -2351,7 +2369,7 @@ export class GnosticaGame extends GameBaseSequenced {
             headArg = parsed.head === "discard" ? parsed.viaUid! : (parsed.steps[0]?.card ?? parsed.viaUid!);
         }
         if (!isGenuineResume && parsed.head !== "use" && parsed.head !== "play") {
-            return undefined;
+            return {};
         }
         const head: "use" | "play" = isGenuineResume ? "play" : parsed.head as "use" | "play";
         let card: Card | undefined;
@@ -2363,7 +2381,7 @@ export class GnosticaGame extends GameBaseSequenced {
         } else if (head === "use") {
             const loc = this.findCardCell(headArg);
             if (loc === undefined) {
-                return undefined;
+                return {};
             }
             const { x, y } = loc;
             card = this.board.get(x, y)?.card;
@@ -2373,13 +2391,13 @@ export class GnosticaGame extends GameBaseSequenced {
             eligible = this.eligibleMinionsForPlay();
         }
         if (card === undefined || eligible.length === 0) {
-            return undefined;
+            return {};
         }
         if (!card.major) {
             const suitUid = suitUidOf(card);
             const istep: IStep = steps[0] ?? { action: "with" };
             const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, eligible);
-            return { head, headArg, activeCardUid: headArg, suitUid, eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, istep };
+            return { advanced: { head, headArg, activeCardUid: headArg, suitUid, eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, istep, announceLast: parsed.announceLast } };
         }
 
         const def = getMajorArcanaDef(card);
@@ -2402,14 +2420,15 @@ export class GnosticaGame extends GameBaseSequenced {
         const priorSteps: IStep[] = [];
         // False right after a power was skipped (a later power of the card used alone); true once a step has been walked past.
         let priorTaken = true;
+        let held: { pending: Omit<IPendingStep, "game">; game: GnosticaGame } | undefined;
         for (let segIdx = 0; segIdx < steps.length; segIdx++) {
             const top = stack[stack.length - 1];
             if (top === undefined) {
-                return undefined; // too many steps already typed - validateMove/move report this properly on submit
+                return { held }; // too many steps already typed - validateMove/move report this properly on submit
             }
             const frameDef = this.resolveFrameDef(top.cardUid);
             if (top.nextStepIndex >= frameDef.powers.length) {
-                return undefined; // defensive - popExhaustedFrames keeps this in sync below
+                return { held }; // defensive - popExhaustedFrames keeps this in sync below
             }
             // A typed step spelled as a later power of the card skips the powers before it (see skipAheadTarget).
             const skipTarget = GnosticaGame.skipAheadTarget(frameDef, top.nextStepIndex, steps[segIdx]);
@@ -2421,19 +2440,24 @@ export class GnosticaGame extends GameBaseSequenced {
             const step = frameDef.powers[stepIndex];
             if ("special" in step && step.special === "fool") {
                 // Fool's own step always auto-resolves the instant it's next in line on a real commit - nothing here for a click to build.
-                return undefined;
+                return { held };
             }
             const isLastSegment = segIdx === steps.length - 1;
-            // Set in whichever branch below falls through (step complete, not held back by preferCurrent) - the IStep this segment becomes.
+            // Set in whichever branch below falls through (step complete) - the IStep this segment becomes.
             let completedStep: IStep | undefined;
             if ("primitive" in step) {
                 const suitUidForStep = this.primitiveToSuit(step.primitive);
                 const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
                 const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
-                if ((istepSoFar.complete ?? -1) < 0 || (isLastSegment && callOpts.preferCurrent)) {
-                    // Still building this one, OR the caller wants the last-typed segment treated as "current" even once complete (board clicks keep refining it).
+                const stepHere = (): Omit<IPendingStep, "game"> => {
                     const { minion, ambiguous, candidates } = (holder.clone ?? this).resolveStepMinion(istepSoFar.withPiece, top.minions);
-                    return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: istepSoFar };
+                    return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [...priorSteps], opts, istep: istepSoFar, announceLast: parsed.announceLast };
+                };
+                if ((istepSoFar.complete ?? -1) < 0) {
+                    return { advanced: stepHere() };
+                }
+                if (isLastSegment) {
+                    held = { pending: stepHere(), game: (holder.clone ?? this).scratchClone() };
                 }
                 completedStep = istepSoFar;
             } else {
@@ -2443,15 +2467,19 @@ export class GnosticaGame extends GameBaseSequenced {
                 const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
                 // A High Priestess discard list stays editable right up until Submit, so it is never "complete" here.
                 const complete = magicianNeedsAs || step.special === "highPriestess" ? false : (istepSoFar.complete ?? -1) >= 0;
-                if (!complete || (isLastSegment && callOpts.preferCurrent)) {
-                    // Same "still building, or the caller wants it treated as current regardless" rule as the primitive branch.
-                    return this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, istepSoFar, asUid, asSuit);
+                const stepHere = (): Omit<IPendingStep, "game"> =>
+                    this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, [...priorSteps], istepSoFar, asUid, asSuit, parsed.announceLast);
+                if (!complete) {
+                    return { advanced: stepHere() };
+                }
+                if (isLastSegment) {
+                    held = { pending: stepHere(), game: (holder.clone ?? this).scratchClone() };
                 }
                 completedStep = istepSoFar;
             }
             // Walking past this segment lets a LATER step of the SAME frame become click-driven, via a clone.
             priorSteps.push(completedStep!);
-            holder.clone ??= this.clone();
+            holder.clone ??= this.scratchClone();
             const clone = holder.clone;
             // A magicianChoice step needs its suit passed as `borrowedPower` here.
             const magicianAs = "special" in step && step.special === "magicianChoice" && asSuit !== undefined;
@@ -2471,31 +2499,31 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const top = stack[stack.length - 1];
         if (top === undefined) {
-            return undefined; // every step already complete - nothing left to click for
+            return { held }; // every step already complete - nothing left to click for
         }
         const frameDef = this.resolveFrameDef(top.cardUid);
         const stepIndex = top.nextStepIndex;
         if (stepIndex >= frameDef.powers.length) {
-            return undefined;
+            return { held };
         }
         const step = frameDef.powers[stepIndex];
         if ("primitive" in step) {
             const suitUid = this.primitiveToSuit(step.primitive);
             const opts = this.computeShortcutOpts(frameDef, step.primitive, stepIndex, frameDef.powers.length, step.opts);
             const { minion, ambiguous, candidates } = (holder.clone ?? this).resolveStepMinion(undefined, top.minions);
-            return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: { action: "with" } };
+            return { held, advanced: { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: { action: "with" }, announceLast: parsed.announceLast } };
         }
-        return this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, { action: "with" }, asUid, asSuit);
+        return { held, advanced: this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, { action: "with" }, asUid, asSuit, parsed.announceLast) };
     }
 
     // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice once its suit is chosen, which is treated as a plain suit step.
     private buildSpecialPending(
         ctx: GnosticaGame, special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
-        eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: MinorSuitUid,
+        eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: MinorSuitUid, announceLast = false,
     ): Omit<IPendingStep, "game"> {
         if (special === "magicianChoice" && asSuit !== undefined) {
             const { minion, ambiguous, candidates } = ctx.resolveStepMinion(istep.withPiece, minions);
-            return { head, headArg, activeCardUid, asUid, asSuit, suitUid: asSuit, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
+            return { head, headArg, activeCardUid, asUid, asSuit, suitUid: asSuit, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep, announceLast };
         }
         // Fool/High Priestess/worldUseAny have no minionRef here; an unchosen magicianChoice also defers its minion choice until after the suit is picked (its
         // own button set needs to show before any ambiguous-minion picker would - see the "2+ minions... suit buttons first" regression test).
@@ -2503,7 +2531,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const { minion, ambiguous, candidates } = noMinionRef
             ? { minion: minions[0], ambiguous: false, candidates: minions }
             : ctx.resolveStepMinion(istep.withPiece, minions);
-        return { head, headArg, activeCardUid, asUid, asSuit, special, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
+        return { head, headArg, activeCardUid, asUid, asSuit, special, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep, announceLast };
     }
 
     // The single valid cell a minor suit-power step may affect: the minion's own cell if facing "U", otherwise the one cell it's pointing at.
@@ -2702,7 +2730,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Spells a pending step's own head. `pending.head` is always the original verb, `headArg` the root card.
     private describePendingMove(pending: IPendingStep, steps: IStep[]): string {
         const { asUid, asSuit } = pending;
-        const base = { announceLast: false, valid: true };
+        const base = { announceLast: pending.announceLast, valid: true };
         // A genuine resume always carries a "via <root>".
         if (this.continued.length > 0) {
             // High Priestess's second step is a discard/draw.
@@ -2742,7 +2770,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pending.special !== undefined) {
             return this.assembleStepMove(pending, this.anchorStep(pending.special, ref));
         }
-        return `${this.describePendingMove(pending, pending.priorSteps)}/with ${ref}`;
+        return this.assembleStepMove(pending, { action: "with", withPiece: ref });
     }
 
     // Builds the move string for a step whose target was just picked from the unified candidate list; which suit-mode this becomes is inferred entirely from `targetRef`'s shape.
@@ -3100,13 +3128,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.describePendingMove({ ...pending, asUid: t.card.uid }, pending.priorSteps);
     }
 
-    // The board as the client currently shows it: `move` applied on a scratch clone whenever it's previewable, otherwise this.board unchanged.
-    private previewBoard(move: string): GnosticaBoard {
+    // The board as the client currently shows it: the move applied on a scratch clone whenever it's previewable, otherwise this.board unchanged.
+    private previewBoard(parsed: IParsedMove): GnosticaBoard {
+        const move = this.pickleMove(parsed);
         const result = this.validateMove(move);
         if (!result.valid || (result.complete ?? -1) < 0 && result.canrender !== true) {
             return this.board;
         }
-        const scratch = this.clone();
+        const scratch = this.scratchClone();
         scratch.move(move, { partial: true });
         return scratch.board;
     }
@@ -3118,426 +3147,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (piece === "_btn_declare") {
             outcome = this.pickleMove({ ...parsed, announceLast: !parsed.announceLast });
         } else {
-            move = this.pickleMove({ ...parsed, announceLast: false });
-            const core = ((): string | IClickResult => {
-                try {
-                    // The "bidding" variant's opening procedure is structurally unlike every other click, so it's handled entirely by its own function.
-                    if (this.phase !== "main") {
-                        return this.handleBiddingClick(move, piece);
-                    }
-                    // A pending obligation's own real click targets show up directly, so `move` may still be leftover from before it existed - seed it uniformly here.
-                    if (this.continued.length > 0 && parsed.head === undefined) {
-                        move = this.freshResumeSeed();
-                    }
-                    if (piece !== undefined && piece.startsWith("_btn_")) {
-                        const value = piece.slice("_btn_".length);
-                        if (value.startsWith("minion_")) {
-                            // "minion_<ref>" - offered whenever 2+ of the acting player's pieces are eligible and none has been picked yet; types just the ref.
-                            const ref = value.slice("minion_".length);
-                            const pending = this.parsePendingStep(move);
-                            if (pending === undefined || !pending.minionAmbiguous) {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            // Resolved against minionCandidates (currently shown), not the full minions pool - a stale move string shouldn't resolve against pieces no longer on offer.
-                            const resolved = pending.game.resolvePieceRef(ref, pending.minionCandidates);
-                            if (resolved.kind !== "ok") {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            const clickedPiece = pending.game.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
-                            const rodReason = this.rodNeedsFacingReason(pending.suitUid, clickedPiece);
-                            if (rodReason !== undefined) {
-                                return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${rodReason.key}`) };
-                            }
-                            const minionRef = pending.game.pieceRefStr(resolved.ref, pending.minions);
-                            return pending.game.buildAnchorMove(pending, minionRef);
-                        }
-                        if (value.startsWith("orientpick_")) {
-                            // "orientpick_<ref>" - orient's own minion-picker (orient has no IPendingStep to resolve against, so it can't reuse "minion_"); facing is a separate click.
-                            const ref = value.slice("orientpick_".length);
-                            const parsed = this.parseMove(move);
-                            if (parsed.head?.toLowerCase() !== "orient") {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            const resolved = this.resolvePieceRef(ref);
-                            if (resolved.kind !== "ok" || this.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index].owner !== this.currplayer) {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            return `orient ${this.pieceRefStr(resolved.ref)}`;
-                        }
-                        if (value.startsWith("target_")) {
-                            // The unified candidate list for a fresh suit-power step, hermitTeleport, or an ambiguous orientAny/tradeHands/hierophantReplace target - one click supplies it directly.
-                            const ref = value.slice("target_".length);
-                            const pending = this.parsePendingStep(move);
-                            if (pending === undefined) {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            if (pending.special === "hermitTeleport") {
-                                if (stepHermitMode(pending.istep) !== undefined) {
-                                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                                }
-                                return pending.game.buildTargetedHermitMove(pending, ref);
-                            }
-                            if (pending.special === "orientAny" || pending.special === "tradeHands" || pending.special === "hierophantReplace") {
-                                if (pending.istep.targetPiece !== undefined) {
-                                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                                }
-                                const result = pending.game.buildSpecialTargetMove(pending, ref);
-                                return result ?? { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            if (pending.suitUid === undefined || this.pendingMode(pending) !== undefined) {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            // Same per-mode availability check the old mode_ buttons used - a struck-through candidate must still reject the click, not build a doomed move.
-                            const clickedMode = pending.suitUid === "C"
-                                ? (ref === "own" || ref === "new" ? ref : "enemy")
-                                : (ref.includes(".") ? "piece" : "tile");
-                            const reason = pending.game.minorModeAvailability(pending).get(clickedMode);
-                            if (reason !== undefined) {
-                                return { move, valid: false, message: i18next.t(`apgames:validation.gnostica.${reason.key}`, reason.params ?? {}) };
-                            }
-                            return pending.game.buildTargetedStepMove(pending, ref);
-                        }
-                        if (value.startsWith("pips_")) {
-                            // Swords "piece" (attack) pips - a button set rather than a click-cycled arg, always rebuilt against the CURRENT target.
-                            const n = value.slice("pips_".length);
-                            const pending = this.parsePendingStep(move);
-                            if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "piece") {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
-                            return pending.game.assembleStepMove(pending, { action: "shrink", withPiece: minionRef, targetPiece: pending.istep.targetPiece!, amount: parseInt(n, 10) });
-                        }
-                        if (value.startsWith("magician_")) {
-                            // Stage 1 of magicianChoice - picks the suit letter, landing in the head as "as <suit>"; every following click then uses ordinary suit-mode machinery.
-                            // The button's own suffix always comes from ALL_SUITS (line ~2264), so it's a real MinorSuitUid even though this parse can't prove it.
-                            const suitUid = value.slice("magician_".length) as MinorSuitUid;
-                            const pending = this.parsePendingStep(move);
-                            if (pending === undefined || pending.special !== "magicianChoice") {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            return pending.game.describePendingMove({ ...pending, asSuit: suitUid }, pending.priorSteps);
-                        }
-                        if (value.startsWith("drawcount_")) {
-                            // The count-picker buttons offered once "discard" is the live head and no "draw <n>" suffix has been chosen yet; always rebuilt from the current discard uids.
-                            const n = value.slice("drawcount_".length);
-                            const parsed = this.parseMove(move);
-                            if (parsed.head !== "discard") {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            return ["discard", ...(parsed.steps[0]?.cardList ?? []), "draw", n].join(" ");
-                        }
-                        if (value.startsWith("hpdraw_")) {
-                            // High Priestess's count-picker - mirrors drawcount_ but appends onto the CURRENT power step's own istep, not the top-level move's args.
-                            const n = value.slice("hpdraw_".length);
-                            const pending = this.parsePendingStep(move);
-                            if (pending === undefined || pending.special !== "highPriestess") {
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                            }
-                            // Picking a count always completes this step - whatever's already been discarded is sitting in the step's own cardList.
-                            const cardList = pending.istep.cardList ?? [];
-                            return pending.game.assembleStepMove(pending, { action: "discard", cardList, amount: parseInt(n, 10) });
-                        }
-                        switch (value) {
-                            case "pass":
-                                // A genuine pass - explicitly zero discards AND zero draw; a bare "discard" seed defaults its omitted "draw <n>" to the max, so it isn't equivalent.
-                                return "discard draw 0";
-                            case "discard":
-                                // validateDiscard's own message already says this - no override needed.
-                                return "discard";
-                            case "place":
-                                // Not strictly necessary (an empty move already builds "place <cell>" from a bare board click), but offered for consistency with every other action.
-                                return { move: "place", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CELL_TO_PLACE") };
-                            case "use":
-                                return { move: "use", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE") };
-                            case "play":
-                                return { move: "play", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY") };
-                            case "orient":
-                                return { move: "orient", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
-                            case "resume_power": {
-                                // Seeds the resume submission's head + already-known card uid directly - pendingPower already names the exact card, no board click needed.
-                                if (this.continued.length === 0) {
-                                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                                }
-                                // Returned as a candidate string, not a hardcoded complete:-1, since a resumed Fool flip is ALREADY complete and needs Submit enabled.
-                                return this.freshResumeSeed();
-                            }
-                            case "decline_power": {
-                                if (this.continued.length === 0) {
-                                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                                }
-                                // Declining pops the CURRENT top frame; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
-                                return this.freshResumeSeed(true);
-                            }
-                            case "drawn":
-                                // Only ever offered for Wheel of Fortune's special option.
-                                {
-                                    const pending = this.parsePendingStep(move);
-                                    if (pending === undefined || pending.suitUid !== "C" || this.pendingMode(pending) !== "new" || pending.opts.allowRandomDraw !== true) {
-                                        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                                    }
-                                    const result = pending.game.supplyStepCardUid(pending, "drawn");
-                                    return result ?? { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                                }
-                            case "destroy": {
-                                const pending = this.parsePendingStep(move);
-                                if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "tile" || pending.istep.targetCell === undefined) {
-                                    return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                                }
-                                const [tx, ty] = GnosticaBoard.algebraic2coords(pending.istep.targetCell);
-                                const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
-                                return pending.game.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: pending.game.board.get(tx, ty)?.pointValue() ?? 0 });
-                            }
-                            default:
-                                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                        }
-                    }
-
-                    const { head, steps: headSteps } = this.parseMove(move);
-
-                    // Hand-card clicks arrive as `piece`, independent of row/col.  If no action is selected, the click is rejected.
-                    if (piece !== undefined && piece.startsWith("hand_")) {
-                        // TODO: render these cards as desired WITHOUT adding an unnecessary "_new" suffix which needs stripping.
-                        const uid = piece.slice("hand_".length).replace(/_new$/, "");
-                        const hand = this.hands[this.currplayer - 1] ?? [];
-                        if (!hand.includes(uid)) {
-                            return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
-                        }
-                        const pendingForCard = this.parsePendingStep(move, { preferCurrent: true });
-                        if (pendingForCard !== undefined && this.pendingMode(pendingForCard) !== undefined) {
-                            const result = pendingForCard.game.supplyStepCardUid(pendingForCard, uid);
-                            if (result !== undefined) {
-                                return result;
-                            }
-                            // Not a mode expecting a card uid right now - fall through.
-                        }
-                        if (pendingForCard?.special === "highPriestess") {
-                            // Special handling for the one of her discard/draw steps - istep.cardList is already just the discard uids, "draw N" already stripped.
-                            let discards = [...(pendingForCard.istep.cardList ?? [])];
-                            if (discards.includes(uid)) {
-                                discards = discards.filter(u => u !== uid);
-                            } else {
-                                discards.push(uid);
-                            }
-                            return pendingForCard.game.assembleStepMove(pendingForCard, { action: "discard", cardList: discards });
-                        }
-                        if (head === "play") {
-                            // "play"'s own pool can span the whole board, unlike "use".
-                            return `play ${uid}`;
-                        }
-                        if (head === "discard") {
-                            let discards = [...(headSteps[0]?.cardList ?? [])];
-                            if (discards.includes(uid)) {
-                                discards = discards.filter(u => u !== uid);
-                            } else {
-                                discards.push(uid);
-                            }
-                            return ["discard", ...discards].join(" ");
-                        }
-                        // No action selected yet (or one a hand-card click makes no sense for) - require a button click first rather than guessing what the player meant.
-                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
-                    }
-
-                    // Discard-pile clicks drive judgementDraw only; a minor-arcana bucket has no individual identity, so clicking one draws a uniformly-random not-yet-selected uid from it.
-                    if (piece !== undefined && piece.startsWith("discard_")) {
-                        // Same "_new" stripping as the hand-card click above - neither a bare major uid nor a bucket key can end in "_new" for real, so this is unambiguous too.
-                        const key = piece.slice("discard_".length).replace(/_new$/, "");
-                        const pendingForDiscard = this.parsePendingStep(move, { preferCurrent: true });
-                        if (pendingForDiscard?.special !== "judgementDraw") {
-                            return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
-                        }
-                        const game = pendingForDiscard.game;
-                        const minionRef = game.pieceRefStr(pendingForDiscard.minion, pendingForDiscard.minions);
-                        // Leading "draw" may or may not be there yet depending on whether this is the first click - stripped before working the list, reattached when rebuilding.
-                        const selected = pendingForDiscard.istep.cardList ?? [];
-                        const minionPiece = game.board.get(pendingForDiscard.minion.x, pendingForDiscard.minion.y)!.pieces[pendingForDiscard.minion.index];
-                        const maxDraw = Math.min(minionPiece.size, Math.max(0, 6 - (this.hands[this.currplayer - 1]?.length ?? 0)));
-                        const rebuildDiscard = (updated: string[]): string =>
-                            game.assembleStepMove(pendingForDiscard, { action: "draw", withPiece: minionRef, cardList: updated });
-
-                        if (/^\d{2}$/.test(key)) {
-                            // Unambiguous major-arcana uid.
-                            if (selected.includes(key)) {
-                                return rebuildDiscard(selected.filter(u => u !== key));
-                            }
-                            if (selected.length >= maxDraw || !this.discardPile.includes(key)) {
-                                return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
-                            }
-                            return rebuildDiscard([...selected, key]);
-                        }
-
-                        const [bucketSuit, bucketCategory] = key.split("_");
-                        const matchesBucket = (uid: string): boolean => {
-                            const card = allCards().find(c => c.uid === uid);
-                            if (card === undefined || card.major) {
-                                return false;
-                            }
-                            return card.suit.uid === bucketSuit && (card.court ? "royal" : "spot") === bucketCategory;
-                        };
-                        const alreadyFromBucket = selected.filter(matchesBucket);
-                        if (alreadyFromBucket.length > 0) {
-                            const last = alreadyFromBucket[alreadyFromBucket.length - 1];
-                            const idx = selected.lastIndexOf(last);
-                            return rebuildDiscard([...selected.slice(0, idx), ...selected.slice(idx + 1)]);
-                        }
-                        if (selected.length >= maxDraw) {
-                            return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
-                        }
-                        const candidates = this.discardPile.filter(uid => matchesBucket(uid) && !selected.includes(uid));
-                        if (candidates.length === 0) {
-                            return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
-                        }
-                        const picked = candidates[Math.floor(Math.random() * candidates.length)];
-                        return rebuildDiscard([...selected, picked]);
-                    }
-
-                    // The client displays the board with the current move already applied, so row/col are relative to THAT window - an earlier step's new territory can widen it.
-                    const { minX, minY } = this.renderWindow(this.previewBoard(move));
-                    // A click on a rendered buffer segment (same contract as pacru.ts/azacru.ts): out-of-window row/col, coords via `piece` as "col,row", still WINDOW-RELATIVE.
-                    let x: number;
-                    let y: number;
-                    if ((row < 0 || col < 0) && piece !== undefined && /^-?\d+,-?\d+$/.test(piece)) {
-                        const [relCol, relRow] = piece.split(",").map(s => parseInt(s, 10));
-                        x = relCol + minX;
-                        y = relRow + minY;
-                    } else {
-                        x = col + minX;
-                        y = row + minY;
-                    }
-                    const cell = GnosticaBoard.coords2algebraic(x, y);
-
-                    let newmove: string;
-
-                    if (head === "place") {
-                        // Click-to-orient: clicking the chosen cell again means "face up", a neighbour means "face that way"; any OTHER cell is a fresh placement (defaulting to "U").
-                        const prevCell = headSteps[0]?.targetCell;
-                        let dir: Orientation | undefined;
-                        if (prevCell !== undefined) {
-                            const [px, py] = GnosticaBoard.algebraic2coords(prevCell);
-                            dir = this.orientationTowardClick(px, py, x, y);
-                        }
-                        if (prevCell !== undefined && dir !== undefined) {
-                            newmove = `place ${prevCell} ${dir}`;
-                        } else {
-                            newmove = `place ${cell} U?`;
-                        }
-                    } else if (head === "orient") {
-                        // Same click-to-orient model as "place", but relative to whichever piece is already selected (prevRef) rather than the clicked cell.
-                        const prevRef = headSteps[0]?.targetPiece;
-                        let dir: Orientation | undefined;
-                        let prevLoc: { x: number; y: number; index: number } | undefined;
-                        // A bare cell token (2+ own pieces there, none picked yet) isn't a resolvable piece ref - treat it the same as "nothing selected yet" below.
-                        if (prevRef !== undefined && prevRef.includes(".")) {
-                            prevLoc = this.resolvePieceRefTrusted(prevRef);
-                            dir = this.orientationTowardClick(prevLoc.x, prevLoc.y, x, y);
-                        }
-                        if (prevLoc !== undefined && dir !== undefined) {
-                            // validateOrient's own message already distinguishes a no-op from a real, complete reorientation - nothing to override here.
-                            newmove = `orient ${prevRef} ${dir}`;
-                        } else {
-                            // Fresh selection - routed through the same minion-selection primitive "use"/"play" use, since 2+ distinguishable pieces here need a real choice.
-                            const pool = this.eligibleMinionsForOrient(x, y);
-                            if (pool.length === 0) {
-                                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE" }) };
-                            }
-                            const { minion, ambiguous } = this.resolveStepMinion(undefined, pool);
-                            if (ambiguous) {
-                                return `orient ${cell}`;
-                            }
-                            newmove = `orient ${this.pieceRefStr(minion)}`;
-                        }
-                    } else if (head === "use" || head === "play" || this.continued.length > 0) {
-                        // Once a minor-arcana power step's mode is chosen, a board click is target/arg cycling for that step first; falls through to ordinary use/play only if unmatched.
-                        const pending = this.parsePendingStep(move, { preferCurrent: true });
-                        // A completed PRIOR step's own click region often overlaps a FOLLOWING button-less special's start region - tried FIRST so starting the next step stays reachable.
-                        const advanced = this.parsePendingStep(move);
-                        // Some eligible minions still span more than one cell with none pinned down - a board click here means "this is the cell my minion is on," tried before mode/special cycling.
-                        const tryNarrowMinion = (candidate: IPendingStep | undefined): string | undefined => {
-                            if (candidate === undefined || !candidate.minionAmbiguous) {
-                                return undefined;
-                            }
-                            const atCell = candidate.minions.filter(m => m.x === x && m.y === y);
-                            if (atCell.length === 0) {
-                                return undefined;
-                            }
-                            if (atCell.length === 1) {
-                                const ref = candidate.game.pieceRefStr(atCell[0], candidate.minions);
-                                return candidate.game.buildAnchorMove(candidate, ref);
-                            }
-                            return candidate.game.buildAnchorMove(candidate, cell);
-                        };
-                        const advancedPastCurrent = advanced !== undefined && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1);
-                        // With the previous step complete and the next step's minion still undecided, a click on a candidate minion's cell picks that minion rather than refining the previous step.
-                        if (advancedPastCurrent) {
-                            const narrowed = tryNarrowMinion(advanced);
-                            if (narrowed !== undefined) {
-                                return narrowed;
-                            }
-                            // Any other click can't refine the finished step here; name the next one instead of raising that step's own errors.
-                            if (advanced.minionAmbiguous) {
-                                return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.PICK_MINION_CELL") };
-                            }
-                        }
-                        if (advanced !== undefined && advanced.special !== undefined && this.pendingSpecialUntouched(advanced) && advancedPastCurrent) {
-                            const result = advanced.game.handlePendingSpecialBoardClick(advanced, x, y, cell);
-                            if (result !== undefined) {
-                                return result;
-                            }
-                        }
-                        {
-                            const narrowed = tryNarrowMinion(pending);
-                            if (narrowed !== undefined) {
-                                return narrowed;
-                            }
-                        }
-                        if (pending !== undefined && this.pendingMode(pending) !== undefined) {
-                            const result = pending.game.handlePendingStepBoardClick(pending, x, y);
-                            if (result !== undefined) {
-                                return result;
-                            }
-                        }
-                        if (pending !== undefined && pending.special !== undefined) {
-                            const result = pending.game.handlePendingSpecialBoardClick(pending, x, y, cell);
-                            if (result !== undefined) {
-                                return result;
-                            }
-                        }
-                        if (head === "play" || this.continued.length > 0) {
-                            // "play" has no cell of its own to re-pick the way "use" does - a board click here only ever means pending-step cycling (handled above).
-                            return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
-                        }
-                        const t = this.board.get(x, y);
-                        if (t?.card === undefined) {
-                            return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_CARD_THERE", { cell }) };
-                        }
-                        if (!t.pieces.some(p => p.owner === this.currplayer)) {
-                            return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell }) };
-                        }
-                        newmove = `use ${t.card.uid}`;
-                    } else if (!this.hasPiecesOnBoard(this.currplayer)) {
-                        // Fresh click, nothing placed yet - place is the only legal start, needs no button. Facing defaults to "U", trailing "?" marking it not yet deliberate.
-                        newmove = `place ${cell} U?`;
-                    } else {
-                        // No mode chosen yet and pieces already exist - board clicks are genuinely ambiguous here, so this doesn't guess; the player picks a button first.
-                        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
-                    }
-
-                    return newmove;
-                } catch {
-                    return {
-                        move,
-                        valid: false,
-                        message: i18next.t("apgames:validation._general.DEFAULT_HANDLER"),
-                    };
-                }
-            })();
-            // Reattaches "last" to a click outcome computed against the last-stripped move; a string just gets the flag folded in, an already-decided result gets it spliced into `.move`.
-            if (!parsed.announceLast) {
-                outcome = core;
-            } else {
-                const moveStr = typeof core === "string" ? core : core.move;
-                const combined = this.pickleMove({ ...this.parseMove(moveStr), announceLast: true });
-                outcome = typeof core === "string" ? combined : { ...core, move: combined };
-            }
+            outcome = this.routeClick(parsed, row, col, piece);
         }
         let result: IClickResult;
         if (typeof outcome === "string") {
@@ -3553,8 +3163,437 @@ export class GnosticaGame extends GameBaseSequenced {
         return result;
     }
 
+    // What every click handler needs: the move so far (as parsed), and a lazily computed, once-per-click view of its in-progress power step.
+    private routeClick(parsed: IParsedMove, row: number, col: number, piece?: string): string | IClickResult {
+        // The "bidding" variant's opening procedure is structurally unlike every other click, so it's handled entirely by its own function.
+        if (this.phase !== "main") {
+            return this.handleBiddingClick(parsed, piece);
+        }
+        try {
+            // A pending obligation's own real click targets show up directly, so the move may still be leftover from before it existed - seed it uniformly here.
+            if (this.continued.length > 0 && parsed.head === undefined) {
+                parsed = this.freshResumeMove(false, parsed.announceLast);
+            }
+            const move = this.pickleMove(parsed);
+            let views: { current?: IPendingStep; advanced?: IPendingStep } | undefined;
+            const ctx: IClickContext = {
+                move, parsed, row, col, piece,
+                last: parsed.announceLast ? " last" : "",
+                noop: { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") },
+                pending: () => views ??= this.parsePendingStep(parsed),
+            };
+            if (piece !== undefined && piece.startsWith("_btn_")) {
+                return this.clickButton(ctx, piece.slice("_btn_".length));
+            }
+            // Hand-card clicks arrive as `piece`, independent of row/col.  If no action is selected, the click is rejected.
+            if (piece !== undefined && piece.startsWith("hand_")) {
+                // TODO: render these cards as desired WITHOUT adding an unnecessary "_new" suffix which needs stripping.
+                return this.clickHandCard(ctx, piece.slice("hand_".length).replace(/_new$/, ""));
+            }
+            // Discard-pile clicks drive judgementDraw only; a minor-arcana bucket has no individual identity, so clicking one draws a uniformly-random not-yet-selected uid from it.
+            if (piece !== undefined && piece.startsWith("discard_")) {
+                // Same "_new" stripping as the hand-card click above - neither a bare major uid nor a bucket key can end in "_new" for real, so this is unambiguous too.
+                return this.clickDiscardPile(ctx, piece.slice("discard_".length).replace(/_new$/, ""));
+            }
+            return this.clickBoard(ctx);
+        } catch {
+            return { move: this.pickleMove(parsed), valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+        }
+    }
+
+    private clickButton(ctx: IClickContext, value: string): string | IClickResult {
+        const prefixed: [string, (ctx: IClickContext, arg: string) => string | IClickResult][] = [
+            ["minion_", (c, a) => this.clickMinionButton(c, a)],
+            ["orientpick_", (c, a) => this.clickOrientPickButton(c, a)],
+            ["target_", (c, a) => this.clickTargetButton(c, a)],
+            ["pips_", (c, a) => this.clickPipsButton(c, a)],
+            ["magician_", (c, a) => this.clickMagicianButton(c, a)],
+            ["drawcount_", (c, a) => this.clickDrawCountButton(c, a)],
+            ["hpdraw_", (c, a) => this.clickHpDrawButton(c, a)],
+        ];
+        for (const [prefix, handler] of prefixed) {
+            if (value.startsWith(prefix)) {
+                return handler(ctx, value.slice(prefix.length));
+            }
+        }
+        return this.clickActionButton(ctx, value);
+    }
+
+    // "minion_<ref>" - offered whenever 2+ of the acting player's pieces are eligible and none has been picked yet; types just the ref.
+    private clickMinionButton(ctx: IClickContext, ref: string): string | IClickResult {
+        const pending = ctx.pending().advanced;
+        if (pending === undefined || !pending.minionAmbiguous) {
+            return ctx.noop;
+        }
+        // Resolved against minionCandidates (currently shown), not the full minions pool - a stale move string shouldn't resolve against pieces no longer on offer.
+        const resolved = pending.game.resolvePieceRef(ref, pending.minionCandidates);
+        if (resolved.kind !== "ok") {
+            return ctx.noop;
+        }
+        const clickedPiece = pending.game.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
+        const rodReason = this.rodNeedsFacingReason(pending.suitUid, clickedPiece);
+        if (rodReason !== undefined) {
+            return { move: ctx.move, valid: false, message: i18next.t(`apgames:validation.gnostica.${rodReason.key}`) };
+        }
+        const minionRef = pending.game.pieceRefStr(resolved.ref, pending.minions);
+        return pending.game.buildAnchorMove(pending, minionRef);
+    }
+
+    // "orientpick_<ref>" - orient's own minion-picker (orient has no IPendingStep to resolve against, so it can't reuse "minion_"); facing is a separate click.
+    private clickOrientPickButton(ctx: IClickContext, ref: string): string | IClickResult {
+        if (ctx.parsed.head?.toLowerCase() !== "orient") {
+            return ctx.noop;
+        }
+        const resolved = this.resolvePieceRef(ref);
+        if (resolved.kind !== "ok" || this.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index].owner !== this.currplayer) {
+            return ctx.noop;
+        }
+        return `orient ${this.pieceRefStr(resolved.ref)}${ctx.last}`;
+    }
+
+    // The unified candidate list for a fresh suit-power step, hermitTeleport, or an ambiguous orientAny/tradeHands/hierophantReplace target - one click supplies it directly.
+    private clickTargetButton(ctx: IClickContext, ref: string): string | IClickResult {
+        const pending = ctx.pending().advanced;
+        if (pending === undefined) {
+            return ctx.noop;
+        }
+        if (pending.special === "hermitTeleport") {
+            if (stepHermitMode(pending.istep) !== undefined) {
+                return ctx.noop;
+            }
+            return pending.game.buildTargetedHermitMove(pending, ref);
+        }
+        if (pending.special === "orientAny" || pending.special === "tradeHands" || pending.special === "hierophantReplace") {
+            if (pending.istep.targetPiece !== undefined) {
+                return ctx.noop;
+            }
+            return pending.game.buildSpecialTargetMove(pending, ref) ?? ctx.noop;
+        }
+        if (pending.suitUid === undefined || this.pendingMode(pending) !== undefined) {
+            return ctx.noop;
+        }
+        // Same per-mode availability check the old mode_ buttons used - a struck-through candidate must still reject the click, not build a doomed move.
+        const clickedMode = pending.suitUid === "C"
+            ? (ref === "own" || ref === "new" ? ref : "enemy")
+            : (ref.includes(".") ? "piece" : "tile");
+        const reason = pending.game.minorModeAvailability(pending).get(clickedMode);
+        if (reason !== undefined) {
+            return { move: ctx.move, valid: false, message: i18next.t(`apgames:validation.gnostica.${reason.key}`, reason.params ?? {}) };
+        }
+        return pending.game.buildTargetedStepMove(pending, ref);
+    }
+
+    // Swords "piece" (attack) pips - a button set rather than a click-cycled arg, always rebuilt against the CURRENT target.
+    private clickPipsButton(ctx: IClickContext, n: string): string | IClickResult {
+        const pending = ctx.pending().advanced;
+        if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "piece") {
+            return ctx.noop;
+        }
+        const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
+        return pending.game.assembleStepMove(pending, { action: "shrink", withPiece: minionRef, targetPiece: pending.istep.targetPiece!, amount: parseInt(n, 10) });
+    }
+
+    // Stage 1 of magicianChoice - picks the suit letter, landing in the head as "as <suit>"; every following click then uses ordinary suit-mode machinery.
+    private clickMagicianButton(ctx: IClickContext, suit: string): string | IClickResult {
+        const pending = ctx.pending().advanced;
+        if (pending === undefined || pending.special !== "magicianChoice") {
+            return ctx.noop;
+        }
+        // The button's own suffix always comes from ALL_SUITS, so it's a real MinorSuitUid even though this parse can't prove it.
+        return pending.game.describePendingMove({ ...pending, asSuit: suit as MinorSuitUid }, pending.priorSteps);
+    }
+
+    // The count-picker buttons offered once "discard" is the live head and no "draw <n>" suffix has been chosen yet; always rebuilt from the current discard uids.
+    private clickDrawCountButton(ctx: IClickContext, n: string): string | IClickResult {
+        if (ctx.parsed.head !== "discard") {
+            return ctx.noop;
+        }
+        return ["discard", ...(ctx.parsed.steps[0]?.cardList ?? []), "draw", n].join(" ") + ctx.last;
+    }
+
+    // High Priestess's count-picker - mirrors drawcount_ but appends onto the CURRENT power step's own istep, not the top-level move's args.
+    private clickHpDrawButton(ctx: IClickContext, n: string): string | IClickResult {
+        const pending = ctx.pending().advanced;
+        if (pending === undefined || pending.special !== "highPriestess") {
+            return ctx.noop;
+        }
+        // Picking a count always completes this step - whatever's already been discarded is sitting in the step's own cardList.
+        const cardList = pending.istep.cardList ?? [];
+        return pending.game.assembleStepMove(pending, { action: "discard", cardList, amount: parseInt(n, 10) });
+    }
+
+    private clickActionButton(ctx: IClickContext, value: string): string | IClickResult {
+        const { move, last } = ctx;
+        switch (value) {
+            case "pass":
+                // A genuine pass - explicitly zero discards AND zero draw; a bare "discard" seed defaults its omitted "draw <n>" to the max, so it isn't equivalent.
+                return `discard draw 0${last}`;
+            case "discard":
+                // validateDiscard's own message already says this - no override needed.
+                return `discard${last}`;
+            case "place":
+                // Not strictly necessary (an empty move already builds "place <cell>" from a bare board click), but offered for consistency with every other action.
+                return { move: `place${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CELL_TO_PLACE") };
+            case "use":
+                return { move: `use${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE") };
+            case "play":
+                return { move: `play${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY") };
+            case "orient":
+                return { move: `orient${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
+            case "resume_power":
+                if (this.continued.length === 0) {
+                    return ctx.noop;
+                }
+                // Seeds the resume submission's head + already-known card uid directly - pendingPower already names the exact card, no board click needed.
+                // Returned as a candidate string, not a hardcoded complete:-1, since a resumed Fool flip is ALREADY complete and needs Submit enabled.
+                return this.pickleMove(this.freshResumeMove(false, ctx.parsed.announceLast));
+            case "decline_power":
+                if (this.continued.length === 0) {
+                    return ctx.noop;
+                }
+                // Declining pops the CURRENT top frame; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
+                return this.pickleMove(this.freshResumeMove(true, ctx.parsed.announceLast));
+            case "drawn": {
+                // Only ever offered for Wheel of Fortune's special option.
+                const pending = ctx.pending().advanced;
+                if (pending === undefined || pending.suitUid !== "C" || this.pendingMode(pending) !== "new" || pending.opts.allowRandomDraw !== true) {
+                    return ctx.noop;
+                }
+                return pending.game.supplyStepCardUid(pending, "drawn") ?? ctx.noop;
+            }
+            case "destroy": {
+                const pending = ctx.pending().advanced;
+                if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "tile" || pending.istep.targetCell === undefined) {
+                    return ctx.noop;
+                }
+                const [tx, ty] = GnosticaBoard.algebraic2coords(pending.istep.targetCell);
+                const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
+                return pending.game.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: pending.game.board.get(tx, ty)?.pointValue() ?? 0 });
+            }
+            default:
+                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+        }
+    }
+
+    private clickHandCard(ctx: IClickContext, uid: string): string | IClickResult {
+        const { move, last } = ctx;
+        const { head, steps: headSteps } = ctx.parsed;
+        const hand = this.hands[this.currplayer - 1] ?? [];
+        if (!hand.includes(uid)) {
+            return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
+        }
+        const pendingForCard = ctx.pending().current;
+        if (pendingForCard !== undefined && this.pendingMode(pendingForCard) !== undefined) {
+            const result = pendingForCard.game.supplyStepCardUid(pendingForCard, uid);
+            if (result !== undefined) {
+                return result;
+            }
+            // Not a mode expecting a card uid right now - fall through.
+        }
+        if (pendingForCard?.special === "highPriestess") {
+            // Special handling for the one of her discard/draw steps - istep.cardList is already just the discard uids, "draw N" already stripped.
+            let discards = [...(pendingForCard.istep.cardList ?? [])];
+            if (discards.includes(uid)) {
+                discards = discards.filter(u => u !== uid);
+            } else {
+                discards.push(uid);
+            }
+            return pendingForCard.game.assembleStepMove(pendingForCard, { action: "discard", cardList: discards });
+        }
+        if (head === "play") {
+            // "play"'s own pool can span the whole board, unlike "use".
+            return `play ${uid}${last}`;
+        }
+        if (head === "discard") {
+            let discards = [...(headSteps[0]?.cardList ?? [])];
+            if (discards.includes(uid)) {
+                discards = discards.filter(u => u !== uid);
+            } else {
+                discards.push(uid);
+            }
+            return ["discard", ...discards].join(" ") + last;
+        }
+        // No action selected yet (or one a hand-card click makes no sense for) - require a button click first rather than guessing what the player meant.
+        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
+    }
+
+    private clickDiscardPile(ctx: IClickContext, key: string): string | IClickResult {
+        const pendingForDiscard = ctx.pending().current;
+        if (pendingForDiscard?.special !== "judgementDraw") {
+            return ctx.noop;
+        }
+        const game = pendingForDiscard.game;
+        const minionRef = game.pieceRefStr(pendingForDiscard.minion, pendingForDiscard.minions);
+        // Leading "draw" may or may not be there yet depending on whether this is the first click - stripped before working the list, reattached when rebuilding.
+        const selected = pendingForDiscard.istep.cardList ?? [];
+        const minionPiece = game.board.get(pendingForDiscard.minion.x, pendingForDiscard.minion.y)!.pieces[pendingForDiscard.minion.index];
+        const maxDraw = Math.min(minionPiece.size, Math.max(0, 6 - (this.hands[this.currplayer - 1]?.length ?? 0)));
+        const rebuildDiscard = (updated: string[]): string =>
+            game.assembleStepMove(pendingForDiscard, { action: "draw", withPiece: minionRef, cardList: updated });
+
+        if (/^\d{2}$/.test(key)) {
+            // Unambiguous major-arcana uid.
+            if (selected.includes(key)) {
+                return rebuildDiscard(selected.filter(u => u !== key));
+            }
+            if (selected.length >= maxDraw || !this.discardPile.includes(key)) {
+                return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
+            }
+            return rebuildDiscard([...selected, key]);
+        }
+
+        const [bucketSuit, bucketCategory] = key.split("_");
+        const matchesBucket = (uid: string): boolean => {
+            const card = allCards().find(c => c.uid === uid);
+            if (card === undefined || card.major) {
+                return false;
+            }
+            return card.suit.uid === bucketSuit && (card.court ? "royal" : "spot") === bucketCategory;
+        };
+        const alreadyFromBucket = selected.filter(matchesBucket);
+        if (alreadyFromBucket.length > 0) {
+            const last = alreadyFromBucket[alreadyFromBucket.length - 1];
+            const idx = selected.lastIndexOf(last);
+            return rebuildDiscard([...selected.slice(0, idx), ...selected.slice(idx + 1)]);
+        }
+        if (selected.length >= maxDraw) {
+            return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
+        }
+        const candidates = this.discardPile.filter(uid => matchesBucket(uid) && !selected.includes(uid));
+        if (candidates.length === 0) {
+            return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
+        }
+        const picked = candidates[Math.floor(Math.random() * candidates.length)];
+        return rebuildDiscard([...selected, picked]);
+    }
+
+    private clickBoard(ctx: IClickContext): string | IClickResult {
+        const { move, row, col, piece, last } = ctx;
+        const { head, steps: headSteps } = ctx.parsed;
+        // The client displays the board with the current move already applied, so row/col are relative to THAT window - an earlier step's new territory can widen it.
+        const { minX, minY } = this.renderWindow(this.previewBoard(ctx.parsed));
+        // A click on a rendered buffer segment (same contract as pacru.ts/azacru.ts): out-of-window row/col, coords via `piece` as "col,row", still WINDOW-RELATIVE.
+        let x: number;
+        let y: number;
+        if ((row < 0 || col < 0) && piece !== undefined && /^-?\d+,-?\d+$/.test(piece)) {
+            const [relCol, relRow] = piece.split(",").map(s => parseInt(s, 10));
+            x = relCol + minX;
+            y = relRow + minY;
+        } else {
+            x = col + minX;
+            y = row + minY;
+        }
+        const cell = GnosticaBoard.coords2algebraic(x, y);
+
+        if (head === "place") {
+            // Click-to-orient: clicking the chosen cell again means "face up", a neighbour means "face that way"; any OTHER cell is a fresh placement (defaulting to "U").
+            const prevCell = headSteps[0]?.targetCell;
+            let dir: Orientation | undefined;
+            if (prevCell !== undefined) {
+                const [px, py] = GnosticaBoard.algebraic2coords(prevCell);
+                dir = this.orientationTowardClick(px, py, x, y);
+            }
+            return prevCell !== undefined && dir !== undefined ? `place ${prevCell} ${dir}${last}` : `place ${cell} U?${last}`;
+        }
+        if (head === "orient") {
+            // Same click-to-orient model as "place", but relative to whichever piece is already selected (prevRef) rather than the clicked cell.
+            const prevRef = headSteps[0]?.targetPiece;
+            let dir: Orientation | undefined;
+            let prevLoc: { x: number; y: number; index: number } | undefined;
+            // A bare cell token (2+ own pieces there, none picked yet) isn't a resolvable piece ref - treat it the same as "nothing selected yet" below.
+            if (prevRef !== undefined && prevRef.includes(".")) {
+                prevLoc = this.resolvePieceRefTrusted(prevRef);
+                dir = this.orientationTowardClick(prevLoc.x, prevLoc.y, x, y);
+            }
+            if (prevLoc !== undefined && dir !== undefined) {
+                // validateOrient's own message already distinguishes a no-op from a real, complete reorientation - nothing to override here.
+                return `orient ${prevRef} ${dir}${last}`;
+            }
+            // Fresh selection - routed through the same minion-selection primitive "use"/"play" use, since 2+ distinguishable pieces here need a real choice.
+            const pool = this.eligibleMinionsForOrient(x, y);
+            if (pool.length === 0) {
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE" }) };
+            }
+            const { minion, ambiguous } = this.resolveStepMinion(undefined, pool);
+            return ambiguous ? `orient ${cell}${last}` : `orient ${this.pieceRefStr(minion)}${last}`;
+        }
+        if (head === "use" || head === "play" || this.continued.length > 0) {
+            // Once a minor-arcana power step's mode is chosen, a board click is target/arg cycling for that step first; falls through to ordinary use/play only if unmatched.
+            const { current: pending, advanced } = ctx.pending();
+            // Some eligible minions still span more than one cell with none pinned down - a board click here means "this is the cell my minion is on," tried before mode/special cycling.
+            const tryNarrowMinion = (candidate: IPendingStep | undefined): string | undefined => {
+                if (candidate === undefined || !candidate.minionAmbiguous) {
+                    return undefined;
+                }
+                const atCell = candidate.minions.filter(m => m.x === x && m.y === y);
+                if (atCell.length === 0) {
+                    return undefined;
+                }
+                if (atCell.length === 1) {
+                    const ref = candidate.game.pieceRefStr(atCell[0], candidate.minions);
+                    return candidate.game.buildAnchorMove(candidate, ref);
+                }
+                return candidate.game.buildAnchorMove(candidate, cell);
+            };
+            // A completed PRIOR step's own click region often overlaps a FOLLOWING button-less special's start region - `advanced` is tried FIRST so starting the next step stays reachable.
+            const advancedPastCurrent = advanced !== undefined && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1);
+            // With the previous step complete and the next step's minion still undecided, a click on a candidate minion's cell picks that minion rather than refining the previous step.
+            if (advancedPastCurrent) {
+                const narrowed = tryNarrowMinion(advanced);
+                if (narrowed !== undefined) {
+                    return narrowed;
+                }
+                // Any other click can't refine the finished step here; name the next one instead of raising that step's own errors.
+                if (advanced.minionAmbiguous) {
+                    return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.PICK_MINION_CELL") };
+                }
+            }
+            if (advanced !== undefined && advanced.special !== undefined && this.pendingSpecialUntouched(advanced) && advancedPastCurrent) {
+                const result = advanced.game.handlePendingSpecialBoardClick(advanced, x, y, cell);
+                if (result !== undefined) {
+                    return result;
+                }
+            }
+            const narrowed = tryNarrowMinion(pending);
+            if (narrowed !== undefined) {
+                return narrowed;
+            }
+            if (pending !== undefined && this.pendingMode(pending) !== undefined) {
+                const result = pending.game.handlePendingStepBoardClick(pending, x, y);
+                if (result !== undefined) {
+                    return result;
+                }
+            }
+            if (pending !== undefined && pending.special !== undefined) {
+                const result = pending.game.handlePendingSpecialBoardClick(pending, x, y, cell);
+                if (result !== undefined) {
+                    return result;
+                }
+            }
+            if (head === "play" || this.continued.length > 0) {
+                // "play" has no cell of its own to re-pick the way "use" does - a board click here only ever means pending-step cycling (handled above).
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
+            }
+            const t = this.board.get(x, y);
+            if (t?.card === undefined) {
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_CARD_THERE", { cell }) };
+            }
+            if (!t.pieces.some(p => p.owner === this.currplayer)) {
+                return { move, valid: false, message: i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell }) };
+            }
+            return `use ${t.card.uid}${last}`;
+        }
+        if (!this.hasPiecesOnBoard(this.currplayer)) {
+            // Fresh click, nothing placed yet - place is the only legal start, needs no button. Facing defaults to "U", trailing "?" marking it not yet deliberate.
+            return `place ${cell} U?${last}`;
+        }
+        // No mode chosen yet and pieces already exist - board clicks are genuinely ambiguous here, so this doesn't guess; the player picks a button first.
+        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST") };
+    }
+
     // Click support for the "bidding" variant's opening procedure. Row/col are never used - both phases are driven entirely by clicking cards in an AreaPieces.
-    private handleBiddingClick(move: string, piece?: string): string | IClickResult {
+    private handleBiddingClick(parsed: IParsedMove, piece?: string): string | IClickResult {
+        const move = this.pickleMove(parsed);
         if (piece === "_btn_bid") {
             return { move: "bid", valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_BID") };
         }
@@ -3578,7 +3617,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (!this.biddingPool!.includes(uid)) {
                 return { move, valid: false, message: i18next.t("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid }) };
             }
-            const { head, steps } = this.parseMove(move);
+            const { head, steps } = parsed;
             let picks = head?.toLowerCase() === "redraw" ? [...(steps[0]?.cardList ?? [])] : [];
             if (picks.includes(uid)) {
                 picks = picks.filter(u => u !== uid);
@@ -5937,7 +5976,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
         const snapshot = this.frameSnapshot(frame, groups[stepIndex] !== undefined ? [groups[stepIndex]] : []);
         // Still mid-build - recompute this step's own preview fresh (only ever a handful of frames), rather than caching one per frame in game state.
-        const parsed = this.parseMove(this.preview!.seed);
+        const parsed = this.preview!.seed;
         snapshot.preview = snapshot.buildPreview({ ...parsed, steps: parsed.steps.slice(0, stepIndex + 2) });
         return snapshot;
     }

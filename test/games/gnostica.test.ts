@@ -2637,7 +2637,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 
         it("after orient, the next step's candidates include every own minion in the cell, at its current facing, and the button bar after the partial move lists them all too", () => {
             const g = setup();
-            const pending = (g as unknown as { parsePendingStep: (m: string) => { minionCandidates: { piece?: Piece }[] } | undefined }).parsePendingStep(move)!;
+            const pending = (g as unknown as { parsePendingStep: (m: unknown) => { advanced?: { minionCandidates: { piece?: Piece }[] } } }).parsePendingStep(g.parseMove(move)).advanced!;
             expect(pending.minionCandidates.map(c => `${c.piece?.size}${c.piece?.orientation}`).sort()).to.deep.equal(["1E", "1W", "2N"]);
 
             const g2 = setup();
@@ -2685,10 +2685,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 hands: [["03", "2S"], filler, filler],
             });
             const internal = g as unknown as {
-                parsePendingStep: (m: string) => object | undefined;
+                parsePendingStep: (m: unknown) => { advanced?: object };
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
             };
-            const pending = internal.parsePendingStep("use AC")!;
+            const pending = internal.parsePendingStep(g.parseMove("use AC")).advanced!;
             const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label).sort();
             expect(enemyLabels).to.deep.equal(["Create Enemy Player 2's 1-pip pointing up", "Create Enemy Player 3's 1-pip pointing up"]);
 
@@ -2697,10 +2697,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 hands: [["03", "2S"], filler],
             });
             const internal2 = g2 as unknown as {
-                parsePendingStep: (m: string) => object | undefined;
+                parsePendingStep: (m: unknown) => { advanced?: object };
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
             };
-            const pending2 = internal2.parsePendingStep("use AC")!;
+            const pending2 = internal2.parsePendingStep(g2.parseMove("use AC")).advanced!;
             const candidates2 = internal2.suitTargetCandidates(pending2, "C");
             expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy Player 2's 1-pip pointing up");
         });
