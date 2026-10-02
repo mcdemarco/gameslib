@@ -1146,6 +1146,34 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.serialize()).eq(before);
     });
 
+    it("a with-ref stays unambiguous among all the player's pieces in its cell, not just the pool (Chariot onto an occupied territory)", () => {
+        const setup = () => testGame({
+            board: [
+                { x: 0, y: 0, uid: "07", pieces: [[1, 2, "E"]] },
+                { x: 1, y: 0, uid: "AR", pieces: [[1, 2, "N"]] },
+                { x: 2, y: 0, uid: "2R" },
+            ],
+            hands: [filler, filler],
+        });
+        const g = setup();
+        // After step 1 the moved piece A sits beside B (same size, different facing); the pool holds only A.
+        const moved = setup();
+        moved.board.get(1, 0)!.pieces.push(new Piece(1, 2, "E"));
+        expect(moved.pieceRefStr({ x: 1, y: 0, index: 1 }, [{ x: 1, y: 0, index: 1 }])).eq("n0.2.E");
+        // Nothing else in the cell: the plain ref is still enough.
+        expect(g.pieceRefStr({ x: 0, y: 0, index: 0 }, [{ x: 0, y: 0, index: 0 }])).eq("m0.2");
+        // The ref resolves to A against every piece the player owns, not only the pool.
+        const resolve = (moved as unknown as { resolvePieceRef: (ref: string, pool: { x: number; y: number; index: number }[]) => { kind: string; ref?: { index: number } } }).resolvePieceRef.bind(moved);
+        const resolved = resolve("n0.2.E", [{ x: 0, y: 0, index: 0 }, { x: 1, y: 0, index: 0 }, { x: 1, y: 0, index: 1 }]);
+        expect(resolved.kind).eq("ok");
+        expect(resolved.ref!.index).eq(1);
+
+        const chain = `use 07/with m0.2 move m0.2 1/with n0.2.E move n0.2.E 1`;
+        expect(g.validateMove(chain).valid).to.be.true;
+        g.move(chain);
+        expect(g.board.get(2, 0)!.pieces.map(p => p.id())).to.deep.equal(["12E"]);
+    });
+
     it("Chariot: two rod steps on the same piece may pass through the void mid-chain", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 3, "W"]] }], // large minion, pointing away from the grid
