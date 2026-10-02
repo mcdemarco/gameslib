@@ -9,7 +9,7 @@ import { Direction, replacer, reviver, shuffle, UserFacingError } from "../commo
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot";
 import { GnosticaBoard, CellClass } from "./gnostica/board";
-import { CellContents, ICellContents, cardPointValue } from "./gnostica/cell";
+import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell";
 import { Piece, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece";
 import {
     Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
@@ -19,7 +19,7 @@ import {
     attackPiece, attackTerritory,
     orientMinion, orientAny, hierophantReplace,
     hermitMovePiece, hermitMoveTerritory, tradeHands,
-    judgementDraw, discardDraw, fool, worldChoosePower,
+    judgementDraw, discardCards, drawCards, fool, createTerritoryFromDeck, worldChoosePower,
     checkCreateOwn, checkCreateEnemy, checkCreateTerritory,
     checkMovePiece, checkMoveTerritory,
     checkGrowPiece, checkGrowTerritory,
@@ -57,6 +57,17 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
     R: { verb: "Move", tile: "Push Territory" },
     D: { verb: "Grow", tile: "Grow Territory" },
     S: { verb: "Attack", tile: "Attack Territory" },
+};
+
+// The face-down card every Decktet game draws for a card the viewer can't see.
+const UNKNOWN_CARD_GLYPH: Glyph = {
+    name: "piece-square-borderless",
+    colour: {
+        func: "flatten",
+        fg: "_context_fill",
+        bg: "_context_background",
+        opacity: 0.5,
+    },
 };
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
@@ -176,6 +187,17 @@ interface IPendingStep {
     // The game as it stands after every completed step above was applied to a clone of the committed state; refs, candidates and lookups for this step resolve against its board.
     game: GnosticaGame;
 }
+
+type IHiddenEffect = (
+    | { type: "flip" }
+    | { type: "territory"; x: number; y: number }
+    | { type: "draw"; count: number; setsCardsDrawn: boolean }
+) & {
+    // Set by the chain walker: the effect's results belong in the submission's per-step _group entries.
+    grouped?: boolean;
+    // Its step already logged a visible result, so in a chained submission it already has a group to join.
+    joinsGroup?: boolean;
+};
 
 // What each click handler needs: the move being clicked on, as parsed, and a once-per-click, lazily computed view of its in-progress power step.
 interface IClickContext {
@@ -343,6 +365,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Transient click-UI hints, not part of persisted game state; set by move(..., {partial: true}) and cleared by a committed move.
     private preview: IPreview | undefined;
+    // Hidden or random effects (deck draws) recorded while a move is applied; only move() performs them, once the move is committed.
+    private hidden: IHiddenEffect[] = [];
     private buffers: Direction[] = [];
     private discarded: string[] = [];
 
@@ -644,6 +668,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         this.results = [];
+        this.hidden = [];
         this.frames = [];
         this.cardsDrawn[this.currplayer - 1] = 0;
         let head;
@@ -653,6 +678,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // The frame stack walkFrameStack hands back, serialized into this.continued once past the partial boundary below.
         let residualFrames: IPowerFrame[] | undefined;
         let preview: IPreview | undefined;
+        let announceLast = false;
 
         if (m.toLowerCase() === "pass") {
             // validateMove() (above) is the actual gate on WHO may say "pass"; `head` deliberately stays undefined here (see the tail below).
@@ -690,7 +716,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         this.cmdOrient(parsed.steps[0]);
                         break;
                     case "discard":
-                        this.cmdDiscard(parsed.steps[0], partial);
+                        this.cmdDiscard(parsed.steps[0]);
                         break;
                     case "use":
                         residualFrames = this.cmdActivate(parsed.steps[0].card!, parsed.steps.slice(1), partial, parsed.asUid, parsed.asSuit);
@@ -704,16 +730,22 @@ export class GnosticaGame extends GameBaseSequenced {
 
             // A "last" may be declared on any sub-move of a still-open chain, not just the first - validateMove's own ALREADY_ANNOUNCED guards (both the
             // fresh-dispatch and continued-branch copies) are the only gate; bid/redraw/pass reject announceLast outright before ever reaching here.
-            if (parsed.announceLast) {
-                newLast = this.currplayer;
-                this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
-            }
+            announceLast = parsed.announceLast;
             // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
             this.preview = preview;
 
         }
  
-        if (partial || emulation) {
+        if (partial) {
+            this.showUnrevealed();
+            return this;
+        }
+        this.resolveHiddenEffects();
+        if (announceLast) {
+            newLast = this.currplayer;
+            this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
+        }
+        if (emulation) {
             return this;
         }
 
@@ -753,6 +785,49 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         this.saveState();
         return this;
+    }
+
+    // A previewed move must not reveal the deck, so each territory it would draw a card for is shown face-down.
+    private showUnrevealed(): void {
+        for (const effect of this.hidden) {
+            if (effect.type === "territory") {
+                this.board.createTerritory(effect.x, effect.y, UNREVEALED_CARD);
+            }
+        }
+    }
+
+    // Performs what move() recorded but a preview must not: every deck draw, in the order the steps recorded them, logging each into the step's own result group.
+    private resolveHiddenEffects(): void {
+        const ctx = this.buildPowerContext();
+        for (const effect of this.hidden) {
+            let result: APMoveResult;
+            switch (effect.type) {
+                case "flip":
+                    result = { type: "deckDraw", what: fool(ctx).uid, from: "fool" };
+                    break;
+                case "territory": {
+                    const card = createTerritoryFromDeck(ctx, effect.x, effect.y);
+                    result = { type: "place", where: GnosticaBoard.coords2algebraic(effect.x, effect.y), how: "territory", what: card.uid };
+                    break;
+                }
+                case "draw": {
+                    const drawn = drawCards(ctx, effect.count);
+                    if (effect.setsCardsDrawn) {
+                        this.cardsDrawn[this.currplayer - 1] = drawn;
+                    }
+                    result = { type: "deckDraw", count: drawn, from: "deck" };
+                    break;
+                }
+            }
+            const last = this.results[this.results.length - 1];
+            if (effect.grouped !== true) {
+                this.results.push(result);
+            } else if (effect.joinsGroup === true && last?.type === "_group") {
+                last.results.push(result);
+            } else {
+                this.results.push({ type: "_group", who: this.currplayer, results: [result] });
+            }
+        }
     }
 
     // English ordinal suffix (1st, 2nd, 3rd, ..., 11th-13th stay "th") - used only for the turn-order legend; plain TS formatting, not an i18next key.
@@ -3932,16 +4007,15 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "discard [uid...] [draw <n>]" - discard the named hand cards, then draw back.
-    private cmdDiscard(step: IStep, partial = false): void {
+    private cmdDiscard(step: IStep): void {
         const discardUids = step.cardList ?? [];
         const drawCountStr = step.amount?.toString();
-        const drawn = discardDraw(this.buildPowerContext(), discardUids, drawCountStr, partial);
+        discardCards(this.buildPowerContext(), discardUids);
         if (discardUids.length > 0) {
             this.discarded.push(...discardUids);
             this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
         }
-        this.results.push({ type: "deckDraw", count: drawn, from: "deck" });
-        this.cardsDrawn[this.currplayer - 1] = drawn;
+        this.hidden.push({ type: "draw", count: Number(drawCountStr), setsCardsDrawn: true });
     }
 
     // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar, using the same checkDiscardDraw primitive.
@@ -4370,6 +4444,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 });
             }
             const resultsBefore = this.results.length;
+            const hiddenBefore = this.hidden.length;
             // A two-step shortcut's waiver only applies when the card's next step was actually supplied (or this is a still-being-built preview).
             const outcome = this.applyPowerStep(step, top.minions, istep, frameDef, top.nextStepIndex, frameDef.powers.length, partial, borrowedForThisStep, i < steps.length || partial, priorTaken);
             if (outcome === undefined) {
@@ -4380,6 +4455,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 return undefined;
             }
             stepsProcessed++;
+            for (const effect of this.hidden.slice(hiddenBefore)) {
+                effect.grouped = chained;
+            }
             top.minions = GnosticaGame.chainMinion(top.minions, outcome);
             top.nextStepIndex = outcome.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
             priorTaken = true;
@@ -4389,6 +4467,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (stepResults.length > 0) {
                     this.results.push({ type: "_group", who: this.currplayer, results: stepResults as [APMoveResult, ...APMoveResult[]] });
                 }
+            }
+            // A flip leaves its frame on the stack (even if that was Fool's last step) to persist as the obligation to use or decline the revealed card.
+            if (outcome.forcePause === true && kind === "fool") {
+                return stack;
             }
             if (outcome.pushFrame !== undefined) {
                 stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions, viaFool: outcome.pushFrame.viaFool === true });
@@ -4724,14 +4806,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Nothing to flip: complete.  Validation already rejected the root Fool's own untouched first flip.
                 return {};
             }
-            // Fool's drawn card is hidden information.
-            if (partial) {
-                return { forcePause: true };
-            }
-            const revealed = fool(this.buildPowerContext());
-            this.results.push({ type: "deckDraw", what: revealed.uid, from: "fool" });
-            // Unlike High Priestess, EVERY draw forces a pause, regardless of whether Fool has another draw left.
-            return { pushFrame: { cardUid: revealed.uid, minions, viaFool: true }, forcePause: true };
+            // The flip itself happens once the move is committed; unlike High Priestess, EVERY flip forces a pause, regardless of whether Fool has another one left.
+            this.hidden.push({ type: "flip" });
+            return { forcePause: true };
         }
         const minionRef = istep!.withPiece!;
         if (this.isMinionCellStillNarrowing(minionRef, minions)) {
@@ -4985,13 +5062,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 // "drawn" is parsed as step.amount === 1 (pickleMove's own sentinel, since step.card must always be a real card uid), and is only honored when THIS card's own step genuinely grants it (opts.allowRandomDraw), not just because the literal token was typed.
                 if (step.amount === 1 && opts.allowRandomDraw) {
-                    createTerritory(ctx, tx, ty, undefined, opts);
-                } else {
-                    createTerritory(ctx, tx, ty, cardArg, opts);
+                    this.hidden.push({ type: "territory", x: tx, y: ty });
+                    return {};
                 }
-                // Read the placed card back off the board rather than trusting cardArg directly - a "drawn" card isn't the literal token typed.
-                this.results.push({ type: "place", where: cellStr, how: "territory", what: this.board.get(tx, ty)!.card!.uid });
-                return opts.allowRoyalty === true && cardArg !== undefined && this.cardValueByUid(cardArg) === 2 ? { consumesRest: true } : {};
+                createTerritory(ctx, tx, ty, cardArg!);
+                this.results.push({ type: "place", where: cellStr, how: "territory", what: cardArg! });
+                return opts.allowRoyalty === true && this.cardValueByUid(cardArg!) === 2 ? { consumesRest: true } : {};
             }
         }
     }
@@ -5491,14 +5567,12 @@ export class GnosticaGame extends GameBaseSequenced {
     private applyHighPriestess(step: IStep | undefined, partial: boolean): void {
         const discardUids = step?.cardList ?? [];
         const drawCountStr = step?.amount?.toString();
-        const drawn = discardDraw(this.buildPowerContext(), discardUids, drawCountStr, partial);
-        if (!partial) {
-            if (discardUids.length > 0) {
-                this.discarded.push(...discardUids);
-                this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
-            }
-            this.results.push({ type: "deckDraw", count: drawn, from: "deck" });
+        discardCards(this.buildPowerContext(), discardUids);
+        if (!partial && discardUids.length > 0) {
+            this.discarded.push(...discardUids);
+            this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
         }
+        this.hidden.push({ type: "draw", count: Number(drawCountStr), setsCardsDrawn: false, joinsGroup: !partial && discardUids.length > 0 });
     }
 
     public validateHighPriestess(step: IStep | undefined): IValidationResult {
@@ -5645,15 +5719,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
         // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
-        legend.hand_UNKNOWN = {
-            name: "piece-square-borderless",
-            colour: {
-                func: "flatten",
-                fg: "_context_fill",
-                bg: "_context_background",
-                opacity: 0.5,
-            },
-        };
+        legend.hand_UNKNOWN = UNKNOWN_CARD_GLYPH;
                 
         const pieceRows: string[] = [];
         const markers: MarkerOutline[] = [];
@@ -6280,7 +6346,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // A board tile uses the spaced card face.  (There's a render option to use the card version when the territory is unpopulated.)
     private buildCellGlyph(t: CellContents | undefined, cls: CellClass, largerCards: boolean, owner?: number): Glyph | [Glyph, ...Glyph[]] {
         const stack: Glyph[] = [];
-        if (t?.card !== undefined) {
+        if (t?.cardUid === UNREVEALED_UID) {
+            stack.push(UNKNOWN_CARD_GLYPH);
+        } else if (t?.card !== undefined) {
             const dontSpace = largerCards && t.playersPresent().size === 0;
             stack.push(...this.buildCardFace(t.card, !dontSpace, owner));
         } else if (cls === "wasteland") {

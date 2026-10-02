@@ -2531,6 +2531,69 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.board.get(0, 0)!.pieces[0]).to.deep.include({ owner: 1, size: 2 });
     });
 
+    describe("hidden deck draws wait for the commit", () => {
+        const wheelGame = () => testGame({
+            board: [{ x: 0, y: 0, uid: "10", pieces: [[1, 1, "E"]] }],
+            hands: [filler, filler],
+            drawPile: ["03", "KS"],
+            discardPile: ["AC"],
+        });
+        const drawn = "use 10/with m0.1 at n0 create drawn";
+
+        it("a previewed Wheel of Fortune draw leaves the deck alone and shows the new territory face down", () => {
+            const g = wheelGame();
+            g.move(drawn, { partial: true });
+            expect(g.drawPile).to.deep.equal(["03", "KS"]);
+            expect(g.discardPile).to.deep.equal(["AC"]);
+            const rep = g.render() as unknown as { legend: Record<string, unknown>; pieces: string };
+            expect(g.board.get(1, 0)!.cardUid).eq("??");
+            const row = rep.pieces.split("\n")[1].split(",");
+            expect(row.length).eq(4); // the window widened to take in the unrevealed territory
+            expect(row.some(key => key.includes("03"))).to.be.false;
+            expect(row.some(key => key.startsWith("k_??_"))).to.be.true;
+            expect(rep.legend[row.find(key => key.startsWith("k_??_"))!]).to.deep.equal([rep.legend.hand_UNKNOWN]);
+        });
+
+        it("committing it draws the top card, logs it, and leaves nothing unrevealed behind", () => {
+            const g = wheelGame();
+            g.move(drawn);
+            expect(g.board.get(1, 0)!.cardUid).eq("03");
+            expect(g.drawPile).to.deep.equal(["KS"]);
+            const placed = (g.getPlies().at(-1)!.results as { type: string; what?: string }[]).find(r => r.type === "place");
+            expect(placed?.what).eq("03");
+        });
+
+        it("a hand card typed for the Wheel is used, and one not in hand is rejected", () => {
+            const g = wheelGame();
+            g.hands[0] = ["AS", ...filler.slice(1)];
+            g.move("use 10/with m0.1 at n0 create AS");
+            expect(g.board.get(1, 0)!.cardUid).eq("AS");
+            expect(g.drawPile).to.deep.equal(["03", "KS"]);
+            expect(wheelGame().validateMove("use 10/with m0.1 at n0 create AS").valid).to.be.false;
+        });
+
+        it("a previewed Fool flip and a previewed discard draw leave the deck alone", () => {
+            const foolGame = () => testGame({ board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 1, "U"]] }], hands: [filler, filler], drawPile: ["AC", "2C"] });
+            const fool = foolGame();
+            fool.move("use 00", { partial: true });
+            expect(fool.drawPile).to.deep.equal(["AC", "2C"]);
+            expect(fool.discardPile).to.deep.equal([]);
+            const flipped = foolGame();
+            flipped.move("use 00");
+            expect(flipped.drawPile).to.deep.equal(["2C"]);
+            expect(flipped.discardPile).to.deep.equal(["AC"]);
+
+            const drawGame = () => testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [["2R", "3R", "4R"], filler], drawPile: ["5R", "6R"] });
+            const preview = drawGame();
+            preview.move("discard 2R draw 2", { partial: true });
+            expect(preview.drawPile).to.deep.equal(["5R", "6R"]);
+            const committed = drawGame();
+            committed.move("discard 2R draw 2");
+            expect(committed.drawPile).to.deep.equal([]);
+            expect(committed.hands[0]).to.deep.equal(["3R", "4R", "5R", "6R"]);
+        });
+    });
+
     it("Cups (new), Wheel of Fortune: a dedicated button supplies the drawn card, no point-value restriction - a regular Ace of Cups offers no such button, and typing \"drawn\" by hand for it is rejected", () => {
         const majorUid = "03"; // The Empress, worth 3
         const g = testGame({ board: [{ x: 0, y: 0, uid: "10", pieces: [[1, 1, "E"]] }], hands: [filler, filler], drawPile: [majorUid] });

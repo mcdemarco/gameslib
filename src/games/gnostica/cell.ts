@@ -1,7 +1,12 @@
-import { TarotCard, allCards } from "../../common/tarot";
+import { Card, Component, TarotCard, allCards } from "../../common/tarot";
 import { Piece } from "./piece";
 
 export type CellPointValue = 0 | 1 | 2 | 3;
+
+// Stands in for a territory whose card is drawn from the deck: shown in a move preview, never part of a committed state.
+export const UNREVEALED_UID = "??";
+const unrevealedPart = new Component({ uid: "?", seq: 0, name: "Unrevealed" });
+export const UNREVEALED_CARD = new Card({ name: "Unrevealed", rank: unrevealedPart, suit: unrevealedPart, major: false });
 
 // Standalone so powers.ts can evaluate a candidate card before it's placed, not just one already in a cell.
 export const cardPointValue = (card?: TarotCard): CellPointValue => {
@@ -28,7 +33,10 @@ export class CellContents {
     }
 
     public get card(): TarotCard | undefined {
-        return this.cardUid === undefined ? undefined : allCards().find(c => c.uid === this.cardUid);
+        if (this.cardUid === undefined) {
+            return undefined;
+        }
+        return this.cardUid === UNREVEALED_UID ? UNREVEALED_CARD : allCards().find(c => c.uid === this.cardUid);
     }
 
     public set card(card: TarotCard | undefined) {

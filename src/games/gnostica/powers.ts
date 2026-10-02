@@ -225,7 +225,7 @@ export const checkCreateTerritory = (
     if (hasEnemyPieces(ctx, targetX, targetY, ctx.currplayer)) {
         return { key: "CELL_HAS_ENEMY" };
     }
-    if (opts.allowRandomDraw) {
+    if (opts.allowRandomDraw && cardUid === undefined) {
         if (ctx.drawPile.length === 0 && ctx.discardPile.length === 0) {
             return { key: "DRAW_PILE_EMPTY" };
         }
@@ -248,17 +248,16 @@ export const checkCreateTerritory = (
     return undefined;
 };
 
-export const createTerritory = (
-    ctx: PowerContext, targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
-): void => {
-    let card: TarotCard;
-    if (opts.allowRandomDraw) {
-        reshuffle(ctx);
-        card = cardByUid(ctx.drawPile.shift() as string);
-    } else {
-        card = takeFromPile(ctx.hand, cardUid as string);
-    }
+export const createTerritory = (ctx: PowerContext, targetX: number, targetY: number, cardUid: string): void => {
+    ctx.board.createTerritory(targetX, targetY, takeFromPile(ctx.hand, cardUid));
+};
+
+// Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
+export const createTerritoryFromDeck = (ctx: PowerContext, targetX: number, targetY: number): TarotCard => {
+    reshuffle(ctx);
+    const card = cardByUid(ctx.drawPile.shift() as string);
     ctx.board.createTerritory(targetX, targetY, card);
+    return card;
 };
 
 // Rods - Move
@@ -836,17 +835,16 @@ export const checkDiscardDraw = (ctx: PowerContext, discardUids: string[], drawC
     return undefined;
 };
 
-// `partial` mirrors cmdDiscard: discard happens eagerly, but draw (genuinely random) is skipped in preview; returns the actual count drawn.
-export const discardDraw = (ctx: PowerContext, discardUids: string[], drawCountStr: string | undefined, partial: boolean): number => {
+export const discardCards = (ctx: PowerContext, discardUids: string[]): void => {
     for (const uid of discardUids) {
         const idx = ctx.hand.indexOf(uid);
         ctx.hand.splice(idx, 1);
         ctx.discardPile.push(uid);
     }
-    if (partial) {
-        return 0;
-    }
-    const count = Number(drawCountStr);
+};
+
+// Genuinely random, so only ever run once a move is committed; returns the actual count drawn.
+export const drawCards = (ctx: PowerContext, count: number): number => {
     let drawn = 0;
     while (drawn < count) {
         reshuffle(ctx);
