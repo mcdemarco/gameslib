@@ -14,7 +14,6 @@ Pre-release:
 Miscellany:
 	- #64 - better discard/draw messaging: both the basic action and the High Priestess version
 	- #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances
-	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves, e.g., a Rods/Discs/Swords "piece" step once a target has been chosen.
 	- #91 - The Fool either didn't let me do the second half of the Sun or was so obscure in its notation that I didn't realize I could; needs retesting.
 	- #98 - Eliminate fall-throughs to the default handler error from informative button-bar buttons.
 	- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
@@ -28,6 +27,7 @@ Miscellany:
 	- #131 - More analysis of this.preview.
 
 UX:
+	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves, e.g., a Rods/Discs/Swords "piece" step once a target has been chosen.
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
 	- #120 - Add another display mode for letters instead of icons.
 	- #125 - UI for using only second power of different-powered major arcana cards.

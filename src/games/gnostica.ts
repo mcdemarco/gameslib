@@ -81,6 +81,15 @@ const RING_SCALE = 1;
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 
+// The greyed button: the same dark-theme grey as MUTED_FILL (about #383838), but about #ccc rather than #b3b3b3 in the light theme.
+// The theme's strokes and fill colours mirror each other, so the 0.8 of background mixed in lifts light and the fill colour's share offsets that in dark.
+const GREYED_BUTTON_FILL: Colourfuncs = {
+    func: "flatten",
+    fg: { func: "flatten", fg: "_context_strokes", bg: "_context_fill", opacity: 0.71 },
+    bg: "_context_background",
+    opacity: 0.2,
+};
+
 export type playerid = 1|2|3|4|5|6;
 
 // Major arcana chaining uses frames.  Discards are abbreviated.
@@ -195,6 +204,8 @@ interface IPendingStep {
     opts: Record<string, unknown>;
     // The current step's own content as typed so far, already resolved into an IStep - completeness gates and click handlers read it directly.
     istep: IStep;
+    // Set on a finished step viewed as the one still being refined: it only completed by default (its facing was never chosen), so a facing click can still redirect it.
+    softComplete?: boolean;
     // Whether the move string being clicked on already declares "last" - rebuilt moves must carry it forward.
     announceLast: boolean;
     // The game as it stands after every completed step above was applied to a clone of the committed state; refs, candidates and lookups for this step resolve against its board.
@@ -239,6 +250,8 @@ interface IPreview {
     orientPickCell: string | undefined;
     // The revealed card a Fool resume is playing, when the move names one.
     foolCard: string | undefined;
+    // How many segments the move has typed so far, the head included; more than one means a step of the revealed card is already under way.
+    segmentsTyped: number;
     // The resume seed move string, including whatever was typed against the pending obligation.
     pending: IPendingStep | undefined;
 }
@@ -1682,6 +1695,7 @@ export class GnosticaGame extends GameBaseSequenced {
             discardNeedsCount: head === "discard" && step0?.amount === undefined,
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
+            segmentsTyped: parsed.steps.length,
             pending: this.parsePendingStep(this.continued.length > 0 ? seed : parsed).advanced,
         };
     }
@@ -1943,20 +1957,17 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.preview?.head?.toLowerCase() === "place";
     }
 
-    // Which button(s) to bold, based on the partial move; "Declare" is a modifier so it can be highlighted alongside whatever the base action is, not instead of it.
+    // Which top-level button(s) the partial move (or an owed resume) already reflects; "Declare" is a modifier so it is reported alongside whatever the base action is, not instead of it.
     private highlightedButtonValues(parsed: IParsedMove | undefined): Set<string> {
         const found = new Set<string>();
-        if (parsed === undefined) {
-            return found;
-        }
-        if (parsed.announceLast) {
+        if (parsed?.announceLast) {
             found.add("declare");
         }
-        const head = parsed.head;
-        const step0 = parsed.steps[0];
+        const head = parsed?.head;
+        const step0 = parsed?.steps[0];
         // A discard move is Pass-equivalent only when it discards nothing AND explicitly draws zero
-        if (head === "discard" && ((step0.cardList === undefined || step0.cardList.length === 0) && step0.amount === 0)) {
-            // "discard draw 0" is the user-facing pass, so bold Pass.
+        if (head === "discard" && step0 !== undefined && ((step0.cardList === undefined || step0.cardList.length === 0) && step0.amount === 0)) {
+            // "discard draw 0" is the user-facing pass, so Pass is the one taken.
             found.add("pass");
         } else if (this.continued.length > 0) {
             // The top-level button matches the resume: "Discard/Draw" for High Priestess, "Play Card" for Fool.
@@ -1981,6 +1992,10 @@ export class GnosticaGame extends GameBaseSequenced {
         // The state as ADVANCED by whatever's been clicked so far this render; `.special === "fool"` means clicks already ran a revealed card's steps.
         const advanced = this.computePendingMinor();
         const justDeclined = this.preview?.head === "decline";
+        // Declining is the alternative to starting the revealed card's play, so once a step of it is typed the choice has been made.
+        if (!justDeclined && (this.preview?.segmentsTyped ?? 0) > 1) {
+            return bar;
+        }
         if (advanced?.special === "fool" && !justDeclined) {
             // Fool's flip is never optional - nothing to decline once a revealed card's own steps have simply run their course.
             return bar;
@@ -1996,26 +2011,21 @@ export class GnosticaGame extends GameBaseSequenced {
             : activeTop.cardUid;
         const declineBtn: ButtonBarButton = { label: `Decline ${declinedUid}`, value: "decline_power" };
         if (justDeclined) {
-            // Bold marks a button matching what the partial move ALREADY says - once clicked, it stays confirmed rather than reverting to an open choice.
-            declineBtn.attributes = [{ name: "font-weight", value: "bold" }];
+            // Greyed once clicked: the partial move already says it, and a second click would do nothing.
+            declineBtn.fill = GREYED_BUTTON_FILL;
         }
         return [...bar, declineBtn] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
     // Pick one value from a small labeled set; `disabledReason` reuses the SAME object minorModeAvailability produces, so strikethrough and rejection message can't drift.
+    // Three looks: available is plain; unavailable (a `disabledReason`) is crossed out; and the one already `current` is greyed, since clicking it again would do nothing.
     private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
         return options.map(({ value, label, disabledReason }) => {
             const button: ButtonBarButton = { label, value: `${prefix}_${value}` };
-            const attrs: { name: string; value: string }[] = [];
-            if (value === current) {
-                attrs.push({ name: "font-weight", value: "bold" });
-            }
             if (disabledReason !== undefined) {
-                attrs.push({ name: "text-decoration", value: "line-through" });
-                button.fill = MUTED_FILL;
-            }
-            if (attrs.length > 0) {
-                button.attributes = attrs as [{ name: string; value: string }, ...{ name: string; value: string }[]];
+                button.attributes = [{ name: "text-decoration", value: "line-through" }];
+            } else if (value === current) {
+                button.fill = GREYED_BUTTON_FILL;
             }
             return button;
         });
@@ -2073,7 +2083,13 @@ export class GnosticaGame extends GameBaseSequenced {
 
         const pendingMinor = this.computePendingMinor();
         if (pendingMinor === undefined) {
-            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+            // A flip owed and then declined has nothing left to play, and the ordinary actions were never options: only Declare is left, and getActionButtons adds Decline.
+            if (this.continued.length > 0 && this.preview !== undefined) {
+                const declare = topLevel.find(b => b.value === "declare");
+                return declare === undefined ? this.pausedPowerButtons() : [declare];
+            }
+            // A move already chosen and fully built (a power's last step, an orient, a discard): the other actions are no more options than mid-step.
+            return this.chosenActionBar(topLevel);
         }
 
         // Once a power step's modes are on offer, only the one choice that got us here stays, plus a spacer and this step's own mode buttons; Declare stays available.
@@ -2089,28 +2105,28 @@ export class GnosticaGame extends GameBaseSequenced {
             if (this.preview === undefined) {
                 return this.pausedPowerButtons();
             }
-            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+            // A flip owed (a decline clicked, say) never had the ordinary actions as options, so only Declare is left, and getActionButtons adds Decline.
+            if (this.continued.length > 0) {
+                return declareBtn === undefined ? this.pausedPowerButtons() : [declareBtn];
+            }
+            return this.chosenActionBar(topLevel);
         }
 
         const minionPicker = pendingMinor.game.minionPickerBar(pendingMinor, selected, declareBtn);
         if (minionPicker !== undefined) {
             return minionPicker;
         }
-        // Still ambiguous but spanning more than one cell ("play"'s board-wide pool) - leave the bar uncollapsed for a fresh activation, but a paused resume gets Use/Decline.
+        // Still ambiguous but spanning more than one cell ("play"'s board-wide pool): a paused resume gets Use/Decline, anything else only the board click that picks the minion.
         if (pendingMinor.minionAmbiguous) {
             if (this.continued.length > 0) {
                 return this.pausedPowerButtons();
             }
-            // Past the card's first step the player is mid-card, so the bar stays collapsed instead of reverting to the top-level choices.
-            if (pendingMinor.priorSteps.length > 0) {
-                const collapsed: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-                collapsed.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
-                if (declareBtn !== undefined) {
-                    collapsed.push(declareBtn);
-                }
-                return collapsed as [ButtonBarButton, ...ButtonBarButton[]];
+            const collapsed: ButtonBarButton[] = selected !== undefined ? [selected] : [];
+            collapsed.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
+            if (declareBtn !== undefined) {
+                collapsed.push(declareBtn);
             }
-            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+            return collapsed as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
         const hpCount = pendingMinor.game.highPriestessCountBar(pendingMinor);
@@ -2123,9 +2139,10 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // orientMinion/judgementDraw/worldUseAny are pure click-driven; tradeHands/orientAny/hierophantReplace fall back to click-driven only when unambiguous (see specialTargetPickerBar above).
         if (pendingMinor.special !== undefined && pendingMinor.special !== "hermitTeleport" && pendingMinor.special !== "magicianChoice") {
-            // While still building a FRESH root activation, the ordinary top-level bar is still right (matches every other "still typing" preview).
+            // A fresh root activation of a click-only special power: just the action chosen, since the board click or hand click that continues it is no button.
             if (this.continued.length === 0) {
-                return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+                const only: ButtonBarButton[] = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
+                return (only.length > 0 ? only : topLevel) as [ButtonBarButton, ...ButtonBarButton[]];
             }
             // Once genuinely paused, NONE of the ordinary 6 buttons are legal - offer the same self-contained Use/Decline pair the Fool-special branch above does.
             return this.pausedPowerButtons();
@@ -2140,7 +2157,17 @@ export class GnosticaGame extends GameBaseSequenced {
         return (!midPowerStep && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement();
     }
 
-    // The ordinary 6-button top-level choice, bolded per highlightedButtonValues - the fallback bar, and the seed every pendingMinor state further trims.
+    // Once an action is chosen the bar keeps just it (greyed) and Declare; with no live preview, or nothing chosen, it is the whole ordinary set.
+    private chosenActionBar(topLevel: ButtonBarButton[]): [ButtonBarButton, ...ButtonBarButton[]] {
+        const chosen = this.preview === undefined ? [] : topLevel.filter(b => b.value !== undefined && b.value !== "declare" && this.preview!.highlighted.has(b.value));
+        if (chosen.length === 0) {
+            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
+        }
+        const declare = topLevel.find(b => b.value === "declare");
+        return (declare === undefined ? chosen : [...chosen, declare]) as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // The ordinary 6-button top-level choice, with the action already taken greyed per highlightedButtonValues - the fallback bar, and the seed every pendingMinor state further trims.
     private buildTopLevelBar(): ButtonBarButton[] {
         const topLevel: ButtonBarButton[] = [
             { label: "Use Territory", value: "use" },
@@ -2149,13 +2176,15 @@ export class GnosticaGame extends GameBaseSequenced {
             { label: "Discard/Draw", value: "discard" },
             { label: "Pass", value: "pass" },
         ];
+        const highlighted = this.preview?.highlighted ?? this.highlightedButtonValues(undefined);
+        // Declare is a toggle, so once on it offers to undo itself rather than sit greyed.
         if (this.declaredPlayer() === undefined) {
-            topLevel.push({ label: "(Declare)", value: "declare" });
+            topLevel.push({ label: highlighted.has("declare") ? "(Undeclare)" : "(Declare)", value: "declare" });
         }
-        const highlighted = this.preview?.highlighted ?? new Set<string>();
+        // A button the move already reflects is greyed; clicking it would do nothing (see clickActionButton).
         for (const b of topLevel) {
-            if (b.value !== undefined && highlighted.has(b.value)) {
-                b.attributes = [{ name: "font-weight", value: "bold" }];
+            if (b.value !== "declare" && b.value !== undefined && highlighted.has(b.value)) {
+                b.fill = GREYED_BUTTON_FILL;
             }
         }
         return topLevel;
@@ -2397,26 +2426,30 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             // Swords pips is pure damage, no destination cell to click (unlike Rods' distance), so it's a button set once a target is chosen.
             if (suitUid === "S" && stepMinorMode("S", pendingMinor.istep) === "piece") {
-                const minionPiece = pendingMinor.minion.piece ?? this.board.get(pendingMinor.minion.x, pendingMinor.minion.y)!.pieces[pendingMinor.minion.index];
-                const pipsOptions: ChoiceOption[] = [];
-                // Anything past the victim's own pips is the same wipeout (or, with one sword, rejected), so it isn't offered.
-                const target = pendingMinor.game.resolvePieceRef(pendingMinor.istep.targetPiece);
-                const victim = target.kind === "ok" ? target.ref.piece ?? pendingMinor.game.board.get(target.ref.x, target.ref.y)?.pieces[target.ref.index] : undefined;
-                const maxPips = Math.min(minionPiece.size * (pendingMinor.opts.bothSwords === true ? 2 : 1), victim?.size ?? Infinity);
-                const ctx = pendingMinor.game.buildPowerContext();
-                for (let n = maxPips; n >= 1; n--) {
-                    // The shrunken piece comes out of its owner's stash, so an empty size there crosses the amount out (the same reason validation gives).
-                    const left = victim === undefined ? 0 : victim.size - n;
-                    const stashEmpty = victim !== undefined && left > 0 && !hasStashAvailable(ctx, victim.owner, left as Pips);
-                    pipsOptions.push({ value: String(n), label: `Attack for ${n}`, disabledReason: stashEmpty ? { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: left } } : undefined });
-                }
-                buttons.push(...this.buildChoiceButtons("pips", pipsOptions, pendingMinor.istep.amount?.toString()));
+                buttons.push(...this.buildChoiceButtons("pips", this.swordsPipsOptions(pendingMinor), pendingMinor.istep.amount?.toString()));
             }
         }
         if (declareBtn !== undefined) {
             buttons.push(declareBtn);
         }
         return buttons as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // The attack amounts a Swords piece step offers, each crossed out when the victim's owner couldn't take the shrunken piece back from their stash.
+    private swordsPipsOptions(pending: IPendingStep): ChoiceOption[] {
+        const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        // Anything past the victim's own pips is the same wipeout (or, with one sword, rejected), so it isn't offered.
+        const target = pending.game.resolvePieceRef(pending.istep.targetPiece);
+        const victim = target.kind === "ok" ? target.ref.piece ?? pending.game.board.get(target.ref.x, target.ref.y)?.pieces[target.ref.index] : undefined;
+        const maxPips = Math.min(minionPiece.size * (pending.opts.bothSwords === true ? 2 : 1), victim?.size ?? Infinity);
+        const ctx = pending.game.buildPowerContext();
+        const options: ChoiceOption[] = [];
+        for (let n = maxPips; n >= 1; n--) {
+            const left = victim === undefined ? 0 : victim.size - n;
+            const stashEmpty = victim !== undefined && left > 0 && !hasStashAvailable(ctx, victim.owner, left as Pips);
+            options.push({ value: String(n), label: `Attack for ${n}`, disabledReason: stashEmpty ? { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: left } } : undefined });
+        }
+        return options;
     }
 
     public primitiveToSuit(primitive: SuitPrimitive): MinorSuitUid {
@@ -2597,6 +2630,9 @@ export class GnosticaGame extends GameBaseSequenced {
             const magicianAs = "special" in step && step.special === "magicianChoice" && asSuit !== undefined;
             const outcome = clone.applyPowerStep(step, top.minions, completedStep, frameDef, stepIndex, frameDef.powers.length, true, magicianAs ? asSuit : undefined, true, priorTaken);
             priorTaken = true;
+            if (isLastSegment && held !== undefined) {
+                held.pending.softComplete = outcome?.softComplete === true;
+            }
             top.minions = GnosticaGame.chainMinion(top.minions, outcome ?? {});
             top.nextStepIndex = outcome?.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
             if (outcome?.pushFrame !== undefined) {
@@ -3291,10 +3327,15 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const move = this.pickleMove(parsed);
         let views: { current?: IPendingStep; advanced?: IPendingStep } | undefined;
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const self = this;
         const ctx: IClickContext = {
             move, parsed, row, col, piece,
             last: parsed.announceLast ? " last" : "",
-            noop: { move, valid: false, message: i18next.t("apgames:validation.gnostica.CLICK_HAS_NO_EFFECT") },
+            // A click that means nothing right now answers with the current move's own status, unchanged, so the player sees no new message or move.
+            get noop(): IClickResult {
+                return { ...self.validateMove(move), move };
+            },
             pending: () => views ??= this.parsePendingStep(parsed),
         };
         if (piece !== undefined && piece.startsWith("_btn_")) {
@@ -3345,7 +3386,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const clickedPiece = pending.game.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
         const rodReason = this.rodNeedsFacingReason(pending.suitUid, clickedPiece);
         if (rodReason !== undefined) {
-            return { move: ctx.move, valid: false, message: i18next.t(`apgames:validation.gnostica.${rodReason.key}`) };
+            return ctx.noop;
         }
         const minionRef = pending.game.pieceRefStr(resolved.ref, pending.minions);
         return pending.game.buildAnchorMove(pending, minionRef);
@@ -3390,7 +3431,7 @@ export class GnosticaGame extends GameBaseSequenced {
             : (ref.includes(".") ? "piece" : "tile");
         const reason = pending.game.minorModeAvailability(pending).get(clickedMode);
         if (reason !== undefined) {
-            return { move: ctx.move, valid: false, message: i18next.t(`apgames:validation.gnostica.${reason.key}`, reason.params ?? {}) };
+            return ctx.noop;
         }
         return pending.game.buildTargetedStepMove(pending, ref);
     }
@@ -3399,6 +3440,11 @@ export class GnosticaGame extends GameBaseSequenced {
     private clickPipsButton(ctx: IClickContext, n: string): string | IClickResult {
         const pending = ctx.pending().advanced;
         if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "piece") {
+            return ctx.noop;
+        }
+        // An amount that isn't offered, is crossed out, or is already the chosen one does nothing.
+        const option = this.swordsPipsOptions(pending).find(o => o.value === n);
+        if (option === undefined || option.disabledReason !== undefined || pending.istep.amount === parseInt(n, 10)) {
             return ctx.noop;
         }
         const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
@@ -3436,6 +3482,10 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private clickActionButton(ctx: IClickContext, value: string): string | IClickResult {
         const { last } = ctx;
+        // A button the move already reflects is greyed, so a click on it does nothing - never a silent restart of the move.
+        if (this.highlightedButtonValues(ctx.parsed).has(value) || (value === "decline_power" && ctx.parsed.head === "decline")) {
+            return ctx.noop;
+        }
         switch (value) {
             case "pass":
                 // A genuine pass - explicitly zero discards AND zero draw; a bare "discard" seed defaults its omitted "draw <n>" to the max, so it isn't equivalent.
@@ -3668,6 +3718,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (narrowed !== undefined) {
                     return narrowed;
                 }
+                // A finished step whose facing was never chosen stays open to a facing click, ahead of naming the next step.
+                if (pending?.softComplete === true && this.pendingMode(pending) !== undefined) {
+                    const refined = pending.game.handlePendingStepBoardClick(pending, x, y);
+                    if (refined !== undefined) {
+                        return refined;
+                    }
+                }
                 // Any other click can't refine the finished step here; name the next one instead of raising that step's own errors.
                 if (advanced.minionAmbiguous) {
                     return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.PICK_MINION_CELL") };
@@ -3751,7 +3808,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return ["redraw", ...picks].join(" ");
         }
-        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CLICK_HAS_NO_EFFECT") };
+        return { ...this.validateMove(move), move };
     }
 
 
@@ -4742,7 +4799,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
                 }
                 const readyMsg = this.forcePauseReadyMessage(top.cardUid, top.nextStepIndex);
-                return { valid: true, complete: softComplete ? 0 : 1, message: i18next.t(readyMsg.key, readyMsg.params) };
+                const ready = i18next.t(readyMsg.key, readyMsg.params);
+                // The orientation hint comes first: the facing is still the player's to change, and the move isn't submitted for them.
+                return { valid: true, complete: softComplete ? 0 : 1, message: softComplete ? `${i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT")} ${ready}` : ready };
             }
             // Moon: the move step is only exempt from the capacity cap if it actually needed to be (destination now holds 4); the attack step then must destroy a piece at that SAME cell to restore it.
             if (frameDef.moonCapacityExemption && "primitive" in step) {
