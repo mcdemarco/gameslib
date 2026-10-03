@@ -104,6 +104,8 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("play 21 as 01 as C via 00/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 11/with m0.1 trade n0.1")).to.have.deep.property("valid", true);
+
+        expect(g.parseMove("use 11/skip/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
     });
     
     it ("Pickles", () =>  {
@@ -134,7 +136,6 @@ describe("Gnostica parsing", () => {
         const move13 = "use 10/with m0.1 at n0 create drawn";
         const move14 = "use 04/orient m0.1 N/with m1.2 move m0.2 2 orient N"
         const move15 = "use 15/orient m0.1 N/with m0.1 orient m1.2 W/orient m0.2 N"
-        g.validateMove(move15);
         expect(g.pickleMove(g.parseMove(move11))).to.equal(move11);
         expect(g.pickleMove(g.parseMove(move12))).to.equal(move12);
         expect(g.pickleMove(g.parseMove(move13))).to.equal(move13);
@@ -142,6 +143,9 @@ describe("Gnostica parsing", () => {
         expect(g.pickleMove(g.parseMove(move15))).to.equal(move15);
 
         expect(g.pickleMove(g.parseMove("use 15/orient m0.1 N/with m0.1 orient m0.1 W/orient m0.2 N"))).to.equal("use 15/orient m0.1 N/orient m0.1 W/orient m0.2 N");
+
+        const move16 = "use 11/skip/with m0.1 shrink n0.1 1";
+        expect(g.pickleMove(g.parseMove(move16))).to.equal(move16);
 
     });
 
@@ -165,6 +169,9 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 09/with n0.1 fly n0.1 3")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 09/with n0.1 fly AC 3")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 09/with n0.1 fly AC to AR")).to.have.deep.property("valid", false);
+        expect(g.parseMove("skip")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 3D/skip/grow n0.1 2")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 09/with n0.1 fly AC to AR/skip")).to.have.deep.property("valid", false);
     });
 
     it("marks a special power's step complete only once its fields are typed", () => {

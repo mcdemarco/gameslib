@@ -869,7 +869,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     public parseMove(m: string): IParsedMove {
         const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
-        const STEPWORDS = ["discard", "draw", "orient", "with"];
+        const STEPWORDS = ["discard", "draw", "orient", "skip", "with"];
         const OTHERWORDS = ["as", "at", "create", "draw", "fly", "grow", "last", "move", "orient", "replace", "shrink", "to", "trade", "via"];
 
         const CARD_UID_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
@@ -1032,7 +1032,26 @@ export class GnosticaGame extends GameBaseSequenced {
                 action: (s === 0 ? pm.head! : segment.shift()!)
             }
 
-            //All steps require more content (except "pass" which was handled already)
+            //Special case for skip.
+            if (step.action === "skip") {
+                if (segment.length > 0) {
+                    pm.error = "STEP_TOO_LONG";
+                    break;
+                } else if (s !== 1) {
+                    pm.error = "BAD_SKIP_TIMING";
+                    break;
+                } else if (lastStep) {
+                    //Partial move.
+                    step.complete = -1;
+                    pm.steps.push(step);
+                    break;
+                } else {
+                    pm.steps.push(step);
+                    continue;
+                }
+            }
+            
+            //Non-skip steps require more content (except "pass" which was handled already)
             //so if there is no more it's either a partial move or invalid.  
             if (segment.length === 0) {
                 if (lastStep) {
@@ -1537,83 +1556,85 @@ export class GnosticaGame extends GameBaseSequenced {
             if (step.action !== "with") {
                 ppart.push(step.action);
             }
+
+            if (step.action !== "skip") {
             
-            if ( step.action === "draw" || step.action === "redraw" || step.action === "discard" ) {
-                if (step.cardList !== undefined)
-                    ppart.push(...step.cardList);
-         
-                if ( step.action === "discard" && step.amount !== undefined ) {
-                    ppart.push("draw");
+                if ( step.action === "draw" || step.action === "redraw" || step.action === "discard" ) {
+                    if (step.cardList !== undefined)
+                        ppart.push(...step.cardList);
+                    
+                    if ( step.action === "discard" && step.amount !== undefined ) {
+                        ppart.push("draw");
+                        ppart.push(step.amount.toString());
+                    }
+                }
+                if ( step.action === "bid" && step.amount !== undefined ) {
                     ppart.push(step.amount.toString());
                 }
-            }
-            if ( step.action === "bid" && step.amount !== undefined ) {
-                ppart.push(step.amount.toString());
-            }
 
-            if ( step.action === "create" ) {
-                if ( step.card !== undefined || step.direction !== undefined || step.targetPiece !== undefined)
-                    ppart.push(((step.card ?? step.direction) ?? step.targetPiece) as string);
-                else if ( step.amount === 1 )
-                    ppart.push("drawn");
-            }
+                if ( step.action === "create" ) {
+                    if ( step.card !== undefined || step.direction !== undefined || step.targetPiece !== undefined)
+                        ppart.push(((step.card ?? step.direction) ?? step.targetPiece) as string);
+                    else if ( step.amount === 1 )
+                        ppart.push("drawn");
+                }
                 
-            if ( step.action === "place" || step.action === "orient" || step.action === "replace" ) {
+                if ( step.action === "place" || step.action === "orient" || step.action === "replace" ) {
 
-                if ( step.action === "place" && step.targetCell !== undefined ) {
-                    ppart.push(step.targetCell);
-                } else if ( (step.action === "orient" || step.action === "replace") && step.targetPiece !== undefined ) {
-                    ppart.push(step.targetPiece);
+                    if ( step.action === "place" && step.targetCell !== undefined ) {
+                        ppart.push(step.targetCell);
+                    } else if ( (step.action === "orient" || step.action === "replace") && step.targetPiece !== undefined ) {
+                        ppart.push(step.targetPiece);
+                    }
+
+                    if ( step.direction !== undefined ) {
+                        ppart.push(step.direction);
+                    }
                 }
 
-                if ( step.direction !== undefined ) {
-                    ppart.push(step.direction);
+                if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {
+                    if ( step.card !== undefined ) {
+                        ppart.push(step.card);
+                    }
                 }
-            }
 
-            if ( step.action === "play" || step.action === "use" || step.action === "decline" ) {
-                if ( step.card !== undefined ) {
-                    ppart.push(step.card);
+                if ( step.action === "trade" ) {
+                    if ( step.targetPiece !== undefined ) {
+                        ppart.push(step.targetPiece);
+                    }
                 }
-            }
-
-            if ( step.action === "trade" ) {
-                if ( step.targetPiece !== undefined ) {
-                    ppart.push(step.targetPiece);
-                }
-            }
                 
-            if ( step.action === "grow" || step.action === "shrink" || step.action === "move" ) {
-                if ( step.targetCell !== undefined || step.targetPiece !== undefined ) {
-                    ppart.push((step.targetCell ?? step.targetPiece)!);
-                }
-                if ( step.amount !== undefined ) {
-                    ppart.push(step.amount.toString());
-                }
-                if ( step.card !== undefined ) {
-                    ppart.push("to")
-                    ppart.push(step.card);
+                if ( step.action === "grow" || step.action === "shrink" || step.action === "move" ) {
+                    if ( step.targetCell !== undefined || step.targetPiece !== undefined ) {
+                        ppart.push((step.targetCell ?? step.targetPiece)!);
+                    }
+                    if ( step.amount !== undefined ) {
+                        ppart.push(step.amount.toString());
+                    }
+                    if ( step.card !== undefined ) {
+                        ppart.push("to")
+                        ppart.push(step.card);
+                    }
+
                 }
 
-            }
-
-            if ( step.action === "fly" ) {
-                if ( step.card !== undefined || step.targetPiece !== undefined ) {
-                    ppart.push((step.card ?? step.targetPiece)!);
+                if ( step.action === "fly" ) {
+                    if ( step.card !== undefined || step.targetPiece !== undefined ) {
+                        ppart.push((step.card ?? step.targetPiece)!);
+                    }
+                    if ( step.targetCell !== undefined ) {
+                        ppart.push("to")
+                        ppart.push(step.targetCell);
+                    }
                 }
-                if ( step.targetCell !== undefined ) {
-                    ppart.push("to")
-                    ppart.push(step.targetCell);
-                }
-            }
 
-            if ( step.action === "grow" || step.action === "move" || step.action === "shrink" || step.action === "fly" ) {
-                if ( step.direction !== undefined ) {
-                    ppart.push("orient")
-                    ppart.push(step.direction as string);
+                if ( step.action === "grow" || step.action === "move" || step.action === "shrink" || step.action === "fly" ) {
+                    if ( step.direction !== undefined ) {
+                        ppart.push("orient")
+                        ppart.push(step.direction as string);
+                    }
                 }
-            }
-
+            }// Returned from the skip exclusion.  The next two cases shouldn't apply to a skip.
 
             //First round.
             if (s === 0) {
@@ -1630,13 +1651,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     ppart.push(p.viaUid);
                 }
             }
-
             
             //Last round.
             if (s ===  p.steps.length -1 && p.announceLast === true)
                 ppart.push("last");
 
-            
             pparts.push(ppart.join(" "));
         }
 
