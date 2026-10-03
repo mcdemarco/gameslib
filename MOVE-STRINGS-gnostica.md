@@ -34,6 +34,7 @@ except High Priestess.
 | **use** — Judgement (judgementDraw)                 | `use 20/m0.2 KS 00`                              | `use 20/with m0.2 draw KS 00`                                          |
 | **use** — High Priestess round 1 (fresh activation) | `use 02/discard AC KS draw 2`                    | `use 02/discard AC KS draw 2` (unchanged)                              |
 | **use** — World (worldUseAny)                       | `use 21 as 06/m0.1 piece n0.1 1 U/o0.1 own o0 U` | `use 21 as 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U` |
+| **use** — skipping a first power (Moon, Lovers, Empress, …) | (new)                         | `use 18/skip/with m0.1 shrink n0.1 1`                                  |
 | **play** (from hand, otherwise identical to use)    | `play AC/m0.1 own m0 U`                          | `play AC/with m0.1 at m0 create U`                                     |
 | **decline** (resume, declining a pause)             | `decline 05 (via 00)`                            | `decline 05 via 00`                                                    |
 | **play … (via)** (Fool/World resume, continuing)    | `play 6D/l0.1 piece l0.1 (via 00)`               | `play 6D via 00/with l0.1 grow l0.1`                                   |
@@ -44,6 +45,15 @@ except High Priestess.
 
 ## Notes
 
+- **`skip`** gives up a card's first power so that its second, different one
+  can be used alone: `use 18/skip/with m0.1 shrink n0.1 1`. It is only ever the
+  first segment, it is always followed by the second power's own step (a move
+  ending on `skip` is incomplete), and it is only accepted for cards whose two
+  powers differ (so not Chariot, Strength, Death, Temperance or Devil) and never
+  for a minor card. It applies equally to a card the World borrows
+  (`use 21 as 18/skip/...`) and to a card the Fool reveals
+  (`play 18 via 00/skip/...`). It has no effect of its own: apply ignores it, and it leaves
+  no result or frame.
 - **Category 1 vs 2** orientation: `orientMinion`/`orientAny` (and the
   standalone `orient` command) hard-reject a same-facing click as a no-op.
   Every trailing/seeded facing elsewhere (Cups own, R/D/S piece,

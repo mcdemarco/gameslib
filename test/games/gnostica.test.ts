@@ -2988,7 +2988,8 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             }
             const g2 = setup(true);
             g2.move("play 03", { partial: true });
-            expect(barValues(g2).map(b => b.value)).to.deep.equal(["play", "_spacer", "declare"]);
+            // Empress has a different second power, so the minion pick is joined by Skip Power.
+            expect(barValues(g2).map(b => b.value)).to.deep.equal(["play", "_spacer", "skip", "declare"]);
         });
     });
 
@@ -3999,7 +4000,7 @@ describe("Gnostica: choose-step click messaging", () => {
     // validateMove("") only populates the status line for the render
     // right after a commit (see playground.js's moveBtn handler). Every
     // state now has a real button to click - the ordinary bar, or a
-    // resume's own Use/Decline pair - so "click a button" always fits;
+    // resume's own Play/Decline pair - so "click a button" always fits;
     // the card's own real instructions come from the resume_power click,
     // not prepopulated here. The one exception is a player with no piece
     // down yet, who must place.
@@ -4733,7 +4734,7 @@ describe("Gnostica: Fool and World", () => {
     };
 
     // A revealed card's own real buttons show immediately (no separate
-    // "Use Card X" click first - see getActionButtons()'s own docs), with
+    // "Play Card X" click first - see getActionButtons()'s own docs), with
     // a persisting "Decline X" always folded in alongside them - even for
     // a Rods card whose every eligible minion is upright (Rods rejects
     // upright minions for every mode), so the player always has a way
@@ -4749,7 +4750,7 @@ describe("Gnostica: Fool and World", () => {
 
         const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
-        // Rods' own target candidates show directly - no "Use Card 2R"
+        // Rods' own target candidates show directly - no "Play Card 2R"
         // click needed first - and every one is struck through, since
         // Fool's own minion (the only eligible one) is upright.
         const modeButtons = bar.buttons!.filter(b => b.value?.startsWith("target_"));
@@ -4772,7 +4773,7 @@ describe("Gnostica: Fool and World", () => {
     // as the "special" branch just below it) - clicking "Play Card X"
     // dispatched into the generic "play" head instead of anything about
     // the actual pending obligation.
-    it("a revealed minor card whose own eligible pool spans 2+ cells shows the paused Use/Decline pair, not the ordinary top-level bar", () => {
+    it("a revealed minor card whose own eligible pool spans 2+ cells shows the paused Play/Decline pair, not the ordinary top-level bar", () => {
         const g = setupFool();
         g.board.get(1, 0)!.pieces = [new Piece(1, 1, "U")]; // a second minion for player 1, a different cell than Fool's own
         pluckCard(g, "10D");
@@ -4890,17 +4891,14 @@ describe("Gnostica: Fool and World", () => {
         // between every click) must neither silently complete the step
         // early nor lose track of the suit already chosen - the bar should
         // show CUPS' OWN mode buttons directly, not the suit-picker again,
-        // and "Decline 01" (the Magician, not the Fool) stays put
-        // throughout.
+        // and no "Decline 01": choosing the suit already began playing it.
         g.move(suitClick.move, { partial: true });
         // Cups' own target candidates: "own"/"new" always, no enemy
         // candidate at all here (Fool's minion, facing U, targets itself -
         // no enemy piece there to offer one for).
         expect(buttonValues(g)).to.include.members(["target_own", "target_new"]);
         expect(buttonValues(g)).to.not.include("magician_R");
-        const midRep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
-        const midBar = midRep.areas!.find(a => a.type === "buttonBar")!;
-        expect(midBar.buttons!.find(b => b.value === "decline_power")!.label).eq("Decline 01");
+        expect(buttonValues(g)).to.not.include("decline_power");
 
         const modeClick = g.handleClick(suitClick.move, -1, -1, "_btn_target_own");
         expect(modeClick.valid).to.be.true;
@@ -4951,7 +4949,7 @@ describe("Gnostica: Fool and World", () => {
     // walkFrameStack's own "segments exhausted" skip branch used to just
     // pop that one frame and stop, leaving Fool's own mandatory second
     // flip sitting unexecuted with no button anywhere to trigger it (the
-    // bar only ever offers "Use Card X"/"Decline X" for a flip still at
+    // bar only ever offers "Play Card X"/"Decline X" for a flip still at
     // its own nextStepIndex 0 - see powerStepMessageKey's own docs) - a
     // real dead end for the player.
     it("an implicitly-skipped tail step (no legal tradeHands target) also auto-continues Fool's own mandatory second flip", () => {
@@ -5192,11 +5190,11 @@ describe("Gnostica: Fool and World", () => {
     });
 
     // Right after a real flip the status line is the generic "click a
-    // button" wording (a Use/Decline pair is on the bar); clicking "Use
+    // button" wording (a Play/Decline pair is on the bar); clicking "Use
     // Card X" (resume_power) is what surfaces the revealed card's own
     // real instructions, naming it explicitly rather than forcing the
     // player to check the chat log.
-    it("Fool's real flip: the Use Card click names the revealed card in the message", () => {
+    it("Fool's real flip: the Play Card click names the revealed card in the message", () => {
         const g = setupFool();
         pluckCard(g, "AC");
         g.drawPile.unshift("AC");
@@ -5253,10 +5251,10 @@ describe("Gnostica: Fool and World", () => {
     // Once genuinely paused (Fool's own reveal of a click-driven special,
     // here the World), the bar drops the ordinary 6 buttons entirely
     // (none legal - validateMove would reject every one with PENDING_
-    // POWER_NEEDS_CONTINUE) and shows a self-contained Use/Decline pair
-    // instead. Clicking "Use Card" surfaces the World's own real target
+    // POWER_NEEDS_CONTINUE) and shows a self-contained Play/Decline pair
+    // instead. Clicking "Play Card" surfaces the World's own real target
     // instructions; a direct board click still works too.
-    it("Fool reveals World: the bar drops to a Use/Decline pair, and clicking Use gives real target instructions", () => {
+    it("Fool reveals World: the bar drops to a Play/Decline pair, and clicking Play gives real target instructions", () => {
         const g = setupFool();
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         forceCardAt(g, 1, 0, () => major(1)); // a real target for World to use
@@ -5303,7 +5301,7 @@ describe("Gnostica: Fool and World", () => {
     // exactly like any other revealed card, ending the cascade without
     // triggering a further flip from IT, while the outer Fool's own
     // still-owed second flip fires regardless (never optional itself).
-    it("Fool revealing Fool offers the ordinary Use/Decline pair, and declining it auto-continues the outer Fool's own mandatory second flip", () => {
+    it("Fool revealing Fool offers the ordinary Play/Decline pair, and declining it auto-continues the outer Fool's own mandatory second flip", () => {
         const g = setupFool();
         pluckCard(g, "00");
         g.drawPile.unshift("00"); // Fool's own first flip reveals another Fool
@@ -5613,6 +5611,116 @@ describe("Gnostica: a new or changed minion's facing stays open to a click until
     });
 });
 
+describe("Gnostica: skipping a card's first power", () => {
+    type Btn = { value?: string; fill?: unknown };
+    const barOf = (g: GnosticaGame): Btn[] => {
+        const out = g.render();
+        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: Btn[] }[] };
+        return rep.areas!.find(a => a.type === "buttonBar")!.buttons!;
+    };
+    // A 2-pip minion facing an enemy 2-pip piece at n0: Moon (move, attack), Lovers (move, create), Chariot (move, move).
+    const duel = (uid: string) => testGame({
+        board: [{ x: 0, y: 0, uid, pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 2, "W"]] }, { x: -1, y: 0, uid: "2D" }],
+        hands: [filler, filler],
+    });
+
+    it("offers Skip Power just before Declare while the first power is pending, and only for cards whose powers differ", () => {
+        for (const uid of ["18", "06", "03", "11", "12", "19"]) {
+            const shown = duel(uid);
+            shown.move(`use ${uid}`, { partial: true });
+            const values = barOf(shown).map(b => b.value);
+            expect(values.indexOf("skip"), uid).to.be.greaterThan(-1);
+            expect(values.indexOf("skip"), uid).eq(values.indexOf("declare") - 1);
+        }
+        for (const uid of ["07", "08", "13", "14", "15"]) {
+            const shown = duel(uid);
+            shown.move(`use ${uid}`, { partial: true });
+            expect(barOf(shown).map(b => b.value), uid).to.not.include("skip");
+        }
+    });
+
+    it("builds `skip`, then shows the second power's buttons without a second Skip Power", () => {
+        const g = duel("18");
+        const click = g.handleClick("use 18", -1, -1, "_btn_skip");
+        expect(click.move).eq("use 18/skip");
+        expect(click.valid).to.be.true;
+        expect(click.complete).eq(-1); // a skip is not a move until the second power's step follows
+        const shown = g.clone();
+        shown.move(click.move!, { partial: true });
+        const values = barOf(shown).map(b => b.value);
+        expect(values).to.not.include("skip");
+        expect(values).to.include("target_n0.2"); // the attack's targets
+        const target = g.handleClick(click.move!, -1, -1, "_btn_target_n0.2");
+        expect(target.move).eq("use 18/skip/with m0.2 shrink n0.2");
+        expect(g.handleClick(target.move!, -1, -1, "_btn_pips_1").move).eq("use 18/skip/with m0.2 shrink n0.2 1");
+    });
+
+    it("applies only the second power, and leaves no trace of the skip", () => {
+        const g = duel("18");
+        g.move("use 18/skip/with m0.2 shrink n0.2 1");
+        expect(g.board.get(0, 0)!.pieces.map(p => p.id())).to.deep.equal(["12E"]); // the minion didn't move
+        expect(g.board.get(1, 0)!.pieces.map(p => p.id())).to.deep.equal(["21W"]); // the enemy shrank from 2 to 1
+        expect(g.results.some(r => r.type === "_group")).to.be.false;
+    });
+
+    it("also applies to the card a World borrows and the card a Fool reveals", () => {
+        // The World borrowing the Moon: `as 18` names the card, and a skip leads the borrowed card's own steps.
+        const world = testGame({
+            board: [{ x: 0, y: 0, uid: "21", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 2, "W"]] }, { x: -1, y: 0, uid: "18" }],
+            hands: [filler, filler],
+        });
+        const borrowed = "use 21 as 18";
+        const shown = world.clone();
+        shown.move(borrowed, { partial: true });
+        const values = barOf(shown).map(b => b.value);
+        expect(values.indexOf("skip")).eq(values.indexOf("declare") - 1);
+        expect(world.handleClick(borrowed, -1, -1, "_btn_skip").move).eq(`${borrowed}/skip`);
+        world.move(`${borrowed}/skip/with m0.2 shrink n0.2 1`);
+        expect(world.board.get(1, 0)!.pieces.map(p => p.id())).to.deep.equal(["21W"]);
+        expect(world.board.get(0, 0)!.pieces.map(p => p.id())).to.deep.equal(["12E"]); // the Moon's move was skipped
+
+        // The Fool revealing the Moon: Skip Power sits in the owed bar, ahead of Declare and Decline.
+        const fool = testGame({
+            board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 2, "W"]] }, { x: -1, y: 0, uid: "2D" }],
+            hands: [filler, filler],
+            drawPile: ["18", "3C", "4C"],
+        });
+        fool.move("use 00");
+        const owed = barOf(fool).map(b => b.value);
+        expect(owed.indexOf("skip")).to.be.greaterThan(-1);
+        expect(owed.indexOf("skip")).to.be.lessThan(owed.indexOf("declare"));
+        const click = fool.handleClick("", -1, -1, "_btn_skip");
+        expect(click.move).eq("play 18 via 00/skip");
+        const after = fool.clone();
+        after.move(click.move!, { partial: true });
+        expect(barOf(after).map(b => b.value)).to.not.include("skip");
+        expect(fool.validateMove("play 18 via 00/skip/with m0.2 shrink n0.2 1").complete).eq(1);
+    });
+
+    it("is rejected where there is nothing to skip to, and ignored where the button isn't offered", () => {
+        const chariot = duel("07");
+        const bad = chariot.validateMove("use 07/skip/with m0.2 move m0.2 1");
+        expect(bad.valid).to.be.false;
+        expect(bad.message).eq(i18next.t("apgames:validation.gnostica.SKIP_NOT_ALLOWED"));
+        expect(chariot.handleClick("use 07", -1, -1, "_btn_skip").move).eq("use 07");
+        const minor = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
+        expect(minor.validateMove("use AC/skip").valid).to.be.false;
+        // The High Priestess: both rounds are the same power, in a move with no minion, so a skip is refused in a fresh use and a play, and in the round-2 resume.
+        const priestess = testGame({ board: [{ x: 0, y: 0, uid: "02", pieces: [[1, 2, "U"]] }], hands: [["02", ...filler.slice(0, 5)], filler], drawPile: ["AC", "2C", "3C", "4C"] });
+        for (const move of ["use 02/skip", "use 02/skip/discard 2R draw 1", "play 02/skip/discard 2R draw 1"]) {
+            const result = priestess.validateMove(move);
+            expect(result.valid, move).to.be.false;
+            expect(result.message, move).eq(i18next.t("apgames:validation.gnostica.SKIP_NOT_ALLOWED"));
+        }
+        priestess.move("use 02/discard 2R draw 1");
+        expect(priestess.validateMove("discard 3R draw 1 via 02/skip").valid).to.be.false;
+        // A move that only skips is never submittable.
+        const only = duel("18").validateMove("use 18/skip");
+        expect(only.valid).to.be.true;
+        expect(only.complete).eq(-1);
+    });
+});
+
 describe("Gnostica: the Fool's Decline button", () => {
     const owed = () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 1, "U"]] }], hands: [filler, filler], drawPile: ["AC", "2C", "3C"] });
@@ -5628,11 +5736,28 @@ describe("Gnostica: the Fool's Decline button", () => {
             .filter(a => a.type === "buttonBar").flatMap(a => (a.buttons ?? []).map(b => b.value ?? ""));
     };
 
-    it("is offered until a step of the revealed card is entered, then goes away", () => {
+    it("is offered until Play is chosen or a step of the revealed card is entered, then goes away", () => {
         const g = owed();
         expect(valuesWhile(g)).to.include("decline_power");
-        expect(valuesWhile(g, "play AC via 00")).to.include("decline_power"); // nothing of the play entered yet
+        expect(valuesWhile(g, "play AC via 00")).to.not.include("decline_power"); // Play clicked: the choice is made
         expect(valuesWhile(g, "play AC via 00/with m0.1 at m0 create N")).to.not.include("decline_power");
+    });
+
+    it("with minions on several cells, clicking Play turns the Play/Decline pair into the ordinary minion pick, with Skip Power", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[1, 1, "W"]] }, { x: -1, y: 0, uid: "2D", pieces: [[2, 1, "U"]] }],
+            hands: [filler, filler],
+            drawPile: ["18", "3C", "4C"], // the Moon
+        });
+        g.move("use 00");
+        expect(valuesWhile(g)).to.deep.equal(["resume_power", "decline_power"]);
+        const click = g.handleClick("", -1, -1, "_btn_resume_power");
+        expect(click.move).eq("play 18 via 00");
+        const shown = g.clone();
+        shown.move(click.move!, { partial: true });
+        const buttons = (shown.render() as { areas?: { type: string; buttons?: { value?: string; fill?: unknown }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+        expect(buttons.map(b => b.value)).to.deep.equal(["play", "_spacer", "skip", "declare"]);
+        expect(isGrey(buttons[0])).to.be.true; // the chosen Play
     });
 
     it("leaves none of the ordinary actions on the bar once it is chosen, just Declare and the greyed Decline", () => {
@@ -5652,6 +5777,37 @@ describe("Gnostica: the Fool's Decline button", () => {
         const decline = buttons.find(b => b.value === "decline_power")!;
         expect(decline).to.not.be.undefined;
         expect(isGrey(decline)).to.be.true;
+    });
+});
+
+describe("Gnostica: a Fool's revealed card plays down the same path as one played from the hand", () => {
+    type Btn = { value?: string; fill?: unknown };
+    const barAt = (g: GnosticaGame, move: string): string[] => {
+        const shown = g.clone();
+        shown.move(move, { partial: true });
+        const out = shown.render();
+        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: Btn[] }[] };
+        return rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => `${b.value}${b.fill !== undefined ? "*" : ""}`).filter(v => v !== "decline_power");
+    };
+    const board = [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] as TestPiece[] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 2, "W"]] as TestPiece[] }, { x: -1, y: 0, uid: "2D" }];
+    const pair = (revealed: string) => {
+        const fool = testGame({ board, hands: [["2R", "3R", "4R", "5D", "6D", "7D"], filler], drawPile: [revealed, "3C", "4C"] });
+        fool.move("use 00");
+        const hand = testGame({ board, hands: [[revealed, "2R", "3R", "4R", "5D", "6D"], filler], drawPile: ["3C", "4C"] });
+        return { fool, hand };
+    };
+
+    it("keeps the chosen Play greyed, with Skip Power and Declare, after a first click-only step (Empress's orient)", () => {
+        const { fool, hand } = pair("03");
+        expect(barAt(fool, "play 03 via 00/orient m0.2")).to.deep.equal(["play*", "skip", "declare"]);
+        expect(barAt(hand, "play 03/orient m0.2")).to.deep.equal(["play*", "skip", "declare"]);
+    });
+
+    it("keeps the chosen Play greyed on a complete move, as a hand play does", () => {
+        const { fool, hand } = pair("AC");
+        const foolBar = barAt(fool, "play AC via 00/with m0.2 at n0 create N");
+        expect(foolBar[0]).eq("play*");
+        expect(foolBar).to.deep.equal(barAt(hand, "play AC/with m0.2 at n0 create N"));
     });
 });
 

@@ -250,8 +250,6 @@ interface IPreview {
     orientPickCell: string | undefined;
     // The revealed card a Fool resume is playing, when the move names one.
     foolCard: string | undefined;
-    // How many segments the move has typed so far, the head included; more than one means a step of the revealed card is already under way.
-    segmentsTyped: number;
     // The resume seed move string, including whatever was typed against the pending obligation.
     pending: IPendingStep | undefined;
 }
@@ -1714,7 +1712,6 @@ export class GnosticaGame extends GameBaseSequenced {
             discardNeedsCount: head === "discard" && step0?.amount === undefined,
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
-            segmentsTyped: parsed.steps.length,
             pending: this.parsePendingStep(this.continued.length > 0 ? seed : parsed).advanced,
         };
     }
@@ -1997,22 +1994,37 @@ export class GnosticaGame extends GameBaseSequenced {
         return found;
     }
 
+    // Whether the power just started could be given up for the card's second one: a major card's first power still pending, whether the card was used, played, borrowed by the World or revealed by the Fool.
+    private canSkipPending(pending: IPendingStep | undefined): boolean {
+        return pending !== undefined && pending.priorSteps.length === 0 && MAJOR_ARCANA[pending.activeCardUid] !== undefined
+            && GnosticaGame.canSkipFirstPower(MAJOR_ARCANA[pending.activeCardUid]);
+    }
+
+    // Slots a "Skip Power" button in just before Declare whenever the first power of a card with a different second one is pending; a bar without Declare (the bare Play/Decline pair) is left alone.
+    private withSkipPower(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        const at = bar?.findIndex(b => b.value === "declare") ?? -1;
+        if (bar === undefined || at < 0 || !this.canSkipPending(this.computePendingMinor())) {
+            return bar;
+        }
+        return [...bar.slice(0, at), { label: "Skip Power", value: "skip" }, ...bar.slice(at)] as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
     // Wraps computeActionButtons() to unconditionally fold a persisting "Decline X" into the bar, since a pending obligation's card can always be declined.
     private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const bar = this.computeActionButtons();
+        const bar = this.withSkipPower(this.computeActionButtons());
         if (bar === undefined || this.continued.length === 0) {
             return bar;
         }
         // this.continued always names a genuine obligation, so there's nothing further to distinguish here.
         if (bar.some(b => b.value === "decline_power")) {
-            // Fool's own step has nothing else to offer, so computeActionButtons() already returns its explicit Use/Decline pair - nothing to add here.
+            // Fool's own step has nothing else to offer, so computeActionButtons() already returns its explicit Play/Decline pair - nothing to add here.
             return bar;
         }
         // The state as ADVANCED by whatever's been clicked so far this render; `.special === "fool"` means clicks already ran a revealed card's steps.
         const advanced = this.computePendingMinor();
         const justDeclined = this.preview?.head === "decline";
-        // Declining is the alternative to starting the revealed card's play, so once a step of it is typed the choice has been made.
-        if (!justDeclined && (this.preview?.segmentsTyped ?? 0) > 1) {
+        // Declining is the alternative to playing the revealed card, so once Play is clicked or a step of it typed, the choice has been made.
+        if (!justDeclined && this.preview !== undefined) {
             return bar;
         }
         if (advanced?.special === "fool" && !justDeclined) {
@@ -2055,12 +2067,12 @@ export class GnosticaGame extends GameBaseSequenced {
         return suitUid === "R" && piece.orientation === "U" ? { key: "ROD_NEEDS_FACING" } : undefined;
     }
 
-    // The self-contained Use/Decline pair offered whenever a paused power has no button set of its own; reads the active card off the resume stack's top frame.
+    // The self-contained Play/Decline pair offered whenever a paused power has no button set of its own; reads the active card off the resume stack's top frame.
     private pausedPowerButtons(): [ButtonBarButton, ButtonBarButton] {
         const resumeQueue = this.resumeQueue()!;
         const activeUid = resumeQueue[resumeQueue.length - 1].cardUid;
         return [
-            { label: `Use Card ${activeUid}`, value: "resume_power" },
+            { label: `Play Card ${activeUid}`, value: "resume_power" },
             { label: `Decline ${activeUid}`, value: "decline_power" },
         ];
     }
@@ -2103,7 +2115,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const pendingMinor = this.computePendingMinor();
         if (pendingMinor === undefined) {
             // A flip owed and then declined has nothing left to play, and the ordinary actions were never options: only Declare is left, and getActionButtons adds Decline.
-            if (this.continued.length > 0 && this.preview !== undefined) {
+            if (this.continued.length > 0 && this.preview?.head === "decline") {
                 const declare = topLevel.find(b => b.value === "declare");
                 return declare === undefined ? this.pausedPowerButtons() : [declare];
             }
@@ -2135,9 +2147,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (minionPicker !== undefined) {
             return minionPicker;
         }
-        // Still ambiguous but spanning more than one cell ("play"'s board-wide pool): a paused resume gets Use/Decline, anything else only the board click that picks the minion.
+        // Still ambiguous but spanning more than one cell ("play"'s board-wide pool): a paused resume gets Play/Decline, anything else only the board click that picks the minion.
         if (pendingMinor.minionAmbiguous) {
-            if (this.continued.length > 0) {
+            // An owed resume is still the bare Play/Decline pair until Play is clicked; after that it reads like a card played from the hand.
+            if (this.continued.length > 0 && this.preview === undefined) {
                 return this.pausedPowerButtons();
             }
             const collapsed: ButtonBarButton[] = selected !== undefined ? [selected] : [];
@@ -2158,12 +2171,12 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // orientMinion/judgementDraw/worldUseAny are pure click-driven; tradeHands/orientAny/hierophantReplace fall back to click-driven only when unambiguous (see specialTargetPickerBar above).
         if (pendingMinor.special !== undefined && pendingMinor.special !== "hermitTeleport" && pendingMinor.special !== "magicianChoice") {
-            // A fresh root activation of a click-only special power: just the action chosen, since the board click or hand click that continues it is no button.
-            if (this.continued.length === 0) {
+            // A click-only special power whose play has begun (fresh, or a resume once Play is clicked): just the action chosen, since the board or hand click that continues it is no button.
+            if (this.continued.length === 0 || this.preview !== undefined) {
                 const only: ButtonBarButton[] = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
                 return (only.length > 0 ? only : topLevel) as [ButtonBarButton, ...ButtonBarButton[]];
             }
-            // Once genuinely paused, NONE of the ordinary 6 buttons are legal - offer the same self-contained Use/Decline pair the Fool-special branch above does.
+            // A resume not yet begun: none of the ordinary 6 buttons are legal - offer the same self-contained Play/Decline pair the Fool-special branch above does.
             return this.pausedPowerButtons();
         }
 
@@ -2558,6 +2571,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return {};
         }
         if (!card.major) {
+            if (steps[0]?.action === "skip") {
+                return {}; // a minor card has no power to skip; validateMove reports it
+            }
             const suitUid = suitUidOf(card);
             const istep: IStep = steps[0] ?? { action: "with" };
             const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, eligible);
@@ -2593,6 +2609,15 @@ export class GnosticaGame extends GameBaseSequenced {
             const frameDef = this.resolveFrameDef(top.cardUid);
             if (top.nextStepIndex >= frameDef.powers.length) {
                 return { held }; // defensive - popExhaustedFrames keeps this in sync below
+            }
+            if (steps[segIdx].action === "skip") {
+                if (top.nextStepIndex !== 0 || !GnosticaGame.canSkipFirstPower(frameDef)) {
+                    return { held }; // validateMove reports it
+                }
+                priorSteps.push(steps[segIdx]);
+                top.nextStepIndex++;
+                priorTaken = false;
+                continue;
             }
             // A typed step spelled as a later power of the card skips the powers before it (see skipAheadTarget).
             const skipTarget = GnosticaGame.skipAheadTarget(frameDef, top.nextStepIndex, steps[segIdx]);
@@ -3534,6 +3559,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // Declining pops the CURRENT top frame; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
                 return this.pickleMove(this.freshResumeMove(true, ctx.parsed.announceLast));
+            case "skip": {
+                const pending = ctx.pending().advanced;
+                const card = ctx.parsed.steps[0]?.card;
+                if (!this.canSkipPending(pending) || card === undefined) {
+                    return ctx.noop;
+                }
+                return this.pickleMove({ ...ctx.parsed, steps: [ctx.parsed.steps[0], { action: "skip", complete: -1 }] });
+            }
             case "drawn": {
                 // Only ever offered for Wheel of Fortune's special option.
                 const pending = ctx.pending().advanced;
@@ -4229,7 +4262,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Applies a submission's power segments card by card (the head card, a World's borrowed card, a Fool's revealed card) straight off the string, then settles whatever
     // that leaves owed. `uid` undefined means the revealed card was declined. Returns what is still owed, or undefined if it stopped early (a preview's unfinished step or Fool flip).
-    private applyPowers(uid: string | undefined, owed: Owed[], steps: IStep[], asUid: string | undefined, partial: boolean): Owed[] | undefined {
+    private applyPowers(uid: string | undefined, owed: Owed[], allSteps: IStep[], asUid: string | undefined, partial: boolean): Owed[] | undefined {
+        // A skip only names the power left unused; the step that follows it says everything that happens.
+        const steps = allSteps.filter(step => step.action !== "skip");
         const ctx = this.buildPowerContext();
         const chained = steps.length + (asUid !== undefined ? 1 : 0) > 1;
         let counted = 0;
@@ -4458,6 +4493,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Mirrors applyMinorPower's own tolerance exactly - skipping, and an incomplete-so-far step, both validate as "fine, nothing to report yet".
     public validateMinorPower(suitUid: MinorSuitUid, cardUid: string, eligible: IMinionRef[], steps: IStep[]): IValidationResult {
+        if (steps.some(step => step.action === "skip")) {
+            return this.invalid("apgames:validation.gnostica.SKIP_NOT_ALLOWED");
+        }
         if (steps.length === 0) {
             // #49: a use/play must take its one meaningful step, not skip it outright - still valid, still "in progress" (complete: -1), not an error.
             const msg = this.freshStepMessage(cardUid, 0, eligible);
@@ -4566,6 +4604,13 @@ export class GnosticaGame extends GameBaseSequenced {
             return power.primitive === "attack" ? "shrink" : power.primitive;
         }
         return SPECIAL_STEP_ACTIONS[power.special];
+    }
+
+    // Whether a card's first power can be given up for its second, a different one (the move's "skip" segment); same-kind cards gain nothing, since using the second alone is using the first.
+    private static canSkipFirstPower(frameDef: MajorArcanaDef): boolean {
+        const first = GnosticaGame.powerAction(frameDef.powers[0]);
+        const second = frameDef.powers[1] === undefined ? undefined : GnosticaGame.powerAction(frameDef.powers[1]);
+        return first !== undefined && second !== undefined && first !== second;
     }
 
     // Powers are optional, so a card's second power may be used alone: when a typed step is spelled as a LATER power of the frame's card, the powers in
@@ -4698,6 +4743,20 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Popping can expose an already-exhausted buried frame (e.g. World's own spent frame), which a later segment must not be validated against.
                 GnosticaGame.popExhaustedFrames(this, stack);
                 justDeclined = true;
+                continue;
+            }
+            // Only a plain step reads the segment: a World's own frame consumes none, so its borrowed card's first power is what a leading skip means.
+            if (kind === "step" && steps[i]?.action === "skip") {
+                if (top.nextStepIndex !== 0 || !GnosticaGame.canSkipFirstPower(frameDef)) {
+                    return this.invalid("apgames:validation.gnostica.SKIP_NOT_ALLOWED");
+                }
+                i++;
+                top.nextStepIndex++;
+                priorTaken = false;
+                // A skip is only ever legal with the power it skips to following it.
+                if (i >= steps.length) {
+                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: this.cardNameOrUid(top.cardUid) }) };
+                }
                 continue;
             }
             if (kind === "step" && i < steps.length) {
