@@ -437,9 +437,8 @@ export const checkGrowTerritory = (
     if (current === 0) {
         return { key: "NOTHING_TO_GROW" };
     }
-    const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
-    if (!pile.includes(newCardUid)) {
-        return { key: opts.replacementSource === "discard" ? "INVALID_MOVE" : "NOT_IN_HAND", params: { uid: newCardUid } };
+    if (!replacementCards(ctx, opts).includes(newCardUid)) {
+        return missingReplacement(opts, newCardUid);
     }
     const newCard = allCards().find(c => c.uid === newCardUid);
     if (newCard === undefined) {
@@ -455,6 +454,13 @@ export const checkGrowTerritory = (
 
 // The replacement card comes from wherever it is: the hand, or (Tower/Star) the discards.
 const replacementPile = (ctx: PowerContext, uid: string): string[] => ctx.hand.includes(uid) ? ctx.hand : ctx.discardPile;
+
+// Tower/Star may take the replacement from the discards as well as the hand; every other card, from the hand alone.
+export const replacementCards = (ctx: PowerContext, opts: { replacementSource?: "hand" | "discard" }): string[] =>
+    opts.replacementSource === "discard" ? [...ctx.hand, ...ctx.discardPile] : ctx.hand;
+
+const missingReplacement = (opts: { replacementSource?: "hand" | "discard" }, uid: string): PowerFailure =>
+    opts.replacementSource === "discard" ? { key: "INVALID_MOVE", params: { reason: "NOT_IN_HAND_OR_DISCARD", uid } } : { key: "NOT_IN_HAND", params: { uid } };
 
 export const growTerritory = (ctx: PowerContext, targetX: number, targetY: number, newCardUid: string): void => {
     const t = getCellContents(ctx, targetX, targetY);
@@ -549,9 +555,8 @@ export const checkAttackTerritory = (
     if (newCardUid === undefined) {
         return { key: "REPLACEMENT_CARD_REQUIRED" };
     }
-    const pile = opts.replacementSource === "discard" ? ctx.discardPile : ctx.hand;
-    if (!pile.includes(newCardUid)) {
-        return { key: opts.replacementSource === "discard" ? "INVALID_MOVE" : "NOT_IN_HAND", params: { uid: newCardUid } };
+    if (!replacementCards(ctx, opts).includes(newCardUid)) {
+        return missingReplacement(opts, newCardUid);
     }
     const newCard = allCards().find(c => c.uid === newCardUid);
     if (newCard === undefined) {

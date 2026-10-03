@@ -1054,6 +1054,28 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             hands: [ownHand, filler],
         });
 
+        it("offers no attack amount past the victim's own pips (a 2-pip minion's 4 and 3 against a 2-pip victim are just 2)", () => {
+            const g = setup(2, "3C", [[2, 2, "U"]]);
+            g.move("use 13/with m0.2 shrink n0.2", { partial: true });
+            const rep = g.render() as { areas?: { type: string; buttons?: { label?: string }[] }[] };
+            const labels = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.label).filter(l => l?.startsWith("Attack for"));
+            expect(labels).to.deep.equal(["Attack for 2", "Attack for 1"]);
+        });
+
+        it("crosses out (rather than hides) an attack amount whose leftover piece the victim's owner has no stash for", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "13", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "3C", pieces: [[2, 2, "U"]] }],
+                hands: [filler, filler],
+                stashes: { 2: [0, 5, 5] }, // no small pyramids left, so a 2-pip piece can't be shrunk to 1
+            });
+            g.move("use 13/with m0.2 shrink n0.2", { partial: true });
+            type Btn = { label?: string; attributes?: { name: string; value: string }[] };
+            const rep = g.render() as { areas?: { type: string; buttons?: Btn[] }[] };
+            const attacks = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.filter(b => b.label?.startsWith("Attack for"));
+            const crossed = (b: Btn) => b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through") === true;
+            expect(attacks.map(b => [b.label, crossed(b)])).to.deep.equal([["Attack for 2", false], ["Attack for 1", true]]);
+        });
+
         it("a piece shrink's total acts across its whole range: 3->1 (size-1 minion, capped at 2), 2->0 and 3->0 (destroyed), and a total above what's there wipes out (4 acts as 3)", () => {
             const a = setup(1, "3C", [[2, 3, "U"]]);
             expect(a.validateMove("use 13/with m0.1 shrink n0.3 3").valid).to.be.false; // 3 > 2 x 1
@@ -1450,8 +1472,8 @@ describe("Gnostica: render", () => {
     // that row's true algebraic notation, for every cell in the row.
     it("labels every row with its true algebraic row number, mirrored per the renderer's convention", () => {
         const g = new GnosticaGame(2);
-        const rep = g.render() as { board: { rowLabels: string[]; width: number }; pieces: string };
-        const pieceRows = rep.pieces.split("\n");
+        const rep = g.render() as { board: { rowLabels: string[]; width: number }; pieces: string[][][] };
+        const pieceRows = rep.pieces;
         const n = pieceRows.length;
         expect(rep.board.rowLabels.length).eq(n);
         // The board's own minY is the absolute y of pieceRows[0] (top row,
@@ -1478,15 +1500,85 @@ describe("Gnostica: render", () => {
             new Piece(2, 2, "U"), new Piece(1, 3, "U"),
         ];
         type CellGlyph = { name?: string; nudge?: { dx: number; dy: number } };
-        const rep = g.render() as { legend: Record<string, CellGlyph | CellGlyph[]> };
-        // Not every legend entry is array-shaped (e.g. hand_UNKNOWN is a
-        // single bare Glyph) - only scan the ones that are.
-        const entry = Object.values(rep.legend)
-            .filter((glyphs): glyphs is CellGlyph[] => Array.isArray(glyphs))
-            .find(glyphs => glyphs.filter(gl => gl.name?.startsWith("pyramid-")).length === t.pieces.length);
-        expect(entry, "expected a legend entry with 5 pyramid glyphs").to.not.be.undefined;
-        const coords = entry!.filter(gl => gl.name?.startsWith("pyramid-")).map(gl => `${gl.nudge!.dx},${gl.nudge!.dy}`);
+        const rep = g.render() as { legend: Record<string, CellGlyph | CellGlyph[]>; pieces: string[][][] };
+        // The board's own minY is pieceRows[0]'s y; render() pads by 1 cell.
+        const keys = rep.pieces[0 - (g.board.minY - 1)][0 - (g.board.minX - 1)];
+        expect(keys.length).eq(t.pieces.length);
+        const coords = keys.map(key => {
+            const nudge = (rep.legend[key] as CellGlyph[]).find(gl => gl.name?.startsWith("pyramid-"))!.nudge!;
+            return `${nudge.dx},${nudge.dy}`;
+        });
         expect(new Set(coords).size, "every piece should have a distinct nudge").eq(coords.length);
+    });
+
+    describe("minion ring", () => {
+        type RingRep = { legend: Record<string, { name?: string }[]>; pieces: string[][][] };
+        const ringKeys = (g: GnosticaGame): string[] => (g.render() as unknown as RingRep).pieces.flat(2).filter(k => k.startsWith("ring_"));
+        const duo = () => testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"], [1, 2, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+
+        it("rings every candidate while it is still unclear which minion is meant", () => {
+            const g = duo();
+            g.move("use AC", { partial: true });
+            expect(ringKeys(g).length).eq(2);
+        });
+
+        it("rings just the chosen minion, listed under its pyramid", () => {
+            const g = duo();
+            g.move("use AC/with m0.2", { partial: true });
+            const rep = g.render() as unknown as RingRep;
+            const keys = ringKeys(g);
+            expect(keys.length).eq(1);
+            expect(rep.legend[keys[0]].some(gl => gl.name === "piece-dashed")).to.be.true;
+            const cell = rep.pieces.flat().find(c => c.includes(keys[0]))!;
+            expect(cell.indexOf(keys[0])).eq(cell.length - 2); // the pyramid's own key follows it
+        });
+
+        it("rings the target piece too, solid against the minion's dashed ring, once one is picked", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 2, "W"]] }],
+                hands: [filler, filler],
+            });
+            g.move("use AS/with m0.2 shrink n0.2", { partial: true });
+            const rep = g.render() as unknown as { legend: Record<string, { name?: string; colour?: unknown }[]>; pieces: string[][][] };
+            const keys = rep.pieces.flat(2).filter(k => k.startsWith("ring_"));
+            expect(keys.map(k => k.split("_")[1]).sort()).to.deep.equal(["minion", "target"]);
+            const target = keys.find(k => k.startsWith("ring_target_"))!;
+            expect(rep.legend[target].some(gl => gl.name === "piece")).to.be.true;
+            expect(rep.legend[keys.find(k => k.startsWith("ring_minion_"))!].some(gl => gl.name === "piece-dashed")).to.be.true;
+            expect(rep.pieces.flat().find(c => c.includes(target))!.length).eq(2); // listed with its own pyramid
+        });
+
+        it("keeps the ring on a finished move's target, read back from its results", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 3, "W"]] }],
+                hands: [filler, filler],
+            });
+            g.move("use AS/with m0.2 shrink n0.3 1");
+            expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 2 }); // shrunk, not destroyed
+            const rep = g.render() as unknown as { pieces: string[][][] };
+            const keys = rep.pieces.flat(2).filter(k => k.startsWith("ring_"));
+            expect(keys.length).eq(1);
+            expect(keys[0].startsWith("ring_target_")).to.be.true;
+        });
+
+        it("rings a Rods move's minion as well as the piece it moved, once the move is finished", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }, { x: 2, y: 0, uid: "AC" }],
+                hands: [filler, filler],
+            });
+            g.move("use AR/with m0.1 move n0.1 1");
+            expect(g.board.get(2, 0)!.pieces.length).eq(1); // the enemy piece landed on o0
+            const rep = g.render() as unknown as { pieces: string[][][] };
+            const keys = rep.pieces.flat(2).filter(k => k.startsWith("ring_"));
+            expect(keys.map(k => k.split("_")[1]).sort()).to.deep.equal(["minion", "target"]);
+        });
+
+        it("shows no ring without a move in progress", () => {
+            expect(ringKeys(duo())).to.deep.equal([]);
+        });
     });
 
     // Void cells are never individually clickable in the grid - a
@@ -1496,9 +1588,9 @@ describe("Gnostica: render", () => {
     // the earlier "expand the void" approach.
     it("never renders a void cell as a clickable target, even once a piece is on the wasteland next to it", () => {
         const g = new GnosticaGame(2);
-        const before = g.render() as { pieces: string };
-        expect(before.pieces).to.include("-"); // no pieces anywhere yet - every void cell is bare
-        expect(before.pieces).to.not.include("k_void_");
+        const before = g.render() as { pieces: string[][][]; legend: Record<string, unknown> };
+        expect(before.pieces.flat().every(cell => cell.length === 0)).to.be.true; // no pieces anywhere yet - every void cell is bare
+        expect(Object.keys(before.legend).filter(k => k.includes("void"))).to.deep.equal([]);
 
         // (2,1) is wasteland (adjacent to the initial 3x3's corner at
         // (1,1)); its own east neighbour (3,1) is void.
@@ -1506,8 +1598,9 @@ describe("Gnostica: render", () => {
         expect(g.board.classify(3, 1)).eq("void");
         g.board.store.set(2, 1, new CellContents(undefined, [new Piece(1, 1, "U")]));
 
-        const after = g.render() as { pieces: string };
-        expect(after.pieces).to.not.include("k_void_");
+        const after = g.render() as { pieces: string[][][]; legend: Record<string, unknown> };
+        expect(after.pieces.flat().filter(cell => cell.length > 0).length).eq(1);
+        expect(Object.keys(after.legend).filter(k => k.includes("void"))).to.deep.equal([]);
     });
 
     it("shows a buffer on the single board edge a wasteland minion sits on, once it starts reorienting", () => {
@@ -1615,9 +1708,68 @@ describe("Gnostica: double-letter coordinates (full move pipeline)", () => {
         expect(target.pieces.length).eq(2); // player 2's placed piece, plus player 1's new one
         expect(target.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "U" });
 
-        const rep = g.render() as { board: { columnLabels: string[] }; pieces: string };
+        const rep = g.render() as { board: { columnLabels: string[] }; pieces: string[][][] };
         expect(rep.board.columnLabels).to.include.members(["aa", "ab"]);
-        expect(rep.pieces).to.be.a("string"); // rendered without throwing
+        expect(rep.pieces).to.be.an("array"); // rendered without throwing
+    });
+});
+
+describe("Gnostica: Judgement's draw from the discards", () => {
+    const judgement = (hand: string[], discardPile: string[], size: 1 | 2 | 3 = 2) => testGame({
+        board: [{ x: 0, y: 0, uid: "20", pieces: [[1, size, "U"]] }],
+        hands: [hand, filler],
+        discardPile,
+    });
+
+    it("stays open for a second card after the first rather than ending the turn", () => {
+        const g = judgement(["2R", "3R", "4R", "5D"], ["AC", "2C", "3C"]); // a 2-pip minion, room for 2 in the hand
+        const one = g.validateMove("use 20/with m0.2 draw AC");
+        expect(one.valid).to.be.true;
+        expect(one.complete).eq(0);
+        expect(g.validateMove("use 20/with m0.2 draw AC 2C").complete).eq(1);
+    });
+
+    it("completes at once when nothing more can be drawn: the hand is full, or the discard pile has no other card", () => {
+        expect(judgement(["2R", "3R", "4R", "5D", "6D"], ["AC", "2C"]).validateMove("use 20/with m0.2 draw AC").complete).eq(1); // room for only 1
+        expect(judgement(["2R", "3R", "4R", "5D"], ["AC"]).validateMove("use 20/with m0.2 draw AC").complete).eq(1); // nothing else to take
+        expect(judgement(["2R", "3R", "4R", "5D"], ["AC", "2C"], 1).validateMove("use 20/with m0.1 draw AC").complete).eq(1); // a 1-pip minion
+    });
+
+    it("answers a discard-pile click that nothing is waiting for with the ignored-click message, not the default handler's", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler], discardPile: ["2C"] });
+        const click = g.handleClick("", -1, -1, "discard_C_spot");
+        expect(click.valid).to.be.false;
+        expect(click.message).eq(i18next.t("apgames:validation.gnostica.CLICK_HAS_NO_EFFECT"));
+        expect(click.message).to.not.eq(i18next.t("apgames:validation._general.DEFAULT_HANDLER"));
+    });
+});
+
+describe("Gnostica: Tower and Star take their replacement card from the hand or the discards", () => {
+    // Star (grow): a 2-pip minion facing a 2 of Cups (worth 1), so a court card (worth 2) is the replacement.
+    const star = () => testGame({
+        board: [{ x: 0, y: 0, uid: "17", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "2C" }],
+        hands: [["2R", "3R", "4R", "KR"], filler],
+        discardPile: ["3D", "KD", "AC"],
+    });
+
+    it("accepts a card from either place, and rejects one in neither with a real message", () => {
+        const g = star();
+        expect(g.validateMove("use 17/with m0.2 grow n0 to KR").valid).to.be.true; // hand
+        expect(g.validateMove("use 17/with m0.2 grow n0 to KD").valid).to.be.true; // discards
+        const neither = g.validateMove("use 17/with m0.2 grow n0 to KS");
+        expect(neither.valid).to.be.false;
+        expect((neither as { message?: string }).message).to.not.include("{{");
+        g.move("use 17/with m0.2 grow n0 to KR");
+        expect(g.board.get(1, 0)!.cardUid).eq("KR");
+        expect(g.discardPile).to.include("2C");
+    });
+
+    it("lets a click on the discard pile supply the card, as a click on a hand card does", () => {
+        const g = star();
+        const fromDiscard = g.handleClick("use 17/with m0.2 grow n0", -1, -1, "discard_D_royal");
+        expect(fromDiscard.move).eq("use 17/with m0.2 grow n0 to KD");
+        expect(fromDiscard.valid).to.be.true;
+        expect(g.handleClick("use 17/with m0.2 grow n0", -1, -1, "hand_KR").move).eq("use 17/with m0.2 grow n0 to KR");
     });
 });
 
@@ -2610,13 +2762,14 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             g.move(drawn, { partial: true });
             expect(g.drawPile).to.deep.equal(["03", "KS"]);
             expect(g.discardPile).to.deep.equal(["AC"]);
-            const rep = g.render() as unknown as { legend: Record<string, unknown>; pieces: string };
+            const rep = g.render() as unknown as { legend: Record<string, unknown>; pieces: string[][][]; board: { markers: { type: string; glyph?: string; points: { row: number; col: number }[] }[] } };
             expect(g.board.get(1, 0)!.cardUid).eq("??");
-            const row = rep.pieces.split("\n")[1].split(",");
-            expect(row.length).eq(4); // the window widened to take in the unrevealed territory
-            expect(row.some(key => key.includes("03"))).to.be.false;
-            expect(row.some(key => key.startsWith("k_??_"))).to.be.true;
-            expect(rep.legend[row.find(key => key.startsWith("k_??_"))!]).to.deep.equal([rep.legend.hand_UNKNOWN]);
+            expect(rep.pieces[1].length).eq(4); // the window widened to take in the unrevealed territory
+            const marker = rep.board.markers.find(m => m.type === "glyph" && m.glyph === "c??")!;
+            expect(marker.points).to.deep.equal([{ row: 1, col: 2 }]);
+            const names = (stack: unknown) => ([] as { name: string }[]).concat(stack as { name: string }).map(g => g.name);
+            expect(names(rep.legend["c??"])).to.include.members(names(rep.legend.hand_UNKNOWN)); // the shared gray face
+            expect(rep.legend).to.not.have.property("c03"); // the drawn card is not on the board
         });
 
         it("committing it draws the top card, logs it, and leaves nothing unrevealed behind", () => {

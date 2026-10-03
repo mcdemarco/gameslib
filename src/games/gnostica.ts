@@ -2,15 +2,15 @@ import { IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IVa
 import { GameBaseSequenced } from "./_turn-sequenced";
 import type { IGamePly } from "./_turn-model";
 import { APGamesInformation } from "../schemas/gameinfo";
-import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import type { ColourResolvable, Colourfuncs } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults";
 import { Direction, replacer, reviver, shuffle, UserFacingError } from "../common";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board";
 import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot";
-import { GnosticaBoard, CellClass } from "./gnostica/board";
+import { GnosticaBoard } from "./gnostica/board";
 import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell";
-import { Piece, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece";
+import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece";
 import {
     Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
     createOwn, createEnemy, createTerritory,
@@ -70,6 +70,15 @@ const UNKNOWN_CARD_GLYPH: Glyph = {
     },
 };
 
+// A glyph marker is drawn at the full size of its cell, while the renderer draws glyphs in the pieces layer at about this fraction of it (measured in the playground).
+const MARKER_SCALE = 0.85;
+
+// How far below its glyph's centre each flat pyramid's centroid lies, small to large, in the renderer's 500-unit glyph space (its triangles' centroids against a 180-unit viewbox).
+const FLAT_PYRAMID_CENTROID_DROP = [46.3, 63.7, 81];
+
+// How large the dashed ring around a highlighted pyramid is, against the pyramid's own slot scale.
+const RING_SCALE = 1;
+
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 
 export type playerid = 1|2|3|4|5|6;
@@ -106,6 +115,8 @@ export interface IStepOutcome {
     forcePause?: boolean;
     // This step's tokens still carry a trailing "?" (Cups "own" creation's mandatory facing) - read by validateMinorPower/validateFrameStack as complete:0.
     softComplete?: boolean;
+    // Judgement: how many more discards this draw could still take; the move is submittable as it stands but not yet complete.
+    mayDrawMore?: number;
     // Rods "piece" mode's own landing cell, regardless of the moved piece's owner (newMinion is only set for the acting player's own) - Moon's own capacity-restoration check reads this.
     movedToCell?: { x: number; y: number };
     // Swords "piece" mode's own cell, set only when the target was fully destroyed (not just shrunk in place) - Moon's own capacity-restoration check reads this too.
@@ -2388,8 +2399,16 @@ export class GnosticaGame extends GameBaseSequenced {
             if (suitUid === "S" && stepMinorMode("S", pendingMinor.istep) === "piece") {
                 const minionPiece = pendingMinor.minion.piece ?? this.board.get(pendingMinor.minion.x, pendingMinor.minion.y)!.pieces[pendingMinor.minion.index];
                 const pipsOptions: ChoiceOption[] = [];
-                for (let n = minionPiece.size * (pendingMinor.opts.bothSwords === true ? 2 : 1); n >= 1; n--) {
-                    pipsOptions.push({ value: String(n), label: `Attack for ${n}` });
+                // Anything past the victim's own pips is the same wipeout (or, with one sword, rejected), so it isn't offered.
+                const target = pendingMinor.game.resolvePieceRef(pendingMinor.istep.targetPiece);
+                const victim = target.kind === "ok" ? target.ref.piece ?? pendingMinor.game.board.get(target.ref.x, target.ref.y)?.pieces[target.ref.index] : undefined;
+                const maxPips = Math.min(minionPiece.size * (pendingMinor.opts.bothSwords === true ? 2 : 1), victim?.size ?? Infinity);
+                const ctx = pendingMinor.game.buildPowerContext();
+                for (let n = maxPips; n >= 1; n--) {
+                    // The shrunken piece comes out of its owner's stash, so an empty size there crosses the amount out (the same reason validation gives).
+                    const left = victim === undefined ? 0 : victim.size - n;
+                    const stashEmpty = victim !== undefined && left > 0 && !hasStashAvailable(ctx, victim.owner, left as Pips);
+                    pipsOptions.push({ value: String(n), label: `Attack for ${n}`, disabledReason: stashEmpty ? { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: left } } : undefined });
                 }
                 buttons.push(...this.buildChoiceButtons("pips", pipsOptions, pendingMinor.istep.amount?.toString()));
             }
@@ -2777,7 +2796,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         result.set(mode, { key: "NOTHING_TO_GROW" });
                         break;
                     }
-                    const pile = pending.opts.replacementSource === "discard" ? this.discardPile : hand;
+                    const pile = pending.opts.replacementSource === "discard" ? [...hand, ...this.discardPile] : hand;
                     const maxDelta = pending.opts.skipLadder === true ? 2 : 1;
                     let ok = false;
                     for (let d = 1; d <= maxDelta; d++) {
@@ -2794,7 +2813,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         result.set(mode, { key: "NOTHING_TO_ATTACK" });
                         break;
                     }
-                    const pile = pending.opts.replacementSource === "discard" ? this.discardPile : hand;
+                    const pile = pending.opts.replacementSource === "discard" ? [...hand, ...this.discardPile] : hand;
                     let ok = false;
                     for (let p = 1; p <= minion.size * (pending.opts.bothSwords === true ? 2 : 1); p++) {
                         const resultValue = current - p;
@@ -3275,7 +3294,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const ctx: IClickContext = {
             move, parsed, row, col, piece,
             last: parsed.announceLast ? " last" : "",
-            noop: { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") },
+            noop: { move, valid: false, message: i18next.t("apgames:validation.gnostica.CLICK_HAS_NO_EFFECT") },
             pending: () => views ??= this.parsePendingStep(parsed),
         };
         if (piece !== undefined && piece.startsWith("_btn_")) {
@@ -3416,7 +3435,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private clickActionButton(ctx: IClickContext, value: string): string | IClickResult {
-        const { move, last } = ctx;
+        const { last } = ctx;
         switch (value) {
             case "pass":
                 // A genuine pass - explicitly zero discards AND zero draw; a bare "discard" seed defaults its omitted "draw <n>" to the max, so it isn't equivalent.
@@ -3464,7 +3483,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return pending.game.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: pending.game.board.get(tx, ty)?.pointValue() ?? 0 });
             }
             default:
-                return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+                return ctx.noop;
         }
     }
 
@@ -3513,7 +3532,12 @@ export class GnosticaGame extends GameBaseSequenced {
     private clickDiscardPile(ctx: IClickContext, key: string): string | IClickResult {
         const pendingForDiscard = ctx.pending().current;
         if (pendingForDiscard?.special !== "judgementDraw") {
-            return ctx.noop;
+            // Tower/Star: a discard may be the replacement card, in place of one from the hand.
+            if (pendingForDiscard?.opts.replacementSource !== "discard") {
+                return ctx.noop;
+            }
+            const uid = /^\d{2}$/.test(key) ? this.discardPile.find(u => u === key) : this.pickFromDiscardBucket(key, []);
+            return uid === undefined ? ctx.noop : pendingForDiscard.game.supplyStepCardUid(pendingForDiscard, uid) ?? ctx.noop;
         }
         const game = pendingForDiscard.game;
         const minionRef = game.pieceRefStr(pendingForDiscard.minion, pendingForDiscard.minions);
@@ -3535,14 +3559,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return rebuildDiscard([...selected, key]);
         }
 
-        const [bucketSuit, bucketCategory] = key.split("_");
-        const matchesBucket = (uid: string): boolean => {
-            const card = allCards().find(c => c.uid === uid);
-            if (card === undefined || card.major) {
-                return false;
-            }
-            return card.suit.uid === bucketSuit && (card.court ? "royal" : "spot") === bucketCategory;
-        };
+        const matchesBucket = (uid: string): boolean => this.inDiscardBucket(uid, key);
         const alreadyFromBucket = selected.filter(matchesBucket);
         if (alreadyFromBucket.length > 0) {
             const last = alreadyFromBucket[alreadyFromBucket.length - 1];
@@ -3552,12 +3569,27 @@ export class GnosticaGame extends GameBaseSequenced {
         if (selected.length >= maxDraw) {
             return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: selected.length + 1 }) };
         }
-        const candidates = this.discardPile.filter(uid => matchesBucket(uid) && !selected.includes(uid));
-        if (candidates.length === 0) {
+        const picked = this.pickFromDiscardBucket(key, selected);
+        if (picked === undefined) {
             return { move: game.describePendingMove(pendingForDiscard, pendingForDiscard.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD" }) };
         }
-        const picked = candidates[Math.floor(Math.random() * candidates.length)];
         return rebuildDiscard([...selected, picked]);
+    }
+
+    // A minor card's identity is hidden in the discard pile's display, shown by "<suit>_<spot|royal>" bucket.
+    private inDiscardBucket(uid: string, key: string): boolean {
+        const [bucketSuit, bucketCategory] = key.split("_");
+        const card = allCards().find(c => c.uid === uid);
+        if (card === undefined || card.major) {
+            return false;
+        }
+        return card.suit.uid === bucketSuit && (card.court ? "royal" : "spot") === bucketCategory;
+    }
+
+    // A uniformly random discard from the clicked bucket that isn't already taken.
+    private pickFromDiscardBucket(key: string, taken: string[]): string | undefined {
+        const candidates = this.discardPile.filter(uid => this.inDiscardBucket(uid, key) && !taken.includes(uid));
+        return candidates.length === 0 ? undefined : candidates[Math.floor(Math.random() * candidates.length)];
     }
 
     private clickBoard(ctx: IClickContext): string | IClickResult {
@@ -3719,7 +3751,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return ["redraw", ...picks].join(" ");
         }
-        return { move, valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER") };
+        return { move, valid: false, message: i18next.t("apgames:validation.gnostica.CLICK_HAS_NO_EFFECT") };
     }
 
 
@@ -4543,6 +4575,8 @@ export class GnosticaGame extends GameBaseSequenced {
         let hpDrawNotChosen = false;
         // True right after a step whose outcome is still soft (Cups "own" creation's still-prepopulated facing) - same "last step wins" convention as hpDrawNotChosen.
         let softComplete = false;
+        // How many more discards a Judgement draw step could still take, when the last step was one; same "last step wins" convention.
+        let mayDrawMore = 0;
         // Set once Moon's own move step genuinely needed its capacity exemption (destination was already at 3); cleared once the attack step destroys a piece there, restoring it.
         let moonRestoreCell: { x: number; y: number } | undefined;
         // Set when the last step was only legal thanks to a two-step shortcut's waiver, which its (missing) paired second step would have earned.
@@ -4567,6 +4601,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 if (softComplete) {
                     return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT") };
+                }
+                if (mayDrawMore > 0) {
+                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_DRAW_MORE", { remaining: mayDrawMore }) };
                 }
                 if (hpFinalRoundReady !== undefined) {
                     return { valid: true, complete: 1, message: i18next.t(hpFinalRoundReady.key, hpFinalRoundReady.params) };
@@ -4735,6 +4772,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             hpDrawNotChosen = "special" in step && step.special === "highPriestess" && istep?.amount === undefined;
             softComplete = outcome.softComplete === true;
+            mayDrawMore = outcome.mayDrawMore ?? 0;
             if (outcome.pushFrame !== undefined) {
                 stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions, viaFool: outcome.pushFrame.viaFool === true });
             }
@@ -4834,10 +4872,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.applyHermitStep(istep);
             case "trade":
                 return this.applyTradeHands(istep);
-            default: // draw (Judgement)
+            default: { // draw (Judgement)
+                const acting = minion();
+                const room = Math.min((acting.piece ?? this.board.get(acting.x, acting.y)!.pieces[acting.index]).size, Math.max(0, 6 - this.hands[this.currplayer - 1].length)) - (istep.cardList?.length ?? 0);
                 this.applyJudgementDraw(istep);
                 // A real (if empty) outcome, is not marked undefined.
-                return {};
+                return room > 0 && this.discardPile.length > 0 ? { mayDrawMore: room } : {};
+            }
         }
     }
 
@@ -5120,7 +5161,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Captured before the move mutates the board, to compute where the piece ends up for the log and minion-chaining check.
                 const movedOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
                 const actor = minion();
-                const facing = (actor.piece ?? this.board.get(actor.x, actor.y)!.pieces[actor.index]).orientation;
+                const actorPiece = actor.piece ?? this.board.get(actor.x, actor.y)!.pieces[actor.index];
+                const facing = actorPiece.orientation;
+                // Named only when it stays put, so the render can ring it; a minion that moves itself is the moved piece.
+                const by = actor.x === target.x && actor.y === target.y && actor.index === target.index ? undefined : this.pieceIdAt(actor.x, actor.y, actorPiece);
                 const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
                 const destX = target.x + dx * dist;
                 const destY = target.y + dy * dist;
@@ -5134,7 +5178,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
                 }
                 const dest = GnosticaBoard.coords2algebraic(destX, destY);
-                this.results.push({ type: "move", from: origin, to: dest, what: this.getPipsFromRef(targetRef), how: "rod-piece", who: movedOwner });
+                this.results.push({ type: "move", by, from: origin, to: dest, what: this.getPipsFromRef(targetRef), how: "rod-piece", who: movedOwner });
                 if (movedOwner === this.currplayer) {
                     const landed = this.board.get(destX, destY)!.pieces;
                     const newIndex = landed.length - 1;
@@ -5148,11 +5192,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 const dist = step.amount!;
                 const [srcX, srcY] = GnosticaBoard.algebraic2coords(cellStr);
                 const actor = minion();
-                const facing = (actor.piece ?? this.board.get(actor.x, actor.y)!.pieces[actor.index]).orientation;
-                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
+                const actorPiece = actor.piece ?? this.board.get(actor.x, actor.y)!.pieces[actor.index];
+                const [dx, dy] = this.board.delta(actorPiece.orientation as Exclude<Orientation, "U">);
                 moveTerritory(ctx, actor.x, actor.y, actor.index, srcX, srcY, dist);
                 const to = GnosticaBoard.coords2algebraic(srcX + dx * dist, srcY + dy * dist);
-                this.results.push({ type: "move", from: cellStr, to, how: "rod-tile" });
+                this.results.push({ type: "move", by: this.pieceIdAt(actor.x, actor.y, actorPiece), from: cellStr, to, how: "rod-tile" });
                 return {};
             }
         }
@@ -5698,36 +5742,9 @@ export class GnosticaGame extends GameBaseSequenced {
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
         legend.hand_UNKNOWN = UNKNOWN_CARD_GLYPH;
                 
-        const pieceRows: string[] = [];
-        const markers: MarkerOutline[] = [];
-        for (let y = minY; y <= maxY; y++) {
-            const rowCells: string[] = [];
-            for (let x = minX; x <= maxX; x++) {
-                const cls = this.board.classify(x, y);
-                if (cls === "void") {
-                    rowCells.push("-");
-                    continue;
-                }
-                const t = this.board.get(x, y);
-                const key = this.cellRenderKey(t, cls);
-                if (!(key in legend)) {
-                    let owner = 0;
-                    const players = t?.card !== undefined ? t.playersPresent() : undefined;
-                    
-                    if (players !== undefined && players.size === 1) {
-                        [owner] = players;
-                        markers.push({
-                            type: "outline",
-                            colour: owner,
-                            points: [{row: y - minY, col: x - minX}],
-                        });
-                    }
-                    legend[key] = this.buildCellGlyph(t, cls, largerCards, owner);
-                }
-                rowCells.push(key);
-            }
-            pieceRows.push(rowCells.join(","));
-        }
+        // A 2+-step major-arcana chain wraps each step's results into a _group entry - flatten one level so annotations and rings still cover every step's effect.
+        const flatResults = this.results.flatMap(r => r.type === "_group" ? r.results : [r]);
+        const { pieceRows, markers } = this.buildBoardLayers(this.board, { minX, maxX, minY, maxY }, largerCards, legend, new Map([...this.ringsFromResults(flatResults, this.board), ...this.pieceRings()]));
 
         const columnLabels: string[] = [];
         for (let x = minX; x <= maxX; x++) {
@@ -5875,8 +5892,12 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const rep: APRenderRep = {
+            renderer: "stacking-offset",
+            // A click on a pyramid reports its stack index, which handleClick would take for a legend piece; cells are what we want clicked.
+            options: ["no-piece-click"],
             board: {
                 style: "squares",
+                stackOffset: 0,
                 width,
                 height,
                 columnLabels,
@@ -5896,13 +5917,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 markers,
             },
             legend,
-            pieces: pieceRows.join("\n"),
+            pieces: pieceRows as [string[][], ...string[][][]],
             areas: areas.length > 0 ? areas : undefined,
         };
 
         const annotations: NonNullable<APRenderRep["annotations"]> = [];
-        // A 2+-step major-arcana chain wraps each step's results into a _group entry - flatten one level so annotations still cover every step's effect.
-        const flatResults = this.results.flatMap(r => r.type === "_group" ? r.results : [r]);
         for (const r of flatResults) {
             if (r.type === "place" && r.where !== undefined) {
                 const [x, y] = GnosticaBoard.algebraic2coords(r.where);
@@ -5934,35 +5953,10 @@ export class GnosticaGame extends GameBaseSequenced {
         const height = maxY - minY + 1;
 
         const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
-        const pieceRows: string[] = [];
-        const markers: MarkerOutline[] = [];
-        for (let y = minY; y <= maxY; y++) {
-            const rowCells: string[] = [];
-            for (let x = minX; x <= maxX; x++) {
-                const cls = board.classify(x, y);
-                if (cls === "void") {
-                    rowCells.push("-");
-                    continue;
-                }
-                const t = board.get(x, y);
-                const key = this.cellRenderKey(t, cls);
-                if (!(key in legend)) {
-                    let owner = 0;
-                    const players = t?.card !== undefined ? t.playersPresent() : undefined;
-                    if (players !== undefined && players.size === 1) {
-                        [owner] = players;
-                        markers.push({
-                            type: "outline",
-                            colour: owner,
-                            points: [{ row: y - minY, col: x - minX }],
-                        });
-                    }
-                    legend[key] = this.buildCellGlyph(t, cls, largerCards, owner);
-                }
-                rowCells.push(key);
-            }
-            pieceRows.push(rowCells.join(","));
-        }
+        // Pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
+        const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
+        const stepResults = groups[stepIndex]?.results ?? [];
+        const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, this.ringsFromResults(stepResults, board));
 
         const columnLabels: string[] = [];
         for (let x = minX; x <= maxX; x++) {
@@ -5983,8 +5977,12 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         const rep: APRenderRep = {
+            renderer: "stacking-offset",
+            // A click on a pyramid reports its stack index, which handleClick would take for a legend piece; cells are what we want clicked.
+            options: ["no-piece-click"],
             board: {
                 style: "squares",
+                stackOffset: 0,
                 width,
                 height,
                 columnLabels,
@@ -5998,13 +5996,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 markers,
             },
             legend,
-            pieces: pieceRows.join("\n"),
+            pieces: pieceRows as [string[][], ...string[][][]],
             areas: areas.length > 0 ? areas : undefined,
         };
 
-        // Same _group unwrapping as the live render's own annotation loop - pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
-        const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
-        const stepResults = groups[stepIndex]?.results ?? [];
         const annotations: NonNullable<APRenderRep["annotations"]> = [];
         for (const r of stepResults) {
             if (r.type === "place" && r.where !== undefined) {
@@ -6209,17 +6204,150 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    // A canonical string identifying this cell's exact visual contents
-    // (card identity + every piece's owner/size/orientation) - the legend
-    // only ever grows entries for combinations actually on the board, built
-    // fresh each render() call.
-    private cellRenderKey(t: CellContents | undefined, cls: CellClass): string {
-        const cardPart = t?.card !== undefined ? t.card.uid : (cls === "wasteland" ? "waste" : "void");
-        // Piece.id() (owner+size+orientation, no punctuation) - legend keys
-        // end up as literal DOM ids in the renderer, and a "." breaks
-        // querySelector("#" + key) since it reads as a class selector.
-        const piecesPart = (t?.pieces ?? []).map(p => p.id()).join("_");
-        return `k_${cardPart}_${piecesPart}`;
+    // "<cell>.<piece id>": names a piece in a result well enough to find it again on the finished board.
+    private pieceIdAt(x: number, y: number, piece: Piece): string {
+        return `${GnosticaBoard.coords2algebraic(x, y)}.${piece.id()}`;
+    }
+
+    // The pieces a move's results name, ringed like the live preview does: each target solid, and a Rods move's own minion dashed.
+    private ringsFromResults(results: APMoveResult[], board: GnosticaBoard): Map<string, "minion" | "target"> {
+        const rings = new Map<string, "minion" | "target">();
+        // The last match, since a piece that moved or changed hands is added to the end of its cell.
+        const ring = (cell: string, kind: "minion" | "target", match: (p: Piece) => boolean) => {
+            const [x, y] = GnosticaBoard.algebraic2coords(cell);
+            const i = (board.get(x, y)?.pieces ?? []).map(match).lastIndexOf(true);
+            if (i >= 0 && (kind === "target" || !rings.has(`${x},${y},${i}`))) {
+                rings.set(`${x},${y},${i}`, kind);
+            }
+        };
+        for (const r of results) {
+            switch (r.type) {
+                case "move": {
+                    if (r.by !== undefined) {
+                        const [cell, id] = r.by.split(".");
+                        ring(cell, "minion", p => p.id() === id);
+                    }
+                    if (r.how === "rod-piece" || r.how === "hermit-piece") {
+                        ring(r.to!, "target", p => p.owner === r.who && p.size === Number(r.what));
+                    }
+                    break;
+                }
+                case "convert":
+                    if (r.into!.startsWith("size ")) {
+                        ring(r.where!, "target", p => p.owner === r.who && p.size === Number(r.into!.slice(5)));
+                    } else if (r.into!.startsWith("owner-")) {
+                        ring(r.where!, "target", p => p.owner === Number(r.into!.slice(6)) && p.size === Number(r.what));
+                    }
+                    break;
+                case "orient":
+                    ring(r.where!, "target", p => p.owner === r.who && p.size === Number(r.what) && p.orientation === r.facing);
+                    break;
+            }
+        }
+        return rings;
+    }
+
+    // The pieces to ring in a live preview: the step's minion (or every candidate while it's still ambiguous which one is meant), and the target piece once picked, which wins on a self-target.
+    private pieceRings(): Map<string, "minion" | "target"> {
+        const rings = new Map<string, "minion" | "target">();
+        const pending = this.preview?.pending;
+        if (pending === undefined) {
+            return rings;
+        }
+        const ringIfThere = (m: IMinionRef, kind: "minion" | "target") => {
+            const onBoard = this.board.get(m.x, m.y)?.pieces[m.index];
+            if (onBoard !== undefined && (m.piece === undefined || m.piece.id() === onBoard.id())) {
+                rings.set(`${m.x},${m.y},${m.index}`, kind);
+            }
+        };
+        for (const m of pending.minionAmbiguous ? pending.minionCandidates : [pending.minion]) {
+            ringIfThere(m, "minion");
+        }
+        const target = pending.istep.targetPiece === undefined ? undefined : pending.game.resolvePieceRef(pending.istep.targetPiece);
+        if (target?.kind === "ok") {
+            ringIfThere(target.ref, "target");
+        }
+        return rings;
+    }
+
+    // The board grid as two layers: a glyph marker for each card (and each wasteland), and in the pieces layer one legend entry per distinct set of pieces in a cell.
+    // Cards are unique, so each card's legend entry is built for its one cell. Every other cell is the bare "-".
+    private buildBoardLayers(
+        board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number }, largerCards: boolean,
+        legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] },
+        rings?: Map<string, "minion" | "target">,
+    ): { pieceRows: string[][][]; markers: (MarkerOutline | MarkerGlyph)[] } {
+        const pieceRows: string[][][] = [];
+        const markers: (MarkerOutline | MarkerGlyph)[] = [];
+        const wastelands: { row: number; col: number }[] = [];
+        for (let y = win.minY; y <= win.maxY; y++) {
+            const rowCells: string[][] = [];
+            for (let x = win.minX; x <= win.maxX; x++) {
+                const cls = board.classify(x, y);
+                const t = board.get(x, y);
+                const point = { row: y - win.minY, col: x - win.minX };
+                if (t?.card !== undefined) {
+                    const key = `c${t.card.uid}`;
+                    const players = t.playersPresent();
+                    const owner = players.size === 1 ? [...players][0] : 0;
+                    if (owner !== 0) {
+                        markers.push({ type: "outline", colour: owner, points: [point] });
+                    }
+                    const dontSpace = largerCards && players.size === 0;
+                    legend[key] = GnosticaGame.markerStack(t.cardUid === UNREVEALED_UID ? [UNKNOWN_CARD_GLYPH] : this.buildCardFace(t.card, !dontSpace, owner));
+                    markers.push({ type: "glyph", glyph: key, points: [point] });
+                } else if (cls === "wasteland") {
+                    wastelands.push(point);
+                }
+                const pieces = t?.pieces ?? [];
+                const slots = this.pieceGridSlots(pieces);
+                rowCells.push(pieces.flatMap((piece, i) => {
+                    // Keys end up as literal DOM ids in the renderer, so no "." (a rounded slot can't carry one).
+                    const slot = slots[i];
+                    const key = `p_${piece.id()}_${Math.round(slot.dx)}_${Math.round(slot.dy)}_${Math.round(slot.scale * 100)}`;
+                    const g = this.pyramidGlyph(piece);
+                    g.scale = slot.scale;
+                    g.nudge = { dx: slot.dx, dy: slot.dy };
+                    if (!(key in legend)) {
+                        // Slots lie out to the edges of the cell, so the symbol has to be cell-sized (backdrop scale 1) or the outer pyramids are cropped.
+                        legend[key] = GnosticaGame.withBackdrop([g], 1);
+                    }
+                    const ring = rings?.get(`${x},${y},${i}`);
+                    if (ring === undefined) {
+                        return [key];
+                    }
+                    const ringKey = `ring_${ring}_${key}`;
+                    if (!(ringKey in legend)) {
+                        // The ring is rotation-invariant, so it takes the pyramid's rotation only to share its pre-rotation nudge; a flat pyramid's centroid lies below its glyph's centre.
+                        // A nudge is applied inside the scale, so a smaller ring needs a proportionally larger one.
+                        // A target is a solid ring against the minion's dashed one.
+                        const drop = piece.orientation === "U" ? 0 : FLAT_PYRAMID_CENTROID_DROP[piece.size - 1];
+                        legend[ringKey] = GnosticaGame.withBackdrop([{
+                            name: ring === "target" ? "piece" : "piece-dashed", rotate: g.rotate, scale: slot.scale * RING_SCALE, opacity: 0,
+                            nudge: { dx: slot.dx / RING_SCALE, dy: (slot.dy + drop) / RING_SCALE },
+                        }], 1);
+                    }
+                    return [ringKey, key];
+                }));
+            }
+            pieceRows.push(rowCells);
+        }
+        if (wastelands.length > 0) {
+            // Same transparent-by-default convention as buildCardFace's own backdrop, so the theme's board colour shows through here too.
+            legend.waste = GnosticaGame.markerStack([{ name: "piece-square-dashed", scale: 1, opacity: 0 }]);
+            markers.push({ type: "glyph", glyph: "waste", points: wastelands as [{ row: number; col: number }, ...{ row: number; col: number }[]] });
+        }
+        return { pieceRows, markers };
+    }
+
+    // A marker is drawn at the full size of its cell, but the pieces layer draws at MARKER_SCALE of it. Scaling only `scale` (a nudge is applied inside the scale transform, so it shrinks with it) keeps the card the size it was when it lived in the pieces layer.
+    private static markerStack(stack: Glyph[]): [Glyph, ...Glyph[]] {
+        return GnosticaGame.withBackdrop(stack.map(g => ({ ...g, scale: (g.scale ?? 1) * MARKER_SCALE })), 1);
+    }
+
+    // The renderer sizes a legend symbol to its largest glyph, so an invisible glyph of a given scale fixes how big the rest of the stack is drawn inside it.
+    private static withBackdrop(stack: Glyph[], scale: number): [Glyph, ...Glyph[]] {
+        return [{ name: "piece-square-borderless", scale, opacity: 0 }, ...stack];
     }
 
     // Gnostica's own card face, rebuilt.  Also handles summary tokens.
@@ -6295,31 +6423,6 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         return stack;
-    }
-
-    // A board tile uses the spaced card face.  (There's a render option to use the card version when the territory is unpopulated.)
-    private buildCellGlyph(t: CellContents | undefined, cls: CellClass, largerCards: boolean, owner?: number): Glyph | [Glyph, ...Glyph[]] {
-        const stack: Glyph[] = [];
-        if (t?.cardUid === UNREVEALED_UID) {
-            stack.push(UNKNOWN_CARD_GLYPH);
-        } else if (t?.card !== undefined) {
-            const dontSpace = largerCards && t.playersPresent().size === 0;
-            stack.push(...this.buildCardFace(t.card, !dontSpace, owner));
-        } else if (cls === "wasteland") {
-            // Same transparent-by-default convention as buildCardFace's own backdrop, so the theme's board colour shows through here too.
-            stack.push({ name: "piece-square-dashed", scale: 1, opacity: 0 });
-        } else {
-            // Void, in principle - the main render loop already short-circuits every void cell to "-", so this is just a defensive fallback.
-            stack.push({ name: "piece-square-borderless", scale: 1, opacity: 0 });
-        }
-        const pieces = t?.pieces ?? [];
-        this.pieceGridSlots(pieces).forEach((slot, i) => {
-            const g = this.pyramidGlyph(pieces[i]);
-            g.scale = slot.scale;
-            g.nudge = { dx: slot.dx, dy: slot.dy };
-            stack.push(g);
-        });
-        return stack as [Glyph, ...Glyph[]];
     }
 
     // Up to 5 pieces: each piece's orientation names its preferred cell in the 3x3 grid; a taken preferred cell bumps the piece into whatever's still free.
