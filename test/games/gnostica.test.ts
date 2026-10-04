@@ -2479,8 +2479,8 @@ describe("Gnostica: handleClick", () => {
         const rep = g.render() as { legend: Record<string, unknown>; areas?: { pieces: string[] }[] };
         const p2area = rep.areas?.[1];
         expect(p2area, "expected an area for player 2's hand").to.not.be.undefined;
-        expect(p2area!.pieces[0]).eq("c??");
-        expect(rep.legend).to.have.property("c??");
+        expect(p2area!.pieces[0]).eq("cUNKNOWN");
+        expect(rep.legend).to.have.property("cUNKNOWN");
     });
 
     // The playground's live-preview mechanism calls move(m, {partial:
@@ -2863,9 +2863,9 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             expect(g.drawPile).to.deep.equal(["03", "KS"]);
             expect(g.discardPile).to.deep.equal(["AC"]);
             const rep = g.render() as unknown as { legend: Record<string, unknown>; pieces: string[][][]; board: { markers: { type: string; glyph?: string; points: { row: number; col: number }[] }[] } };
-            expect(g.board.get(1, 0)!.cardUid).eq("??");
+            expect(g.board.get(1, 0)!.cardUid).eq("");
             expect(rep.pieces[1].length).eq(4); // the window widened to take in the unrevealed territory
-            const marker = rep.board.markers.find(m => m.type === "glyph" && m.glyph === "c??")!;
+            const marker = rep.board.markers.find(m => m.type === "glyph" && m.glyph === "cUNKNOWN")!;
             expect(marker.points).to.deep.equal([{ row: 1, col: 2 }]);
             expect(rep.board.markers.some(m => m.glyph === "c03")).to.be.false; // the drawn card is not on the board
         });
@@ -6045,5 +6045,44 @@ describe("Gnostica: the Undo button", () => {
         g.move("use 00");
         expect(g.handleClick("play AC via 00", -1, -1, "_btn_undo").move).eq("");
         expect(g.handleClick("decline AC via 00", -1, -1, "_btn_undo").move).eq("");
+    });
+});
+
+describe("Gnostica: hidden information", () => {
+    const game = () => testGame({
+        board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+        hands: [["2R", "3R", "4R", "5D", "6D", "7D"], ["AC", "KS", "9S", "8S", "QD", "PD"]],
+        drawPile: ["10C", "ND", "3S"],
+    });
+    const top = (g: GnosticaGame, opts: { strip?: boolean; player?: number }) => g.state(opts).stack[g.state(opts).stack.length - 1];
+
+    it("shows a viewer only their own hand, and no draw pile, keeping the sizes", () => {
+        const stripped = top(game(), { strip: true, player: 1 });
+        expect(stripped.hands[0]).to.deep.equal(["2R", "3R", "4R", "5D", "6D", "7D"]);
+        expect(stripped.hands[1]).to.deep.equal(["", "", "", "", "", ""]);
+        expect(stripped.drawPile).to.deep.equal(["", "", ""]);
+        expect(top(game(), { strip: true, player: 2 }).hands[0]).to.deep.equal(["", "", "", "", "", ""]);
+    });
+
+    it("shows a spectator no hand at all", () => {
+        const stripped = top(game(), { strip: true });
+        expect(stripped.hands.flat().every(uid => uid === "")).to.be.true;
+    });
+
+    it("gives the full state when not asked to strip", () => {
+        const g = game();
+        expect(top(g, {}).hands[1][0]).eq("AC");
+        expect(top(g, {}).drawPile).to.deep.equal(["10C", "ND", "3S"]);
+    });
+
+    it("reloads from a stripped state, renders the viewer's hand and the other's face down, and still plays the viewer's own moves", () => {
+        const viewer = new GnosticaGame(game().serialize({ strip: true, player: 1 }));
+        const out = viewer.render();
+        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { legend: Record<string, unknown>; areas?: { ownerMark?: number; pieces?: string[] }[] };
+        expect(rep.areas!.find(a => a.ownerMark === 1)!.pieces).to.include("c2R");
+        expect(rep.areas!.find(a => a.ownerMark === 2)!.pieces!.every(key => key === "cUNKNOWN")).to.be.true;
+        expect(rep.legend).to.have.property("cUNKNOWN");
+        expect(viewer.validateMove("play 2R/with m0.2 move m0.2 1").valid).to.be.true;
+        viewer.move("discard 2R draw 1", { partial: true });
     });
 });

@@ -3,9 +3,9 @@ import { Piece } from "./piece";
 
 export type CellPointValue = 0 | 1 | 2 | 3;
 
-// Stands in for a territory whose card is drawn from the deck: shown in a move preview, never part of a committed state.
-export const UNREVEALED_UID = "??";
-const unrevealedPart = new Component({ uid: "?", seq: 0, name: "Unrevealed" });
+// A card nobody can see, as in the other Decktet games' hidden hands: a hand card hidden from a viewer, or a territory whose card is drawn from the deck (shown in a move preview, never part of a committed state).
+export const UNREVEALED_UID = "";
+const unrevealedPart = new Component({ uid: UNREVEALED_UID, seq: 0, name: "Unrevealed" });
 export const UNREVEALED_CARD = new Card({ name: "Unrevealed", rank: unrevealedPart, suit: unrevealedPart, major: false });
 
 // Standalone so powers.ts can evaluate a candidate card before it's placed, not just one already in a cell.

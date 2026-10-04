@@ -47,6 +47,7 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
 };
 
 // The face-down card every Decktet game draws for a card the viewer can't see.
+const UNKNOWN_CARD_KEY = "cUNKNOWN";
 const UNKNOWN_CARD_GLYPH: Glyph = {
     name: "piece-square-borderless",
     colour: {
@@ -552,8 +553,8 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    public state(): IGnosticaState {
-        return {
+    public state(opts?: {strip?: boolean, player?: number}): IGnosticaState {
+        const state: IGnosticaState = {
             game: GnosticaGame.gameinfo.uid,
             numplayers: this.numplayers,
             variants: this.variants,
@@ -561,6 +562,18 @@ export class GnosticaGame extends GameBaseSequenced {
             winner: [...this.winner],
             stack: [...this.stack],
         };
+        if (opts !== undefined && opts.strip) {
+            state.stack = state.stack.map(mstate => {
+                for (let p = 1; p <= this.numplayers; p++) {
+                    if (p === opts.player) { continue; }
+                    mstate.hands[p - 1] = mstate.hands[p - 1].map(() => UNREVEALED_UID);
+                }
+                // The draw pile is stored in order, unlike the other Decktet games' decks; blanked the same way, since the rules read its size.
+                mstate.drawPile = mstate.drawPile.map(() => UNREVEALED_UID);
+                return mstate;
+            });
+        }
+        return state;
     }
 
     public validateMove(m: string): IValidationResult {
@@ -6006,9 +6019,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return super.shouldCloseRound(roundPlies, stackIndex);
     }
 
-    // A card is unique, so its legend key needs no location; "??" is the shared face-down card.
+    // A card is unique, so its legend key needs no location; every hidden card shares the one face-down key.
     private static cardKey(uid: string): string {
-        return `c${uid}`;
+        return uid === UNREVEALED_UID ? UNKNOWN_CARD_KEY : `c${uid}`;
     }
 
     private static cardKeyUid(piece: string | undefined): string | undefined {
@@ -6115,7 +6128,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const height = maxY - minY + 1;
 
         // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
-        const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
+        const legend = GnosticaGame.newLegend();
                 
         // A 2+-step major-arcana chain wraps each step's results into a _group entry - flatten one level so annotations and rings still cover every step's effect.
         const flatResults = this.results.flatMap(r => r.type === "_group" ? r.results : [r]);
@@ -6146,7 +6159,6 @@ export class GnosticaGame extends GameBaseSequenced {
             for (const uid of hand) {
                 const card = allCards().find(c => c.uid === uid);
                 if (card === undefined) {
-                    legend[GnosticaGame.cardKey(UNREVEALED_UID)] ??= GnosticaGame.markerStack([UNKNOWN_CARD_GLYPH]);
                     handKeys.push(GnosticaGame.cardKey(UNREVEALED_UID));
                     continue;
                 }
@@ -6328,7 +6340,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const width = maxX - minX + 1;
         const height = maxY - minY + 1;
 
-        const legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] } = {};
+        const legend = GnosticaGame.newLegend();
         // Pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
         const stepResults = groups[stepIndex]?.results ?? [];
@@ -6648,14 +6660,16 @@ export class GnosticaGame extends GameBaseSequenced {
                 const t = board.get(x, y);
                 const point = { row: y - win.minY, col: x - win.minX };
                 if (t?.card !== undefined) {
-                    const key = `c${t.card.uid}`;
+                    const key = GnosticaGame.cardKey(t.cardUid!);
                     const players = t.playersPresent();
                     const owner = players.size === 1 ? [...players][0] : 0;
                     if (owner !== 0) {
                         markers.push({ type: "outline", colour: owner, points: [point] });
                     }
                     const dontSpace = largerCards && players.size === 0;
-                    legend[key] = GnosticaGame.markerStack(t.cardUid === UNREVEALED_UID ? [UNKNOWN_CARD_GLYPH] : this.buildCardFace(t.card, !dontSpace, owner));
+                    if (t.cardUid !== UNREVEALED_UID) {
+                        legend[key] = GnosticaGame.markerStack(this.buildCardFace(t.card, !dontSpace, owner));
+                    }
                     markers.push({ type: "glyph", glyph: key, points: [point] });
                 } else if (cls === "wasteland") {
                     wastelands.push(point);
@@ -6699,6 +6713,11 @@ export class GnosticaGame extends GameBaseSequenced {
             markers.push({ type: "glyph", glyph: "waste", points: wastelands as [{ row: number; col: number }, ...{ row: number; col: number }[]] });
         }
         return { pieceRows, markers };
+    }
+
+    // The one place the face-down card is put in a legend: an unrevealed territory and a hidden hand card are both this card.
+    private static newLegend(): { [k: string]: Glyph | [Glyph, ...Glyph[]] } {
+        return { [UNKNOWN_CARD_KEY]: GnosticaGame.markerStack([UNKNOWN_CARD_GLYPH]) };
     }
 
     // A marker is drawn at the full size of its cell, but the pieces layer draws at MARKER_SCALE of it. Scaling only `scale` (a nudge is applied inside the scale transform, so it shrinks with it) keeps the card the size it was when it lived in the pieces layer.
