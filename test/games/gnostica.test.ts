@@ -66,11 +66,11 @@ const clearBoard = (g: GnosticaGame): void => {
 // done in the render only" comment), so any test that cares about sort
 // order has to read it back off the rendered hand area, not the raw
 // array. Strips the "_new" highlight suffix (see newHandCardUids's own
-// docs) the same way the real hand_ click handler does.
+// docs) the same way the real card click handler does.
 const renderedHandUids = (g: GnosticaGame, player: number): string[] => {
     const rep = g.render() as { areas?: { type: string; ownerMark?: number; pieces?: string[] }[] };
     const area = rep.areas?.find(a => a.type === "pieces" && a.ownerMark === player);
-    return (area?.pieces ?? []).map(key => key.replace(/^hand_/, "").replace(/_new$/, ""));
+    return (area?.pieces ?? []).map(key => key.slice(1));
 };
 
 describe("Gnostica: setup", () => {
@@ -173,8 +173,9 @@ describe("Gnostica: hand sort order", () => {
 describe("Gnostica: new-card hand highlight", () => {
     type HandArea = { type: string; pieces?: string[]; label?: string };
     type RenderRep = { legend: Record<string, unknown>; areas?: HandArea[] };
+    const isTinted = (rep: RenderRep, key: string): boolean => JSON.stringify(rep.legend[key]).includes('"flatten"');
     const player1HandArea = (rep: RenderRep): HandArea | undefined =>
-        rep.areas?.find(a => a.type === "pieces" && a.pieces?.some(p => p.startsWith("hand_")));
+        rep.areas?.find(a => a.type === "pieces" && a.pieces?.some(p => p.startsWith("c")));
 
     it("tags a newly drawn card once it's that player's turn again, and a real click on it still resolves", () => {
         const g = testGame({
@@ -185,13 +186,12 @@ describe("Gnostica: new-card hand highlight", () => {
         g.move("discard draw 0"); // player 2's turn - now back to player 1
         const rep = g.render() as RenderRep;
         const handArea = player1HandArea(rep);
-        const newKey = `hand_7C_new`;
-        expect(newKey in rep.legend).to.be.true;
+        const newKey = `c7C`;
         expect(handArea?.pieces).to.include(newKey);
+        expect(isTinted(rep, newKey)).to.be.true;
         // A card that was already there before last turn stays untagged.
-        expect(handArea?.pieces).to.include(`hand_2C`);
-        expect(handArea?.pieces).to.not.include(`hand_2C_new`);
-        // The "_new" suffix is part of the clickable piece identifier too, not just a legend tag.
+        expect(handArea?.pieces).to.include(`c2C`);
+        expect(isTinted(rep, `c2C`)).to.be.false;
         const seeded = g.handleClick("", -1, -1, "_btn_discard");
         const click = g.handleClick(seeded.move, -1, -1, newKey);
         expect(click.valid).to.be.true;
@@ -200,7 +200,8 @@ describe("Gnostica: new-card hand highlight", () => {
 
     it("shows no highlight on a player's first turn, or once they start building this turn's own move", () => {
         const fresh = new GnosticaGame(2);
-        expect(player1HandArea(fresh.render() as RenderRep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+        const freshRep = fresh.render() as RenderRep;
+        expect(player1HandArea(freshRep)?.pieces?.some(p => isTinted(freshRep, p))).to.be.false;
 
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
@@ -208,9 +209,11 @@ describe("Gnostica: new-card hand highlight", () => {
         });
         g.move("discard AC draw 1");
         g.move("discard draw 0");
-        expect(player1HandArea(g.render() as RenderRep)?.pieces).to.include(`hand_7C_new`); // sanity - not vacuous
+        const before = g.render() as RenderRep;
+        expect(isTinted(before, `c7C`)).to.be.true; // sanity - not vacuous
         g.move("discard", { partial: true }); // simulates the player's own first click
-        expect(player1HandArea(g.render() as RenderRep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+        const after = g.render() as RenderRep;
+        expect(player1HandArea(after)?.pieces?.some(p => isTinted(after, p))).to.be.false;
     });
 });
 
@@ -1752,7 +1755,7 @@ describe("Gnostica: Judgement's draw from the discards", () => {
 
     it("answers a discard-pile click that nothing is waiting for with the current status, not the default handler's", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler], discardPile: ["2C"] });
-        const click = g.handleClick("", -1, -1, "discard_C_spot");
+        const click = g.handleClick("", -1, -1, "C_spot_1");
         expect(click.move).eq("");
         expect(click.message).eq(g.validateMove("").message); // the current status, unchanged
         expect(click.message).to.not.eq(i18next.t("apgames:validation._general.DEFAULT_HANDLER"));
@@ -1781,10 +1784,10 @@ describe("Gnostica: Tower and Star take their replacement card from the hand or 
 
     it("lets a click on the discard pile supply the card, as a click on a hand card does", () => {
         const g = star();
-        const fromDiscard = g.handleClick("use 17/with m0.2 grow n0", -1, -1, "discard_D_royal");
+        const fromDiscard = g.handleClick("use 17/with m0.2 grow n0", -1, -1, "D_royal_1");
         expect(fromDiscard.move).eq("use 17/with m0.2 grow n0 to KD");
         expect(fromDiscard.valid).to.be.true;
-        expect(g.handleClick("use 17/with m0.2 grow n0", -1, -1, "hand_KR").move).eq("use 17/with m0.2 grow n0 to KR");
+        expect(g.handleClick("use 17/with m0.2 grow n0", -1, -1, "cKR").move).eq("use 17/with m0.2 grow n0 to KR");
     });
 });
 
@@ -2111,7 +2114,7 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U");
         const uid = g.hands[0][0];
         const seed = g.handleClick("", -1, -1, "_btn_play");
-        const result = g.handleClick(seed.move, -1, -1, `hand_${uid}`);
+        const result = g.handleClick(seed.move, -1, -1, `c${uid}`);
         expect(result.valid).to.be.true;
         expect(result.move).eq(`play ${uid}`);
     });
@@ -2347,8 +2350,8 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U");
         const [uid1, uid2] = g.hands[0];
         const btn = g.handleClick("", -1, -1, "_btn_discard");
-        const seeded = g.handleClick(btn.move, -1, -1, `hand_${uid1}`);
-        const built = g.handleClick(seeded.move, -1, -1, `hand_${uid2}`);
+        const seeded = g.handleClick(btn.move, -1, -1, `c${uid1}`);
+        const built = g.handleClick(seeded.move, -1, -1, `c${uid2}`);
         expect(built.move).eq(`discard ${uid1} ${uid2}`);
         const result = g.handleClick(built.move, -1, -1, "_btn_drawcount_1");
         expect(result.valid).to.be.true;
@@ -2420,11 +2423,11 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U"); // back to player 1's turn
         const uid = g.hands[0][0];
         const btn = g.handleClick("", -1, -1, "_btn_discard");
-        const first = g.handleClick(btn.move, -1, -1, `hand_${uid}`);
+        const first = g.handleClick(btn.move, -1, -1, `c${uid}`);
         expect(first.valid).to.be.true;
         expect(first.move).eq(`discard ${uid}`);
         expect(first.complete).eq(-1); // no draw count chosen yet - never complete without one
-        const second = g.handleClick(first.move, -1, -1, `hand_${uid}`);
+        const second = g.handleClick(first.move, -1, -1, `c${uid}`);
         expect(second.valid).to.be.true;
         expect(second.move).eq("discard");
     });
@@ -2434,7 +2437,7 @@ describe("Gnostica: handleClick", () => {
         g.move("place m0 U");
         g.move("place l0 U");
         const uid = g.hands[0][0];
-        const result = g.handleClick("", -1, -1, `hand_${uid}`);
+        const result = g.handleClick("", -1, -1, `c${uid}`);
         expect(result.valid).to.be.false;
         expect(result.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
     });
@@ -2442,7 +2445,7 @@ describe("Gnostica: handleClick", () => {
     it("discard: rejects a hand-card click for a card not in the acting player's hand", () => {
         const g = new GnosticaGame(2);
         const uid = g.hands[1][0]; // player 2's card, player 1 is acting
-        const result = g.handleClick("", -1, -1, `hand_${uid}`);
+        const result = g.handleClick("", -1, -1, `c${uid}`);
         expect(result.valid).to.be.false;
     });
 
@@ -2456,8 +2459,8 @@ describe("Gnostica: handleClick", () => {
         const rep = g.render() as { legend: Record<string, unknown>; areas?: { pieces: string[] }[] };
         const p2area = rep.areas?.[1];
         expect(p2area, "expected an area for player 2's hand").to.not.be.undefined;
-        expect(p2area!.pieces[0]).eq("hand_UNKNOWN");
-        expect(rep.legend).to.have.property("hand_UNKNOWN");
+        expect(p2area!.pieces[0]).eq("c??");
+        expect(rep.legend).to.have.property("c??");
     });
 
     // The playground's live-preview mechanism calls move(m, {partial:
@@ -2530,22 +2533,22 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
         // "just discarded" (see newDiscardUids's own docs) - this test is
         // about the bucketing/grouping shape, not the highlight.
         const rep = g.render() as { legend: Record<string, unknown>; areas?: { label: string; pieces?: string[] }[] };
-        const discardArea = rep.areas?.find(a => a.pieces?.some(p => p.startsWith("discard_")));
+        const discardArea = rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
         expect(discardArea, "expected a discard-pile area").to.not.be.undefined;
-        expect(discardArea!.pieces).to.include("discard_C_spot");
-        expect(discardArea!.pieces).to.include("discard_C_royal");
-        expect(discardArea!.pieces).to.include("discard_07");
+        expect(discardArea!.pieces).to.include("C_spot_2");
+        expect(discardArea!.pieces).to.include("C_royal_1");
+        expect(discardArea!.pieces).to.include("c07");
         expect(discardArea!.pieces!.length).eq(3); // one spot-cup bucket, one royal-cup bucket, one major - not 4 separate entries
-        expect(rep.legend).to.have.property("discard_C_spot");
-        const spotGlyphs = rep.legend.discard_C_spot as { text?: string }[];
+        expect(rep.legend).to.have.property("C_spot_2");
+        const spotGlyphs = rep.legend.C_spot_2 as { text?: string }[];
         expect(spotGlyphs.find(gl => gl.text === "2x"), "spot bucket should count 2").to.not.be.undefined;
     });
 
     it("omits the discard-pile area entirely once the pile is empty", () => {
         const g = new GnosticaGame(2);
         g.discardPile = [];
-        const rep = g.render() as { areas?: { pieces?: string[] }[] };
-        const discardArea = rep.areas?.find(a => a.pieces?.some(p => p.startsWith("discard_")));
+        const rep = g.render() as { areas?: { label?: string; pieces?: string[] }[] };
+        const discardArea = rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
         expect(discardArea).to.be.undefined;
     });
 
@@ -2568,12 +2571,12 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
         // 10 spot cups exist in total; with AC visible in hand, the other
         // 9 are unaccounted for anywhere and should show as unknown.
         const before = g.render() as { legend: Record<string, { text?: string }[]> };
-        const beforeText = before.legend.draw_C_spot.find(gl => gl.text !== undefined)!.text;
+        const beforeText = before.legend.C_spot_9.find(gl => gl.text !== undefined)!.text;
         expect(beforeText, "AC is visible, so only the other 9 spot cups are unknown").eq("9x");
 
         g.hands[1] = [""]; // the back end redacts it - now hidden from this viewer
         const after = g.render() as { legend: Record<string, { text?: string }[]> };
-        const afterText = after.legend.draw_C_spot.find(gl => gl.text !== undefined)!.text;
+        const afterText = after.legend.C_spot_10.find(gl => gl.text !== undefined)!.text;
         expect(afterText, "AC is now hidden too, so all 10 spot cups are unknown").eq("10x");
     });
 });
@@ -2584,8 +2587,9 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
 // scoped to a specific viewer (the pile is always public) or gated on
 // whose turn it is (there's only one shared pile).
 describe("Gnostica: discard-pile 'just discarded' highlight", () => {
-    type DiscardRenderRep = { legend: Record<string, { colour?: unknown; text?: string }[]>; areas?: { pieces?: string[] }[] };
-    const discardArea = (rep: DiscardRenderRep) => rep.areas?.find(a => a.pieces?.some(p => p.startsWith("discard_")));
+    type DiscardRenderRep = { legend: Record<string, { colour?: unknown; text?: string }[]>; areas?: { label?: string; pieces?: string[] }[] };
+    const isTinted = (rep: DiscardRenderRep, key: string): boolean => JSON.stringify(rep.legend[key]).includes('"flatten"');
+    const discardArea = (rep: DiscardRenderRep) => rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
 
     it("tags a card discarded on the most recent move, tinted the same theme-relative muted colour as a new hand card", () => {
         // A major arcana card specifically - unlike a minor, it gets its
@@ -2597,12 +2601,12 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.hands[0] = ["03", "2C", "3C", "4C", "5C", "6C"];
         g.move(`discard 03 draw 1`); // 1 is max: 6 - 5 remaining
         const rep = g.render() as DiscardRenderRep;
-        const newKey = `discard_03_new`;
+        const newKey = `c03`;
         expect(discardArea(rep)?.pieces).to.include(newKey);
         expect(rep.legend[newKey].some(gl => gl.colour !== undefined)).to.be.true;
     });
 
-    it("a minor card only tints its own share of the bucket, not the whole count", () => {
+    it("tints a minor card's whole bucket, with the total count, when any card in it is new", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place n0 U");
@@ -2610,12 +2614,9 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.hands[0] = ["AC", "3C", "4C", "5C", "6C", "7C"];
         g.move("discard AC draw 1"); // a second spot cup, discarded just now; 1 is max: 6 - 5 remaining
         const rep = g.render() as DiscardRenderRep;
-        const pieces = discardArea(rep)?.pieces ?? [];
-        expect(pieces).to.include("discard_C_spot"); // the older one, untinted
-        expect(pieces).to.include("discard_C_spot_new"); // just this move's own
-        expect(rep.legend.discard_C_spot.some(gl => gl.text === "1x")).to.be.true;
-        expect(rep.legend.discard_C_spot_new.some(gl => gl.text === "1x")).to.be.true;
-        expect(rep.legend.discard_C_spot_new.some(gl => gl.colour !== undefined)).to.be.true;
+        expect(discardArea(rep)?.pieces).to.deep.equal(["C_spot_2_shaded"]);
+        expect(rep.legend.C_spot_2_shaded.some(gl => gl.text === "2x")).to.be.true;
+        expect(isTinted(rep, "C_spot_2_shaded")).to.be.true;
     });
 
     it("clears once the next move is submitted, even by a different player", () => {
@@ -2626,7 +2627,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("discard AC draw 1"); // 1 is max: 6 - 5 remaining
         g.move("discard draw 0"); // player 2's own turn
         const rep = g.render() as DiscardRenderRep;
-        expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.false;
+        expect(discardArea(rep)?.pieces?.some(p => isTinted(rep, p))).to.be.false;
     });
 
     it("a live preview of the player's own in-progress move highlights discards", () => {
@@ -2636,14 +2637,9 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
         g.move("discard AC", { partial: true }); // simulates the player's own first click
         const rep = g.render() as DiscardRenderRep;
-        expect(discardArea(rep)?.pieces?.some(p => p.endsWith("_new"))).to.be.true;
+        expect(discardArea(rep)?.pieces?.some(p => isTinted(rep, p))).to.be.true;
     });
 
-    // Same "_new" suffix stripping as the hand-card click -
-    // AreaPieces reuses the pieces[] entry as both the legend key and the
-    // clickable identifier, so a real click on a highlighted discard-pile
-    // card (Judgement's own picker) must still resolve to its real uid/
-    // bucket, not fall through to "not a recognized click".
 });
 
 // Click support for minor arcana's single suit-power step - see
@@ -2726,7 +2722,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // soft-pedaled to 0 - a bare hand-typed submission of this exact string must not look valid.
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(-1);
-        const cardClick = g.handleClick(modeClick.move, -1, -1, `hand_${spotUid}`);
+        const cardClick = g.handleClick(modeClick.move, -1, -1, `c${spotUid}`);
         expect(cardClick.move).eq(`use AC/with l0.1 at k0 create ${spotUid}`);
         g.move(cardClick.move);
         expect(g.board.get(-2, 0)!.card?.uid).eq(spotUid);
@@ -2851,9 +2847,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             expect(rep.pieces[1].length).eq(4); // the window widened to take in the unrevealed territory
             const marker = rep.board.markers.find(m => m.type === "glyph" && m.glyph === "c??")!;
             expect(marker.points).to.deep.equal([{ row: 1, col: 2 }]);
-            const names = (stack: unknown) => ([] as { name: string }[]).concat(stack as { name: string }).map(g => g.name);
-            expect(names(rep.legend["c??"])).to.include.members(names(rep.legend.hand_UNKNOWN)); // the shared gray face
-            expect(rep.legend).to.not.have.property("c03"); // the drawn card is not on the board
+            expect(rep.board.markers.some(m => m.glyph === "c03")).to.be.false; // the drawn card is not on the board
         });
 
         it("committing it draws the top card, logs it, and leaves nothing unrevealed behind", () => {
@@ -3149,13 +3143,13 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const { g, modeClick } = setup(2, "00"); // major, worth 3
             expect(modeClick.move).eq("use AS/with m0.2 shrink l0");
             expect(modeClick.valid).to.be.true;
-            const cardClick = g.handleClick(modeClick.move, -1, -1, "hand_2S");
+            const cardClick = g.handleClick(modeClick.move, -1, -1, "c2S");
             expect(cardClick.move).eq("use AS/with m0.2 shrink l0 2 to 2S");
             g.move(cardClick.move);
             expect(g.board.get(-1, 0)!.card?.uid).eq("2S");
 
             const { g: g2, modeClick: modeClick2 } = setup(1, "00");
-            const cardClick2 = g2.handleClick(modeClick2.move, -1, -1, "hand_2S");
+            const cardClick2 = g2.handleClick(modeClick2.move, -1, -1, "c2S");
             expect(cardClick2.move).eq("use AS/with m0.1 shrink l0 2 to 2S");
             expect(g2.validateMove(cardClick2.move).valid).to.be.false;
         });
@@ -3776,7 +3770,7 @@ describe("Gnostica: choose-step click messaging", () => {
         g.move("place m0 U");
         g.move("place l0 U");
         const uid = g.hands[0].find(u => !/^\d{2}$/.test(u))!; // a minor card
-        const result = g.handleClick("play", -1, -1, `hand_${uid}`);
+        const result = g.handleClick("play", -1, -1, `c${uid}`);
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`play ${uid}`);
@@ -3788,7 +3782,7 @@ describe("Gnostica: choose-step click messaging", () => {
         g.move("place m0 U");
         g.move("place l0 U");
         g.hands[0].push("10"); // Wheel of Fortune, injected regardless of the random deal
-        const result = g.handleClick("play", -1, -1, "hand_10");
+        const result = g.handleClick("play", -1, -1, "c10");
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq("play 10");
@@ -4155,17 +4149,17 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
-        const click1 = g.handleClick(cellClick.move, -1, -1, "hand_2C");
+        const click1 = g.handleClick(cellClick.move, -1, -1, "c2C");
         expect(click1.move).eq(`use 02/discard 2C`);
         expect(click1.valid).to.be.true;
         // No "draw <n>" chosen yet - never complete without one
         // (see validateHighPriestess's own docs), so a single discard
         // toggle must never read as done.
         expect(click1.complete).eq(-1);
-        const click2 = g.handleClick(click1.move, -1, -1, "hand_5C");
+        const click2 = g.handleClick(click1.move, -1, -1, "c5C");
         expect(click2.move).eq(`use 02/discard 2C 5C`);
         expect(click2.complete).eq(-1);
-        const click3 = g.handleClick(click2.move, -1, -1, "hand_2C"); // toggle back off
+        const click3 = g.handleClick(click2.move, -1, -1, "c2C"); // toggle back off
         expect(click3.move).eq(`use 02/discard 5C`);
         expect(click3.complete).eq(-1);
         const click4 = g.handleClick(click3.move, -1, -1, "_btn_hpdraw_1");
@@ -4195,7 +4189,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
-        const discardClick = g.handleClick(cellClick.move, -1, -1, "hand_5C");
+        const discardClick = g.handleClick(cellClick.move, -1, -1, "c5C");
         expect(discardClick.move).eq(`use 02/discard 5C`);
         // maxDraw is 6 - 2 (hand after discarding 5C) = 4; choose 1 instead.
         const drawClick = g.handleClick(discardClick.move, -1, -1, "_btn_hpdraw_1");
@@ -4237,11 +4231,11 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const seed = g.handleClick("", -1, -1, "_btn_use");
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
-        const discard1 = g.handleClick(cellClick.move, -1, -1, "hand_5C");
+        const discard1 = g.handleClick(cellClick.move, -1, -1, "c5C");
         const drawClick = g.handleClick(discard1.move, -1, -1, "_btn_hpdraw_1"); // chosen too early
         expect(drawClick.move).eq(`use 02/discard 5C draw 1`);
 
-        const discard2 = g.handleClick(drawClick.move, -1, -1, "hand_AR");
+        const discard2 = g.handleClick(drawClick.move, -1, -1, "cAR");
         expect(discard2.move).eq(`use 02/discard 5C AR`); // stale "draw 1" dropped, AR added
         expect(discard2.valid).to.be.true;
 
@@ -4267,10 +4261,10 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         }
         g.hands[0] = ["02", "2C", "5C", "AR", "AS", "AD"];
         const seed = g.handleClick("", -1, -1, "_btn_play");
-        const play02 = g.handleClick(seed.move, -1, -1, "hand_02");
+        const play02 = g.handleClick(seed.move, -1, -1, "c02");
         expect(play02.move).eq("play 02");
-        const discard1 = g.handleClick(play02.move, -1, -1, "hand_2C");
-        const discard2 = g.handleClick(discard1.move, -1, -1, "hand_5C");
+        const discard1 = g.handleClick(play02.move, -1, -1, "c2C");
+        const discard2 = g.handleClick(discard1.move, -1, -1, "c5C");
         expect(discard2.move).eq("play 02/discard 2C 5C");
 
         // Hand is genuinely down to 3 (6 - the played card - 2 discards),

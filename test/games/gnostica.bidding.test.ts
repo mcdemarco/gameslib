@@ -456,7 +456,7 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
     it("clicking a hand card during bidding builds bid <n> from its 1-based hand position", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["AC", "2C", "KS", "3C", "4C", "5C"];
-        const result = g.handleClick("", -1, -1, `hand_KS`);
+        const result = g.handleClick("", -1, -1, `cKS`);
         expect(result.move).eq("bid 3");
         expect(result.valid).to.be.true;
         // A bid is a single, one-shot choice - nothing more to refine once
@@ -468,16 +468,16 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
     it("clicking a different hand card replaces the earlier pick rather than accumulating", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
-        const first = g.handleClick("", -1, -1, "hand_AC");
+        const first = g.handleClick("", -1, -1, "cAC");
         expect(first.move).eq("bid 1");
-        const second = g.handleClick(first.move, -1, -1, "hand_6C");
+        const second = g.handleClick(first.move, -1, -1, "c6C");
         expect(second.move).eq("bid 6"); // replaced, not "bid 1 6"
     });
 
     it("clicking a card not in your hand during bidding is rejected", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
-        const result = g.handleClick("", -1, -1, "hand_KS");
+        const result = g.handleClick("", -1, -1, "cKS");
         expect(result.valid).to.be.false;
     });
 
@@ -492,23 +492,23 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
     it("clicking pool cards during redraw toggles a uid list, building redraw <uid...>", () => {
         const g = setupRedraw();
         const [uidA, uidB] = g.biddingPool!;
-        const click1 = g.handleClick("", -1, -1, `pool_${uidA}`);
+        const click1 = g.handleClick("", -1, -1, `c${uidA}`);
         expect(click1.move).eq(`redraw ${uidA}`);
         // setupRedraw's own currplayer needs exactly 1 back - one pick
         // already reaches it, and there's no further refinement possible
         // once the exact count is hit, so genuinely complete:1.
         expect(click1.complete).eq(1);
-        const click2 = g.handleClick(click1.move, -1, -1, `pool_${uidA}`); // toggle back off
+        const click2 = g.handleClick(click1.move, -1, -1, `c${uidA}`); // toggle back off
         expect(click2.move).eq("redraw");
         expect(click2.complete).eq(-1); // back to 0 picks, still short of the needed 1
-        const click3 = g.handleClick("", -1, -1, `pool_${uidB}`);
+        const click3 = g.handleClick("", -1, -1, `c${uidB}`);
         expect(click3.move).eq(`redraw ${uidB}`);
         expect(click3.complete).eq(1);
     });
 
     it("clicking a uid not currently in the pool during redraw is rejected", () => {
         const g = setupRedraw();
-        const result = g.handleClick("", -1, -1, "pool_AC"); // AC is in a hand, not the pool
+        const result = g.handleClick("", -1, -1, "cAC"); // AC is in a hand, not the pool
         expect(result.valid).to.be.false;
     });
 
@@ -519,18 +519,18 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         g.hands[2] = ["PS", "AD", "2D", "3D", "4D", "5D"];
 
         // Bidding: each player clicks their own high card in turn.
-        const bid1 = g.handleClick("", -1, -1, `hand_KS`);
+        const bid1 = g.handleClick("", -1, -1, `cKS`);
         g.move(bid1.move);
-        const bid2 = g.handleClick("", -1, -1, `hand_QS`);
+        const bid2 = g.handleClick("", -1, -1, `cQS`);
         g.move(bid2.move);
-        const bid3 = g.handleClick("", -1, -1, `hand_PS`);
+        const bid3 = g.handleClick("", -1, -1, `cPS`);
         g.move(bid3.move);
         expect(g.phase).eq("redraw");
         expect(g.bidWinner).eq(1);
 
         // Redraw: each player in redrawOrder clicks their one needed pool card.
         for (let i = 0; i < 3; i++) {
-            const click = g.handleClick("", -1, -1, `pool_${g.biddingPool![0]}`);
+            const click = g.handleClick("", -1, -1, `c${g.biddingPool![0]}`);
             g.move(click.move);
         }
         expect(g.phase).eq("main");
