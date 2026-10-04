@@ -5780,6 +5780,67 @@ describe("Gnostica: the Fool's Decline button", () => {
     });
 });
 
+describe("Gnostica: a Rods distance past the edge of the window", () => {
+    type Rep = { board: { width: number; height: number; buffer?: { show: string[] } } };
+    const rep = (g: GnosticaGame, move: string) => {
+        const shown = g.clone();
+        shown.move(move, { partial: true });
+        return { rep: shown.render() as Rep, window: shown.renderWindow() };
+    };
+
+    it("draws a buffer on the side the piece moves toward, and a click on it sets the distance", () => {
+        // A lone 3-pip minion facing south: distance 1 lands in the window's padding, distance 2 one cell past it.
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 3, "S"]] }], hands: [filler, filler] });
+        const mid = "use AR/with m0.3 move m0.3";
+        const { rep: shown, window } = rep(g, mid);
+        expect(shown.board.buffer?.show).to.deep.equal(["S"]);
+        expect(g.handleClick(mid, 2, 0 - window.minX).move).eq(`${mid} 1`); // the padding row
+        expect(g.handleClick(mid, 3, 0 - window.minX).move).eq(`${mid} 2`); // the buffer row
+    });
+
+    it("draws none when every landing cell is inside the window", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "S"]] }, { x: 0, y: 1, uid: "AD" }], hands: [filler, filler] });
+        expect(rep(g, "use AR/with m0.1 move m0.1").rep.board.buffer).to.be.undefined;
+    });
+});
+
+describe("Gnostica: a card played from the hand is not counted in the hand its power sees", () => {
+    type Btn = { value?: string; attributes?: { name: string; value: string }[] };
+    const barAt = (g: GnosticaGame, move: string): Btn[] => {
+        const shown = g.clone();
+        shown.move(move, { partial: true });
+        const out = shown.render();
+        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: Btn[] }[] };
+        return rep.areas!.find(a => a.type === "buttonBar")!.buttons!;
+    };
+    const crossed = (b: Btn | undefined): boolean => b?.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through") === true;
+    const grid = [{ x: 0, y: 0, uid: "2D", pieces: [[1, 1, "E"]] as TestPiece[] }, { x: 1, y: 0, uid: "KC" }];
+
+    it("crosses out an attack on a territory when the played card is the only one that could replace it", () => {
+        // The minion faces a court card (worth 2); shrinking it by 1 needs a replacement worth 1.
+        const sole = testGame({ board: grid, hands: [["AS", "KC", "KD", "KR", "KS", "QC"], filler] });
+        expect(crossed(barAt(sole, "play AS/with m0.1").find(b => b.value === "target_n0"))).to.be.true;
+        expect(sole.handleClick("play AS/with m0.1", -1, -1, "_btn_target_n0").move).eq("play AS/with m0.1"); // no response
+        // With another card worth 1 in the hand, the same button is fine.
+        const other = testGame({ board: grid, hands: [["AS", "2R", "KD", "KR", "KS", "QC"], filler] });
+        expect(crossed(barAt(other, "play AS/with m0.1").find(b => b.value === "target_n0"))).to.be.false;
+    });
+
+    it("does not let a played Strength stand in for its own territory growth", () => {
+        const board = [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] as TestPiece[] }, { x: 1, y: 0, uid: "AD" }];
+        const fromHand = testGame({ board, hands: [["08", "2R", "3R", "4R", "5D", "6D"], filler] });
+        expect(crossed(barAt(fromHand, "play 08/with m0.2").find(b => b.value === "target_n0"))).to.be.true;
+    });
+
+    it("lets a High Priestess played from a full hand draw back the one card her own play freed", () => {
+        const board = [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] as TestPiece[] }];
+        const g = testGame({ board, hands: [["02", "2R", "3R", "4R", "5D", "6D"], filler], drawPile: ["AC", "2C", "3C"] });
+        const values = barAt(g, "play 02").map(b => b.value);
+        expect(values).to.include("hpdraw_1");
+        expect(values).to.include("hpdraw_0");
+    });
+});
+
 describe("Gnostica: a Fool's revealed card plays down the same path as one played from the hand", () => {
     type Btn = { value?: string; fill?: unknown };
     const barAt = (g: GnosticaGame, move: string): string[] => {

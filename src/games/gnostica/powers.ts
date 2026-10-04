@@ -766,6 +766,9 @@ export const tradeHands = (
     return target.owner;
 };
 
+// How many cards a Judgement draw may take in all: one per pip of the acting minion, as far as the hand has room.
+export const judgementDrawRoom = (minionSize: number, handSize: number): number => Math.min(minionSize, Math.max(0, 6 - handSize));
+
 // Judgement: draw chosen cards from the discard pile into hand, up to one per pip of the acting minion, capped by the 6-card hand limit.
 export const checkJudgementDraw = (
     ctx: PowerContext, minionX: number, minionY: number, minionIndex: number, cardUids: string[],
@@ -773,7 +776,7 @@ export const checkJudgementDraw = (
     const minion = getPiece(ctx, minionX, minionY, minionIndex);
     const ownErr = checkOwnMinion(minion, ctx.currplayer);
     if (ownErr) return ownErr;
-    const maxDraw = Math.min(minion.size, Math.max(0, 6 - ctx.hand.length));
+    const maxDraw = judgementDrawRoom(minion.size, ctx.hand.length);
     if (cardUids.length > maxDraw) {
         return { key: "TOO_MANY_TO_DRAW", params: { maxDraw, requested: cardUids.length } };
     }
