@@ -238,6 +238,8 @@ interface IPreview {
     foolCard: string | undefined;
     // The resume seed move string, including whatever was typed against the pending obligation.
     pending: IPendingStep | undefined;
+    // What Undo would turn the move into; undefined when there is nothing to undo.
+    undo: string | undefined;
 }
 
 // A lossless-for-display abbreviation of a raw uid list - individual major uids, plus per-suit/per-(spot|royal) minor COUNTs (minors aren't shown individually).
@@ -728,6 +730,7 @@ export class GnosticaGame extends GameBaseSequenced {
             head = parsed.head;
             preview = partial ? this.buildPreview(parsed) : undefined;
             this.addDistanceBuffer(preview?.pending);
+            this.addPendingFacingBuffer(parsed, preview?.pending);
 
             // A genuine cross-turn pause means every legal move right now has to be resuming it; legality of any kind is validateMove's job alone now.
             if (this.continued.length > 0) {
@@ -1670,6 +1673,95 @@ export class GnosticaGame extends GameBaseSequenced {
         return pparts.join("/");
     }
 
+    // Takes back the field a click supplied last, working only on the move's own text (not on what the game would have filled in): the reverse of pickleMove's order.
+    private static retractStep(step: IStep): boolean {
+        const clear = (...keys: (keyof IStep)[]): boolean => {
+            const set = keys.filter(k => step[k] !== undefined);
+            for (const k of set) {
+                delete step[k];
+            }
+            return set.length > 0;
+        };
+        const dropLastCard = (): boolean => {
+            if (step.cardList === undefined || step.cardList.length === 0) {
+                return false;
+            }
+            step.cardList = step.cardList.slice(0, -1);
+            return true;
+        };
+        switch (step.action) {
+            case "grow": case "shrink": case "move":
+                // A replaced territory is picked with its card, which sets the amount too.
+                return clear("direction") || (step.card !== undefined && step.amount !== undefined ? clear("card", "amount") : clear("card") || clear("amount")) || clear("targetCell", "targetPiece");
+            case "fly":
+                return clear("direction") || clear("targetCell") || clear("card", "targetPiece");
+            case "create":
+                return clear("card", "direction", "targetPiece", "amount");
+            case "place":
+                return clear("direction") || clear("targetCell");
+            case "orient": case "replace": {
+                const target = step.targetPiece;
+                if (clear("direction")) {
+                    return true;
+                }
+                // An orient of the minion itself spells its ref once, so the minion goes with its target.
+                if (step.withPiece === target) {
+                    clear("withPiece");
+                }
+                return clear("targetPiece");
+            }
+            case "trade":
+                return clear("targetPiece");
+            case "draw": case "redraw":
+                return dropLastCard();
+            case "discard":
+                return clear("amount") || dropLastCard();
+            case "bid":
+                return clear("amount");
+            case "play": case "use": case "decline":
+                return clear("card");
+        }
+        return false;
+    }
+
+    private static isBareStep(step: IStep): boolean {
+        return Object.entries(step).every(([k, v]) => k === "action" || k === "complete" || v === undefined);
+    }
+
+    // The move with its latest decision taken back, or undefined when there is nothing to take back.
+    private retractedMove(parsed: IParsedMove): IParsedMove | undefined {
+        if (parsed.head === undefined) {
+            return undefined;
+        }
+        const steps: IStep[] = parsed.steps.map(step => ({ ...step, cardList: step.cardList?.slice() }));
+        const emptied: IParsedMove = { ...parsed, head: undefined, steps: [], asUid: undefined, asSuit: undefined, viaUid: undefined };
+        if (steps.length <= 1) {
+            if (parsed.asSuit !== undefined) {
+                return { ...parsed, steps, asSuit: undefined };
+            }
+            if (parsed.asUid !== undefined) {
+                return { ...parsed, steps, asUid: undefined };
+            }
+            // A resume's own first step is what choosing Play or Decline supplied, so it goes back to the pair as a whole.
+            if (steps.length === 0 || (parsed.viaUid !== undefined && parsed.head !== "discard") || !GnosticaGame.retractStep(steps[0])) {
+                return emptied;
+            }
+            return parsed.viaUid !== undefined && GnosticaGame.isBareStep(steps[0]) ? emptied : { ...parsed, steps };
+        }
+        const step = steps[steps.length - 1];
+        if (step.action === "skip" || !GnosticaGame.retractStep(step)) {
+            if (step.action === "skip" || step.action === "with" || step.withPiece === undefined) {
+                steps.pop();
+            } else {
+                // Back to naming only the minion; the cell it was to act at goes with the action.
+                steps[steps.length - 1] = { action: "with", withPiece: step.withPiece };
+            }
+        } else if (step.withPiece === undefined) {
+            steps.pop();
+        }
+        return { ...parsed, steps };
+    }
+
     // The innermost continued obligation's own uid ("00" or "02") - the one a resume submission addresses and demotes into "via <uid>".
     // Ignores a leading "last" (a declare staged mid-chain) rather than relying on it always sitting exactly at the front.
     public getContinuedUid(): string | undefined {
@@ -1737,6 +1829,11 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
+    private undoneMove(parsed: IParsedMove): string | undefined {
+        const retracted = this.retractedMove(parsed);
+        return retracted === undefined ? undefined : this.pickleMove(retracted);
+    }
+
     private buildPreview(parsed: IParsedMove): IPreview {
         const step0 = parsed.steps[0];
         const head = parsed.head?.toLowerCase();
@@ -1747,6 +1844,7 @@ export class GnosticaGame extends GameBaseSequenced {
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
             pending: this.parsePendingStep(this.resumeMove(parsed) ?? parsed).advanced,
+            undo: this.undoneMove(parsed),
         };
     }
 
@@ -2041,6 +2139,18 @@ export class GnosticaGame extends GameBaseSequenced {
             return bar;
         }
         return [...bar.slice(0, at), { label: "Skip Power", value: "skip" }, ...bar.slice(at)] as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
+    // Undo ends every main-phase bar; crossed out, like any unavailable action, when the move has nothing to take back.
+    private withUndo(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        if (bar === undefined || this.phase !== "main") {
+            return bar;
+        }
+        const undo: ButtonBarButton = { label: "Undo", value: "undo" };
+        if (this.preview?.undo === undefined) {
+            undo.attributes = [{ name: "text-decoration", value: "line-through" }];
+        }
+        return [...bar, undo] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
     // Wraps computeActionButtons() to unconditionally fold a persisting "Decline X" into the bar, since a pending obligation's card can always be declined.
@@ -3571,6 +3681,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return pending.game.assembleStepMove(pending, { action: "discard", cardList, amount: parseInt(n, 10) });
     }
 
+    // The prompt after choosing a bare top-level action, before anything is clicked for it.
+    private chosenHeadResult(head: string, last: string): IClickResult | undefined {
+        const prompts: Record<string, string> = {
+            place: "PICK_CELL_TO_PLACE", use: "PICK_CARD_TO_ACTIVATE", play: "PICK_HAND_CARD_TO_PLAY", orient: "PICK_PIECE_TO_ORIENT",
+        };
+        return prompts[head] === undefined ? undefined : { move: `${head}${last}`, valid: true, complete: -1, message: i18next.t(`apgames:validation.gnostica.${prompts[head]}`) };
+    }
+
     private clickActionButton(ctx: IClickContext, value: string): string | IClickResult {
         const { last } = ctx;
         // A button the move already reflects is greyed, so a click on it does nothing - never a silent restart of the move.
@@ -3584,15 +3702,9 @@ export class GnosticaGame extends GameBaseSequenced {
             case "discard":
                 // validateDiscard's own message already says this - no override needed.
                 return `discard${last}`;
-            case "place":
-                // Not strictly necessary (an empty move already builds "place <cell>" from a bare board click), but offered for consistency with every other action.
-                return { move: `place${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CELL_TO_PLACE") };
-            case "use":
-                return { move: `use${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE") };
-            case "play":
-                return { move: `play${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HAND_CARD_TO_PLAY") };
-            case "orient":
-                return { move: `orient${last}`, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
+            // Not strictly necessary for place (an empty move already builds "place <cell>" from a bare board click), but offered for consistency with every other action.
+            case "place": case "use": case "play": case "orient":
+                return this.chosenHeadResult(value, last) ?? ctx.noop;
             case "resume_power":
                 if (this.continued.length === 0) {
                     return ctx.noop;
@@ -3606,6 +3718,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // Declining pops the CURRENT top frame; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
                 return this.pickleMove(this.freshResumeMove(true, ctx.parsed.announceLast));
+            case "undo": {
+                const undone = this.retractedMove(ctx.parsed);
+                if (undone === undefined) {
+                    return ctx.noop;
+                }
+                // Back to just the action: its button's own prompt, since the bare action isn't a valid move to validate.
+                const bare = undone.steps.length === 1 && undone.head !== undefined && undone.asUid === undefined && GnosticaGame.isBareStep(undone.steps[0]);
+                return bare ? this.chosenHeadResult(undone.head!, ctx.last) ?? this.pickleMove(undone) : this.pickleMove(undone);
+            }
             case "skip": {
                 const pending = ctx.pending().advanced;
                 const card = ctx.parsed.steps[0]?.card;
@@ -4165,6 +4286,17 @@ export class GnosticaGame extends GameBaseSequenced {
         if (y === this.board.maxY && y + 1 > win.maxY) {
             this.buffers.push("S");
         }
+    }
+
+    // A piece picked to be turned but not yet turned: nothing sets its buffer until the facing is in, yet the facing click may be past the window.
+    private addPendingFacingBuffer(parsed: IParsedMove, pending: IPendingStep | undefined): void {
+        const turning = parsed.head === "orient" ? parsed.steps[0] : pending?.special === "orientAny" ? pending.istep : undefined;
+        const ref = turning?.targetPiece;
+        if (ref === undefined || turning?.direction !== undefined || !ref.includes(".")) {
+            return;
+        }
+        const [x, y] = GnosticaBoard.algebraic2coords(ref.split(".")[0]);
+        this.addBufferIfWasteland(x, y);
     }
 
     // A Rods piece step still waiting for its distance: a landing cell can lie past the window, where nothing is drawn to click, so a buffer on that side gives it something to click.
@@ -6112,7 +6244,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
-        const actionButtons = this.getActionButtons();
+        const actionButtons = this.withUndo(this.getActionButtons());
         if (actionButtons !== undefined) {
             areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
         }

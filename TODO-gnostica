@@ -27,7 +27,7 @@ Miscellany:
 	- #131 - More analysis of this.preview.
 
 UX:
-	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves, e.g., a Rods/Discs/Swords "piece" step once a target has been chosen.
+	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves. @done(2026-10-04)
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
 	- #120 - Add another display mode for letters instead of icons.
 	- #125 - UI for using only second power of different-powered major arcana cards.
