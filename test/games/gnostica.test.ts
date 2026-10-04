@@ -5967,6 +5967,45 @@ describe("Gnostica: the Undo button", () => {
         expect(undoAll(board(), "discard 2R 3R draw 1")).to.deep.equal(["discard 2R 3R draw 1", "discard 2R 3R", "discard 2R", "discard", ""]);
     });
 
+    it("takes back a place's facing to the seed its cell click made, then the cell, so every step is one a click could reach", () => {
+        const g = new GnosticaGame(2);
+        expect(undoAll(g, "place m0 N")).to.deep.equal(["place m0 N", "place m0 U?", "place", ""]);
+    });
+
+    it("takes back Cups' new piece's facing to the seed its option made, then the whole option", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [["9R", "3R", "4R", "5D", "6D", "7D"], filler], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+        });
+        expect(undoAll(g, "use AC/with m0.2 at n0 create W")).to.deep.equal([
+            "use AC/with m0.2 at n0 create W", "use AC/with m0.2 at n0 create U?", "use AC/with m0.2", "use AC", "use", "",
+        ]);
+    });
+
+    it("leaves a board and bar that render, once it is back to a bare action", () => {
+        const g = new GnosticaGame(2);
+        const placed = g.clone();
+        placed.move("place m0 U?", { partial: true });
+        expect((placed.render() as { pieces: string[][][] }).pieces.flat().some(cell => cell.length > 0)).to.be.true;
+        const undone = g.handleClick("place m0 U?", -1, -1, "_btn_undo").move!;
+        expect(undone).eq("place");
+        const shown = g.clone();
+        shown.move(undone, { partial: true }); // what the front end does with a click's move
+        expect((shown.render() as { pieces: string[][][] }).pieces.flat().some(cell => cell.length > 0)).to.be.false;
+        expect(undoButton(g, "place")).to.not.be.undefined;
+    });
+
+    it("previews a chosen action with nothing yet clicked for it, greying that action", () => {
+        const g = board();
+        g.move("use", { partial: true });
+        const out = g.render();
+        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: (Btn & { fill?: unknown })[] }[] };
+        const buttons = rep.areas!.find(a => a.type === "buttonBar")!.buttons!;
+        expect(buttons.map(b => b.value)).to.deep.equal(["use", "declare", "undo"]);
+        expect(isGrey(buttons[0])).to.be.true;
+        expect(buttons[2].attributes).to.be.undefined; // Undo is live
+    });
+
     it("takes back an orient's facing, then its piece", () => {
         expect(undoAll(board(), "orient m0.2 N")).to.deep.equal(["orient m0.2 N", "orient m0.2", "orient", ""]);
     });

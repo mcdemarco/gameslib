@@ -70,6 +70,11 @@ const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "
 
 // The greyed button: the same dark-theme grey as MUTED_FILL (about #383838), but about #ccc rather than #b3b3b3 in the light theme.
 // The theme's strokes and fill colours mirror each other, so the 0.8 of background mixed in lifts light and the fill colour's share offsets that in dark.
+// What to click next after choosing one of these actions, before anything is clicked for it.
+const BARE_ACTION_PROMPTS: Record<string, string> = {
+    place: "PICK_CELL_TO_PLACE", use: "PICK_CARD_TO_ACTIVATE", play: "PICK_HAND_CARD_TO_PLAY", orient: "PICK_PIECE_TO_ORIENT",
+};
+
 const GREYED_BUTTON_FILL: Colourfuncs = {
     func: "flatten",
     fg: { func: "flatten", fg: "_context_strokes", bg: "_context_fill", opacity: 0.71 },
@@ -675,6 +680,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (parsed.announceLast && this.lastTurner !== undefined) {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
+        // An action chosen with nothing yet clicked for it is a legal start, and says what to click next.
+        if (GnosticaGame.isBareAction(parsed)) {
+            return { valid: true, complete: -1, message: i18next.t(`apgames:validation.gnostica.${BARE_ACTION_PROMPTS[head]}`) };
+        }
         switch (head) {
             case "place": return this.validatePlace(parsed);
             case "orient": return this.validateOrient(parsed);
@@ -747,7 +756,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     this.cmdPass(partial);
                 }
             } else {
-                switch (head) {
+                switch (GnosticaGame.isBareAction(parsed) ? undefined : head) {
                     case "place":
                         this.cmdPlace(parsed.steps[0]);
                         break;
@@ -1696,9 +1705,25 @@ export class GnosticaGame extends GameBaseSequenced {
             case "fly":
                 return clear("direction") || clear("targetCell") || clear("card", "targetPiece");
             case "create":
+                // Choosing the "own" option seeds the new piece's facing ("U?"), and a chosen facing goes back to that seed; the seed goes with the whole option.
+                if (step.direction !== undefined && !step.direction.endsWith("?") && step.atCell !== undefined) {
+                    step.direction = "U?";
+                    return true;
+                }
+                if (step.direction?.endsWith("?")) {
+                    step.action = "with";
+                    delete step.atCell;
+                    delete step.direction;
+                    return true;
+                }
                 return clear("card", "direction", "targetPiece", "amount");
             case "place":
-                return clear("direction") || clear("targetCell");
+                // A cell click seeds its facing ("U?"), so a chosen facing goes back to the seed, and the seed goes with the cell.
+                if (step.targetCell !== undefined && step.direction !== undefined && !step.direction.endsWith("?")) {
+                    step.direction = "U?";
+                    return true;
+                }
+                return clear("direction", "targetCell");
             case "orient": case "replace": {
                 const target = step.targetPiece;
                 if (clear("direction")) {
@@ -1722,6 +1747,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 return clear("card");
         }
         return false;
+    }
+
+    // place, use, play or orient with nothing yet chosen for it.
+    private static isBareAction(parsed: IParsedMove): boolean {
+        return parsed.head !== undefined && BARE_ACTION_PROMPTS[parsed.head] !== undefined && parsed.viaUid === undefined && parsed.asUid === undefined
+            && parsed.steps.every(step => GnosticaGame.isBareStep(step));
     }
 
     private static isBareStep(step: IStep): boolean {
@@ -3681,14 +3712,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return pending.game.assembleStepMove(pending, { action: "discard", cardList, amount: parseInt(n, 10) });
     }
 
-    // The prompt after choosing a bare top-level action, before anything is clicked for it.
-    private chosenHeadResult(head: string, last: string): IClickResult | undefined {
-        const prompts: Record<string, string> = {
-            place: "PICK_CELL_TO_PLACE", use: "PICK_CARD_TO_ACTIVATE", play: "PICK_HAND_CARD_TO_PLAY", orient: "PICK_PIECE_TO_ORIENT",
-        };
-        return prompts[head] === undefined ? undefined : { move: `${head}${last}`, valid: true, complete: -1, message: i18next.t(`apgames:validation.gnostica.${prompts[head]}`) };
-    }
-
     private clickActionButton(ctx: IClickContext, value: string): string | IClickResult {
         const { last } = ctx;
         // A button the move already reflects is greyed, so a click on it does nothing - never a silent restart of the move.
@@ -3702,9 +3725,9 @@ export class GnosticaGame extends GameBaseSequenced {
             case "discard":
                 // validateDiscard's own message already says this - no override needed.
                 return `discard${last}`;
-            // Not strictly necessary for place (an empty move already builds "place <cell>" from a bare board click), but offered for consistency with every other action.
             case "place": case "use": case "play": case "orient":
-                return this.chosenHeadResult(value, last) ?? ctx.noop;
+                // Place isn't strictly necessary (an empty move already builds "place <cell>" from a bare board click), but is offered for consistency with every other action.
+                return `${value}${last}`;
             case "resume_power":
                 if (this.continued.length === 0) {
                     return ctx.noop;
@@ -3720,12 +3743,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.pickleMove(this.freshResumeMove(true, ctx.parsed.announceLast));
             case "undo": {
                 const undone = this.retractedMove(ctx.parsed);
-                if (undone === undefined) {
-                    return ctx.noop;
-                }
-                // Back to just the action: its button's own prompt, since the bare action isn't a valid move to validate.
-                const bare = undone.steps.length === 1 && undone.head !== undefined && undone.asUid === undefined && GnosticaGame.isBareStep(undone.steps[0]);
-                return bare ? this.chosenHeadResult(undone.head!, ctx.last) ?? this.pickleMove(undone) : this.pickleMove(undone);
+                return undone === undefined ? ctx.noop : this.pickleMove(undone);
             }
             case "skip": {
                 const pending = ctx.pending().advanced;
