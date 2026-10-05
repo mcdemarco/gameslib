@@ -54,6 +54,12 @@ except High Priestess.
   (`use 21 as 18/skip/...`) and to a card the Fool reveals
   (`play 18 via 00/skip/...`). It has no effect of its own: apply ignores it, and it leaves
   no result or frame.
+- **Justice's trade** is made on commit, so its move ends there: the attack cannot follow in the same submission.
+  The turn stays with the same player, owing the attack, as `continued` `11.use`, `11.play`, `11.use21` or `11.play21`
+  (how it was reached, and whether the World borrowed it; that decides which minions may attack). The attack is then
+  `use 11 as S/with m0.1 shrink n0.1 1` (or `play …`, matching how it was reached), and `decline 11` gives it up.
+  A preview of the trade shows the player's old hand in the other hand and their new hand face-down. The other
+  persisted obligations are `00.<flips done>` for the Fool and `02` for High Priestess.
 - **A bare trailing `/`** (`use 19/with m0.1 at l0 create U/`) begins the next
   step with nothing chosen for it. The click UI adds it for "Skip Reorient", which
   keeps a finished power's facing as it is, so board clicks then choose the next

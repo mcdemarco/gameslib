@@ -4020,7 +4020,7 @@ describe("Gnostica: choose-step click messaging", () => {
 
         g.move(`use 00`);
         // Fool owes its 2nd flip ("00.1"); the revealed High Priestess is
-        // itself a continuing card, so it's tracked too ("02.0", round 1).
+        // itself a continuing card, so it's tracked too ("02", round 1).
         expect(g.continued).to.deep.equal(["00.1"]);
 
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
@@ -5082,7 +5082,7 @@ describe("Gnostica: Fool and World", () => {
 
     it("resume-mismatch guards are keyed on the innermost obligation, not an outer one still on the stack", () => {
         // Fool reveals the High Priestess; resuming its round 1 leaves
-        // continued = ["00.1", "02.1"] - the Fool still owes its own second
+        // continued = ["00.1", "02"] - the Fool still owes its own second
         // flip, but the High Priestess's round 2 is what's active now. The
         // anchor must be "02" (the innermost obligation), not "00" (the
         // Fool buried under it).
@@ -5101,11 +5101,11 @@ describe("Gnostica: Fool and World", () => {
         expect(g.continued).to.deep.equal(["00.1"]);
         g.hands[0] = ["2C", "5C", "AR"];
         g.move("play 02 via 00/discard 5C draw 1"); // High Priestess round 1
-        expect(g.continued).to.deep.equal(["00.1", "02.1"]);
+        expect(g.continued).to.deep.equal(["00.1", "02"]);
 
         // " via 00" names the buried Fool, not the active round 2 -> rejected.
         expect(g.validateMove("decline 00 via 00").valid).to.be.false;
-        expect(g.continued).to.deep.equal(["00.1", "02.1"]);
+        expect(g.continued).to.deep.equal(["00.1", "02"]);
         // The correct anchor works (a High Priestess round is a "discard").
         expect(g.validateMove("discard draw 0 via 02").valid).to.be.true;
     });
@@ -5514,7 +5514,7 @@ describe("Gnostica: Fool and World", () => {
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
         const discardUid = g.hands[0][0];
         g.move(`use 02/discard ${discardUid} draw 1`); // round 1
-        expect(g.continued).to.deep.equal(["02.1"]); // round 2 owed
+        expect(g.continued).to.deep.equal(["02"]); // round 2 owed
 
         expect(g.validateMove(`decline via 02`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_CONTINUED_ACTION" }));
         const move = g.randomMove();
@@ -6224,5 +6224,134 @@ describe("Gnostica: hidden information", () => {
         expect(rep.legend).to.have.property("cUNKNOWN");
         expect(viewer.validateMove("play 2R/with m0.2 move m0.2 1").valid).to.be.true;
         viewer.move("discard 2R draw 1", { partial: true });
+    });
+});
+
+
+describe("Gnostica: Justice's trade and its continued attack", () => {
+    const theirs = ["AC", "KS", "9S", "8S", "QD", "PD"];
+    const justice = (uid = "11") => testGame({
+        board: [{ x: 0, y: 0, uid, pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }],
+        hands: [filler, theirs], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+    });
+    const barValues = (g: GnosticaGame, move?: string): (string | undefined)[] => {
+        const shown = g.clone();
+        if (move !== undefined) {
+            shown.move(move, { partial: true });
+        }
+        const out = shown.render();
+        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        return rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.value);
+    };
+    const trade = "use 11/with m0.2 trade n0.1";
+
+    it("pauses after the trade: nothing may follow it in the same submission", () => {
+        const g = justice();
+        expect(g.validateMove(trade).complete).eq(1);
+        const after = g.validateMove(`${trade}/with m0.2 shrink n0.1 1`);
+        expect(after.valid).to.be.false;
+        expect(after.message).to.include("STEPS_AFTER_FORCED_PAUSE");
+    });
+
+    it("previews the player's old hand in the other hand, and their new hand face-down", () => {
+        const g = justice();
+        g.move(trade, { partial: true });
+        expect(g.hands[0]).to.deep.equal(["", "", "", "", "", ""]);
+        expect(g.hands[1]).to.deep.equal(filler);
+    });
+
+    it("previews the same from a client that cannot see the other hand", () => {
+        const client = new GnosticaGame(justice().serialize({ strip: true, player: 1 }));
+        client.move(trade, { partial: true });
+        expect(client.hands[0]).to.deep.equal(["", "", "", "", "", ""]);
+        expect(client.hands[1]).to.deep.equal(filler);
+    });
+
+    it("swaps the hands only when the move is committed, and leaves the turn with the same player, owing the attack", () => {
+        const g = justice();
+        g.move(trade);
+        expect(g.hands[0]).to.deep.equal(theirs);
+        expect(g.hands[1]).to.deep.equal(filler);
+        expect(g.currplayer).eq(1);
+        expect(g.continued).to.deep.equal(["11.use"]);
+        expect(g.results.some(r => r.type === "swap")).to.be.true;
+    });
+
+    it("remembers how it was reached: used, played, or used through the World", () => {
+        const played = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }],
+            hands: [["11", ...filler.slice(0, 5)], theirs], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+        });
+        played.move("play 11/with m0.2 trade n0.1");
+        expect(played.continued).to.deep.equal(["11.play"]);
+        expect(played.validateMove("play 11 as S/with m0.2 shrink n0.1 1").valid).to.be.true;
+        expect(played.validateMove("use 11 as S/with m0.2 shrink n0.1 1").valid).to.be.false;
+
+        const world = testGame({
+            board: [{ x: 0, y: 0, uid: "21", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }, { x: -1, y: 0, uid: "11" }],
+            hands: [filler, theirs], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+        });
+        world.move("use 21 as 11/with m0.2 trade n0.1");
+        expect(world.continued).to.deep.equal(["11.use21"]);
+        expect(world.validateMove("use 11 as S/with m0.2 shrink n0.1 1").valid).to.be.true; // the World's own minion, not one on Justice's territory
+    });
+
+    it("lets a used Justice's attack be made only by the minions in the territory it was used from", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "11", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }, { x: -1, y: 0, uid: "2D", pieces: [[1, 3, "E"]] }],
+            hands: [filler, theirs], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+        });
+        g.move("use 11/with m0.2 trade n0.1");
+        expect(g.validateMove("use 11 as S/with m0.2 shrink n0.1 1").valid).to.be.true;
+        expect(g.validateMove("use 11 as S/with l0.3 shrink n0.1 1").valid).to.be.false; // a minion from another territory
+    });
+
+    it("finishes the turn when the attack is made, or when it is declined", () => {
+        const attacked = justice();
+        attacked.move(trade);
+        attacked.move("use 11 as S/with m0.2 shrink n0.1 1");
+        expect(attacked.continued).to.deep.equal([]);
+        expect(attacked.currplayer).eq(2);
+        expect(attacked.board.get(1, 0)?.pieces.length ?? 0).eq(0);
+
+        const declined = justice();
+        declined.move(trade);
+        declined.move("decline 11");
+        expect(declined.continued).to.deep.equal([]);
+        expect(declined.currplayer).eq(2);
+        expect(declined.hands[0]).to.deep.equal(theirs); // the trade stands
+    });
+
+    it("rejects a continued turn that names the wrong card, verb or suit", () => {
+        const g = justice();
+        g.move(trade);
+        expect(g.validateMove("use 11 as S/with m0.2 shrink n0.1 1").valid).to.be.true;
+        expect(g.validateMove("play 11 as S/with m0.2 shrink n0.1 1").message).to.include("WRONG_CONTINUED_ACTION");
+        expect(g.validateMove("use 11/with m0.2 shrink n0.1 1").message).to.include("WRONG_AS_SUIT");
+        expect(g.validateMove("use 12 as S/with m0.2 shrink n0.1 1").valid).to.be.false;
+        expect(g.validateMove("use 11 as C/with m0.2 shrink n0.1 1").valid).to.be.false;
+    });
+
+    it("offers Play and Decline for the owed attack, without Skip Power, and drops Decline once Play is chosen", () => {
+        const g = justice();
+        g.move(trade);
+        const owed = barValues(g);
+        expect(owed).to.include("decline_power");
+        expect(owed).to.not.include("skip");
+        const play = g.handleClick("", -1, -1, "_btn_resume_power");
+        expect(play.move).eq("use 11 as S");
+        expect(barValues(g, play.move)).to.not.include("decline_power");
+        expect(g.handleClick("", -1, -1, "_btn_decline_power").move).eq("decline 11");
+    });
+
+    it("does not pause the Hanged Man, whose trade comes last", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "12", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD" }, { x: 2, y: 0, uid: "2D", pieces: [[2, 1, "W"]] }, { x: 3, y: 0, uid: "3D" }],
+            hands: [filler, theirs], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+        });
+        g.move("use 12/with m0.1 move m0.1 1/with n0.1 trade o0.1");
+        expect(g.continued).to.deep.equal([]);
+        expect(g.currplayer).eq(2);
+        expect(g.hands[1]).to.deep.equal(filler); // swapped on commit
     });
 });
