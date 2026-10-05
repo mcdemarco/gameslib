@@ -1094,7 +1094,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "WITH_BAD_PIECE_REF";
                     break;
                 }
-                step.withPiece = step.withPiece.toLowerCase();
 
                 if (segment.length === 0) {
                     if (lastStep) {
@@ -1270,7 +1269,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 else if ( DIRECTION_RE.test(tempwhat) )
                     step.direction = tempwhat.toUpperCase();
                 else if ( PIECE_REF_RE.test(tempwhat) )
-                    step.targetPiece = tempwhat.toLowerCase();
+                    step.targetPiece = tempwhat;
                 else if ( tempwhat === "drawn" )
                     step.amount = 1;
                 else {
@@ -1305,7 +1304,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "BAD_PIECE_REF_FOR_ORIENT";
                         break;
                     }
-                    step.targetPiece = tempwhat.toLowerCase();
+                    step.targetPiece = tempwhat;
                     //The rules are not explicit about orient needing/being a minion,
                     //but for code consistency purposes we also populate the minion field.
                     if (step.withPiece === undefined)
@@ -1378,7 +1377,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "BAD_PIECE_REF";
                     break;
                 }
-                step.targetPiece = step.targetPiece.toLowerCase();
 
                 if (segment.length > 0) {
                     const tempdirection = segment.shift()!;
@@ -1422,7 +1420,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 else if ( CARD_UID_RE.test(tempwhat) )
                     step.card = tempwhat;
                 else if ( PIECE_REF_RE.test(tempwhat) )
-                    step.targetPiece = tempwhat.toLowerCase();
+                    step.targetPiece = tempwhat;
                 else {
                     pm.error = "BAD_STEP_CONTENT";
                     break;
