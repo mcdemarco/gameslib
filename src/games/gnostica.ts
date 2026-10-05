@@ -892,7 +892,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const CARD_UID_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
         const CELL_RE = /^[a-z]{1,2}-?\d+$/i;
         const DIRECTION_RE = /^[NESWU]\??$/i;
-        const PIECE_REF_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[neswu])?(\.[1-6])?)?$/i;
+        const PIECE_REF_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[NESWU])?(\.[1-6])?)?$/;
         const MAJOR_ARCANA_RE = /^[0-1][0-9]|20|21$/i;
         const NUMBER_RE = /^[0-6]$/i; //Used for player Ids, card counts, bids, etc.
         const SUIT_RE = /^[CDRS]$/i;
@@ -4354,7 +4354,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (ref === undefined || turning?.direction !== undefined || !ref.includes(".")) {
             return;
         }
-        const [x, y] = GnosticaBoard.algebraic2coords(ref.split(".")[0]);
+        const [x, y] = GnosticaBoard.algebraic2coords(ref.split(".")[0].toLowerCase());
         this.addBufferIfWasteland(x, y);
     }
 
