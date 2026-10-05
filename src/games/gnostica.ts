@@ -46,25 +46,6 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
     S: { verb: "Attack", tile: "Attack Territory" },
 };
 
-// The face-down card every Decktet game draws for a card the viewer can't see.
-const WARNING_GLYPH: [Glyph, ...Glyph[]] = [
-    { name: "piece-borderless", colour: "_context_background" },
-    { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
-];
-const UNKNOWN_CARD_KEY = "cUNKNOWN";
-const UNKNOWN_CARD_GLYPH: Glyph = {
-    name: "piece-square-borderless",
-    colour: {
-        func: "flatten",
-        fg: "_context_fill",
-        bg: "_context_background",
-        opacity: 0.5,
-    },
-};
-
-// A glyph marker is drawn at the full size of its cell, while the renderer draws glyphs in the pieces layer at about this fraction of it (measured in the playground).
-const MARKER_SCALE = 0.85;
-
 // How far below its glyph's centre each flat pyramid's centroid lies, small to large, in the renderer's 500-unit glyph space (its triangles' centroids against a 180-unit viewbox).
 const FLAT_PYRAMID_CENTROID_DROP = [46.3, 63.7, 81];
 
@@ -100,6 +81,10 @@ interface ChoiceOption {
     value: string;
     label: string;
     disabledReason?: { key: string; params?: Record<string, unknown> };
+}
+
+interface ILegendObj {
+    [key: string]: Glyph|[Glyph, ...Glyph[]];
 }
 
 // A minion's board location; `piece` carries owner/size/orientation for a newMinion predicted by validate* before the board is actually mutated.
@@ -6063,7 +6048,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // A card is unique, so its legend key needs no location; every hidden card shares the one face-down key.
     private static cardKey(uid: string): string {
-        return uid === UNREVEALED_UID ? UNKNOWN_CARD_KEY : `c${uid}`;
+        return uid === UNREVEALED_UID ? "cUNKNOWN" : `c${uid}`;
     }
 
     private static cardKeyUid(piece: string | undefined): string | undefined {
@@ -6176,7 +6161,16 @@ export class GnosticaGame extends GameBaseSequenced {
         };
 
         // Built once and edited per frame: a card's face depends on where it is in the frame, so every frame assigns the cards it shows afresh.
-        const legend = GnosticaGame.newLegend();
+        const legend: ILegendObj = { ["cUNKNOWN"]: GnosticaGame.markerStack([{
+            name: "piece-square-borderless",
+            colour: {
+                func: "flatten",
+                fg: "_context_fill",
+                bg: "_context_background",
+                opacity: 0.5,
+            },
+        }])};
+                                   
         const faces = new Map<string, string>();
 
         const renders: APRenderRep[] = [];
@@ -6270,7 +6264,10 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 // The declaration round banner.
                 if (this.declaredPlayer() !== undefined) {
-                    legend.Warning = WARNING_GLYPH;
+                    legend.Warning = [
+                        { name: "piece-borderless", colour: "_context_background" },
+                        { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
+                    ];
                     areas.push({
                         type: "pieces",
                         pieces: ["Warning"],
@@ -6678,14 +6675,9 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // The one place the face-down card is put in a legend: an unrevealed territory and a hidden hand card are both this card.
-    private static newLegend(): { [k: string]: Glyph | [Glyph, ...Glyph[]] } {
-        return { [UNKNOWN_CARD_KEY]: GnosticaGame.markerStack([UNKNOWN_CARD_GLYPH]) };
-    }
-
-    // A marker is drawn at the full size of its cell, but the pieces layer draws at MARKER_SCALE of it. Scaling only `scale` (a nudge is applied inside the scale transform, so it shrinks with it) keeps the card the size it was when it lived in the pieces layer.
+    // A marker is drawn at the full size of its cell, but the pieces layer is scaled down. Scaling only `scale` (a nudge is applied inside the scale transform, so it shrinks with it) keeps the card the size it was when it lived in the pieces layer.
     private static markerStack(stack: Glyph[]): [Glyph, ...Glyph[]] {
-        return GnosticaGame.withBackdrop(stack.map(g => ({ ...g, scale: (g.scale ?? 1) * MARKER_SCALE })), 1);
+        return GnosticaGame.withBackdrop(stack.map(g => ({ ...g, scale: (g.scale ?? 1) * 0.85 })), 1);
     }
 
     // The renderer sizes a legend symbol to its largest glyph, so an invisible glyph of a given scale fixes how big the rest of the stack is drawn inside it.
