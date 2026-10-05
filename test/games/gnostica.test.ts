@@ -2573,8 +2573,8 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
         // Matches the discard pile itself, so none of these register as
         // "just discarded" (see newDiscardUids's own docs) - this test is
         // about the bucketing/grouping shape, not the highlight.
-        const rep = g.render().at(-1) as { legend: Record<string, unknown>; areas?: { label: string; pieces?: string[] }[] };
-        const discardArea = rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
+        const rep = g.render().at(-1) as { legend: Record<string, unknown>; areas?: { label?: unknown; pieces?: string[] }[] };
+        const discardArea = rep.areas?.find(a => (a.label as { textKey?: string } | undefined)?.textKey === "apgames:validation.gnostica.LABEL_DISCARDS");
         expect(discardArea, "expected a discard-pile area").to.not.be.undefined;
         expect(discardArea!.pieces).to.include("C_spot_2");
         expect(discardArea!.pieces).to.include("C_royal_1");
@@ -2588,8 +2588,8 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
     it("omits the discard-pile area entirely once the pile is empty", () => {
         const g = new GnosticaGame(2);
         g.discardPile = [];
-        const rep = g.render().at(-1) as { areas?: { label?: string; pieces?: string[] }[] };
-        const discardArea = rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
+        const rep = g.render().at(-1) as { areas?: { label?: unknown; pieces?: string[] }[] };
+        const discardArea = rep.areas?.find(a => (a.label as { textKey?: string } | undefined)?.textKey === "apgames:validation.gnostica.LABEL_DISCARDS");
         expect(discardArea).to.be.undefined;
     });
 
@@ -2628,9 +2628,9 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
 // scoped to a specific viewer (the pile is always public) or gated on
 // whose turn it is (there's only one shared pile).
 describe("Gnostica: discard-pile 'just discarded' highlight", () => {
-    type DiscardRenderRep = { legend: Record<string, { colour?: unknown; text?: string }[]>; areas?: { label?: string; pieces?: string[] }[] };
+    type DiscardRenderRep = { legend: Record<string, { colour?: unknown; text?: string }[]>; areas?: { label?: unknown; pieces?: string[] }[] };
     const isTinted = (rep: DiscardRenderRep, key: string): boolean => JSON.stringify(rep.legend[key]).includes('"flatten"');
-    const discardArea = (rep: DiscardRenderRep) => rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
+    const discardArea = (rep: DiscardRenderRep) => rep.areas?.find(a => (a.label as { textKey?: string } | undefined)?.textKey === "apgames:validation.gnostica.LABEL_DISCARDS");
 
     it("tags a card discarded on the most recent move, tinted the same theme-relative muted colour as a new hand card", () => {
         // A major arcana card specifically - unlike a minor, it gets its
@@ -6473,7 +6473,7 @@ describe("Gnostica: the declaration warning banner", () => {
 
     it("labels the declarer's hand for the other players, and not in the turn the declaration is made", () => {
         const handLabel = (g: GnosticaGame, player: number) =>
-            (g.render().at(-1) as { areas?: { ownerMark?: number; label?: string }[] }).areas!.find(a => a.ownerMark === player)!.label!;
+            (g.render().at(-1) as { areas?: { ownerMark?: number; label?: { textParams?: { declared?: string } } }[] }).areas!.find(a => a.ownerMark === player)!.label!.textParams!.declared!;
         const committed = declared();
         expect(handLabel(committed, 1)).to.include("(declarer)");
         expect(handLabel(committed, 2)).to.not.include("(declarer)");

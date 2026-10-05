@@ -1,4 +1,4 @@
-import { IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult } from "./_base.js";
+import { IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult, type StructuredRenderLabel } from "./_base.js";
 import { GameBaseSequenced } from "./_turn-sequenced.js";
 import type { IGamePly } from "./_turn-model.js";
 import { APGamesInformation } from "../schemas/gameinfo.js";
@@ -6194,7 +6194,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
         const ungrouped = this.results.filter(r => r.type !== "_group");
 
-        const discardLabel = i18next.t("apgames:validation.gnostica.LABEL_DISCARDS");
+        const discardLabel = this.neutralAreaLabel("apgames:validation.gnostica.LABEL_DISCARDS");
         const strokeColour = {
             func: "flatten" as const,
             fg: "_context_strokes",
@@ -6279,7 +6279,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     areas.push({
                         type: "pieces",
                         pieces: handKeys as [string, ...string[]],
-                        label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurner === p ? "(declarer)" : "" }),
+                        label: this.seatAreaLabel(p, "apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurner === p ? "(declarer)" : "" }),
                         spacing: 0.25,
                         width: 6,
                         ownerMark: p,
@@ -6298,7 +6298,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     areas.push({
                         type: "pieces",
                         pieces: poolKeys as [string, ...string[]],
-                        label: i18next.t("apgames:validation.gnostica.LABEL_BIDDING_POOL"),
+                        label: this.neutralAreaLabel("apgames:validation.gnostica.LABEL_BIDDING_POOL"),
                         spacing: 0.25,
                         width: 6,
                     });
@@ -6313,7 +6313,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     areas.push({
                         type: "pieces",
                         pieces: ["Warning"],
-                        label: i18next.t("apgames:validation.gnostica.LABEL_WARNING"),
+                        label: this.neutralAreaLabel("apgames:validation.gnostica.LABEL_WARNING"),
                         spacing: 0.25,
                         width: 1,
                     });
@@ -6321,7 +6321,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 // The literal drawPile array isn't used for the draw-pile summary - "what's left to draw" is computed by elimination: every card in the full deck not visible somewhere else.
                 const drawArea = this.buildDeckSummaryArea(
-                    this.unseenCardUids(), legend, faces, i18next.t("apgames:validation.gnostica.LABEL_DECK")
+                    this.unseenCardUids(), legend, faces, this.neutralAreaLabel("apgames:validation.gnostica.LABEL_DECK")
                 );
                 if (drawArea !== undefined) {
                     areas.push(drawArea);
@@ -6473,7 +6473,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Builds a discard area straight from a DiscardSummary - used only for historical frames. Otherwise identical to buildDeckSummaryArea.
     private buildAreaFromSummary(
-        summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: string,
+        summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: StructuredRenderLabel,
     ): AreaPieces | undefined {
         const pieces: string[] = [];
         for (const suit of suits) {
@@ -6508,7 +6508,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Summary code because Draw/discard piles can be large. Minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are shown individually.
     private buildDeckSummaryArea(
-        uids: string[], legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: string,
+        uids: string[], legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: StructuredRenderLabel,
         newUids: Set<string> = new Set(),
     ): AreaPieces | undefined {
         if (uids.length === 0) {

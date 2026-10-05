@@ -55,4 +55,5 @@ Rebasing:
 	- #136 - Consider using piece area text labels.
 	- #137 - Consider combinable display options (once I have a second one)
 	- #138 - Deal with the changes to chatLog.
+	- #139 - Move the rest of the render path to the structured label style (action button labels, the hard-coded "(declarer)" text, any remaining i18next.t calls).
 
