@@ -339,8 +339,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 ],
             }
         ],
-        categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
-        flags: ["experimental", "no-moves", "custom-randomization", "player-stashes", "autopass", "scores"],
+        categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>hidden", "mechanic>random>play", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
+        flags: ["experimental", "no-moves", "custom-randomization", "no-explore", "player-stashes", "autopass", "scores"],
         displays: [{ uid: "larger-cards" }],
     };
 
@@ -538,11 +538,12 @@ export class GnosticaGame extends GameBaseSequenced {
         };
         if (opts !== undefined && opts.strip) {
             state.stack = state.stack.map(mstate => {
+                const entry = {...mstate, hands: mstate.hands.map(h => [...h])};
                 for (let p = 1; p <= this.numplayers; p++) {
                     if (p === opts.player) { continue; }
-                    mstate.hands[p - 1] = mstate.hands[p - 1].map(() => UNREVEALED_UID);
+                    entry.hands[p - 1] = entry.hands[p - 1].map(() => UNREVEALED_UID);
                 }
-                return mstate;
+                return entry;
             });
         }
         return state;
