@@ -969,8 +969,8 @@ export class GnosticaGame extends GameBaseSequenced {
                         pm.error = "BAD_AS_HEADWORD";
                         break;
                     }
-                    if (headTokens[0] !== "01" && headTokens[0] !== "21") {
-                        pm.error = "AS_NEEDS_MAGICIAN_OR_WORLD";
+                    if (headTokens[0] !== "01" && headTokens[0] !== "11" && headTokens[0] !== "21") {
+                        pm.error = "AS_NEEDS_MAGICIAN_JUSTICE_OR_WORLD";
                         break;
                     }
                     while (headTokens.indexOf("as") > -1) {
@@ -1004,7 +1004,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     if ( pm.asSuit !== undefined && (! SUIT_RE.test(pm.asSuit)) ) {
                         //Bad suit for the Magician.
-                        pm.error = "MAGICIAN_BAD_SUIT";
+                        pm.error = "MAGICIAN_OR_JUSTICE_BAD_SUIT";
+                        break;
+                    }
+                    if ( pm.asSuit !== undefined &&  headTokens[0] === "11" && pm.asSuit !== "S" ) {
+                        //Bad suit for the Magician.
+                        pm.error = "JUSTICE_WRONG_SUIT";
                         break;
                     }
                     if (pm.asSuit !== undefined) {

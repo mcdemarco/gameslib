@@ -84,6 +84,7 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 01 as R/with m0.1 move m0.1 1")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 21 as 01 as C/with m0.1 at m0 create U")).to.have.deep.property("valid", true);
+        expect(g.parseMove("use 11 as S/with m0.1 shrink m0.2 2")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 20/with m0.2 draw KS 00")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 02/discard AC KS draw 2")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 21 as 06/with m0.1 move n0.1 1 orient U/with o0.1 at o0 create U")).to.have.deep.property("valid", true);
@@ -102,6 +103,7 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 11/with m0.1 trade n0.1/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 21 as 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("play 21 as 01 as C via 00/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
+        expect(g.parseMove("play 11 as S/with m0.1 shrink m1.2 1")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 11/with m0.1 trade n0.1")).to.have.deep.property("valid", true);
 
@@ -172,6 +174,8 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("skip")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 3D/skip/grow n0.1 2")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 09/with n0.1 fly AC to AR/skip")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 01 as Q/with n0.1 grow AC to KC")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 11 as Q/with n0.1 fly AC to AR")).to.have.deep.property("valid", false);
     });
 
     it("marks a special power's step complete only once its fields are typed", () => {
