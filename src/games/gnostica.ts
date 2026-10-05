@@ -326,7 +326,18 @@ export class GnosticaGame extends GameBaseSequenced {
             { uid: "#target" },
             { uid: "target-10", group: "target" },
             { uid: "bidding" },
-            { uid: "no-majors" }
+            {
+                uid: "no-majors",
+                fans: true,
+                people: [
+                    {
+                        type: "designer",
+                        name: "Russ Williams",
+                        urls: ["https://boardgamegeek.com/boardgamedesigner/43454/russ-williams"],
+                        apid: "4223967c-d922-47c6-8f57-69b6025f5a9b",
+                    },
+                ],
+            }
         ],
         categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
         flags: ["experimental", "no-moves", "custom-randomization", "player-stashes", "autopass", "scores"],
