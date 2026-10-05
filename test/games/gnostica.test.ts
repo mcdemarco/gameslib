@@ -67,7 +67,7 @@ const clearBoard = (g: GnosticaGame): void => {
 // order has to read it back off the rendered hand area, not the raw
 // array.
 const renderedHandUids = (g: GnosticaGame, player: number): string[] => {
-    const rep = g.render() as { areas?: { type: string; ownerMark?: number; pieces?: string[] }[] };
+    const rep = g.render().at(-1) as { areas?: { type: string; ownerMark?: number; pieces?: string[] }[] };
     const area = rep.areas?.find(a => a.type === "pieces" && a.ownerMark === player);
     return (area?.pieces ?? []).map(key => key.slice(1));
 };
@@ -183,7 +183,7 @@ describe("Gnostica: new-card hand highlight", () => {
         });
         g.move("discard AC draw 1"); // player 1 discards AC, draws 7C back
         g.move("discard draw 0"); // player 2's turn - now back to player 1
-        const rep = g.render() as RenderRep;
+        const rep = g.render().at(-1) as RenderRep;
         const handArea = player1HandArea(rep);
         const newKey = `c7C`;
         expect(handArea?.pieces).to.include(newKey);
@@ -199,7 +199,7 @@ describe("Gnostica: new-card hand highlight", () => {
 
     it("shows no highlight on a player's first turn, or once they start building this turn's own move", () => {
         const fresh = new GnosticaGame(2);
-        const freshRep = fresh.render() as RenderRep;
+        const freshRep = fresh.render().at(-1) as RenderRep;
         expect(player1HandArea(freshRep)?.pieces?.some(p => isTinted(freshRep, p))).to.be.false;
 
         const g = testGame({
@@ -208,10 +208,10 @@ describe("Gnostica: new-card hand highlight", () => {
         });
         g.move("discard AC draw 1");
         g.move("discard draw 0");
-        const before = g.render() as RenderRep;
+        const before = g.render().at(-1) as RenderRep;
         expect(isTinted(before, `c7C`)).to.be.true; // sanity - not vacuous
         g.move("discard", { partial: true }); // simulates the player's own first click
-        const after = g.render() as RenderRep;
+        const after = g.render().at(-1) as RenderRep;
         expect(player1HandArea(after)?.pieces?.some(p => isTinted(after, p))).to.be.false;
     });
 });
@@ -284,7 +284,7 @@ describe("Gnostica: discard", () => {
 describe("Gnostica: turn order / legend", () => {
     type KeyArea = { type: string; list?: { piece: string; name: string }[] };
     const keyArea = (g: GnosticaGame): KeyArea | undefined =>
-        (g.render() as { areas?: KeyArea[] }).areas?.find(a => a.type === "key");
+        (g.render().at(-1) as { areas?: KeyArea[] }).areas?.find(a => a.type === "key");
 
     it("advances currplayer around the table and back", () => {
         const g = new GnosticaGame(3);
@@ -773,16 +773,17 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "U" }); // B, pushed and reoriented
         expect(dest.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "U" }); // new piece from the Cups step
 
-        // A genuine 2-step chain: one frame (state after step 1 only), plus the final/live rep.
-        expect(g.frames.length).eq(1);
-        expect(g.frames[0].board.get(2, 0)?.pieces.length).eq(1); // B pushed here, Cups step not yet applied
+        // A genuine 2-step chain: a frame before each step (the first is the starting board), plus the final/live rep.
+        expect(g.frames.length).eq(2);
+        expect(g.frames[0].board.get(2, 0)).eq(undefined); // the starting board
+        expect(g.frames[1].board.get(2, 0)?.pieces.length).eq(1); // B pushed here, Cups step not yet applied
         const reps = g.render() as { annotations?: { type: string }[] }[];
-        expect(reps.length).eq(2);
-        // Frame 0's own annotations cover only step 1's effect (the push), not step 2's - proving
-        // the _group/annotation-flattening isolates each step rather than overlaying every step
-        // onto every frame; the final/live rep covers the whole turn, same as any ordinary move.
-        expect(reps[0].annotations?.map(a => a.type)).to.deep.equal(["move"]);
-        expect(reps[1].annotations?.map(a => a.type).sort()).to.deep.equal(["enter", "move"]);
+        expect(reps.length).eq(3);
+        // Each rep's annotations cover only the step that led to it: none for the starting board, the push for the
+        // next, and the live rep shows the last step's own effect.
+        expect(reps[0].annotations).eq(undefined);
+        expect(reps[1].annotations?.map(a => a.type)).to.deep.equal(["move"]);
+        expect(reps[2].annotations?.map(a => a.type)).to.deep.equal(["enter"]);
         // Confirms results really are grouped (one _group per step, not flat), and chatLog()
         // logs a line for each step of the chain.
         expect(g.results.filter(r => r.type === "_group")).to.have.length(2);
@@ -812,10 +813,11 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(dest.pieces[0]).to.deep.include({ owner: 1, size: 1, orientation: "E" });
         expect(g.board.has(1, 0)).eq(false); // the waypoint at n0 is left empty
 
-        // Frame 0 shows the piece at its intermediate (post-first-move) position, n0 - not yet o0.
-        expect(g.frames.length).eq(1);
-        expect(g.frames[0].board.get(1, 0)?.pieces.length).eq(1);
-        expect(g.frames[0].board.get(2, 0)).eq(undefined);
+        // Frame 1 shows the piece at its intermediate (post-first-move) position, n0 - not yet o0.
+        expect(g.frames.length).eq(2);
+        expect(g.frames[0].board.get(0, 0)?.pieces.length).eq(1); // the starting board
+        expect(g.frames[1].board.get(1, 0)?.pieces.length).eq(1);
+        expect(g.frames[1].board.get(2, 0)).eq(undefined);
     });
 
     // Direct, low-level coverage for chainMinion itself: a relocation prunes its own pre-mutation
@@ -1059,7 +1061,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         it("offers no attack amount past the victim's own pips (a 2-pip minion's 4 and 3 against a 2-pip victim are just 2)", () => {
             const g = setup(2, "3C", [[2, 2, "U"]]);
             g.move("use 13/with m0.2 shrink n0.2", { partial: true });
-            const rep = g.render() as { areas?: { type: string; buttons?: { label?: string }[] }[] };
+            const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label?: string }[] }[] };
             const labels = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.label).filter(l => l?.startsWith("Attack for"));
             expect(labels).to.deep.equal(["Attack for 2", "Attack for 1"]);
         });
@@ -1072,7 +1074,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             });
             g.move("use 13/with m0.2 shrink n0.2", { partial: true });
             type Btn = { label?: string; attributes?: { name: string; value: string }[] };
-            const rep = g.render() as { areas?: { type: string; buttons?: Btn[] }[] };
+            const rep = g.render().at(-1) as { areas?: { type: string; buttons?: Btn[] }[] };
             const attacks = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.filter(b => b.label?.startsWith("Attack for"));
             const crossed = (b: Btn) => b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through") === true;
             expect(attacks.map(b => [b.label, crossed(b)])).to.deep.equal([["Attack for 2", false], ["Attack for 1", true]]);
@@ -1289,13 +1291,14 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.board.get(0, 0)!.pieces[0].orientation).eq("U"); // reoriented twice, back to up
         expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, orientation: "W" }); // enemy piece reoriented too
 
-        // A genuine 3-step chain: two frames (N-1), plus the final/live rep.
-        expect(g.frames.length).eq(2);
-        expect(g.frames[0].board.get(0, 0)!.pieces[0].orientation).eq("E"); // after step 1 only
-        expect(g.frames[0].board.get(1, 0)!.pieces[0].orientation).eq("U"); // step 2 not yet applied
-        expect(g.frames[1].board.get(0, 0)!.pieces[0].orientation).eq("E"); // still E after step 2
-        expect(g.frames[1].board.get(1, 0)!.pieces[0].orientation).eq("W"); // step 2's own effect
-        expect((g.render() as unknown[]).length).eq(3);
+        // A genuine 3-step chain: a frame before each step (N), plus the final/live rep.
+        expect(g.frames.length).eq(3);
+        expect(g.frames[0].board.get(0, 0)!.pieces[0].orientation).eq("U"); // the starting board
+        expect(g.frames[1].board.get(0, 0)!.pieces[0].orientation).eq("E"); // after step 1 only
+        expect(g.frames[1].board.get(1, 0)!.pieces[0].orientation).eq("U"); // step 2 not yet applied
+        expect(g.frames[2].board.get(0, 0)!.pieces[0].orientation).eq("E"); // still E after step 2
+        expect(g.frames[2].board.get(1, 0)!.pieces[0].orientation).eq("W"); // step 2's own effect
+        expect((g.render() as unknown[]).length).eq(4);
         expect(g.results.filter(r => r.type === "_group").length).eq(3); // grouped, one per step
     });
 
@@ -1364,24 +1367,27 @@ describe("Gnostica: frame-stepping render() contract", () => {
     it("a genuine 2-step chain gives only its final rep any buttons, whether still mid-build (partial) or committed and reloaded", () => {
         const midBuild = setupLovers();
         midBuild.move(move, { partial: true });
-        expect(midBuild.frames.length).eq(1); // still mid-build, but the chain itself is complete
+        expect(midBuild.frames.length).eq(2); // still mid-build, but the chain itself is complete
         const reps = midBuild.render() as RepLike[];
-        expect(reps.length).eq(2);
+        expect(reps.length).eq(3);
         expect(barValues(reps[0])).eq(undefined);
-        expect(barValues(reps[1])).to.not.eq(undefined);
+        expect(barValues(reps[1])).eq(undefined);
+        expect(barValues(reps[2])).to.not.eq(undefined);
 
         const committed = setupLovers();
         committed.move(move);
         const reps2 = committed.render() as RepLike[];
-        expect(reps2.length).eq(2);
+        expect(reps2.length).eq(3);
         expect(barValues(reps2[0])).eq(undefined);
-        expect(barValues(reps2[1])).to.not.eq(undefined);
+        expect(barValues(reps2[1])).eq(undefined);
+        expect(barValues(reps2[2])).to.not.eq(undefined);
     });
 
-    it("1 real step never produces an array or grouped results, even on a card that could have taken more", () => {
+    it("1 real step never produces extra frames or grouped results, even on a card that could have taken more", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "06", pieces: [[1, 1, "E"]] }], hands: [filler, filler] }); // Lovers - could take up to 2 steps
         g.move(`use 06/with m0.1 move m0.1 1 orient E`); // only step 1, step 2 skipped
-        expect(Array.isArray(g.render())).eq(false);
+        expect(g.frames.length).eq(0);
+        expect(g.render()).to.have.length(1);
         expect(g.results.some(r => r.type === "_group")).eq(false);
     });
 
@@ -1393,7 +1399,7 @@ describe("Gnostica: frame-stepping render() contract", () => {
         const after = g2.render() as RepLike[];
         expect(after.length).eq(before.length);
         expect(g2.frames.length).eq(g.frames.length);
-        expect(g2.frames[0].board.get(2, 0)?.pieces.length).eq(g.frames[0].board.get(2, 0)?.pieces.length);
+        expect(g2.frames[1].board.get(2, 0)?.pieces.length).eq(g.frames[1].board.get(2, 0)?.pieces.length);
     });
 });
 
@@ -1477,7 +1483,7 @@ describe("Gnostica: render", () => {
     // that row's true algebraic notation, for every cell in the row.
     it("labels every row with its true algebraic row number, mirrored per the renderer's convention", () => {
         const g = new GnosticaGame(2);
-        const rep = g.render() as { board: { rowLabels: string[]; width: number }; pieces: string[][][] };
+        const rep = g.render().at(-1) as { board: { rowLabels: string[]; width: number }; pieces: string[][][] };
         const pieceRows = rep.pieces;
         const n = pieceRows.length;
         expect(rep.board.rowLabels.length).eq(n);
@@ -1505,7 +1511,7 @@ describe("Gnostica: render", () => {
             new Piece(2, 2, "U"), new Piece(1, 3, "U"),
         ];
         type CellGlyph = { name?: string; nudge?: { dx: number; dy: number } };
-        const rep = g.render() as { legend: Record<string, CellGlyph | CellGlyph[]>; pieces: string[][][] };
+        const rep = g.render().at(-1) as { legend: Record<string, CellGlyph | CellGlyph[]>; pieces: string[][][] };
         // The board's own minY is pieceRows[0]'s y; render() pads by 1 cell.
         const keys = rep.pieces[0 - (g.board.minY - 1)][0 - (g.board.minX - 1)];
         expect(keys.length).eq(t.pieces.length);
@@ -1518,7 +1524,7 @@ describe("Gnostica: render", () => {
 
     describe("minion ring", () => {
         type RingRep = { legend: Record<string, { name?: string }[]>; pieces: string[][][] };
-        const ringKeys = (g: GnosticaGame): string[] => (g.render() as unknown as RingRep).pieces.flat(2).filter(k => k.startsWith("ring_"));
+        const ringKeys = (g: GnosticaGame): string[] => (g.render().at(-1) as unknown as RingRep).pieces.flat(2).filter(k => k.startsWith("ring_"));
         const duo = () => testGame({
             board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"], [1, 2, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
             hands: [filler, filler],
@@ -1533,7 +1539,7 @@ describe("Gnostica: render", () => {
         it("rings just the chosen minion, listed under its pyramid", () => {
             const g = duo();
             g.move("use AC/with m0.2", { partial: true });
-            const rep = g.render() as unknown as RingRep;
+            const rep = g.render().at(-1) as unknown as RingRep;
             const keys = ringKeys(g);
             expect(keys.length).eq(1);
             expect(rep.legend[keys[0]].some(gl => gl.name === "piece-dashed")).to.be.true;
@@ -1547,7 +1553,7 @@ describe("Gnostica: render", () => {
                 hands: [filler, filler],
             });
             g.move("use AS/with m0.2 shrink n0.2", { partial: true });
-            const rep = g.render() as unknown as { legend: Record<string, { name?: string; colour?: unknown }[]>; pieces: string[][][] };
+            const rep = g.render().at(-1) as unknown as { legend: Record<string, { name?: string; colour?: unknown }[]>; pieces: string[][][] };
             const keys = rep.pieces.flat(2).filter(k => k.startsWith("ring_"));
             expect(keys.map(k => k.split("_")[1]).sort()).to.deep.equal(["minion", "target"]);
             const target = keys.find(k => k.startsWith("ring_target_"))!;
@@ -1563,7 +1569,7 @@ describe("Gnostica: render", () => {
             });
             g.move("use AS/with m0.2 shrink n0.3 1");
             expect(g.board.get(1, 0)!.pieces[0]).to.deep.include({ owner: 2, size: 2 }); // shrunk, not destroyed
-            const rep = g.render() as unknown as { pieces: string[][][] };
+            const rep = g.render().at(-1) as unknown as { pieces: string[][][] };
             const keys = rep.pieces.flat(2).filter(k => k.startsWith("ring_"));
             expect(keys.length).eq(1);
             expect(keys[0].startsWith("ring_target_")).to.be.true;
@@ -1576,7 +1582,7 @@ describe("Gnostica: render", () => {
             });
             g.move("use AR/with m0.1 move n0.1 1");
             expect(g.board.get(2, 0)!.pieces.length).eq(1); // the enemy piece landed on o0
-            const rep = g.render() as unknown as { pieces: string[][][] };
+            const rep = g.render().at(-1) as unknown as { pieces: string[][][] };
             const keys = rep.pieces.flat(2).filter(k => k.startsWith("ring_"));
             expect(keys.map(k => k.split("_")[1]).sort()).to.deep.equal(["minion", "target"]);
         });
@@ -1593,7 +1599,7 @@ describe("Gnostica: render", () => {
     // the earlier "expand the void" approach.
     it("never renders a void cell as a clickable target, even once a piece is on the wasteland next to it", () => {
         const g = new GnosticaGame(2);
-        const before = g.render() as { pieces: string[][][]; legend: Record<string, unknown> };
+        const before = g.render().at(-1) as { pieces: string[][][]; legend: Record<string, unknown> };
         expect(before.pieces.flat().every(cell => cell.length === 0)).to.be.true; // no pieces anywhere yet - every void cell is bare
         expect(Object.keys(before.legend).filter(k => k.includes("void"))).to.deep.equal([]);
 
@@ -1603,7 +1609,7 @@ describe("Gnostica: render", () => {
         expect(g.board.classify(3, 1)).eq("void");
         g.board.store.set(2, 1, new CellContents(undefined, [new Piece(1, 1, "U")]));
 
-        const after = g.render() as { pieces: string[][][]; legend: Record<string, unknown> };
+        const after = g.render().at(-1) as { pieces: string[][][]; legend: Record<string, unknown> };
         expect(after.pieces.flat().filter(cell => cell.length > 0).length).eq(1);
         expect(Object.keys(after.legend).filter(k => k.includes("void"))).to.deep.equal([]);
     });
@@ -1621,7 +1627,7 @@ describe("Gnostica: render", () => {
 
         const ref = `${GnosticaBoard.coords2algebraic(2, 0)}.1`;
         g.move(`orient ${ref} N`);
-        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        const rep = g.render().at(-1) as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer?.show).to.deep.equal(["E"]);
     });
 
@@ -1631,7 +1637,7 @@ describe("Gnostica: render", () => {
         g.move("place l0 U"); // player 2 - keeps their own board presence legal
         const ref = `${GnosticaBoard.coords2algebraic(0, 0)}.1`;
         g.move(`orient ${ref} N`);
-        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        const rep = g.render().at(-1) as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer).to.be.undefined;
     });
 
@@ -1643,7 +1649,7 @@ describe("Gnostica: render", () => {
         expect(g.board.classify(2, 0)).eq("wasteland");
         const cell = GnosticaBoard.coords2algebraic(2, 0);
         g.move(`place ${cell} N`);
-        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        const rep = g.render().at(-1) as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer?.show).to.deep.equal(["E"]);
     });
 
@@ -1655,7 +1661,7 @@ describe("Gnostica: render", () => {
         const minionCell = GnosticaBoard.coords2algebraic(1, 0);
         const targetCell = GnosticaBoard.coords2algebraic(2, 0);
         g.move(`use AC/with ${minionCell}.1 at ${targetCell} create U`);
-        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        const rep = g.render().at(-1) as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer?.show).to.deep.equal(["E"]);
     });
 
@@ -1667,7 +1673,7 @@ describe("Gnostica: render", () => {
         });
         expect(g.board.classify(2, 0)).eq("wasteland");
         g.move(`use 15/with n0.1 orient o0.1 N`);
-        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        const rep = g.render().at(-1) as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer?.show).to.deep.equal(["E"]);
     });
 
@@ -1680,7 +1686,7 @@ describe("Gnostica: render", () => {
         const bufferAt = (move: string) => {
             const shown = g.clone();
             shown.move(move, { partial: true });
-            return (shown.render() as BufferRep).board.buffer?.show;
+            return (shown.render().at(-1) as BufferRep).board.buffer?.show;
         };
         expect(bufferAt("use 15/with n0.1 orient o0.1")).to.deep.equal(["E"]); // the Devil's target picked, no facing yet
         expect(bufferAt("use 15/with n0.1 orient n0.1")).to.be.undefined; // a piece on a real territory needs none
@@ -1689,7 +1695,7 @@ describe("Gnostica: render", () => {
         expect(click.move).eq("use 15/with n0.1 orient o0.1 E");
         const own = testGame({ board: [{ x: 1, y: 0, uid: "AD" }, { x: 2, y: 0, pieces: [[1, 1, "S"]] }], hands: [filler, filler] });
         own.move("orient o0.1", { partial: true });
-        expect((own.render() as BufferRep).board.buffer?.show).to.deep.equal(["E"]); // the plain orient's piece, same
+        expect((own.render().at(-1) as BufferRep).board.buffer?.show).to.deep.equal(["E"]); // the plain orient's piece, same
     });
 
     it("shows a buffer when hierophantReplace targets a piece on an edge wasteland", () => {
@@ -1701,7 +1707,7 @@ describe("Gnostica: render", () => {
         const minionCell = GnosticaBoard.coords2algebraic(1, 0);
         const targetCell = GnosticaBoard.coords2algebraic(2, 0);
         g.move(`use 05/with ${minionCell}.1 replace ${targetCell}.1 N`);
-        const rep = g.render() as { board: { buffer?: { show: string[] } } };
+        const rep = g.render().at(-1) as { board: { buffer?: { show: string[] } } };
         expect(rep.board.buffer?.show).to.deep.equal(["E"]);
     });
 });
@@ -1734,7 +1740,7 @@ describe("Gnostica: double-letter coordinates (full move pipeline)", () => {
         expect(target.pieces.length).eq(2); // player 2's placed piece, plus player 1's new one
         expect(target.pieces[1]).to.deep.include({ owner: 1, size: 1, orientation: "U" });
 
-        const rep = g.render() as { board: { columnLabels: string[] }; pieces: string[][][] };
+        const rep = g.render().at(-1) as { board: { columnLabels: string[] }; pieces: string[][][] };
         expect(rep.board.columnLabels).to.include.members(["aa", "ab"]);
         expect(rep.pieces).to.be.an("array"); // rendered without throwing
     });
@@ -1760,7 +1766,7 @@ describe("Gnostica: Judgement's draw from the discards", () => {
         const values = (move: string): (string | undefined)[] => {
             const shown = g.clone();
             shown.move(move, { partial: true });
-            return ((shown.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
+            return ((shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
                 .filter(a => a.type === "buttonBar").flatMap(a => (a.buttons ?? []).map(b => b.value));
         };
         expect(values("use 20/with m0.2 draw AC")).to.deep.equal(["use", "declare", "undo"]); // one taken, room for another
@@ -1813,7 +1819,7 @@ describe("Gnostica: Tower and Star take their replacement card from the hand or 
 
 describe("Gnostica: button states", () => {
     type Btn = { label?: string; value?: string; attributes?: { name: string; value: string }[] };
-    const barOf = (g: GnosticaGame): Btn[] => (g.render() as { areas?: { type: string; buttons?: Btn[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+    const barOf = (g: GnosticaGame): Btn[] => (g.render().at(-1) as { areas?: { type: string; buttons?: Btn[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
     const swords = () => testGame({
         board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 2, "W"]] }],
         hands: [filler, filler],
@@ -2076,7 +2082,7 @@ describe("Gnostica: handleClick", () => {
         expect(clicked.move).eq("orient m0");
         expect(clicked.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON"));
         g.move(clicked.move!, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const pickButtons = bar!.buttons!.filter(b => b.value?.startsWith("orientpick_"));
         expect(pickButtons.length).eq(2);
@@ -2240,7 +2246,7 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U"); // player 2
         g.move("place n0 U"); // player 3, back to player 1
         g.lastTurner = g.currplayer;
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         expect(bar!.buttons!.map(b => b.value)).to.not.include("declare");
         const check = g.validateMove("discard draw 0 last");
@@ -2250,7 +2256,7 @@ describe("Gnostica: handleClick", () => {
 
     it("shows only a single, bold Place button with no pieces on the board yet", () => {
         const g = new GnosticaGame(2);
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         expect(bar, "expected a button bar").to.not.be.undefined;
         expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["place", "undo"]);
@@ -2266,7 +2272,7 @@ describe("Gnostica: handleClick", () => {
     it("still shows only Place while a first placement is previewed but not yet submitted", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U", { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["place", "undo"]);
         expect(bar!.buttons![0].value).eq("place");
@@ -2276,7 +2282,7 @@ describe("Gnostica: handleClick", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U"); // back to player 1
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         expect(bar!.buttons!.length).greaterThan(1);
     });
@@ -2295,7 +2301,7 @@ describe("Gnostica: handleClick", () => {
         // it's player 2's turn now; they haven't clicked anything yet - the
         // just-committed "orient" belongs to player 1's finished turn, not
         // a live action of player 2's.
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         for (const b of bar!.buttons!.filter(b => b.value !== "undo")) {
             expect(b.attributes, `button "${b.value}" should not be highlighted yet`).to.be.undefined;
@@ -2311,7 +2317,7 @@ describe("Gnostica: handleClick", () => {
         const clicked = g.handleClick(seed.move, row, col);
         expect(clicked.move).eq("orient m0.1");
         g.move(clicked.move, { partial: true }); // sync engine state, same as the playground's own preview flow
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const orientBtn = bar!.buttons!.find(b => b.value === "orient");
         expect(isGrey(orientBtn)).to.be.true; // already chosen
@@ -2325,7 +2331,7 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U");
         for (const liveMove of ["discard draw 0", "discard draw 0"]) {
             g.move(liveMove, { partial: true });
-            const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+            const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
             const bar = rep.areas?.find(a => a.type === "buttonBar");
             const passBtn = bar!.buttons!.find(b => b.value === "pass");
             const discardBtn = bar!.buttons!.find(b => b.value === "discard");
@@ -2340,7 +2346,7 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U");
         g.hands[0] = g.hands[0].slice(0, 5); // leave room to draw
         g.move("discard draw 1", { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const discardBtn = bar!.buttons!.find(b => b.value === "discard");
         const passBtn = bar!.buttons!.find(b => b.value === "pass");
@@ -2354,7 +2360,7 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U");
         const [uid1, uid2] = g.hands[0];
         g.move(`discard ${uid1} ${uid2}`, { partial: true }); // player 1's own live preview, 2 discarded, no count chosen yet
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         // Pass and a bare "discard" share the exact same move text (known
@@ -2396,7 +2402,7 @@ describe("Gnostica: handleClick", () => {
         const clicked = g.handleClick(seed.move, row, col);
         expect(clicked.move).eq(`use ${uid0}`);
         g.move(clicked.move, { partial: true }); // live preview, power still skipped - pushes zero results
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const activateBtn = bar!.buttons!.find(b => b.value === "use");
         // lastmove-based detection still catches this case, since lastmove is
@@ -2420,7 +2426,7 @@ describe("Gnostica: handleClick", () => {
         // even though player 2 also has a piece on the just-activated
         // cell, the mode-button set from player 1's finished turn must not
         // leak through.
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("use");
@@ -2476,7 +2482,7 @@ describe("Gnostica: handleClick", () => {
     it("renders a redacted (blank-uid) hand card as a placeholder, not a dangling legend reference", () => {
         const g = new GnosticaGame(2);
         g.hands[1].fill(""); // simulate the back end redacting player 2's cards
-        const rep = g.render() as { legend: Record<string, unknown>; areas?: { pieces: string[] }[] };
+        const rep = g.render().at(-1) as { legend: Record<string, unknown>; areas?: { pieces: string[] }[] };
         const p2area = rep.areas?.[1];
         expect(p2area, "expected an area for player 2's hand").to.not.be.undefined;
         expect(p2area!.pieces[0]).eq("cUNKNOWN");
@@ -2552,7 +2558,7 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
         // Matches the discard pile itself, so none of these register as
         // "just discarded" (see newDiscardUids's own docs) - this test is
         // about the bucketing/grouping shape, not the highlight.
-        const rep = g.render() as { legend: Record<string, unknown>; areas?: { label: string; pieces?: string[] }[] };
+        const rep = g.render().at(-1) as { legend: Record<string, unknown>; areas?: { label: string; pieces?: string[] }[] };
         const discardArea = rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
         expect(discardArea, "expected a discard-pile area").to.not.be.undefined;
         expect(discardArea!.pieces).to.include("C_spot_2");
@@ -2567,7 +2573,7 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
     it("omits the discard-pile area entirely once the pile is empty", () => {
         const g = new GnosticaGame(2);
         g.discardPile = [];
-        const rep = g.render() as { areas?: { label?: string; pieces?: string[] }[] };
+        const rep = g.render().at(-1) as { areas?: { label?: string; pieces?: string[] }[] };
         const discardArea = rep.areas?.find(a => a.label === i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"));
         expect(discardArea).to.be.undefined;
     });
@@ -2590,12 +2596,12 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
 
         // 10 spot cups exist in total; with AC visible in hand, the other
         // 9 are unaccounted for anywhere and should show as unknown.
-        const before = g.render() as { legend: Record<string, { text?: string }[]> };
+        const before = g.render().at(-1) as { legend: Record<string, { text?: string }[]> };
         const beforeText = before.legend.C_spot_9.find(gl => gl.text !== undefined)!.text;
         expect(beforeText, "AC is visible, so only the other 9 spot cups are unknown").eq("9x");
 
         g.hands[1] = [""]; // the back end redacts it - now hidden from this viewer
-        const after = g.render() as { legend: Record<string, { text?: string }[]> };
+        const after = g.render().at(-1) as { legend: Record<string, { text?: string }[]> };
         const afterText = after.legend.C_spot_10.find(gl => gl.text !== undefined)!.text;
         expect(afterText, "AC is now hidden too, so all 10 spot cups are unknown").eq("10x");
     });
@@ -2620,7 +2626,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("place n0 U");
         g.hands[0] = ["03", "2C", "3C", "4C", "5C", "6C"];
         g.move(`discard 03 draw 1`); // 1 is max: 6 - 5 remaining
-        const rep = g.render() as DiscardRenderRep;
+        const rep = g.render().at(-1) as DiscardRenderRep;
         const newKey = `c03`;
         expect(discardArea(rep)?.pieces).to.include(newKey);
         expect(rep.legend[newKey].some(gl => gl.colour !== undefined)).to.be.true;
@@ -2633,7 +2639,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.discardPile = ["2C"]; // one spot cup already discarded earlier
         g.hands[0] = ["AC", "3C", "4C", "5C", "6C", "7C"];
         g.move("discard AC draw 1"); // a second spot cup, discarded just now; 1 is max: 6 - 5 remaining
-        const rep = g.render() as DiscardRenderRep;
+        const rep = g.render().at(-1) as DiscardRenderRep;
         expect(discardArea(rep)?.pieces).to.deep.equal(["C_spot_2_shaded"]);
         expect(rep.legend.C_spot_2_shaded.some(gl => gl.text === "2x")).to.be.true;
         expect(isTinted(rep, "C_spot_2_shaded")).to.be.true;
@@ -2646,7 +2652,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
         g.move("discard AC draw 1"); // 1 is max: 6 - 5 remaining
         g.move("discard draw 0"); // player 2's own turn
-        const rep = g.render() as DiscardRenderRep;
+        const rep = g.render().at(-1) as DiscardRenderRep;
         expect(discardArea(rep)?.pieces?.some(p => isTinted(rep, p))).to.be.false;
     });
 
@@ -2656,7 +2662,7 @@ describe("Gnostica: discard-pile 'just discarded' highlight", () => {
         g.move("place n0 U");
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
         g.move("discard AC", { partial: true }); // simulates the player's own first click
-        const rep = g.render() as DiscardRenderRep;
+        const rep = g.render().at(-1) as DiscardRenderRep;
         expect(discardArea(rep)?.pieces?.some(p => isTinted(rep, p))).to.be.true;
     });
 
@@ -2758,7 +2764,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         g.move(cellClick.move, { partial: true }); // sync engine state, same as a real client's preview flow
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("target_m0.1");
@@ -2863,7 +2869,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             g.move(drawn, { partial: true });
             expect(g.drawPile).to.deep.equal(["03", "KS"]);
             expect(g.discardPile).to.deep.equal(["AC"]);
-            const rep = g.render() as unknown as { legend: Record<string, unknown>; pieces: string[][][]; board: { markers: { type: string; glyph?: string; points: { row: number; col: number }[] }[] } };
+            const rep = g.render().at(-1) as unknown as { legend: Record<string, unknown>; pieces: string[][][]; board: { markers: { type: string; glyph?: string; points: { row: number; col: number }[] }[] } };
             expect(g.board.get(1, 0)!.cardUid).eq("");
             expect(rep.pieces[1].length).eq(4); // the window widened to take in the unrevealed territory
             const marker = rep.board.markers.find(m => m.type === "glyph" && m.glyph === "cUNKNOWN")!;
@@ -2920,7 +2926,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const modeClick = g.handleClick(cellClick.move, -1, -1, "_btn_target_new");
         expect(modeClick.move).eq(`use 10/with m0.1 at n0 create`);
         g.move(modeClick.move, { partial: true }); // sync engine state, same as a real client's preview flow
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         expect(bar?.buttons?.some(b => b.value === "drawn")).eq(true);
 
@@ -2938,7 +2944,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const cellClick2 = g2.handleClick(seed2.move, row2, col2);
         const modeClick2 = g2.handleClick(cellClick2.move, -1, -1, "_btn_target_new");
         g2.move(modeClick2.move, { partial: true });
-        const rep2 = g2.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep2 = g2.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar2 = rep2.areas?.find(a => a.type === "buttonBar");
         expect(bar2?.buttons?.some(b => b.value === "drawn")).eq(false);
         // The gate is opts.allowRandomDraw (derived from the card's own step definition), not the literal token.
@@ -2989,7 +2995,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             hands: [["03", "2S"], filler],
         });
         const barValues = (g: GnosticaGame) =>
-            (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
 
         it("any other board click names the next step instead of raising the finished orient's errors; a fresh play with minions on several cells offers only the minion pick, not the ordinary actions", () => {
             const g = setup(true);
@@ -3023,7 +3029,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 
             const g2 = setup();
             g2.move(move, { partial: true });
-            const buttons = (g2.render() as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            const buttons = (g2.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.filter(b => b.value?.startsWith("minion_")).map(b => b.label).sort()).to.deep.equal(["1-pip pointing E", "1-pip pointing W", "2-pip pointing N"]);
         });
 
@@ -3050,7 +3056,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const move = "play 03/orient m0.1.e.2 N";
             const withMinion = g.handleClick(move, -1, -1, "_btn_minion_m0.1.E");
             g.move(withMinion.move, { partial: true });
-            const buttons = (g.render() as { areas?: { type: string; buttons?: { value?: string; label: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.some(b => b.value === "target_own")).to.be.true;
             const enemyBtn = buttons.find(b => b.value === "target_n0.1")!;
             expect(enemyBtn.label).to.eq("Create Enemy Player 1's 1-pip pointing up");
@@ -3134,7 +3140,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 stashes: { 1: [0, 5, 5], 2: [5, 5, 5] },
             });
             g.move("use AC", { partial: true });
-            const buttons = (g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             const ownBtn = buttons.find(b => b.value === "target_own")!;
             expect(ownBtn.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
             expect(isGrey(ownBtn)).to.be.false;
@@ -3158,7 +3164,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             return { g, modeClick };
         };
         const buttonValuesOf = (g: GnosticaGame) =>
-            (g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.value);
+            (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.value);
 
         it("the target click leaves the shrink open, and a hand-card click derives it; a card needing a bigger shrink than the minion's size is rejected by validation", () => {
             const { g, modeClick } = setup(2, "00"); // major, worth 3
@@ -3204,7 +3210,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     it("narrows the bar to just the selected top-level button, a spacer, then the mode buttons - Declare stays available throughout", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
         g.move(`use AC`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         // The full top-level set (play/orient/discard/pass) is gone, save for the one choice that got us here.
@@ -3222,7 +3228,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
     it("offers a target candidate for own/enemy/new, struck through when not currently sensible, and ignores a click on one", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler] }); // "U" targets itself, a territory with no enemy on it
         g.move(`use AC`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("target_own");
@@ -3263,7 +3269,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(modeClick.move).eq(`use AS/with m0.1 shrink m0.1 1`); // self-attack, since "U" has no facing cell
         g.move(modeClick.move, { partial: true }); // live preview - destroys the player's only piece
         expect(g.board.get(0, 0)!.pieces.length).eq(0); // confirm the destructive side effect really happened
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.not.deep.equal(["place"]);
@@ -3343,7 +3349,7 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
         g.move("place m0 U");
         g.move("place l0 U");
         g.move(`use AC`, { partial: true });
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values.some(v => v?.startsWith("minion_"))).to.be.false;
@@ -3970,7 +3976,7 @@ describe("Gnostica: choose-step click messaging", () => {
         g.move(`use 02/discard ${discardUid} draw 1`);
         expect(g.continued).to.not.be.empty;
 
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: unknown[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: unknown[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         expect(bar.buttons!.find(b => b.value === "resume_power")).to.be.undefined;
         expect(bar.buttons!.some(b => b.value?.startsWith("hpdraw_"))).to.be.true;
@@ -4002,7 +4008,7 @@ describe("Gnostica: choose-step click messaging", () => {
         // itself a continuing card, so it's tracked too ("02.0", round 1).
         expect(g.continued).to.deep.equal(["00.1"]);
 
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         expect(bar.buttons!.find(b => b.value === "resume_power")).to.be.undefined;
         expect(bar.buttons!.some(b => b.value?.startsWith("hpdraw_"))).to.be.true;
@@ -4054,7 +4060,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         return [y - minY, x - minX];
     };
     const buttonValues = (g: GnosticaGame): (string | undefined)[] => {
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         return bar!.buttons!.map(b => b.value);
     };
@@ -4763,7 +4769,7 @@ describe("Gnostica: Fool and World", () => {
         // re-derived from the resume submission's own head arg.
         expect(g.continued).to.deep.equal(["00.1"]);
 
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         // Rods' own target candidates show directly - no "Play Card 2R"
         // click needed first - and every one is struck through, since
@@ -5121,7 +5127,7 @@ describe("Gnostica: Fool and World", () => {
         // "use 00") with no "decline_power" mixed in.
         expect(preview.continued).to.be.empty;
         expect(buttonValues(preview)).to.not.include("decline_power");
-        const rep = preview.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = preview.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         const useBtn = bar.buttons!.find(b => b.value === "use")!;
         expect(isGrey(useBtn)).to.be.true;
@@ -5143,7 +5149,7 @@ describe("Gnostica: Fool and World", () => {
 
         g.move("play 00", { partial: true });
         expect(buttonValues(g)).to.not.include("decline_power");
-        const rep = g.render() as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         const playBtn = bar.buttons!.find(b => b.value === "play")!;
         expect(isGrey(playBtn)).to.be.true;
@@ -5182,7 +5188,7 @@ describe("Gnostica: Fool and World", () => {
         // stays, greyed, as the choice already made.
         expect(buttonValues(preview)).to.not.include("power_fool");
         expect(buttonValues(preview)).to.deep.equal(["declare", "decline_power", "undo"]);
-        const rep = preview.render() as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
+        const rep = preview.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
         expect(declineBtn.label).eq("Decline AC");
@@ -5858,7 +5864,7 @@ describe("Gnostica: the Fool's Decline button", () => {
         if (move !== undefined) {
             shown.move(move, { partial: true });
         }
-        return ((shown.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
+        return ((shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
             .filter(a => a.type === "buttonBar").flatMap(a => (a.buttons ?? []).map(b => b.value ?? ""));
     };
 
@@ -5881,7 +5887,7 @@ describe("Gnostica: the Fool's Decline button", () => {
         expect(click.move).eq("play 18 via 00");
         const shown = g.clone();
         shown.move(click.move!, { partial: true });
-        const buttons = (shown.render() as { areas?: { type: string; buttons?: { value?: string; fill?: unknown }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+        const buttons = (shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; fill?: unknown }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
         expect(buttons.map(b => b.value)).to.deep.equal(["play", "_spacer", "skip", "declare", "undo"]);
         expect(isGrey(buttons[0])).to.be.true; // the chosen Play
     });
@@ -5890,7 +5896,7 @@ describe("Gnostica: the Fool's Decline button", () => {
         const g = owed();
         const shown = g.clone();
         shown.move("decline AC via 00", { partial: true });
-        const values = ((shown.render() as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
+        const values = ((shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
             .filter(a => a.type === "buttonBar").flatMap(a => (a.buttons ?? []).map(b => b.value));
         expect(values).to.deep.equal(["declare", "decline_power", "undo"]);
     });
@@ -5899,7 +5905,7 @@ describe("Gnostica: the Fool's Decline button", () => {
         const g = owed();
         const shown = g.clone();
         shown.move("decline AC via 00", { partial: true });
-        const buttons = (shown.render() as { areas?: { type: string; buttons?: { value?: string; fill?: unknown }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+        const buttons = (shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; fill?: unknown }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
         const decline = buttons.find(b => b.value === "decline_power")!;
         expect(decline).to.not.be.undefined;
         expect(isGrey(decline)).to.be.true;
@@ -5911,7 +5917,7 @@ describe("Gnostica: a Rods distance past the edge of the window", () => {
     const rep = (g: GnosticaGame, move: string) => {
         const shown = g.clone();
         shown.move(move, { partial: true });
-        return { rep: shown.render() as Rep, window: shown.renderWindow() };
+        return { rep: shown.render().at(-1) as Rep, window: shown.renderWindow() };
     };
 
     it("draws a buffer on the side the piece moves toward, and a click on it sets the distance", () => {
@@ -6098,12 +6104,12 @@ describe("Gnostica: the Undo button", () => {
         const g = new GnosticaGame(2);
         const placed = g.clone();
         placed.move("place m0 U?", { partial: true });
-        expect((placed.render() as { pieces: string[][][] }).pieces.flat().some(cell => cell.length > 0)).to.be.true;
+        expect((placed.render().at(-1) as { pieces: string[][][] }).pieces.flat().some(cell => cell.length > 0)).to.be.true;
         const undone = g.handleClick("place m0 U?", -1, -1, "_btn_undo").move!;
         expect(undone).eq("place");
         const shown = g.clone();
         shown.move(undone, { partial: true }); // what the front end does with a click's move
-        expect((shown.render() as { pieces: string[][][] }).pieces.flat().some(cell => cell.length > 0)).to.be.false;
+        expect((shown.render().at(-1) as { pieces: string[][][] }).pieces.flat().some(cell => cell.length > 0)).to.be.false;
         expect(undoButton(g, "place")).to.not.be.undefined;
     });
 

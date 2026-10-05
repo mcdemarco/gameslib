@@ -544,14 +544,14 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
     it("render() offers a single bold 'Bid'/'Redraw' button per phase, and the pool area only appears once populated", () => {
         addResource("en");
         const bidding = new GnosticaGame(2, ["bidding"]);
-        const biddingRep = bidding.render() as APRenderRep;
+        const biddingRep = bidding.render().at(-1) as APRenderRep;
         const biddingBar = biddingRep.areas?.find((a): a is AreaButtonBar => a.type === "buttonBar");
         expect(biddingBar?.buttons).to.deep.equal([{ label: "Bid", value: "bid", attributes: [{ name: "font-weight", value: "bold" }] }]);
         const poolLabel = i18next.t("apgames:validation.gnostica.LABEL_BIDDING_POOL");
         expect(biddingRep.areas?.some(a => a.type === "pieces" && "label" in a && a.label === poolLabel)).to.be.false;
 
         const redraw = setupRedraw();
-        const redrawRep = redraw.render() as APRenderRep;
+        const redrawRep = redraw.render().at(-1) as APRenderRep;
         const redrawBar = redrawRep.areas?.find((a): a is AreaButtonBar => a.type === "buttonBar");
         expect(redrawBar?.buttons).to.deep.equal([{ label: "Redraw", value: "redraw", attributes: [{ name: "font-weight", value: "bold" }] }]);
         const poolArea = redrawRep.areas?.find(a => a.type === "pieces" && "label" in a && a.label === poolLabel);

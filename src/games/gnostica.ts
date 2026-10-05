@@ -85,7 +85,7 @@ const GREYED_BUTTON_FILL: Colourfuncs = {
 
 export type playerid = 1|2|3|4|5|6;
 
-// Major arcana chaining uses frames.  Discards are abbreviated.
+// Major arcana chaining uses frames: the board before each step of a move of 2+ steps, as in Frogger and Rincala.  Discards are abbreviated.
 export type FrameState = {
     board: UnboundedSquareBoard<CellContents>;
     discardSummary: DiscardSummary;
@@ -4552,17 +4552,13 @@ export class GnosticaGame extends GameBaseSequenced {
         const chained = steps.length + (asUid !== undefined ? 1 : 0) > 1;
         let counted = 0;
         let at = 0;
-        // One step: a board snapshot to step back to (all but the first) and its results grouped when the submission is chained; false if it didn't complete.
+        // One step: a snapshot of the board before it, and its results grouped when the submission is chained; false if it didn't complete.
         const count = (apply: () => boolean): boolean => {
-            if (counted > 0) {
-                this.frames.push({ board: this.board.clone().store, discardSummary: this.summarizeDiscardPile(this.discardPile) });
-            }
+            this.frames.push({ board: this.board.clone().store, discardSummary: this.summarizeDiscardPile(this.discardPile) });
             const resultsBefore = this.results.length;
             const hiddenBefore = this.hidden.length;
             if (!apply()) {
-                if (counted > 0) {
-                    this.frames.pop();
-                }
+                this.frames.pop();
                 return false;
             }
             counted++;
@@ -4666,10 +4662,12 @@ export class GnosticaGame extends GameBaseSequenced {
             return owed;
         };
         const outcome = uid === undefined ? "done" : run(uid);
-        if (outcome === "stopped") {
-            return undefined;
+        const stillOwed = outcome === "stopped" ? undefined : outcome === "paused" ? owed : settle();
+        // Frames only matter to a move of 2+ steps; one step's frame is just the current state.
+        if (counted < 2) {
+            this.frames = [];
         }
-        return outcome === "paused" ? owed : settle();
+        return stillOwed;
     }
 
     // One ordinary power segment: false while a preview's step is still unfinished (its arguments, or the minion it needs, aren't chosen yet).
@@ -6156,303 +6154,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return generateRandomMove(this);
     }
 
-    //TODO: reword the following comment.
-    // The actual, single-state render body, renamed so the public render() dispatcher can call it directly; a historical frame is built entirely from renderFrame() instead.
-    private renderCurrent(opts?: IRenderOpts): APRenderRep {
-        let altDisplay: string | undefined;
-        if (opts !== undefined) {
-            altDisplay = opts.altDisplay;
-        }
-        let largerCards = false;
-        if (altDisplay !== undefined) {
-            if (altDisplay === "larger-cards") {
-                largerCards = true;
-            }
-        }
-
-        const { minX, maxX, minY, maxY } = this.renderWindow();
-        const width = maxX - minX + 1;
-        const height = maxY - minY + 1;
-
-        // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
-        const legend = GnosticaGame.newLegend();
-                
-        // A 2+-step major-arcana chain wraps each step's results into a _group entry - flatten one level so annotations and rings still cover every step's effect.
-        const flatResults = this.results.flatMap(r => r.type === "_group" ? r.results : [r]);
-        const { pieceRows, markers } = this.buildBoardLayers(this.board, { minX, maxX, minY, maxY }, largerCards, legend, new Map([...this.ringsFromResults(flatResults, this.board), ...this.pieceRings()]));
-
-        const columnLabels: string[] = [];
-        for (let x = minX; x <= maxX; x++) {
-            // coords2algebraic(x, 0) always ends in the literal digit "0" - strip it to get just this column's letter(s).
-            columnLabels.push(GnosticaBoard.coords2algebraic(x, 0).slice(0, -1));
-        }
-        // The renderer pairs rowLabels[i] with pieceRows[N-1-i] (mirrored), so rowLabels is built bottom-first for the label to land on the right row. Matches Knight Line's own .reverse().
-        const rowLabels: string[] = [];
-        for (let y = maxY; y >= minY; y--) {
-            rowLabels.push((y === 0 ? 0 : -y).toString());
-        }
-
-        // One area per player's hand, full-size (non-spaced) card faces.
-        const areas: (AreaPieces | AreaButtonBar | AreaKey)[] = [];
-        for (let p = 1; p <= this.numplayers; p++) {
-            const hand = this.hands[p - 1].slice() ?? [];
-            if (hand.length === 0) {
-                continue;
-            }
-            //Hand sorting is now done in the render only.
-            hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
-            const newUids = this.newHandCardUids(p as playerid);
-            const handKeys: string[] = [];
-            for (const uid of hand) {
-                const card = allCards().find(c => c.uid === uid);
-                if (card === undefined) {
-                    handKeys.push(GnosticaGame.cardKey(UNREVEALED_UID));
-                    continue;
-                }
-                // A card just added to hand gets its own tagged legend entry - same face, just tinted so it's easy to spot regardless of sort order.
-                const isNew = newUids.has(uid);
-                const key = GnosticaGame.cardKey(uid);
-                if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
-                }
-                handKeys.push(key);
-            }
-            areas.push({
-                type: "pieces",
-                pieces: handKeys as [string, ...string[]],
-                label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.declaredPlayer() === p ? "(declarer)" : "" }),
-                // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter than default spacing, fixed width since hands are always <=6 cards.
-                spacing: 0.25,
-                width: 6,
-                ownerMark: p,
-            });
-        }
-
-        // The "bidding" variant's shared pool - every card revealed by the opening bid procedure, available for anyone to redraw; fully public, no redaction needed.
-        if (this.biddingPool !== undefined && this.biddingPool.length > 0) {
-            const poolKeys: string[] = [];
-            for (const uid of this.biddingPool) {
-                const card = allCards().find(c => c.uid === uid)!;
-                const key = GnosticaGame.cardKey(uid);
-                if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
-                }
-                poolKeys.push(key);
-            }
-            areas.push({
-                type: "pieces",
-                pieces: poolKeys as [string, ...string[]],
-                label: i18next.t("apgames:validation.gnostica.LABEL_BIDDING_POOL"),
-                spacing: 0.25,
-                width: 6,
-            });
-        }
-
-        // The declaration round banner.
-        if (this.declaredPlayer() !== undefined) {
-            if (!("Warning" in legend)) {
-                legend.Warning = [
-                    { name: "piece-borderless", colour: "_context_background" },
-                    { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
-                ];
-            }
-            areas.push({
-                type: "pieces",
-                pieces: ["Warning"],
-                label: i18next.t("apgames:validation.gnostica.LABEL_WARNING"),
-                spacing: 0.25,
-                width: 1,
-            });
-        }
-        
-        // The literal drawPile array isn't used for the draw-pile summary - "what's left to draw" is computed by elimination: every card in the full deck not visible somewhere else.
-        const visible = this.visibleCardUids();
-        const unknownUids = allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
-        const drawArea = this.buildDeckSummaryArea(
-            unknownUids, legend, i18next.t("apgames:validation.gnostica.LABEL_DECK")
-        );
-        if (drawArea !== undefined) {
-            areas.push(drawArea);
-        }
-        // The discard pile is always face-up/public, unlike hands or the draw pile, so its contents are read directly.
-        const discardArea = this.buildDeckSummaryArea(
-            this.discardPile, legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"), new Set(this.discarded)
-        );
-        if (discardArea !== undefined) {
-            areas.push(discardArea);
-        }
-
-        // Shown whenever it has real content: a bidding game always has turn order to show (any player count - even at 2 players,
-        // "you, then them" is still worth confirming once icon rows can share the same key), and any game can have icon rows once a
-        // card is actively mid-build this turn, bidding or not.
-        {
-            const list: AreaKey["list"] = [];
-            if (this.variants.includes("bidding")) {
-                this.turnOrder!.forEach((p, i) => {
-                    const key = `turnorder_p${p}`;
-                    if (!(key in legend)) {
-                        legend[key] = { name: "pyramid-up-small", colour: p };
-                    }
-                    list.push({ piece: key, name: GnosticaGame.ordinal(i + 1) });
-                });
-            }
-            // The card whose own step is CURRENTLY resolving (follows World's borrow/Fool's reveal, not pinned to the root card) -
-            // undefined once nothing is mid-build, including right after a commit (this.preview is cleared then).
-            const activeCard = allCards().find(c => c.uid === this.preview?.pending?.activeCardUid);
-            if (activeCard !== undefined) {
-                const icons = activeCard.major ? getMajorArcanaIcons(activeCard) : (activeCard.suit.glyph !== undefined ? [activeCard.suit.glyph] : []);
-                for (const icon of icons) {
-                    const key = `activecard_${icon}`;
-                    if (!(key in legend)) {
-                        // Circle-backed, matching every other place these icons appear (buildCardFace's own pushCircle) - a bare
-                        // icon glyph alone reads too thin/low-contrast next to the turn-order rows' own solid pyramids.
-                        legend[key] = [
-                            { name: "piece", colour: "_context_board" },
-                            { name: icon, scale: 0.5 },
-                        ];
-                    }
-                    list.push({ piece: key, name: "" });
-                }
-            }
-            if (list.length > 0) {
-                // "left", not "right" - the action button bar already owns the right side, and the two don't stack cleanly on the same side.
-                areas.push({ type: "key", list, position: "left", height: 0.7, clickable: false });
-            }
-        }
-
-        // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
-        const actionButtons = this.withUndo(this.getActionButtons());
-        if (actionButtons !== undefined) {
-            areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
-        }
-
-        const rep: APRenderRep = {
-            renderer: "stacking-offset",
-            // A click on a pyramid reports its stack index, which handleClick would take for a legend piece; cells are what we want clicked.
-            options: ["no-piece-click"],
-            board: {
-                style: "squares",
-                stackOffset: 0,
-                width,
-                height,
-                columnLabels,
-                rowLabels,
-                strokeColour: {
-                    func: "flatten",
-                    fg: "_context_strokes",
-                    bg: "_context_board",
-                    opacity: 0,
-                },
-                buffer: this.buffers.length === 0 ? undefined : {
-                    separated: true,
-                    width: 0.2,
-                    pattern: "dots",
-                    show: [...this.buffers] as ("N" | "E" | "S" | "W")[],
-                },
-                markers,
-            },
-            legend,
-            pieces: pieceRows as [string[][], ...string[][][]],
-            areas: areas.length > 0 ? areas : undefined,
-        };
-
-        const annotations: NonNullable<APRenderRep["annotations"]> = [];
-        for (const r of flatResults) {
-            if (r.type === "place" && r.where !== undefined) {
-                const [x, y] = GnosticaBoard.algebraic2coords(r.where);
-                annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
-            } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
-                const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
-                const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
-                annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
-            }
-        }
-        if (annotations.length > 0) {
-            rep.annotations = annotations;
-        }
-
-        return rep;
-    }
-
-    // Builds a chain's intermediate frame directly from FrameState's board/discardPile, without hand/pool/button areas - the same whether the chain is committed or still being built.
-    private renderFrame(frame: FrameState, stepIndex: number, opts?: IRenderOpts): APRenderRep {
-        let altDisplay: string | undefined;
-        if (opts !== undefined) {
-            altDisplay = opts.altDisplay;
-        }
-        const largerCards = altDisplay === "larger-cards";
-
-        const board = new GnosticaBoard(frame.board);
-        const { minX, maxX, minY, maxY } = this.renderWindow(board);
-        const width = maxX - minX + 1;
-        const height = maxY - minY + 1;
-
-        const legend = GnosticaGame.newLegend();
-        // Pull just this step's own group by position, matching frogger.ts's frame[i]/results[i] pairing.
-        const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
-        const stepResults = groups[stepIndex]?.results ?? [];
-        const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, this.ringsFromResults(stepResults, board));
-
-        const columnLabels: string[] = [];
-        for (let x = minX; x <= maxX; x++) {
-            columnLabels.push(GnosticaBoard.coords2algebraic(x, 0).slice(0, -1));
-        }
-        const rowLabels: string[] = [];
-        for (let y = maxY; y >= minY; y--) {
-            rowLabels.push((y === 0 ? 0 : -y).toString());
-        }
-
-        // The discard pile is always face-up/public - the one non-board area worth reconstructing here; no "just discarded" tinting since that's a live-only concept.
-        const areas: AreaPieces[] = [];
-        const discardArea = this.buildAreaFromSummary(
-            frame.discardSummary, legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
-        );
-        if (discardArea !== undefined) {
-            areas.push(discardArea);
-        }
-
-        const rep: APRenderRep = {
-            renderer: "stacking-offset",
-            // A click on a pyramid reports its stack index, which handleClick would take for a legend piece; cells are what we want clicked.
-            options: ["no-piece-click"],
-            board: {
-                style: "squares",
-                stackOffset: 0,
-                width,
-                height,
-                columnLabels,
-                rowLabels,
-                strokeColour: {
-                    func: "flatten",
-                    fg: "_context_strokes",
-                    bg: "_context_board",
-                    opacity: 0,
-                },
-                markers,
-            },
-            legend,
-            pieces: pieceRows as [string[][], ...string[][][]],
-            areas: areas.length > 0 ? areas : undefined,
-        };
-
-        const annotations: NonNullable<APRenderRep["annotations"]> = [];
-        for (const r of stepResults) {
-            if (r.type === "place" && r.where !== undefined) {
-                const [x, y] = GnosticaBoard.algebraic2coords(r.where);
-                annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
-            } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
-                const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
-                const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
-                annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
-            }
-        }
-        if (annotations.length > 0) {
-            rep.annotations = annotations;
-        }
-
-        return rep;
-    }
-
     // A disposable copy for applying steps onto, without the full-history serialization clone() pays - nothing here reads earlier stack entries.
     private scratchClone(): GnosticaGame {
         const raw = this.state();
@@ -6460,15 +6161,235 @@ export class GnosticaGame extends GameBaseSequenced {
         return new GnosticaGame(JSON.stringify(raw, replacer));
     }
 
-    // this.frames is only non-empty for a move that chained 2+ major-arcana steps - every other move returns the single rep renderCurrent() always has.
-    public render(opts?: IRenderOpts): APRenderRep | APRenderRep[] {
-        if (this.frames.length === 0) {
-            return this.renderCurrent(opts);
+    // this.frames is only non-empty for a move that chained 2+ major-arcana steps: each holds the board before a step, so frame i shows the board with the results of
+    // step i - 1 that led to it, and the live state comes last. Only the final rep carries the hands, pools and buttons.
+    public render(opts?: IRenderOpts): APRenderRep[] {
+        const largerCards = opts?.altDisplay === "larger-cards";
+
+        // A chain wraps each step's results into a _group entry; whatever else the move did (a "use", a declaration) goes with the last rep.
+        const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
+        const ungrouped = this.results.filter(r => r.type !== "_group");
+
+        const renders: APRenderRep[] = [];
+        // We need to look at each frame, and then finally the live state.
+        for (let i = 0; i <= this.frames.length; i++) {
+            const last = i === this.frames.length;
+            const board = last ? this.board : new GnosticaBoard(this.frames[i].board);
+            const results: APMoveResult[] = i > 0 && groups[i - 1] !== undefined ? [...groups[i - 1].results] : [];
+            if (last) {
+                results.push(...ungrouped);
+            }
+
+            const { minX, maxX, minY, maxY } = this.renderWindow(board);
+            const width = maxX - minX + 1;
+            const height = maxY - minY + 1;
+
+            // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
+            const legend = GnosticaGame.newLegend();
+            const rings = this.ringsFromResults(results, board);
+            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, last ? new Map([...rings, ...this.pieceRings()]) : rings);
+
+            const columnLabels: string[] = [];
+            for (let x = minX; x <= maxX; x++) {
+                // coords2algebraic(x, 0) always ends in the literal digit "0" - strip it to get just this column's letter(s).
+                columnLabels.push(GnosticaBoard.coords2algebraic(x, 0).slice(0, -1));
+            }
+            // The renderer pairs rowLabels[i] with pieceRows[N-1-i] (mirrored), so rowLabels is built bottom-first for the label to land on the right row. Matches Knight Line's own .reverse().
+            const rowLabels: string[] = [];
+            for (let y = maxY; y >= minY; y--) {
+                rowLabels.push((y === 0 ? 0 : -y).toString());
+            }
+
+            const areas: (AreaPieces | AreaButtonBar | AreaKey)[] = [];
+            if (!last) {
+                // The discard pile is always face-up/public - the one non-board area worth reconstructing for an earlier frame; no "just discarded" tinting since that's a live-only concept.
+                const discardArea = this.buildAreaFromSummary(
+                    this.frames[i].discardSummary, legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
+                );
+                if (discardArea !== undefined) {
+                    areas.push(discardArea);
+                }
+            } else {
+                // One area per player's hand, full-size (non-spaced) card faces.
+                for (let p = 1; p <= this.numplayers; p++) {
+                    const hand = this.hands[p - 1].slice() ?? [];
+                    if (hand.length === 0) {
+                        continue;
+                    }
+                    //Hand sorting is now done in the render only.
+                    hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
+                    const newUids = this.newHandCardUids(p as playerid);
+                    const handKeys: string[] = [];
+                    for (const uid of hand) {
+                        const card = allCards().find(c => c.uid === uid);
+                        if (card === undefined) {
+                            handKeys.push(GnosticaGame.cardKey(UNREVEALED_UID));
+                            continue;
+                        }
+                        // A card just added to hand gets its face tinted so it's easy to spot regardless of sort order.
+                        const isNew = newUids.has(uid);
+                        const key = GnosticaGame.cardKey(uid);
+                        if (!(key in legend)) {
+                            legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
+                        }
+                        handKeys.push(key);
+                    }
+                    areas.push({
+                        type: "pieces",
+                        pieces: handKeys as [string, ...string[]],
+                        label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.declaredPlayer() === p ? "(declarer)" : "" }),
+                        // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter than default spacing, fixed width since hands are always <=6 cards.
+                        spacing: 0.25,
+                        width: 6,
+                        ownerMark: p,
+                    });
+                }
+
+                // The "bidding" variant's shared pool - every card revealed by the opening bid procedure, available for anyone to redraw; fully public, no redaction needed.
+                if (this.biddingPool !== undefined && this.biddingPool.length > 0) {
+                    const poolKeys: string[] = [];
+                    for (const uid of this.biddingPool) {
+                        const card = allCards().find(c => c.uid === uid)!;
+                        const key = GnosticaGame.cardKey(uid);
+                        if (!(key in legend)) {
+                            legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
+                        }
+                        poolKeys.push(key);
+                    }
+                    areas.push({
+                        type: "pieces",
+                        pieces: poolKeys as [string, ...string[]],
+                        label: i18next.t("apgames:validation.gnostica.LABEL_BIDDING_POOL"),
+                        spacing: 0.25,
+                        width: 6,
+                    });
+                }
+
+                // The declaration round banner.
+                if (this.declaredPlayer() !== undefined) {
+                    if (!("Warning" in legend)) {
+                        legend.Warning = [
+                            { name: "piece-borderless", colour: "_context_background" },
+                            { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
+                        ];
+                    }
+                    areas.push({
+                        type: "pieces",
+                        pieces: ["Warning"],
+                        label: i18next.t("apgames:validation.gnostica.LABEL_WARNING"),
+                        spacing: 0.25,
+                        width: 1,
+                    });
+                }
+
+                // The literal drawPile array isn't used for the draw-pile summary - "what's left to draw" is computed by elimination: every card in the full deck not visible somewhere else.
+                const visible = this.visibleCardUids();
+                const unknownUids = allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
+                const drawArea = this.buildDeckSummaryArea(
+                    unknownUids, legend, i18next.t("apgames:validation.gnostica.LABEL_DECK")
+                );
+                if (drawArea !== undefined) {
+                    areas.push(drawArea);
+                }
+                // The discard pile is always face-up/public, unlike hands or the draw pile, so its contents are read directly.
+                const discardArea = this.buildDeckSummaryArea(
+                    this.discardPile, legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"), new Set(this.discarded)
+                );
+                if (discardArea !== undefined) {
+                    areas.push(discardArea);
+                }
+
+                // Shown whenever it has real content: a bidding game always has turn order to show (any player count - even at 2 players,
+                // "you, then them" is still worth confirming once icon rows can share the same key), and any game can have icon rows once a
+                // card is actively mid-build this turn, bidding or not.
+                const list: AreaKey["list"] = [];
+                if (this.variants.includes("bidding")) {
+                    this.turnOrder!.forEach((p, place) => {
+                        const key = `turnorder_p${p}`;
+                        if (!(key in legend)) {
+                            legend[key] = { name: "pyramid-up-small", colour: p };
+                        }
+                        list.push({ piece: key, name: GnosticaGame.ordinal(place + 1) });
+                    });
+                }
+                // The card whose own step is CURRENTLY resolving (follows World's borrow/Fool's reveal, not pinned to the root card) -
+                // undefined once nothing is mid-build, including right after a commit (this.preview is cleared then).
+                const activeCard = allCards().find(c => c.uid === this.preview?.pending?.activeCardUid);
+                if (activeCard !== undefined) {
+                    const icons = activeCard.major ? getMajorArcanaIcons(activeCard) : (activeCard.suit.glyph !== undefined ? [activeCard.suit.glyph] : []);
+                    for (const icon of icons) {
+                        const key = `activecard_${icon}`;
+                        if (!(key in legend)) {
+                            // Circle-backed, matching every other place these icons appear (buildCardFace's own pushCircle) - a bare
+                            // icon glyph alone reads too thin/low-contrast next to the turn-order rows' own solid pyramids.
+                            legend[key] = [
+                                { name: "piece", colour: "_context_board" },
+                                { name: icon, scale: 0.5 },
+                            ];
+                        }
+                        list.push({ piece: key, name: "" });
+                    }
+                }
+                if (list.length > 0) {
+                    // "left", not "right" - the action button bar already owns the right side, and the two don't stack cleanly on the same side.
+                    areas.push({ type: "key", list, position: "left", height: 0.7, clickable: false });
+                }
+
+                // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
+                const actionButtons = this.withUndo(this.getActionButtons());
+                if (actionButtons !== undefined) {
+                    areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
+                }
+            }
+
+            const rep: APRenderRep = {
+                renderer: "stacking-offset",
+                // A click on a pyramid reports its stack index, which handleClick would take for a legend piece; cells are what we want clicked.
+                options: ["no-piece-click"],
+                board: {
+                    style: "squares",
+                    stackOffset: 0,
+                    width,
+                    height,
+                    columnLabels,
+                    rowLabels,
+                    strokeColour: {
+                        func: "flatten",
+                        fg: "_context_strokes",
+                        bg: "_context_board",
+                        opacity: 0,
+                    },
+                    buffer: !last || this.buffers.length === 0 ? undefined : {
+                        separated: true,
+                        width: 0.2,
+                        pattern: "dots",
+                        show: [...this.buffers] as ("N" | "E" | "S" | "W")[],
+                    },
+                    markers,
+                },
+                legend,
+                pieces: pieceRows as [string[][], ...string[][][]],
+                areas: areas.length > 0 ? areas : undefined,
+            };
+
+            const annotations: NonNullable<APRenderRep["annotations"]> = [];
+            for (const r of results) {
+                if (r.type === "place" && r.where !== undefined) {
+                    const [x, y] = GnosticaBoard.algebraic2coords(r.where);
+                    annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
+                } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
+                    const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
+                    const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
+                    annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
+                }
+            }
+            if (annotations.length > 0) {
+                rep.annotations = annotations;
+            }
+
+            renders.push(rep);
         }
-        // Only the final rep carries buttons and hands; every earlier frame is just its step's board.
-        const reps = this.frames.map((f, i) => this.renderFrame(f, i, opts));
-        reps.push(this.renderCurrent(opts));
-        return reps;
+        return renders;
     }
 
     // Every card whose identity is definitively known to the viewer: the board, discards, and known hands, used to compute the draw-pile summary by elimination.
