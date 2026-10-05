@@ -92,8 +92,8 @@ export interface IStepOutcome {
     newMinion?: IMinionRef;
     // The EXISTING frame-pool entry (matched by x,y,index) newMinion supersedes - unset only when nothing existing became invalid (Cups' "create").
     replacesMinion?: IMinionRef;
-    // Hand off to a DIFFERENT card's power array (World's target, or Fool's flip); `viaFool` distinguishes which, since only Fool's makes Decline available.
-    pushFrame?: { cardUid: string; minions: IMinionRef[]; viaFool?: boolean };
+    // Hand off to a DIFFERENT card's power array (World's target, or Fool's flip).
+    pushFrame?: { cardUid: string; minions: IMinionRef[] };
     // Must pause here regardless of further supplied step segments - the outcome is hidden (Fool's flip) or a later sibling step needs it (High Priestess).
     forcePause?: boolean;
     // This step's tokens still carry a trailing "?" (Cups "own" creation's mandatory facing) - read by validateMinorPower/validateFrameStack as complete:0.
@@ -239,8 +239,6 @@ interface IPowerFrame {
     cardUid: string;
     nextStepIndex: number;
     minions: IMinionRef[];
-    // True only for a frame pushed by Fool's reveal - this is what makes Decline available, since flipping (unlike World's target choice) is itself committing.
-    viaFool?: boolean;
 }
 
 // What a use, play or resume move is playing (see resolvePowerPlay).
@@ -4947,15 +4945,14 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         const pool = this.eligibleMinionsForPlay();
-        // Every non-outermost obligation got here via a Fool reveal (the only card that nests one on top of another), so it stays declinable.
-        const stack = tokens.map((token, idx) => {
+        const stack = tokens.map(token => {
             const owed = GnosticaGame.owedFromToken(token);
-            return { cardUid: owed.uid, nextStepIndex: owed.done, minions: [...this.eligibleMinionsForOwed(owed)], viaFool: idx > 0 } as IPowerFrame;
+            return { cardUid: owed.uid, nextStepIndex: owed.done, minions: [...this.eligibleMinionsForOwed(owed)] } as IPowerFrame;
         });
         if (stack[stack.length - 1].cardUid === "00") {
             const revealed = this.discardPile[this.discardPile.length - 1];
             if (revealed !== undefined) {
-                stack.push({ cardUid: revealed, nextStepIndex: 0, minions: [...pool], viaFool: true });
+                stack.push({ cardUid: revealed, nextStepIndex: 0, minions: [...pool] });
             }
         }
         return { rootCardUid: stack[0].cardUid, stack: stack as [IPowerFrame, ...IPowerFrame[]] };
@@ -5219,7 +5216,7 @@ export class GnosticaGame extends GameBaseSequenced {
             softComplete = outcome.softComplete === true;
             mayDrawMore = stepResult.mayAddMore ?? 0;
             if (outcome.pushFrame !== undefined) {
-                stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions, viaFool: outcome.pushFrame.viaFool === true });
+                stack.push({ cardUid: outcome.pushFrame.cardUid, nextStepIndex: 0, minions: outcome.pushFrame.minions });
             }
             GnosticaGame.popExhaustedFrames(this, stack);
         }
