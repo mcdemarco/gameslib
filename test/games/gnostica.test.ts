@@ -1562,17 +1562,17 @@ describe("Gnostica: render", () => {
             expect(cell.indexOf(keys[0])).eq(cell.length - 2); // the pyramid's own key follows it
         });
 
-        it("rings the target piece too, solid against the minion's dashed ring, once one is picked", () => {
+        it("rings the target piece too, in red against the minion's black ring, once one is picked", () => {
             const g = testGame({
                 board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 2, "W"]] }],
                 hands: [filler, filler],
             });
             g.move("use AS/with m0.2 shrink n0.2", { partial: true });
-            const rep = g.render().at(-1) as unknown as { legend: Record<string, { name?: string; colour?: unknown }[]>; pieces: string[][][] };
+            const rep = g.render().at(-1) as unknown as { legend: Record<string, { name?: string; colour?: unknown; paint?: { border?: string } }[]>; pieces: string[][][] };
             const keys = rep.pieces.flat(2).filter(k => k.startsWith("ring_"));
             expect(keys.map(k => k.split("_")[1]).sort()).to.deep.equal(["minion", "target"]);
             const target = keys.find(k => k.startsWith("ring_target_"))!;
-            expect(rep.legend[target].some(gl => gl.name === "piece")).to.be.true;
+            expect(rep.legend[target].some(gl => gl.name === "piece-dashed" && gl.paint?.border === "#d00")).to.be.true;
             expect(rep.legend[keys.find(k => k.startsWith("ring_minion_"))!].some(gl => gl.name === "piece-dashed")).to.be.true;
             expect(rep.pieces.flat().find(c => c.includes(target))!.length).eq(2); // listed with its own pyramid
         });

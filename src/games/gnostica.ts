@@ -6692,10 +6692,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     const ringKey = `ring_${ring}_${key}`;
                     if (!(ringKey in legend)) {
-                        // A target is a solid ring and a minion a dashed one; a flat pyramid's centroid lies `drop` below its glyph's centre, so the ring takes the pyramid's rotation to share that nudge.
+                        // A target is a red dashed ring and a minion a black one; a flat pyramid's centroid lies `drop` below its glyph's centre, so the ring takes the pyramid's rotation to share that nudge.
                         const drop = piece.orientation === "U" ? 0 : [46.3, 63.7, 81][piece.size - 1];
                         legend[ringKey] = GnosticaGame.withBackdrop([{
-                            name: ring === "target" ? "piece" : "piece-dashed", rotate: g.rotate, scale: slot.scale, opacity: 0,
+                            name: "piece-dashed", rotate: g.rotate, scale: slot.scale,
+                            paint: ring === "target" ? { fill: { opacity: 0 }, border: "#d00" } : { fill: { opacity: 0 } },
                             nudge: { dx: slot.dx, dy: slot.dy + drop },
                         }], 1);
                     }
