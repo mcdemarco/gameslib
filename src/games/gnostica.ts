@@ -46,21 +46,14 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
     S: { verb: "Attack", tile: "Attack Territory" },
 };
 
-// How far below its glyph's centre each flat pyramid's centroid lies, small to large, in the renderer's 500-unit glyph space (its triangles' centroids against a 180-unit viewbox).
-const FLAT_PYRAMID_CENTROID_DROP = [46.3, 63.7, 81];
-
-// How large the dashed ring around a highlighted pyramid is, against the pyramid's own slot scale.
-const RING_SCALE = 1;
-
-const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
-
-// The greyed button: the same dark-theme grey as MUTED_FILL (about #383838), but about #ccc rather than #b3b3b3 in the light theme.
-// The theme's strokes and fill colours mirror each other, so the 0.8 of background mixed in lifts light and the fill colour's share offsets that in dark.
 // What to click next after choosing one of these actions, before anything is clicked for it.
 const BARE_ACTION_PROMPTS: Record<string, string> = {
     place: "PICK_CELL_TO_PLACE", use: "PICK_CARD_TO_ACTIVATE", play: "PICK_HAND_CARD_TO_PLAY", orient: "PICK_PIECE_TO_ORIENT",
 };
 
+const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
+// The greyed button: the same dark-theme grey as MUTED_FILL (about #383838), but about #ccc rather than #b3b3b3 in the light theme.
+// The theme's strokes and fill colours mirror each other, so the 0.8 of background mixed in lifts light and the fill colour's share offsets that in dark.
 const GREYED_BUTTON_FILL: Colourfuncs = {
     func: "flatten",
     fg: { func: "flatten", fg: "_context_strokes", bg: "_context_fill", opacity: 0.71 },
@@ -6648,10 +6641,11 @@ export class GnosticaGame extends GameBaseSequenced {
                         // The ring is rotation-invariant, so it takes the pyramid's rotation only to share its pre-rotation nudge; a flat pyramid's centroid lies below its glyph's centre.
                         // A nudge is applied inside the scale, so a smaller ring needs a proportionally larger one.
                         // A target is a solid ring against the minion's dashed one.
-                        const drop = piece.orientation === "U" ? 0 : FLAT_PYRAMID_CENTROID_DROP[piece.size - 1];
+                        // The numbers indicate how far below its glyph's centre each flat pyramid's centroid lies.
+                        const drop = piece.orientation === "U" ? 0 : [46.3, 63.7, 81][piece.size - 1];
                         legend[ringKey] = GnosticaGame.withBackdrop([{
-                            name: ring === "target" ? "piece" : "piece-dashed", rotate: g.rotate, scale: slot.scale * RING_SCALE, opacity: 0,
-                            nudge: { dx: slot.dx / RING_SCALE, dy: (slot.dy + drop) / RING_SCALE },
+                            name: ring === "target" ? "piece" : "piece-dashed", rotate: g.rotate, scale: slot.scale, opacity: 0,
+                            nudge: { dx: slot.dx, dy: slot.dy + drop },
                         }], 1);
                     }
                     return [ringKey, key];
