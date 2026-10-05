@@ -1,4 +1,4 @@
-import { Component, ranks, suits, majorRanks, majorArcanaSuit } from "./Component";
+import { Component, ranks, suits, majorRanks, majorArcanaSuit } from "./Component.js";
 import { Glyph } from "@abstractplay/renderer/build/schemas/schema";
 
 // `compact` requests a smaller-footprint composition (e.g. a board tile

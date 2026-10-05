@@ -1,8 +1,8 @@
-import { UnboundedSquareBoard } from "../../common/unbounded-square-board";
-import { DirectionCardinal, orthDirections } from "../../common";
-import { TarotCard } from "../../common/tarot";
-import { CellContents, ICellContents } from "./cell";
-import { Piece } from "./piece";
+import { UnboundedSquareBoard } from "../../common/unbounded-square-board.js";
+import { DirectionCardinal, orthDirections } from "../../common/index.js";
+import { TarotCard } from "../../common/tarot/index.js";
+import { CellContents, ICellContents } from "./cell.js";
+import { Piece } from "./piece.js";
 
 export type CellClass = "territory" | "wasteland" | "void";
 

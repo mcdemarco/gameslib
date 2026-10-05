@@ -24,14 +24,14 @@
 // helper) is inlined locally instead (see its own docs below), so
 // gnostica.ts can import from here with no circular value import
 // either way.
-import { type GnosticaGame, type IMinionRef, type IStep, type IStepOutcome, type IParsedMove } from "../gnostica";
-import { shuffle } from "../../common";
-import { Card, allCards } from "../../common/tarot";
-import { cardPointValue } from "./cell";
-import { Orientation, allOrientations } from "./piece";
-import { GnosticaBoard } from "./board";
-import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana";
-import { ALL_SUITS, RDS_VERBS, MinorSuitUid, MinorMode } from "./powers";
+import { type GnosticaGame, type IMinionRef, type IStep, type IStepOutcome, type IParsedMove } from "../gnostica.js";
+import { shuffle } from "../../common/index.js";
+import { Card, allCards } from "../../common/tarot/index.js";
+import { cardPointValue } from "./cell.js";
+import { Orientation, allOrientations } from "./piece.js";
+import { GnosticaBoard } from "./board.js";
+import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana.js";
+import { ALL_SUITS, RDS_VERBS, MinorSuitUid, MinorMode } from "./powers.js";
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
 // docs there, including #98/#100's own) - duplicated rather than imported

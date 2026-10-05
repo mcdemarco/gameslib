@@ -1,4 +1,4 @@
-import { Card } from "../../common/tarot";
+import { Card } from "../../common/tarot/index.js";
 
 // The four suit primitives every minor-arcana card (and most major powers) reduce to; behaviour lives in powers.ts.
 export type SuitPrimitive = "create" | "move" | "grow" | "attack";

@@ -1,10 +1,10 @@
-import { DirectionCardinal, shuffle } from "../../common";
-import { TarotCard, allCards } from "../../common/tarot";
-import { GnosticaBoard, IEvicted } from "./board";
-import { CellContents, cardPointValue } from "./cell";
-import { Piece, Pips, Orientation } from "./piece";
-import type { IStep } from "../gnostica";
-import { PrimitiveOpts, MAJOR_ARCANA, MajorArcanaDef, SpecialPower } from "./majorArcana";
+import { DirectionCardinal, shuffle } from "../../common/index.js";
+import { TarotCard, allCards } from "../../common/tarot/index.js";
+import { GnosticaBoard, IEvicted } from "./board.js";
+import { CellContents, cardPointValue } from "./cell.js";
+import { Piece, Pips, Orientation } from "./piece.js";
+import type { IStep } from "../gnostica.js";
+import { PrimitiveOpts, MAJOR_ARCANA, MajorArcanaDef, SpecialPower } from "./majorArcana.js";
 
 // Per-size counts of pieces still in reserve [small, medium, large]; mutated in place by takeFromStash/returnToStash below.
 export type Stash = [number, number, number];

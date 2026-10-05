@@ -1,16 +1,16 @@
-import { IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult } from "./_base";
-import { GameBaseSequenced } from "./_turn-sequenced";
-import type { IGamePly } from "./_turn-model";
-import { APGamesInformation } from "../schemas/gameinfo";
+import { IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IValidationResult } from "./_base.js";
+import { GameBaseSequenced } from "./_turn-sequenced.js";
+import type { IGamePly } from "./_turn-model.js";
+import { APGamesInformation } from "../schemas/gameinfo.js";
 import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
 import type { ColourResolvable, Colourfuncs } from "@abstractplay/renderer/build/schemas/schema";
-import { APMoveResult } from "../schemas/moveresults";
-import { Direction, replacer, reviver, shuffle, UserFacingError } from "../common";
-import { UnboundedSquareBoard } from "../common/unbounded-square-board";
-import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot";
-import { GnosticaBoard } from "./gnostica/board";
-import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell";
-import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece";
+import { APMoveResult } from "../schemas/moveresults.js";
+import { Direction, replacer, reviver, shuffle, UserFacingError } from "../common/index.js";
+import { UnboundedSquareBoard } from "../common/unbounded-square-board.js";
+import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot/index.js";
+import { GnosticaBoard } from "./gnostica/board.js";
+import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell.js";
+import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece.js";
 import {
     Stash, PowerContext, PowerFailure, takeFromStash, returnToStash, hasStashAvailable,
     createOwn, createEnemy, createTerritory,
@@ -29,9 +29,9 @@ import {
     checkJudgementDraw, judgementDrawRoom, checkDiscardDraw, checkFool, checkWorldChoosePower,
     ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_ACTIONS,
     MinorSuitUid, TargetMode, CupsMode, MinorMode,
-} from "./gnostica/powers";
-import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaIcons } from "./gnostica/majorArcana";
-import { generateRandomMove } from "./gnostica/randomMove";
+} from "./gnostica/powers.js";
+import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaIcons } from "./gnostica/majorArcana.js";
+import { generateRandomMove } from "./gnostica/randomMove.js";
 
 import i18next from "i18next";
 

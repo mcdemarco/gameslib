@@ -1,5 +1,5 @@
-import { shuffle } from "../shuffle";
-import { Card, TarotCard, minorCards, majorCards } from "./Card";
+import { shuffle } from "../shuffle.js";
+import { Card, TarotCard, minorCards, majorCards } from "./Card.js";
 
 export class Deck {
     private _cards: TarotCard[];
