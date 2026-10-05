@@ -47,6 +47,10 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
 };
 
 // The face-down card every Decktet game draws for a card the viewer can't see.
+const WARNING_GLYPH: [Glyph, ...Glyph[]] = [
+    { name: "piece-borderless", colour: "_context_background" },
+    { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
+];
 const UNKNOWN_CARD_KEY = "cUNKNOWN";
 const UNKNOWN_CARD_GLYPH: Glyph = {
     name: "piece-square-borderless",
@@ -4573,11 +4577,9 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return true;
         };
+        // The Fool's flip isn't one of the move's steps: it takes no segment, so it gets no frame and joins the last step's group.
         const flip = (): void => {
-            count(() => {
-                this.hidden.push({ type: "flip" });
-                return true;
-            });
+            this.hidden.push({ type: "flip", grouped: chained, joinsGroup: true });
         };
         const run = (card: string): "done" | "paused" | "stopped" => {
             if (card === "21") {
@@ -4597,8 +4599,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 if (checkFool(ctx) !== undefined) {
                     // Nothing left to flip: both flips are spent.
-                    count(() => true);
-                    count(() => true);
                     return "done";
                 }
                 flip();
@@ -4649,9 +4649,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     return undefined;
                 }
                 if (checkFool(ctx) !== undefined) {
-                    for (let n = top.done; n < 2; n++) {
-                        count(() => true);
-                    }
                     owed.pop();
                     continue;
                 }
@@ -6170,6 +6167,14 @@ export class GnosticaGame extends GameBaseSequenced {
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
         const ungrouped = this.results.filter(r => r.type !== "_group");
 
+        const discardLabel = i18next.t("apgames:validation.gnostica.LABEL_DISCARDS");
+        const strokeColour = {
+            func: "flatten" as const,
+            fg: "_context_strokes",
+            bg: "_context_board",
+            opacity: 0,
+        };
+
         const renders: APRenderRep[] = [];
         // We need to look at each frame, and then finally the live state.
         for (let i = 0; i <= this.frames.length; i++) {
@@ -6204,7 +6209,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (!last) {
                 // The discard pile is always face-up/public - the one non-board area worth reconstructing for an earlier frame; no "just discarded" tinting since that's a live-only concept.
                 const discardArea = this.buildAreaFromSummary(
-                    this.frames[i].discardSummary, legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS")
+                    this.frames[i].discardSummary, legend, discardLabel
                 );
                 if (discardArea !== undefined) {
                     areas.push(discardArea);
@@ -6238,7 +6243,6 @@ export class GnosticaGame extends GameBaseSequenced {
                         type: "pieces",
                         pieces: handKeys as [string, ...string[]],
                         label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.declaredPlayer() === p ? "(declarer)" : "" }),
-                        // Matches magnate.ts/emu.ts's own hand/deck sizing - tighter than default spacing, fixed width since hands are always <=6 cards.
                         spacing: 0.25,
                         width: 6,
                         ownerMark: p,
@@ -6267,12 +6271,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 // The declaration round banner.
                 if (this.declaredPlayer() !== undefined) {
-                    if (!("Warning" in legend)) {
-                        legend.Warning = [
-                            { name: "piece-borderless", colour: "_context_background" },
-                            { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },
-                        ];
-                    }
+                    legend.Warning = WARNING_GLYPH;
                     areas.push({
                         type: "pieces",
                         pieces: ["Warning"],
@@ -6293,7 +6292,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // The discard pile is always face-up/public, unlike hands or the draw pile, so its contents are read directly.
                 const discardArea = this.buildDeckSummaryArea(
-                    this.discardPile, legend, i18next.t("apgames:validation.gnostica.LABEL_DISCARDS"), new Set(this.discarded)
+                    this.discardPile, legend, discardLabel, new Set(this.discarded)
                 );
                 if (discardArea !== undefined) {
                     areas.push(discardArea);
@@ -6353,12 +6352,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     height,
                     columnLabels,
                     rowLabels,
-                    strokeColour: {
-                        func: "flatten",
-                        fg: "_context_strokes",
-                        bg: "_context_board",
-                        opacity: 0,
-                    },
+                    strokeColour,
                     buffer: !last || this.buffers.length === 0 ? undefined : {
                         separated: true,
                         width: 0.2,
