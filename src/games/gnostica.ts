@@ -281,7 +281,6 @@ interface IMoveState extends IIndividualState {
     hands: string[][];
     // Number of hand cards drawn on the player's last turn.
     cardsDrawn: number[];
-    drawPile: string[];
     discardPile: string[];
     stashes: Map<playerid, Stash>;
     eliminated: playerid[];
@@ -411,19 +410,11 @@ export class GnosticaGame extends GameBaseSequenced {
 
             // Built directly, not via createTerritory() (which requires the target to already classify as a wasteland - not true for an empty board).
             const board = new GnosticaBoard();
-            let boardCards: TarotCard[];
-            let drawPile: string[];
-            if (this.variants.includes("no-majors")) {
-                // Pulls 9 non-major cards out then reshuffles.
-                const remaining = deck.cards;
-                const nonMajors = remaining.filter(c => !c.major);
-                boardCards = nonMajors.splice(0, 9);
-                const rest = shuffle([...nonMajors, ...remaining.filter(c => c.major)]) as TarotCard[];
-                drawPile = rest.map(c => c.uid);
-            } else {
-                boardCards = deck.draw(9);
-                drawPile = deck.cards.map(c => c.uid);
-            }
+            // The draw pile isn't stored: load() rebuilds it from the cards nobody can see.
+            const boardCards = this.variants.includes("no-majors")
+                // Pulls 9 non-major cards out.
+                ? deck.cards.filter(c => !c.major).slice(0, 9)
+                : deck.draw(9);
             
             for (let x = -1; x <= 1; x++) {
                 for (let y = -1; y <= 1; y++) {
@@ -447,7 +438,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Do not display the initial hand as a draw.
                 // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 cardsDrawn: hands.map(h => 0),
-                drawPile,
                 discardPile: [],
                 stashes,
                 eliminated: [],
@@ -496,7 +486,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.board = new GnosticaBoard(state.board).clone();
         this.hands = state.hands.map(h => [...h]);
         this.cardsDrawn = [...state.cardsDrawn];
-        this.drawPile = [...state.drawPile];
         this.discardPile = [...state.discardPile];
         this.stashes = new Map([...state.stashes.entries()].map(([k, v]) => [k, [...v] as Stash]));
         this.eliminated = [...state.eliminated];
@@ -508,6 +497,8 @@ export class GnosticaGame extends GameBaseSequenced {
         this.turnOrder = state.turnOrder !== undefined ? [...state.turnOrder] : undefined;
         this.frames = state.frames ? [...state.frames] : [];
         this.continued = state.continued ? [...state.continued] : [];
+        // Like the other Decktet games, the deck is reset every time you load: whatever isn't on the board, in a hand, discarded or in the pool, shuffled.
+        this.drawPile = shuffle(this.unseenCardUids()) as string[];
         return this;
     }
 
@@ -520,7 +511,6 @@ export class GnosticaGame extends GameBaseSequenced {
             board: this.board.clone().store,
             hands: this.hands.map(h => [...h]),
             cardsDrawn: [...this.cardsDrawn],
-            drawPile: [...this.drawPile],
             discardPile: [...this.discardPile],
             stashes: new Map([...this.stashes.entries()].map(([k, v]) => [k, [...v] as Stash])),
             eliminated: [...this.eliminated],
@@ -550,8 +540,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (p === opts.player) { continue; }
                     mstate.hands[p - 1] = mstate.hands[p - 1].map(() => UNREVEALED_UID);
                 }
-                // The draw pile is stored in order, unlike the other Decktet games' decks; blanked the same way, since the rules read its size.
-                mstate.drawPile = mstate.drawPile.map(() => UNREVEALED_UID);
                 return mstate;
             });
         }
@@ -6261,10 +6249,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
 
                 // The literal drawPile array isn't used for the draw-pile summary - "what's left to draw" is computed by elimination: every card in the full deck not visible somewhere else.
-                const visible = this.visibleCardUids();
-                const unknownUids = allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
                 const drawArea = this.buildDeckSummaryArea(
-                    unknownUids, legend, faces, i18next.t("apgames:validation.gnostica.LABEL_DECK")
+                    this.unseenCardUids(), legend, faces, i18next.t("apgames:validation.gnostica.LABEL_DECK")
                 );
                 if (drawArea !== undefined) {
                     areas.push(drawArea);
@@ -6387,6 +6373,12 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return visible;
+    }
+
+    // The cards nobody can see, which is to say the draw pile.
+    private unseenCardUids(): string[] {
+        const visible = this.visibleCardUids();
+        return allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
     }
 
     // The abbreviation FrameState.discardSummary itself stores; pure bucketing, no "new"/tinting concept - just the first half of buildDeckSummaryArea's own logic, minus newUids.

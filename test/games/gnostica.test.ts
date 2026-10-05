@@ -6189,11 +6189,10 @@ describe("Gnostica: hidden information", () => {
     });
     const top = (g: GnosticaGame, opts: { strip?: boolean; player?: number }) => g.state(opts).stack[g.state(opts).stack.length - 1];
 
-    it("shows a viewer only their own hand, and no draw pile, keeping the sizes", () => {
+    it("shows a viewer only their own hand, keeping the sizes", () => {
         const stripped = top(game(), { strip: true, player: 1 });
         expect(stripped.hands[0]).to.deep.equal(["2R", "3R", "4R", "5D", "6D", "7D"]);
         expect(stripped.hands[1]).to.deep.equal(["", "", "", "", "", ""]);
-        expect(stripped.drawPile).to.deep.equal(["", "", ""]);
         expect(top(game(), { strip: true, player: 2 }).hands[0]).to.deep.equal(["", "", "", "", "", ""]);
     });
 
@@ -6203,9 +6202,17 @@ describe("Gnostica: hidden information", () => {
     });
 
     it("gives the full state when not asked to strip", () => {
-        const g = game();
-        expect(top(g, {}).hands[1][0]).eq("AC");
-        expect(top(g, {}).drawPile).to.deep.equal(["10C", "ND", "3S"]);
+        expect(top(game(), {}).hands[1][0]).eq("AC");
+    });
+
+    it("keeps no draw pile in the state, and rebuilds it on load from the cards nobody can see", () => {
+        const g = new GnosticaGame(2);
+        expect("drawPile" in top(g, {})).to.be.false;
+        const reloaded = new GnosticaGame(g.serialize());
+        const seen = new Set<string>([...reloaded.hands.flat(), ...reloaded.discardPile, ...[...reloaded.board.entries()].map(([, , t]) => t.cardUid!)]);
+        expect(reloaded.drawPile.length).eq(78 - seen.size);
+        expect(reloaded.drawPile.some(uid => seen.has(uid))).to.be.false;
+        expect(new Set(reloaded.drawPile).size).eq(reloaded.drawPile.length);
     });
 
     it("reloads from a stripped state, renders the viewer's hand and the other's face down, and still plays the viewer's own moves", () => {
