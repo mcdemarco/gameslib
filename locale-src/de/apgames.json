@@ -3915,6 +3915,10 @@
     "src": "Gliss",
     "out": "Gliss"
   },
+  "names.gnostica": {
+    "src": "Gnostica",
+    "out": "Gnostica"
+  },
   "names.go": {
     "src": "Go",
     "out": "Go"
