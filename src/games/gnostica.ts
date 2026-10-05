@@ -1806,12 +1806,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return real[real.length - 1]?.split(".")[0];
     }
 
-    // Who has declared "last" so far, whether already promoted into lastTurner or still staged mid-chain via "last" (always the currplayer whose own
-    // still-open turn it rides along with, since a continued chain only ever belongs to one seat at a time).
-    private declaredPlayer(): playerid | undefined {
-        return this.lastTurner ?? (this.continued.includes("last") ? this.currplayer : undefined);
-    }
-
     // The card a continuation is waiting on: the obligation's own card, or for the Fool what its last flip revealed, as the last committed move logged it. undefined when nothing is pending.
     public activeCardUid(): string | undefined {
         const active = this.getContinuedUid();
@@ -2415,8 +2409,8 @@ export class GnosticaGame extends GameBaseSequenced {
             { label: "Pass", value: "pass" },
         ];
         const highlighted = this.preview?.highlighted ?? this.highlightedButtonValues(undefined);
-        // Declare is a toggle, so once on it offers to undo itself rather than sit greyed.
-        if (this.declaredPlayer() === undefined) {
+        // Declare is offered until someone has declared (committed, or staged in an open turn), and is a toggle, so once on it offers to undo itself rather than sit greyed.
+        if (this.lastTurner === undefined && !this.continued.includes("last")) {
             topLevel.push({ label: highlighted.has("declare") ? "(Undeclare)" : "(Declare)", value: "declare" });
         }
         // A button the move already reflects is greyed; clicking it would do nothing (see clickActionButton).
@@ -6274,7 +6268,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     areas.push({
                         type: "pieces",
                         pieces: handKeys as [string, ...string[]],
-                        label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.declaredPlayer() === p ? "(declarer)" : "" }),
+                        label: i18next.t("apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurner === p ? "(declarer)" : "" }),
                         spacing: 0.25,
                         width: 6,
                         ownerMark: p,
@@ -6299,8 +6293,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     });
                 }
 
-                // The declaration round banner.
-                if (this.declaredPlayer() !== undefined) {
+                // The declaration round banner: once a declaration is committed, but not in the turn it is made (when it is still staged in `continued`).
+                if (this.lastTurner !== undefined) {
                     legend.Warning = [
                         { name: "piece-borderless", colour: "_context_background" },
                         { text: "\u{26A0}", colour: "#f00", orientation: "vertical" },

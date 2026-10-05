@@ -6442,3 +6442,48 @@ describe("Gnostica: a move typed in mixed case", () => {
         expect(g.validateMove("use AR/with m0.2.e move n0.1 1").valid).to.be.false;
     });
 });
+
+
+describe("Gnostica: the declaration warning banner", () => {
+    const declared = () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }],
+            hands: [filler, filler],
+        });
+        g.move("orient m0.1 N last"); // player 1 declares and ends the turn
+        return g;
+    };
+    const hasBanner = (g: GnosticaGame, perspective?: number) =>
+        ((g.render({ perspective }).at(-1) as { areas?: { pieces?: string[] }[] }).areas ?? []).some(a => a.pieces?.includes("Warning"));
+
+    it("warns the other players and spectators once the declaration is committed", () => {
+        const g = declared();
+        expect(g.lastTurner).eq(1);
+        expect(hasBanner(g, 2)).to.be.true;
+        expect(hasBanner(g)).to.be.true;
+    });
+
+    it("shows no banner in the turn the declaration is made, even when that turn stays open", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 1, "U"]] }], hands: [filler, filler], drawPile: ["AC", "2C"] });
+        g.move("use 00 last"); // declares on a turn that stays open
+        expect(g.continued[0]).eq("last");
+        expect(hasBanner(g, 1)).to.be.false;
+        expect(hasBanner(g, 2)).to.be.false;
+    });
+
+    it("labels the declarer's hand for the other players, and not in the turn the declaration is made", () => {
+        const handLabel = (g: GnosticaGame, player: number) =>
+            (g.render().at(-1) as { areas?: { ownerMark?: number; label?: string }[] }).areas!.find(a => a.ownerMark === player)!.label!;
+        const committed = declared();
+        expect(handLabel(committed, 1)).to.include("(declarer)");
+        expect(handLabel(committed, 2)).to.not.include("(declarer)");
+        const open = testGame({ board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 1, "U"]] }], hands: [filler, filler], drawPile: ["AC", "2C"] });
+        open.move("use 00 last");
+        expect(handLabel(open, 1)).to.not.include("(declarer)");
+    });
+
+    it("shows nothing before anyone has declared", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }], hands: [filler, filler] });
+        expect(hasBanner(g, 2)).to.be.false;
+    });
+});
