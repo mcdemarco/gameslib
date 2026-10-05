@@ -34,6 +34,9 @@
         "frogger_other": "{{player}} chose to refill the draw pool.  He gets another turn to take his {{count}} remaining moves.",
         "icepalace_build": "{{player}} won the hand and builds the Yard into the Ice Palace, using {{count}} pyramids. One legal way to build it is `{{move}}`.",
         "icepalace_nobuild": "{{player}} won the hand, but none of the Yard can be built into the Ice Palace.",
+        "gnostica": "Bidding is resolved. Turn order for the rest of the game will be {{turnOrder}}. Cards will be drawn from the bidding pool in the order {{redrawOrder}}.",
+        "gnostica_decline": "{{player}} declined {{card}}'s power.",
+        "gnostica_declore": "{{player}} ended their declared last turn with a score of {{count}}.",
         "quincunx": "Player {{playerNum}} had the following cards left in their hand: {{cards}}.",
         "elOso": {
             "playerSetup": "Player setup",
@@ -196,6 +199,14 @@
     "CONVERT": {
         "complete": "{{player}} turned a {{what}} into a {{into}} at {{where}}.",
         "courtesan": "King and courtesan swapped positions at {{where}}.",
+        "gnostica_hierophant": "{{player}} converted an enemy piece to their own at {{where}}.",
+        "gnostica_hierophant_target": "{{player}} converted {{target}}'s piece to their own at {{where}}.",
+        "gnostica_piece": "{{player}} grew {{target}}'s piece to {{into}} at {{where}}.",
+        "gnostica_piece_own": "{{player}} grew their piece to {{into}} at {{where}}.",
+        "gnostica_piece_shrink": "{{player}} shrank {{target}}'s piece to {{into}} at {{where}}.",
+        "gnostica_piece_shrink_own": "{{player}} shrank their own piece to {{into}} at {{where}}.",
+        "gnostica_tile": "{{player}} grew the territory at {{where}} from {{what}} into {{into}}.",
+        "gnostica_tile_shrink": "{{player}} shrank the territory at {{where}} from {{what}} into {{into}}.",
         "magnate_deed": "{{player}} completed their deeded card {{what}} in district {{where}}.",
         "magnate_trade": "{{player}} traded three {{what}} tokens in for one {{into}}.",
         "moonsquad": "{{player}} recruited a squad.",
@@ -220,7 +231,12 @@
         "quincunx_one": "{{player}} drew {{count}} card.",
         "quincunx_other": "{{player}} drew {{count}} cards.",
         "evenatodds": "{{player}} drew a tile from the boneyard.",
-        "agofmars": "{{player}} drew a {{colour}}{{count}} pyramid from the bag."
+        "agofmars": "{{player}} drew a {{colour}}{{count}} pyramid from the bag.",
+        "gnostica_deck": "{{player}} drew {{count}} card(s) from the deck.",
+        "gnostica_discard": "{{player}} drew {{count}} card(s) from the discard pile.",
+        "gnostica_fool": "{{player}} drew {{what}}.",
+        "gnostica_hand": "{{player}} played {{what}}.",
+        "gnostica_pool": "{{player}} drew card(s) {{what}} from the bidding pool."
     },
     "DECLARE": {
         "biscuit": "{{player}} has gone out!",
@@ -228,6 +244,7 @@
         "frogger": "The crocodiles advanced.",
         "killallgo_handicap_one": "{{player}} set the handicap to one stone.",
         "killallgo_handicap_other": "{{player}} set the handicap to {{count}} stones.",
+        "gnostica": "{{player}} declared their last turn with a score of {{count}}.",
         "mchess": "{{player}} has \"called the clock.\" If no capture is made in the next seven turns, the game will end and be scored.",
         "renju": "{{player}} has declared {{count}} tentative fifths."
     },
@@ -262,6 +279,9 @@
             "minimal_one": "{{count}} friendly piece was destroyed.",
             "minimal_other": "{{count}} friendly pieces were destroyed."
         },
+        "gnostica_piece_own": "{{player}} destroyed their own {{what}}-pip piece.",
+        "gnostica_piece": "{{player}} destroyed {{target}}'s {{what}}-pip piece.",
+        "gnostica_tile": "{{player}} destroyed {{what}} at {{where}}.",
         "logger": "{{player}} felled a tree at {{where}}.",
         "mattock": "{{player}} mined at {{where}}.",
         "string": "String {{where}} broke under the strain."
@@ -386,6 +406,12 @@
         "frogger_forward": "{{player}} used {{card}} to move a frog forward from {{from}} to {{to}}.",
         "gess_one": "{{player}} moved a 3x3 piece containing {{count}} stone from {{from}} to {{to}}.",
         "gess_other": "{{player}} moved a 3x3 piece containing {{count}} stones from {{from}} to {{to}}.",
+        "gnostica_hermit_piece": "{{player}} teleported {{target}}'s {{what}}-pip piece from {{from}} to {{to}}.",
+        "gnostica_hermit_piece_own": "{{player}} teleported their {{what}}-pip piece from {{from}} to {{to}}.",
+        "gnostica_hermit_tile": "{{player}} teleported the territory at {{from}} to {{to}}.",
+        "gnostica_rod_piece": "{{player}} moved {{target}}'s {{what}}-pip piece from {{from}} to {{to}}.",
+        "gnostica_rod_piece_own": "{{player}} moved their own {{what}}-pip piece from {{from}} to {{to}}.",
+        "gnostica_rod_tile": "{{player}} pushed the territory at {{from}} to {{to}}.",
         "hexentafl_king": "{{player}} moved the king from {{from}} to {{to}}.",
         "iqishiqi": "{{player}} moved neutral stone {{from}} to {{to}}.",
         "knightline": "{{player}} moved {{what}} pieces from {{from}} to {{to}}.",
@@ -432,6 +458,8 @@
     },
     "ORIENT": {
         "crosshairs": "{{player}} turned a plane at {{where}} to face {{facing}}.",
+        "gnostica_own": "{{player}} oriented a {{what}}-pip minion at {{where}} {{facing}}-ward.",
+        "gnostica_target": "{{player}} oriented {{target}}'s {{what}}-pip piece at {{where}} {{facing}}-ward.",
         "nowhat": "{{player}} turned a piece at {{where}} to face {{facing}}."
     },
     "PASS": {
@@ -447,6 +475,8 @@
         "elOso": "{{player}} passed.",
         "frogger": "{{player}} passed {{why}}.",
         "icepalace": "{{player}} passed.",
+        "gnostica_bids": "{{player}} was automatically passed for redrawing, having won the bid.",
+        "gnostica_eliminated": "{{player}} has been eliminated and was passed.",
         "linage": "{{player}} passes.",
         "pie": "{{player}} accepted the komi offer and will continue playing second.",
         "pigs": "{{player}} idles.",
@@ -508,6 +538,11 @@
         "elOso_one": "{{player}} placed one piece at {{where}}.",
         "elOso_other": "{{player}} placed {{count}} pieces at {{where}}.",
         "epam": "{{player}} placed a stone at {{where}}.",
+        "gnostica_discard": "{{player}} discarded {{what}}.",
+        "gnostica_enemy": "{{player}} added a new piece of {{target}}'s to {{where}}.",
+        "gnostica_initial": "{{player}} placed their first piece at {{where}}.",
+        "gnostica_own": "{{player}} added one of their pieces to {{where}}.",
+        "gnostica_territory": "{{player}} placed a new territory, {{what}}, at {{where}}.",
         "gorogo_henge": "{{player}} placed a henge piece at {{where}}.",
         "gorogo_piece": "{{player}} placed a piece at {{where}}.",
         "icepalace": "{{player}} placed a {{what}} at {{where}}.",
@@ -662,6 +697,7 @@
         "fnap": "{{player}} selected the tile {{tile}}.",
         "killallgo_iplace": "{{player}} chose to place the first batch.",
         "killallgo_youplace": "{{player}} chose to let their opponent place the first batch.",
+        "gnostica": "{{player}} selected a bid card.",
         "resolve": "{{player}} selects the piece in a crosscut at {{where}}.",
         "slyde_fixed_opponent": "{{player}} changed the state of their opponent's piece at {{where}} from mobile to fixed.",
         "slyde_fixed_self": "{{player}} changed the state of their own piece at {{where}} from mobile to fixed.",
@@ -703,6 +739,7 @@
     },
     "SWAP": {
         "deckfish": "{{player}} swapped {{what}} from the market with {{with}} at {{where}}.",
+        "gnostica": "{{player}} traded hands with {{target}}.",
         "nex": "{{player}} swapped a piece of their colour at {{where}} to a neutral piece.",
         "nex_neutral": "{{player}} swapped a neutral piece at {{where}} to a piece of their colour.",
         "resolve": "The piece is swapped to {{where}}.",
@@ -738,7 +775,9 @@
     "USE": {
         "camelot_castle_move_one": "{{player}} used has 1 more castle move.",
         "camelot_castle_move_other": "{{player}} used has {{count}} more castle moves.",
-        "camelot_castle_move_none": "{{player}} has no more castle moves."
+        "camelot_castle_move_none": "{{player}} has no more castle moves.",
+        "gnostica": "{{player}} used {{what}}.",
+        "gnostica_world": "{{player}} borrowed the power of {{what}}."
     },
     "SCRIBE": {
         "no_formation": "no formations",

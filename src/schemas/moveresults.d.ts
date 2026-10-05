@@ -159,6 +159,7 @@ export type APMoveResult =
       what: string;
       into: string;
       where?: string;
+      who?: number;
     }
   | {
       type: "sacrifice";
@@ -181,6 +182,7 @@ export type APMoveResult =
       what?: string;
       where?: string;
       facing: string;
+      who?: number;
     }
   | {
       type: "detonate";
@@ -191,6 +193,7 @@ export type APMoveResult =
       type: "destroy";
       what?: string;
       where?: string;
+      who?: number;
     }
   | {
       type: "bearoff";

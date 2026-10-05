@@ -1,0 +1,57 @@
+Gnostica-specific task list.
+Some numbers carry over from a partially-lost task list.
+Some items were marked off at transfer here, not at completion.
+Mark items done with @done(date) only as they're confirmed.
+
+Pre-release:
+	- #29 - reduce test count towards 50-100.  Progress so far: 514 -> 408  Not yet reviewed:  gnostica.bidding.test.ts, "Fool and World". Doomed: randomMove.
+	- #66 - test fool messaging on reload in production
+	- #86 - Once gnostica/randomMove.ts is deleted (or no longer needs them - see #85), revert these 28 gnostica.ts methods from public back to private (all were private before #85; only made public so randomMove.ts could call them cross-file): buildViaMove, cloneLive, computeShortcutOpts, eligibleMinionsForActivate, eligibleMinionsForPlay, hasPiecesOnBoard, minorModeAvailability, minorTargetCell, pickleMove, pieceRefStr, primitiveToSuit, renderWindow, scoreFor, targetScore, validateHermitStep, validateHierophantReplace, validateHighPriestess, validateJudgementDraw, validateMagicianChoice, validateMajorPower, validateMinorPower, validateOrientAny, validateOrientMinion, validateSuitPrimitive, validateTradeHands, victimRefStr, applyPowerStep, validatePowerStep.
+	- #87 - Remove randomMove.ts and tests thereof.
+	- #88 - Also revert the IMinionRef/IStepOutcome/StepValidation/ALL_SUITS export/relocation changes #85 made once randomMove.ts is gone.
+	- #89 - Test mutating the game state with a manual move in production (e.g. via Emu Ranchers) to see what the errors look like.
+
+Miscellany:
+	- #64 - better discard/draw messaging: both the basic action and the High Priestess version
+	- #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances
+	- #91 - The Fool either didn't let me do the second half of the Sun or was so obscure in its notation that I didn't realize I could; needs retesting.
+	- #98 - Eliminate fall-throughs to the default handler error from informative button-bar buttons.
+	- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
+	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
+	- #115 - The question of case-sensitivity of directions.
+	- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)? @done(2026-10-05)
+	- #123 - Swords territory clicks seed values removed re Death shortcut. @done(2026-09-26)
+	- #124 - StepShape (powers.ts) incomplete/complete values replaced with parsed moves complete value. @done(2026-09-26)
+	- #127 - minorModeAvailability's "own" case for Cups only checks cell capacity, not stash. @done(2026-09-28)
+	- #129 - A bug with passing on your last, winning turn after Fool. @done(2026-09-28)
+	- #131 - More analysis of this.preview.
+
+UX:
+	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves. @done(2026-10-04)
+	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
+	- #120 - Add another display mode for letters instead of icons.
+	- #125 - UI for using only second power of different-powered major arcana cards.
+	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups.
+	- #128 - After next merge, add text labels to hand cards (for major arcana names)
+
+Refactoring:
+	- #90 - Replace this.liveMove with fields for render() to read. @done(2026-09-27)
+	- #95 - Replace cloneLive() with clone(). @done(2026-09-26)
+	- #99 - Remove one-liner wrappers like invalid() and failureResult().
+	- #107 - Tests should not assemble internal structures manually. Done? but some unit testing remains to be removed for #29.
+	- #118 - Finish removing stepSegments. @done(2026-09-24)
+	- #119 - Remove all echos of stepSegments and rest from other structures.  Done?
+	- #121 - There's still an unprecendented amount of throwing of errors in the code. @done(2026-09-29)
+	- #122 - Determine whether the initial structural stepShapes are still needed, and whether the rest is as well. @done(2026-09-24)
+	- #130 - Remove pendingLastTurner. @done(2026-10-01)
+	
+Rebasing:
+	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
+	- #116 - On next rebase, credit Russ with his variant.
+	- #132 - On rebase use dotted red piece.
+	- #133 - Test hidden info in playground!
+	- #134 - Add icons to buttons (and remove from key?)
+	- #135 - Change stash sidebar now that it can contain "full legend definitions"?
+	- #136 - Consider using piece area text labels.
+	- #137 - Consider combinable display options (once I have a second one)
+
