@@ -117,10 +117,9 @@ type StepValidation =
     // `mayAddMore`: a Judgement draw that could still take this many more discards, so the move can be submitted as it is but isn't finished.
     | { failed: false; complete?: boolean; mayAddMore?: number };
 
-// resolvePieceRef's result: "ok" (exactly one), "malformed" (syntax), "not_found" (zero matches), or "ambiguous" (2+, narrowable by more fields).
+// resolvePieceRef's result: "ok" (exactly one), "not_found" (zero matches, which includes text that isn't a piece reference), or "ambiguous" (2+, narrowable by more fields).
 type PieceRefResolution =
     | { kind: "ok"; ref: IMinionRef }
-    | { kind: "malformed" }
     | { kind: "not_found" }
     | { kind: "ambiguous" };
 
@@ -1892,9 +1891,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Maps a failed resolvePieceRef() result to its validation message; `notFoundKey` lets a minion-selector report NOT_AN_ELIGIBLE_MINION instead of NO_SUCH_PIECE.
-    private invalidPieceRef(kind: "malformed" | "not_found" | "ambiguous", ref: string | undefined, notFoundKey = "NO_SUCH_PIECE"): IValidationResult {
+    private invalidPieceRef(kind: "not_found" | "ambiguous", ref: string | undefined, notFoundKey = "NO_SUCH_PIECE"): IValidationResult {
         switch (kind) {
-            case "malformed": return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_PIECE_REF" });
             // notFoundKey is sometimes overridden to a key with its own real text - only the shared default collapses into INVALID_MOVE.
             case "not_found": return notFoundKey === "NO_SUCH_PIECE"
                 ? this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_SUCH_PIECE" })
@@ -1906,18 +1904,18 @@ export class GnosticaGame extends GameBaseSequenced {
     // "<cell>.<pips>[.<orientation>][.<player>]"; resolved against `pool` (minion-selector) if given, else every piece at the cell (a target, any owner).
     private resolvePieceRef(ref: string | undefined, pool?: IMinionRef[]): PieceRefResolution {
         if (ref === undefined) {
-            return { kind: "malformed" };
+            return { kind: "not_found" };
         }
         const segments = ref.toLowerCase().split(".");
         if (segments.length < 2 || segments.length > 4) {
-            return { kind: "malformed" };
+            return { kind: "not_found" };
         }
         const [cellStr, pipsStr, ...rest] = segments;
         // PIECE_REF_RE (parseMove) already guarantees cellStr decodes cleanly - same cell grammar and case as CELL_RE.
         const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
         const pips = parseInt(pipsStr, 10);
         if (Number.isNaN(pips) || pips < 1 || pips > 3) {
-            return { kind: "malformed" };
+            return { kind: "not_found" };
         }
         let orientation: Orientation | undefined;
         let player: number | undefined;
@@ -1926,14 +1924,14 @@ export class GnosticaGame extends GameBaseSequenced {
             const asOrientation = (allOrientations as string[]).includes(upper) ? upper as Orientation : undefined;
             if (asOrientation !== undefined) {
                 if (orientation !== undefined || player !== undefined) {
-                    return { kind: "malformed" };
+                    return { kind: "not_found" };
                 }
                 orientation = asOrientation;
                 continue;
             }
             const asPlayer = parseInt(tok, 10);
             if (Number.isNaN(asPlayer) || player !== undefined) {
-                return { kind: "malformed" };
+                return { kind: "not_found" };
             }
             player = asPlayer;
         }
