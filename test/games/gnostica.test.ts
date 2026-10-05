@@ -2795,8 +2795,9 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // Unlike a self-target (where distance 1 collides with the acting minion's own facing
         // cell), n0's own distance-1 destination (o0) doesn't coincide with anything else.
         const [row1, col1] = rowColFor(g, 2, 0); // o0, distance 1 from n0
-        const distClick1 = g.handleClick(distClick2.move, row1, col1);
-        expect(distClick1.move).eq(`use AR/with m0.2 move n0.1 1`);
+        expect(g.handleClick(targeted.move, row1, col1).move).eq(`use AR/with m0.2 move n0.1 1`);
+        // Once the distance is chosen, a click no longer changes it (this target is the opponent's, so it has no facing to set either); Undo is how to change it.
+        expect(g.handleClick(distClick2.move, row1, col1).move).eq(`use AR/with m0.2 move n0.1 2`);
     });
 
     it("Rods (tile): the tile candidate defaults to pushing the pointed-at territory 1 space, and seeds distance 1 - a destination click sets any further distance", () => {
@@ -5601,8 +5602,119 @@ describe("Gnostica: a new or changed minion's facing stays open to a click until
         expect(east.valid).to.be.true;
         const west = g.handleClick(seeded, 0 - minY, -1 - minX);
         expect(west.move).eq("use 14/with m0.2 at m0 create W");
-        // Clicking a candidate minion's own cell still starts the next step.
-        expect(g.handleClick(seeded, 0 - minY, 0 - minX).move).eq(`${seeded}/with m0`);
+        // The piece's own cell points it up, even though a minion stands there too: the next step starts from the buttons.
+        expect(g.handleClick(seeded, 0 - minY, 0 - minX).move).eq("use 14/with m0.2 at m0 create U");
+    });
+
+    describe("Skip Reorient", () => {
+        // The Hanged Man (move, then trade) next to an enemy piece the trade could target, which is also a facing cell of the moved piece.
+        const hanged = () => testGame({
+            board: [{ x: 0, y: 0, uid: "12", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD" }, { x: 1, y: -1, uid: "2D", pieces: [[2, 1, "W"]] }],
+            hands: [filler, filler], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+        });
+        const seeded = "use 12/with m0.2 move m0.2 1";
+        const barValues = (g: GnosticaGame, move: string) => {
+            const shown = g.clone();
+            shown.move(move, { partial: true });
+            const out = shown.render();
+            const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: { value?: string }[] }[] };
+            return rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.value);
+        };
+
+        it("is offered while the finished power's piece can still be turned, before Declare", () => {
+            const values = barValues(hanged(), seeded);
+            expect(values.indexOf("skip_reorient")).to.be.greaterThan(-1);
+            expect(values.indexOf("skip_reorient")).eq(values.indexOf("declare") - 1);
+        });
+
+        it("keeps a board click on the piece's neighbour a facing click, not the start of the next power", () => {
+            const g = hanged();
+            const shown = g.clone();
+            shown.move(seeded, { partial: true });
+            const { minX, minY } = shown.renderWindow();
+            expect(g.handleClick(seeded, -1 - minY, 1 - minX).move).eq(`${seeded} orient N`);
+        });
+
+        it("begins the next power with a bare with, adding no facing, after which a click chooses its minion", () => {
+            const g = hanged();
+            const skipped = g.handleClick(seeded, -1, -1, "_btn_skip_reorient");
+            expect(skipped.move).eq(`${seeded}/with`);
+            expect(skipped.valid).to.be.true;
+            expect(skipped.complete).eq(-1);
+            expect(barValues(g, skipped.move!)).to.not.include("skip_reorient");
+            const shown = g.clone();
+            shown.move(skipped.move!, { partial: true });
+            const { minX, minY } = shown.renderWindow();
+            expect(g.handleClick(skipped.move!, -1 - minY, 1 - minX).move).to.include("/with");
+        });
+
+        it("treats a click on the facing the piece already has as skipping the reorient", () => {
+            const g = hanged();
+            const shown = g.clone();
+            shown.move(seeded, { partial: true });
+            const { minX, minY } = shown.renderWindow();
+            expect(g.handleClick(seeded, 0 - minY, 2 - minX).move).eq(`${seeded}/with`); // east: where the moved piece already points
+        });
+
+        it("rejects a move that goes on past a facing still marked unchosen, which only a wrongly built move would", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "14", pieces: [[1, 2, "U"]] }, { x: 1, y: 0, uid: "AD" }, { x: -1, y: 0, uid: "AR" }],
+                hands: [filler, filler],
+            });
+            for (const move of ["use 14/with m0.2 at m0 create U?/with m0.1", "use 14/with m0.2 at m0 create U?/with"]) {
+                expect(g.validateMove(move).valid, move).to.be.false;
+            }
+            expect(g.validateMove("use 14/with m0.2 at m0 create U/with m0.1").valid).to.be.true;
+        });
+
+        it("holds back the next power's minion buttons until the reorient is skipped", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "14", pieces: [[1, 2, "U"]] }, { x: 1, y: 0, uid: "AD" }, { x: -1, y: 0, uid: "AR" }],
+                hands: [filler, filler],
+            });
+            const open = "use 14/with m0.2 at m0 create U?";
+            expect(barValues(g, open).some(v => v?.startsWith("minion_"))).to.be.false;
+            expect(g.handleClick(open, -1, -1, "_btn_minion_m0.1").move).eq(open); // inert, like any button the state doesn't offer
+            const skipped = g.handleClick(open, -1, -1, "_btn_skip_reorient").move!;
+            expect(skipped).eq("use 14/with m0.2 at m0 create U/with");
+            expect(barValues(g, skipped).some(v => v?.startsWith("minion_"))).to.be.true;
+            expect(g.handleClick(skipped, -1, -1, "_btn_minion_m0.1").move).eq("use 14/with m0.2 at m0 create U/with m0.1");
+        });
+
+        it("is taken back by Undo, which reopens the facing", () => {
+            expect(hanged().handleClick(`${seeded}/with`, -1, -1, "_btn_undo").move).eq(seeded);
+        });
+
+        it("goes on from a seeded Cups facing without choosing one", () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "19", pieces: [[1, 1, "W"]] }, { x: -1, y: 0, uid: "AD" }],
+                hands: [filler, filler], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+            });
+            expect(g.handleClick("use 19/with m0.1 at l0 create U?", -1, -1, "_btn_skip_reorient").move).eq("use 19/with m0.1 at l0 create U/with");
+        });
+
+        it("says what to click for a board click that neither turns the piece nor can start the next power", () => {
+            const g = hanged();
+            const shown = g.clone();
+            shown.move(seeded, { partial: true });
+            const { minX, minY } = shown.renderWindow();
+            const stray = g.handleClick(seeded, 0 - minY, -2 - minX);
+            expect(stray.move).eq(seeded);
+            expect(stray.message).eq(i18next.t("apgames:validation.gnostica.FACE_OR_NEXT_POWER"));
+        });
+    });
+
+    // The Sun (create, grow) makes its piece on a neighbouring territory, so the cell that turns it toward the minion is also a candidate minion's cell.
+    it("turns the new piece toward a neighbouring minion's cell, not on to the next step", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "19", pieces: [[1, 1, "W"]] }, { x: -1, y: 0, uid: "AD" }, { x: 1, y: 0, uid: "2D" }],
+            hands: [filler, filler], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+        });
+        const seeded = "use 19/with m0.1 at l0 create U?";
+        const shown = g.clone();
+        shown.move(seeded, { partial: true });
+        const { minX, minY } = shown.renderWindow();
+        expect(g.handleClick(seeded, 0 - minY, 0 - minX).move).eq("use 19/with m0.1 at l0 create E");
     });
 
     // The facing may be unchosen without a "?" in the move: a Rods move of one's own piece and a grow of it are only complete by default too.

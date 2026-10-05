@@ -189,4 +189,15 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 09/with m0.1 fly n0.1 to AR")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 09/with m0.1 fly n0.1 3")).to.have.deep.property("valid", false);
     });
+
+    it("reads a bare trailing with as the next step begun", () => {
+        const parsed = g.parseMove("use 19/with m0.1 at l0 create U/with");
+        expect(parsed).to.have.deep.property("valid", true);
+        expect(parsed.steps.map(step => step.action)).to.deep.equal(["use", "create", "with"]);
+        expect(parsed.steps[2].withPiece).eq(undefined);
+        expect(g.pickleMove(parsed)).eq("use 19/with m0.1 at l0 create U/");
+        expect(g.parseMove("use 19//with m0.1 at l0 create U?")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 19/with m0.1 at l0 create U?/with m0.1")).to.have.deep.property("valid", false);
+        expect(g.pickleMove(g.parseMove("use 19/with m0.1 at l0 create U/with"))).to.equal("use 19/with m0.1 at l0 create U/");
+    });
 });

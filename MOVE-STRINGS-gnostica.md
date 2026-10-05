@@ -54,6 +54,13 @@ except High Priestess.
   (`use 21 as 18/skip/...`) and to a card the Fool reveals
   (`play 18 via 00/skip/...`). It has no effect of its own: apply ignores it, and it leaves
   no result or frame.
+- **A bare trailing `/`** (`use 19/with m0.1 at l0 create U/`) begins the next
+  step with nothing chosen for it. The click UI adds it for "Skip Reorient", which
+  keeps a finished power's facing as it is, so board clicks then choose the next
+  power's minion instead of turning the piece. The move is incomplete until that
+  step is filled in, and Undo removes the `/`. A facing still marked unchosen (`U?`)
+  can't be followed by another step; validation rejects it, and the code that begins the
+  next step writes the facing without its `?`.
 - **Category 1 vs 2** orientation: `orientMinion`/`orientAny` (and the
   standalone `orient` command) hard-reject a same-facing click as a no-op.
   Every trailing/seeded facing elsewhere (Cups own, R/D/S piece,

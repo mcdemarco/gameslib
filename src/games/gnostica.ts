@@ -246,6 +246,8 @@ interface IPreview {
     pending: IPendingStep | undefined;
     // What Undo would turn the move into; undefined when there is nothing to undo.
     undo: string | undefined;
+    // A finished power whose piece can still be turned, with the next power waiting: board clicks turn the piece until the buttons go on.
+    facingOpen: boolean;
 }
 
 // A lossless-for-display abbreviation of a raw uid list - individual major uids, plus per-suit/per-(spot|royal) minor COUNTs (minors aren't shown individually).
@@ -1293,6 +1295,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (segment.length > 0) {
                     pm.error = "SURPLUS_STEP_CONTENT";
                     break;
+                } else if (!lastStep && step.direction !== undefined && step.direction.length > 1) {
+                    pm.error = "AMBIGUOUS_DIRECTION";
+                    break;
                 } else {
                     step.complete = 1;
                     pm.steps.push(step);
@@ -1873,6 +1878,10 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
+    private facingOpen(current: IPendingStep | undefined, advanced: IPendingStep | undefined): boolean {
+        return current?.softComplete === true && this.pendingMode(current) !== undefined && advanced !== undefined && advanced.priorSteps.length > current.priorSteps.length;
+    }
+
     private undoneMove(parsed: IParsedMove): string | undefined {
         const retracted = this.retractedMove(parsed);
         return retracted === undefined ? undefined : this.pickleMove(retracted);
@@ -1881,14 +1890,16 @@ export class GnosticaGame extends GameBaseSequenced {
     private buildPreview(parsed: IParsedMove): IPreview {
         const step0 = parsed.steps[0];
         const head = parsed.head?.toLowerCase();
+        const { current, advanced } = this.parsePendingStep(this.resumeMove(parsed) ?? parsed);
         return {
             head: parsed.head,
             highlighted: this.highlightedButtonValues(parsed),
             discardNeedsCount: head === "discard" && step0?.amount === undefined,
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
-            pending: this.parsePendingStep(this.resumeMove(parsed) ?? parsed).advanced,
+            pending: advanced,
             undo: this.undoneMove(parsed),
+            facingOpen: this.facingOpen(current, advanced),
         };
     }
 
@@ -2185,6 +2196,26 @@ export class GnosticaGame extends GameBaseSequenced {
         return [...bar.slice(0, at), { label: "Skip Power", value: "skip" }, ...bar.slice(at)] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
+    // Keeps the finished power's facing as it stands and begins the next step with a bare "with", nothing chosen for it: a seeded facing loses its "?", being chosen now.
+    private settleFacing(parsed: IParsedMove): string {
+        const steps = parsed.steps.map(step => ({ ...step }));
+        const finished = steps[steps.length - 1];
+        finished.direction = finished.direction?.replace("?", "");
+        return `${this.pickleMove({ ...parsed, announceLast: false, steps })}/with${parsed.announceLast ? " last" : ""}`;
+    }
+
+    // While a finished power's piece can still be turned, board clicks turn it; Skip Reorient settles its facing so they can go on to the next power.
+    private withSkipReorient(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        if (bar === undefined || this.preview?.facingOpen !== true) {
+            return bar;
+        }
+        // The next power can't start until the reorient is skipped, so its minion buttons wait too.
+        const open = bar.filter(b => !b.value?.startsWith("minion_"));
+        const at = open.findIndex(b => b.value === "declare");
+        const skip: ButtonBarButton = { label: "Skip Reorient", value: "skip_reorient" };
+        return (at < 0 ? [...open, skip] : [...open.slice(0, at), skip, ...open.slice(at)]) as [ButtonBarButton, ...ButtonBarButton[]];
+    }
+
     // Undo ends every main-phase bar; crossed out, like any unavailable action, when the move has nothing to take back.
     private withUndo(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         if (bar === undefined || this.phase !== "main") {
@@ -2199,7 +2230,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Wraps computeActionButtons() to unconditionally fold a persisting "Decline X" into the bar, since a pending obligation's card can always be declined.
     private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const bar = this.withSkipPower(this.computeActionButtons());
+        const bar = this.withSkipReorient(this.withSkipPower(this.computeActionButtons()));
         const phase = this.resumePhase();
         if (bar === undefined || phase === "none") {
             return bar;
@@ -3287,8 +3318,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 return undefined;
             }
 
-            // Rods' distance is a real destination cell, along the ACTING minion's own facing (matches movePiece's own computation).
-            if (suitUid === "R") {
+            // Rods' distance is a real destination cell, along the ACTING minion's own facing (matches movePiece's own computation); once chosen, Undo is how to change it.
+            if (suitUid === "R" && pending.istep.amount === undefined) {
                 const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
                 for (let n = 1; n <= minionPiece.size; n++) {
                     if (x === target.x + dx * n && y === target.y + dy * n) {
@@ -3619,8 +3650,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // "minion_<ref>" - offered whenever 2+ of the acting player's pieces are eligible and none has been picked yet; types just the ref.
     private clickMinionButton(ctx: IClickContext, ref: string): string | IClickResult {
-        const pending = ctx.pending().advanced;
-        if (pending === undefined || !pending.minionAmbiguous) {
+        const { current, advanced: pending } = ctx.pending();
+        if (pending === undefined || !pending.minionAmbiguous || this.facingOpen(current, pending)) {
             return ctx.noop;
         }
         // Resolved against minionCandidates (currently shown), not the full minions pool - a stale move string shouldn't resolve against pieces no longer on offer.
@@ -3757,6 +3788,13 @@ export class GnosticaGame extends GameBaseSequenced {
             case "undo": {
                 const undone = this.retractedMove(ctx.parsed);
                 return undone === undefined ? ctx.noop : this.pickleMove(undone);
+            }
+            case "skip_reorient": {
+                const { current, advanced } = ctx.pending();
+                if (current === undefined || !this.facingOpen(current, advanced)) {
+                    return ctx.noop;
+                }
+                return this.settleFacing(ctx.parsed);
             }
             case "skip": {
                 const pending = ctx.pending().advanced;
@@ -3964,11 +4002,16 @@ export class GnosticaGame extends GameBaseSequenced {
             };
             // A completed PRIOR step's own click region often overlaps a FOLLOWING button-less special's start region - `advanced` is tried FIRST so starting the next step stays reachable.
             const advancedPastCurrent = advanced !== undefined && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1);
-            // With the previous step complete and the next step's minion still undecided, a click on a candidate minion's cell picks that minion rather than refining the previous step.
+            // With the previous step complete and the next step's minion still undecided, a click on a candidate minion's cell picks that minion, unless it can still turn the previous step's piece.
             if (advancedPastCurrent) {
-                const narrowed = tryNarrowMinion(advanced);
-                if (narrowed !== undefined) {
-                    return narrowed;
+                // A finished power whose piece can still be turned: the board turns it, and the buttons go on to the next power.
+                if (this.facingOpen(pending, advanced)) {
+                    const turned = pending!.game.handlePendingStepBoardClick(pending!, x, y);
+                    if (turned === undefined) {
+                        return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.FACE_OR_NEXT_POWER") };
+                    }
+                    // A click on the facing it already has keeps it, and goes on.
+                    return (typeof turned === "string" ? turned : turned.move) === move ? this.settleFacing(ctx.parsed) : turned;
                 }
                 // The next step is a button-less special whose start click may overlap the finished step's own: it wins, so the next step stays reachable.
                 if (!advanced.minionAmbiguous && advanced.special !== undefined && this.pendingSpecialUntouched(advanced)) {
@@ -3977,12 +4020,9 @@ export class GnosticaGame extends GameBaseSequenced {
                         return result;
                     }
                 }
-                // A finished step whose facing was never chosen stays open to a facing click, ahead of naming the next step.
-                if (pending?.softComplete === true && this.pendingMode(pending) !== undefined) {
-                    const refined = pending.game.handlePendingStepBoardClick(pending, x, y);
-                    if (refined !== undefined) {
-                        return refined;
-                    }
+                const narrowed = tryNarrowMinion(advanced);
+                if (narrowed !== undefined) {
+                    return narrowed;
                 }
                 // Any other click can't refine the finished step here; name the next one instead of raising that step's own errors.
                 if (advanced.minionAmbiguous) {
@@ -5084,7 +5124,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (stepResult.complete === false) {
                 if (i >= steps.length) {
-                    if (this.isMinionCellStillNarrowing(istep!.withPiece!, top.minions)) {
+                    if (istep!.withPiece !== undefined && this.isMinionCellStillNarrowing(istep!.withPiece, top.minions)) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
                     }
                     // orientAny/hierophantReplace's own target is already chosen but its facing isn't yet - name the real next click, not the generic "pick a target" wording.
@@ -5096,7 +5136,10 @@ export class GnosticaGame extends GameBaseSequenced {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_HERMIT_DESTINATION") };
                     }
                     const override = "primitive" in step && istep !== undefined ? this.primitiveIncompleteMessage(this.primitiveToSuit(step.primitive), istep) : undefined;
-                    const msg = override ?? this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions, istep?.withPiece);
+                    // A bare "/" has begun the step with nothing chosen for it.
+                    const msg = override ?? (istep?.action === "with" && istep.withPiece === undefined
+                        ? this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions)
+                        : this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions, istep?.withPiece));
                     return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                 }
                 // An earlier segment being incomplete means a later one couldn't legitimately exist - defensive, shouldn't fire.
@@ -5292,6 +5335,10 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const minionRef = istep!.withPiece;
         if (minionRef === undefined) {
+            // A bare "/": the step is begun with nothing chosen for it, which leaves the move as complete as it was.
+            if (istep!.action === "with") {
+                return { failed: false, complete: false };
+            }
             return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "POWER_STEP_ARGS_REQUIRED" }) };
         }
         if (this.isMinionCellStillNarrowing(minionRef, minions)) {
