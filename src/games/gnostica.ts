@@ -46,11 +46,6 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
     S: { verb: "Attack", tile: "Attack Territory" },
 };
 
-// What to click next after choosing one of these actions, before anything is clicked for it.
-const BARE_ACTION_PROMPTS: Record<string, string> = {
-    place: "PICK_CELL_TO_PLACE", use: "PICK_CARD_TO_ACTIVATE", play: "PICK_HAND_CARD_TO_PLAY", orient: "PICK_PIECE_TO_ORIENT",
-};
-
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 // The greyed button: MUTED_FILL's dark-theme grey, lightened to about #ccc in the light theme.
 const GREYED_BUTTON_FILL: Colourfuncs = {
@@ -660,8 +655,11 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.ALREADY_ANNOUNCED");
         }
         // An action chosen with nothing yet clicked for it is a legal start, and says what to click next.
-        if (GnosticaGame.isBareAction(parsed)) {
-            return { valid: true, complete: -1, message: i18next.t(`apgames:validation.gnostica.${BARE_ACTION_PROMPTS[head]}`) };
+        const prompts: Record<string, string> = {
+            place: "PICK_CELL_TO_PLACE", use: "PICK_CARD_TO_ACTIVATE", play: "PICK_HAND_CARD_TO_PLAY", orient: "PICK_PIECE_TO_ORIENT",
+        };
+        if (head !== undefined && prompts[head] !== undefined && parsed.viaUid === undefined && parsed.asUid === undefined && parsed.steps.every(step => GnosticaGame.isBareStep(step))) {
+            return { valid: true, complete: -1, message: i18next.t(`apgames:validation.gnostica.${prompts[head]}`) };
         }
         switch (head) {
             case "place": return this.validatePlace(parsed);
@@ -735,9 +733,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     this.cmdPass(partial);
                 }
             } else {
-                switch (GnosticaGame.isBareAction(parsed) ? undefined : head) {
+                switch (head) {
                     case "place":
-                        this.cmdPlace(parsed.steps[0]);
+                        // A bare "place" has no cell to put a piece on yet.
+                        if (parsed.steps[0]?.targetCell !== undefined) {
+                            this.cmdPlace(parsed.steps[0]);
+                        }
                         break;
                     case "orient":
                         this.cmdOrient(parsed.steps[0]);
@@ -745,12 +746,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     case "discard":
                         this.cmdDiscard(parsed.steps[0]);
                         break;
-                    case "use":
-                        owed = this.cmdActivate(this.resolvePowerPlay(parsed)!, partial);
+                    // A bare "use" or "play" has nothing to play yet, which resolvePowerPlay reports as undefined.
+                    case "use": {
+                        const play = this.resolvePowerPlay(parsed);
+                        owed = play === undefined ? undefined : this.cmdActivate(play, partial);
                         break;
-                    case "play":
-                        owed = this.cmdPlay(this.resolvePowerPlay(parsed)!, partial);
+                    }
+                    case "play": {
+                        const play = this.resolvePowerPlay(parsed);
+                        owed = play === undefined ? undefined : this.cmdPlay(play, partial);
                         break;
+                    }
                     // "decline" with nothing pending, or any other head with no business here, falls through with no case - a caller bug, not this dispatch's job.
                 }
             }
@@ -1748,20 +1754,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return false;
     }
 
-    // place, use, play or orient with nothing yet chosen for it.
-    private static isBareAction(parsed: IParsedMove): boolean {
-        return parsed.head !== undefined && BARE_ACTION_PROMPTS[parsed.head] !== undefined && parsed.viaUid === undefined && parsed.asUid === undefined
-            && parsed.steps.every(step => GnosticaGame.isBareStep(step));
-    }
-
     private static isBareStep(step: IStep): boolean {
         return Object.entries(step).every(([k, v]) => k === "action" || k === "complete" || v === undefined);
     }
 
-    // The move with its latest decision taken back, or undefined when there is nothing to take back.
-    private retractedMove(parsed: IParsedMove): IParsedMove | undefined {
+    // The move with its latest decision taken back; an empty move has nothing left to take back.
+    private retractedMove(parsed: IParsedMove): IParsedMove {
         if (parsed.head === undefined) {
-            return parsed.announceLast ? { ...parsed, announceLast: false } : undefined;
+            return { ...parsed, announceLast: false };
         }
         const steps: IStep[] = parsed.steps.map(step => ({ ...step, cardList: step.cardList?.slice() }));
         const emptied: IParsedMove = { ...parsed, head: undefined, steps: [], asUid: undefined, asSuit: undefined, viaUid: undefined };
@@ -3777,10 +3777,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // Declining pops the CURRENT top frame; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
                 return this.pickleMove(this.freshResumeMove(true, ctx.parsed.announceLast));
-            case "undo": {
-                const undone = this.retractedMove(ctx.parsed);
-                return undone === undefined ? ctx.noop : this.pickleMove(undone);
-            }
+            case "undo":
+                return this.pickleMove(this.retractedMove(ctx.parsed));
             case "skip_reorient": {
                 const { current, advanced } = ctx.pending();
                 if (current === undefined || !this.facingOpen(current, advanced)) {
