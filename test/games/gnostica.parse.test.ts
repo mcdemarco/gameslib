@@ -166,6 +166,7 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 3D/grow n0 to n1")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 3D/grow n0.1 2")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 3C/with m0.1 create U")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 3C/with M0.1.u at M1 create U")).to.have.deep.property("valid", false);
 
         expect(g.parseMove("use 09/with n0.1 fly n0.1 to AR")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 09/with n0.1 fly n0.1 3")).to.have.deep.property("valid", false);
@@ -176,6 +177,7 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 09/with n0.1 fly AC to AR/skip")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 01 as Q/with n0.1 grow AC to KC")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 11 as Q/with n0.1 fly AC to AR")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use /with n0.1 fly AC to AR")).to.have.deep.property("valid", false);
     });
 
     it("marks a special power's step complete only once its fields are typed", () => {
@@ -191,7 +193,6 @@ describe("Gnostica parsing", () => {
         expect(lastComplete("use 09/with m0.1 fly n0.1 to o0")).eq(0);
         expect(lastComplete("use 20/with m0.1 draw")).eq(-1);
         expect(g.parseMove("use 09/with m0.1 fly n0.1 to AR")).to.have.deep.property("valid", false);
-        expect(g.parseMove("use 09/with m0.1 fly n0.1 3")).to.have.deep.property("valid", false);
     });
 
     it("reads a bare trailing with as the next step begun", () => {
@@ -203,5 +204,15 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 19//with m0.1 at l0 create U?")).to.have.deep.property("valid", false);
         expect(g.parseMove("use 19/with m0.1 at l0 create U?/with m0.1")).to.have.deep.property("valid", false);
         expect(g.pickleMove(g.parseMove("use 19/with m0.1 at l0 create U/with"))).to.equal("use 19/with m0.1 at l0 create U/");
+    });
+
+    it("reads a direction in either case as upper case, and a cell in either case as lower case", () => {
+        const place = g.parseMove("place A0 w").steps[0];
+        expect(place.targetCell).eq("a0");
+        expect(place.direction).eq("W");
+        const create = g.parseMove("use AC/with m0.2 at N0 create s").steps[1];
+        expect(create.atCell).eq("n0");
+        expect(create.direction).eq("S");
+        expect(g.parseMove("use 17/with m0.2 grow N0 orient e").steps[1].direction).eq("E");
     });
 });

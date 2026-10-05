@@ -766,7 +766,6 @@ export class GnosticaGame extends GameBaseSequenced {
             announceLast = parsed.announceLast;
             // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
             this.preview = preview;
-
         }
  
         if (partial) {
@@ -4354,7 +4353,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (ref === undefined || turning?.direction !== undefined || !ref.includes(".")) {
             return;
         }
-        const [x, y] = GnosticaBoard.algebraic2coords(ref.split(".")[0].toLowerCase());
+        const [x, y] = GnosticaBoard.algebraic2coords(ref.split(".")[0]);
         this.addBufferIfWasteland(x, y);
     }
 

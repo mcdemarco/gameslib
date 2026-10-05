@@ -3035,7 +3035,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             currplayer: 2,
             hands: [filler, ["03", "2S"]],
         });
-        const move = "play 03/orient m0.1.w.2 E";
+        const move = "play 03/orient m0.1.W.2 E";
 
         it("after orient, the next step's candidates include every own minion in the cell, at its current facing, and the button bar after the partial move lists them all too", () => {
             const g = setup();
@@ -3068,7 +3068,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 currplayer: 2,
                 hands: [filler, ["03", "2S"]],
             });
-            const move = "play 03/orient m0.1.e.2 N";
+            const move = "play 03/orient m0.1.E.2 N";
             const withMinion = g.handleClick(move, -1, -1, "_btn_minion_m0.1.E");
             g.move(withMinion.move, { partial: true });
             const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
@@ -6396,5 +6396,49 @@ describe("Gnostica: Justice's trade and its continued attack", () => {
         expect(g.continued).to.deep.equal([]);
         expect(g.currplayer).eq(2);
         expect(g.hands[1]).to.deep.equal(filler); // swapped on commit
+    });
+});
+
+
+describe("Gnostica: a move typed in mixed case", () => {
+    // What a person might type in capitals or lower case: cells and directions. A piece reference is stricter: its cell is lower case and its orientation upper case.
+    const outcome = (setup: () => GnosticaGame, move: string) => {
+        const g = setup();
+        const verdict = g.validateMove(move);
+        g.move(move);
+        const board = [...g.board.entries()].map(([x, y, t]) => `${x},${y}:${t.cardUid ?? ""}:${t.pieces.map(piece => piece.id()).join("+")}`).sort().join("|");
+        return { valid: verdict.valid, complete: verdict.complete, board, currplayer: g.currplayer };
+    };
+    const same = (setup: () => GnosticaGame, lower: string, mixed: string) => {
+        expect(outcome(setup, mixed), mixed).to.deep.equal(outcome(setup, lower));
+        expect(outcome(setup, lower).valid, lower).to.be.true;
+    };
+    const duel = (uid: string) => () => testGame({
+        board: [{ x: 0, y: 0, uid, pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }],
+        hands: [filler, filler], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
+    });
+
+    it("places a first piece on a cell written in capitals, facing a direction written in lower case", () => {
+        const empty = () => testGame({ board: [{ x: 0, y: 0, uid: "AC" }], hands: [filler, filler] });
+        same(empty, "place m0 U", "place M0 u");
+    });
+
+    it("creates and grows with a cell and a direction written in capitals or lower case", () => {
+        same(duel("AC"), "use AC/with m0.2 at n0 create W", "use AC/with m0.2 at N0 create w");
+        same(duel("17"), "use 17/with m0.2 grow n0.1 orient E", "use 17/with m0.2 grow n0.1 orient e");
+    });
+
+    it("orients the minion itself with its orientation capitalised in the reference, and the direction in either case", () => {
+        const lone = () => testGame({ board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 1, "E"]] }], hands: [filler, filler] });
+        same(lone, "use 03/orient m0.1.E N", "use 03/orient m0.1.E n");
+    });
+
+    it("rejects a piece reference whose cell is capitalised or whose orientation is not", () => {
+        const g = duel("AR")();
+        expect(g.validateMove("use AR/with m0.2 move n0.1 1").valid).to.be.true;
+        expect(g.validateMove("use AR/with M0.2 move n0.1 1").valid).to.be.false;
+        expect(g.validateMove("use AR/with m0.2 move N0.1 1").valid).to.be.false;
+        expect(g.validateMove("use AR/with m0.2.E move n0.1 1").valid).to.be.true;
+        expect(g.validateMove("use AR/with m0.2.e move n0.1 1").valid).to.be.false;
     });
 });
