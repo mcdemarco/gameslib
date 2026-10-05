@@ -222,12 +222,8 @@ interface IPreview {
     discardNeedsCount: boolean;
     // A bare orient cell whose piece is still ambiguous.
     orientPickCell: string | undefined;
-    // The revealed card a Fool resume is playing, when the move names one.
-    foolCard: string | undefined;
     // The resume seed move string, including whatever was typed against the pending obligation.
     pending: IPendingStep | undefined;
-    // What Undo would turn the move into; undefined when there is nothing to undo.
-    undo: string | undefined;
     // A finished power whose piece can still be turned, with the next power waiting: board clicks turn the piece until the buttons go on.
     facingOpen: boolean;
 }
@@ -1767,7 +1763,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // The move with its latest decision taken back, or undefined when there is nothing to take back.
     private retractedMove(parsed: IParsedMove): IParsedMove | undefined {
         if (parsed.head === undefined) {
-            return undefined;
+            return parsed.announceLast ? { ...parsed, announceLast: false } : undefined;
         }
         const steps: IStep[] = parsed.steps.map(step => ({ ...step, cardList: step.cardList?.slice() }));
         const emptied: IParsedMove = { ...parsed, head: undefined, steps: [], asUid: undefined, asSuit: undefined, viaUid: undefined };
@@ -1821,16 +1817,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.lastTurner ?? (this.continued.includes("last") ? this.currplayer : undefined);
     }
 
-    // The ordinary card a Fool continuation is waiting on: what the last flip revealed (discard pile's top), or the in-progress resume move's own card. undefined when nothing is pending.
+    // The card a continuation is waiting on: the obligation's own card, or for the Fool what its last flip revealed, as the last committed move logged it. undefined when nothing is pending.
     public activeCardUid(): string | undefined {
         const active = this.getContinuedUid();
         if (active !== "00") {
             return active;
         }
-        if (this.preview?.foolCard !== undefined) {
-            return this.preview.foolCard;
-        }
-        return this.discardPile[this.discardPile.length - 1];
+        const results = this.stack[this.stack.length - 1]._results.flatMap(r => r.type === "_group" ? r.results : [r]);
+        return results.reverse().find((r): r is Extract<APMoveResult, { type: "deckDraw" }> => r.type === "deckDraw" && r.from === "fool")?.what;
     }
 
     // Whether a move headed `head` is a power in progress: a use or play, or anything while a resume is owed.
@@ -1882,11 +1876,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return current?.softComplete === true && this.pendingMode(current) !== undefined && advanced !== undefined && advanced.priorSteps.length > current.priorSteps.length;
     }
 
-    private undoneMove(parsed: IParsedMove): string | undefined {
-        const retracted = this.retractedMove(parsed);
-        return retracted === undefined ? undefined : this.pickleMove(retracted);
-    }
-
     private buildPreview(parsed: IParsedMove): IPreview {
         const step0 = parsed.steps[0];
         const head = parsed.head?.toLowerCase();
@@ -1896,9 +1885,7 @@ export class GnosticaGame extends GameBaseSequenced {
             highlighted: this.highlightedButtonValues(parsed),
             discardNeedsCount: head === "discard" && step0?.amount === undefined,
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
-            foolCard: parsed.viaUid === "00" ? step0?.card : undefined,
             pending: advanced,
-            undo: this.undoneMove(parsed),
             facingOpen: this.facingOpen(current, advanced),
         };
     }
@@ -2226,7 +2213,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return bar;
         }
         const undo: ButtonBarButton = { label: "Undo", value: "undo" };
-        if (this.preview?.undo === undefined) {
+        // There is something to take back once the move has an action or a declaration.
+        if (this.preview === undefined || (this.preview.head === undefined && !this.preview.highlighted.has("declare"))) {
             undo.attributes = [{ name: "text-decoration", value: "line-through" }];
         }
         return [...bar, undo] as [ButtonBarButton, ...ButtonBarButton[]];
@@ -5261,7 +5249,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "BAD_CARD"});
         }
         // Justice's remaining power is its attack, which is Swords.
-        if (play.headArg === "11" && parsed.head !== "decline" && parsed.asSuit !== "S") {
+        if (this.getContinuedUid() === "11" && parsed.head !== "decline" && parsed.asSuit !== "S") {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", {reason: "WRONG_AS_SUIT"});
         }
         return this.validatePlayedPower(play);

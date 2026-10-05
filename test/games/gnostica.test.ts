@@ -6161,8 +6161,17 @@ describe("Gnostica: the Undo button", () => {
         ]);
     });
 
-    it("keeps a declaration, which is its own toggle", () => {
-        expect(board().handleClick("use AR last", -1, -1, "_btn_undo").move).eq("use last");
+    it("takes back a declaration last, once the rest of the move is gone", () => {
+        expect(undoAll(board(), "use AR last")).to.deep.equal(["use AR last", "use last", "last", ""]);
+    });
+
+    it("is live while only a declaration has been made", () => {
+        const g = board();
+        const shown = g.clone();
+        shown.move("last", { partial: true });
+        const out = shown.render();
+        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: Btn[] }[] };
+        expect(rep.areas!.find(a => a.type === "buttonBar")!.buttons!.find(b => b.value === "undo")!.attributes).to.be.undefined;
     });
 
     it("is crossed out, and does nothing, while there is nothing to take back", () => {
@@ -6342,6 +6351,40 @@ describe("Gnostica: Justice's trade and its continued attack", () => {
         expect(play.move).eq("use 11 as S");
         expect(barValues(g, play.move)).to.not.include("decline_power");
         expect(g.handleClick("", -1, -1, "_btn_decline_power").move).eq("decline 11");
+    });
+
+    describe("revealed by the Fool", () => {
+        const owed = () => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }],
+                hands: [filler, theirs], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] }, drawPile: ["11", "3C", "4C"],
+            });
+            g.move("use 00"); // flips Justice
+            g.move("play 11 via 00/with m0.2 trade n0.1");
+            return g;
+        };
+
+        it("owes the attack above the Fool's second flip, and plays its trade without needing `as S`", () => {
+            const g = owed();
+            expect(g.continued).to.deep.equal(["00.1", "11.play"]);
+            expect(g.currplayer).eq(1);
+            expect(g.hands[0]).to.deep.equal(theirs);
+        });
+
+        it("goes on to the Fool's second flip once the attack is made or declined", () => {
+            for (const move of ["play 11 as S/with m0.2 shrink n0.1 1", "decline 11"]) {
+                const g = owed();
+                g.drawPile = ["3C", "4C"]; // pinned again after the reload
+                expect(g.validateMove(move).valid, move).to.be.true;
+                g.move(move);
+                expect(g.continued, move).to.deep.equal(["00.2"]);
+                expect(g.discardPile, move).to.deep.equal(["11", "3C"]);
+            }
+        });
+
+        it("still names the Fool, not Justice, for a move that answers the wrong obligation", () => {
+            expect(owed().validateMove("play 3C via 00").message).to.include("WRONG_VIA_CARD");
+        });
     });
 
     it("does not pause the Hanged Man, whose trade comes last", () => {
