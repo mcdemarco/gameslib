@@ -1391,6 +1391,21 @@ describe("Gnostica: frame-stepping render() contract", () => {
         expect(g.results.some(r => r.type === "_group")).eq(false);
     });
 
+    it("rebuilds a card's legend face only for the frames where it changed, without altering the earlier reps", () => {
+        // The Chariot walks a piece off the territory it starts on, so that card loses its owner's tint after the first frame.
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 1, "E"]] }, { x: 3, y: 0, uid: "AD" }],
+            hands: [filler, filler],
+        });
+        g.move("use 07/with m0.1 move m0.1 1/with n0.1 move n0.1 1");
+        const reps = g.render() as { legend: Record<string, unknown> }[];
+        expect(reps.length).eq(3);
+        const face = (rep: { legend: Record<string, unknown> }) => JSON.stringify(rep.legend.c07);
+        expect(face(reps[0])).to.not.eq(face(reps[1])); // owned in the starting board, not after it walks off
+        expect(face(reps[1])).eq(face(reps[2])); // unchanged since
+        expect(reps[1].legend).to.not.eq(reps[2].legend); // each rep has its own legend object
+    });
+
     it("persistence round-trip: a reloaded game still steps through the same frames a genuine chain produced", () => {
         const g = setupLovers();
         g.move(move);

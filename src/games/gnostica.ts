@@ -6175,6 +6175,10 @@ export class GnosticaGame extends GameBaseSequenced {
             opacity: 0,
         };
 
+        // Built once and edited per frame: a card's face depends on where it is in the frame, so every frame assigns the cards it shows afresh.
+        const legend = GnosticaGame.newLegend();
+        const faces = new Map<string, string>();
+
         const renders: APRenderRep[] = [];
         // We need to look at each frame, and then finally the live state.
         for (let i = 0; i <= this.frames.length; i++) {
@@ -6190,9 +6194,8 @@ export class GnosticaGame extends GameBaseSequenced {
             const height = maxY - minY + 1;
 
             // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
-            const legend = GnosticaGame.newLegend();
             const rings = this.ringsFromResults(results, board);
-            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, last ? new Map([...rings, ...this.pieceRings()]) : rings);
+            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, faces, last ? new Map([...rings, ...this.pieceRings()]) : rings);
 
             const columnLabels: string[] = [];
             for (let x = minX; x <= maxX; x++) {
@@ -6209,7 +6212,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (!last) {
                 // The discard pile is always face-up/public - the one non-board area worth reconstructing for an earlier frame; no "just discarded" tinting since that's a live-only concept.
                 const discardArea = this.buildAreaFromSummary(
-                    this.frames[i].discardSummary, legend, discardLabel
+                    this.frames[i].discardSummary, legend, faces, discardLabel
                 );
                 if (discardArea !== undefined) {
                     areas.push(discardArea);
@@ -6234,9 +6237,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         // A card just added to hand gets its face tinted so it's easy to spot regardless of sort order.
                         const isNew = newUids.has(uid);
                         const key = GnosticaGame.cardKey(uid);
-                        if (!(key in legend)) {
-                            legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
-                        }
+                        GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}));
                         handKeys.push(key);
                     }
                     areas.push({
@@ -6255,9 +6256,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     for (const uid of this.biddingPool) {
                         const card = allCards().find(c => c.uid === uid)!;
                         const key = GnosticaGame.cardKey(uid);
-                        if (!(key in legend)) {
-                            legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
-                        }
+                        GnosticaGame.setCardFace(legend, faces, key, "full|false", () => this.buildCardFace(card, false));
                         poolKeys.push(key);
                     }
                     areas.push({
@@ -6285,14 +6284,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 const visible = this.visibleCardUids();
                 const unknownUids = allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
                 const drawArea = this.buildDeckSummaryArea(
-                    unknownUids, legend, i18next.t("apgames:validation.gnostica.LABEL_DECK")
+                    unknownUids, legend, faces, i18next.t("apgames:validation.gnostica.LABEL_DECK")
                 );
                 if (drawArea !== undefined) {
                     areas.push(drawArea);
                 }
                 // The discard pile is always face-up/public, unlike hands or the draw pile, so its contents are read directly.
                 const discardArea = this.buildDeckSummaryArea(
-                    this.discardPile, legend, discardLabel, new Set(this.discarded)
+                    this.discardPile, legend, faces, discardLabel, new Set(this.discarded)
                 );
                 if (discardArea !== undefined) {
                     areas.push(discardArea);
@@ -6361,7 +6360,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     },
                     markers,
                 },
-                legend,
+                legend: { ...legend },
                 pieces: pieceRows as [string[][], ...string[][][]],
                 areas: areas.length > 0 ? areas : undefined,
             };
@@ -6431,7 +6430,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Builds a discard area straight from a DiscardSummary - used only for historical frames. Otherwise identical to buildDeckSummaryArea.
     private buildAreaFromSummary(
-        summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string,
+        summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: string,
     ): AreaPieces | undefined {
         const pieces: string[] = [];
         for (const suit of suits) {
@@ -6455,10 +6454,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         for (const uid of summary.majorUids.sort()) {
             const key = GnosticaGame.cardKey(uid);
-            if (!(key in legend)) {
-                const card = allCards().find(c => c.uid === uid)!;
-                legend[key] = this.buildCardFace(card, false) as [Glyph, ...Glyph[]];
-            }
+            GnosticaGame.setCardFace(legend, faces, key, "full|false", () => this.buildCardFace(allCards().find(c => c.uid === uid)!, false));
             pieces.push(key);
         }
         if (pieces.length === 0) {
@@ -6469,7 +6465,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Summary code because Draw/discard piles can be large. Minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are shown individually.
     private buildDeckSummaryArea(
-        uids: string[], legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, label: string,
+        uids: string[], legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: string,
         newUids: Set<string> = new Set(),
     ): AreaPieces | undefined {
         if (uids.length === 0) {
@@ -6519,10 +6515,7 @@ export class GnosticaGame extends GameBaseSequenced {
         for (const uid of majorUids.sort()) {
             const isNew = newUids.has(uid);
             const key = GnosticaGame.cardKey(uid);
-            if (!(key in legend)) {
-                const card = allCards().find(c => c.uid === uid)!;
-                legend[key] = this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}) as [Glyph, ...Glyph[]];
-            }
+            GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(allCards().find(c => c.uid === uid)!, false, 0, isNew ? { background: MUTED_FILL } : {}));
             pieces.push(key);
         }
 
@@ -6609,7 +6602,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Cards are unique, so each card's legend entry is built for its one cell. Every other cell is the bare "-".
     private buildBoardLayers(
         board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number }, largerCards: boolean,
-        legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] },
+        legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>,
         rings?: Map<string, "minion" | "target">,
     ): { pieceRows: string[][][]; markers: (MarkerOutline | MarkerGlyph)[] } {
         const pieceRows: string[][][] = [];
@@ -6630,7 +6623,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     const dontSpace = largerCards && players.size === 0;
                     if (t.cardUid !== UNREVEALED_UID) {
-                        legend[key] = GnosticaGame.markerStack(this.buildCardFace(t.card, !dontSpace, owner));
+                        GnosticaGame.setCardFace(legend, faces, key, `board|${!dontSpace}|${owner}`, () => GnosticaGame.markerStack(this.buildCardFace(t.card!, !dontSpace, owner)));
                     }
                     markers.push({ type: "glyph", glyph: key, points: [point] });
                 } else if (cls === "wasteland") {
@@ -6675,6 +6668,14 @@ export class GnosticaGame extends GameBaseSequenced {
             markers.push({ type: "glyph", glyph: "waste", points: wastelands as [{ row: number; col: number }, ...{ row: number; col: number }[]] });
         }
         return { pieceRows, markers };
+    }
+
+    // Puts a card's face in the legend unless its key already holds this variant of it: a card's face depends on where it is, so a later frame rebuilds only the cards that moved or changed.
+    private static setCardFace(legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, key: string, variant: string, face: () => Glyph[]): void {
+        if (faces.get(key) !== variant) {
+            legend[key] = face() as [Glyph, ...Glyph[]];
+            faces.set(key, variant);
+        }
     }
 
     // The one place the face-down card is put in a legend: an unrevealed territory and a hidden hand card are both this card.
