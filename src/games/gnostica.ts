@@ -52,8 +52,7 @@ const BARE_ACTION_PROMPTS: Record<string, string> = {
 };
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
-// The greyed button: the same dark-theme grey as MUTED_FILL (about #383838), but about #ccc rather than #b3b3b3 in the light theme.
-// The theme's strokes and fill colours mirror each other, so the 0.8 of background mixed in lifts light and the fill colour's share offsets that in dark.
+// The greyed button: MUTED_FILL's dark-theme grey, lightened to about #ccc in the light theme.
 const GREYED_BUTTON_FILL: Colourfuncs = {
     func: "flatten",
     fg: { func: "flatten", fg: "_context_strokes", bg: "_context_fill", opacity: 0.71 },
@@ -1823,8 +1822,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return head === "use" || head === "play" || this.continued.length > 0;
     }
 
-    // How far an owed resume has got, for the bar and the clicks: nothing owed; owed with nothing clicked yet (the bare Play/Decline choice);
-    // Play clicked or a step of the revealed card typed; or Decline clicked.
+    // How far an owed resume has got: nothing owed, owed with nothing clicked yet, Play clicked or a step of the revealed card typed, or Decline clicked.
     private resumePhase(): "none" | "owed" | "playing" | "declined" {
         if (this.continued.length === 0) {
             return "none";
@@ -2250,8 +2248,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return [...bar, declineBtn] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
-    // Pick one value from a small labeled set; `disabledReason` reuses the SAME object minorModeAvailability produces, so strikethrough and rejection message can't drift.
-    // Three looks: available is plain; unavailable (a `disabledReason`) is crossed out; and the one already `current` is greyed, since clicking it again would do nothing.
+    // Pick one value from a small labeled set: available is plain, unavailable (a `disabledReason`, shared with minorModeAvailability) is crossed out, the `current` one is greyed.
     private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
         return options.map(({ value, label, disabledReason }) => {
             const button: ButtonBarButton = { label, value: `${prefix}_${value}` };
@@ -2710,9 +2707,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // What a use, play or resume move is playing, resolved once from the typed move and the game state: the card whose powers are walked, who may act, and the typed steps.
-    // A resume of a persisted Fool/High Priestess obligation reads as a "play" of the card it is waiting on, so everything downstream treats it like a hand play.
-    // undefined when there is nothing to play (no head, or a card that isn't on the board or isn't known).
+    // What a use, play or resume is playing, resolved once from the move and the game state (a resume reads as a play of the card it waits on); undefined when there is nothing to play.
     private resolvePowerPlay(parsed: IParsedMove): IPowerPlay | undefined {
         // A "via <uid>" marker dispatches from the Fool/HP anchor for a genuine resume; otherwise the front card token. "as <x>" never moves the head arg.
         let headArg = parsed.viaUid ?? parsed.steps[0]?.card;
@@ -4352,8 +4347,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.addBufferIfWasteland(x, y);
     }
 
-    // A Rods piece step still waiting for its distance: a landing cell can lie past the window, where nothing is drawn to click, so a buffer on that side gives it something to click.
-    // (A territory can't land that far out: it would no longer touch another territory.)
+    // A Rods piece step still waiting for its distance: a landing cell can lie past the window, so a buffer on that side gives it something to click.
     private addDistanceBuffer(pending: IPendingStep | undefined): void {
         if (pending?.suitUid !== "R" || pending.istep.amount !== undefined || this.pendingMode(pending) !== "piece") {
             return;
@@ -5180,8 +5174,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, def.uid, asUid, asSuit);
     }
 
-    // The shared start of validating any walk of a frame stack, fresh or resumed.
-    // #49: a use/play must take at least one meaningful step - the SAME commitment every pushed frame owes too, just enforced at different call sites (see validateFrameStack).
+    // The shared start of validating a walk of a frame stack, fresh or resumed (#49: every frame owes one meaningful step; see validateFrameStack).
     private validatePowerStack(stack: IPowerFrame[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string): IValidationResult {
         // A World borrow with nothing else typed still has a real step to choose (falls through to the walk); a Magician borrow pushes no frame, so it wants the same fresh-step wording.
         const worldBorrow = asUid !== undefined;
@@ -6136,8 +6129,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return new GnosticaGame(JSON.stringify(raw, replacer));
     }
 
-    // this.frames is only non-empty for a move that chained 2+ major-arcana steps: each holds the board before a step, so frame i shows the board with the results of
-    // step i - 1 that led to it, and the live state comes last. Only the final rep carries the hands, pools and buttons.
+    // Each frame of a 2+-step chain holds the board before a step and shows the results of the step that led to it; the live state comes last and alone carries the hands, pools and buttons.
     public render(opts?: IRenderOpts): APRenderRep[] {
         const largerCards = opts?.altDisplay === "larger-cards";
 
@@ -6638,10 +6630,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     const ringKey = `ring_${ring}_${key}`;
                     if (!(ringKey in legend)) {
-                        // The ring is rotation-invariant, so it takes the pyramid's rotation only to share its pre-rotation nudge; a flat pyramid's centroid lies below its glyph's centre.
-                        // A nudge is applied inside the scale, so a smaller ring needs a proportionally larger one.
-                        // A target is a solid ring against the minion's dashed one.
-                        // The numbers indicate how far below its glyph's centre each flat pyramid's centroid lies.
+                        // A target is a solid ring and a minion a dashed one; a flat pyramid's centroid lies `drop` below its glyph's centre, so the ring takes the pyramid's rotation to share that nudge.
                         const drop = piece.orientation === "U" ? 0 : [46.3, 63.7, 81][piece.size - 1];
                         legend[ringKey] = GnosticaGame.withBackdrop([{
                             name: ring === "target" ? "piece" : "piece-dashed", rotate: g.rotate, scale: slot.scale, opacity: 0,
