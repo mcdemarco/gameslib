@@ -783,7 +783,9 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         // next, and the live rep shows the last step's own effect.
         expect(reps[0].annotations).eq(undefined);
         expect(reps[1].annotations?.map(a => a.type)).to.deep.equal(["move"]);
-        expect(reps[2].annotations?.map(a => a.type)).to.deep.equal(["enter"]);
+        expect(reps[2].annotations).eq(undefined); // a created piece is ringed rather than outlined
+        const ringed = (reps[2] as unknown as { pieces: string[][][] }).pieces.flat(2).filter(k => k.startsWith("ring_target_"));
+        expect(ringed.length).eq(1);
         // Confirms results really are grouped (one _group per step, not flat), and chatLog()
         // logs a line for each step of the chain.
         expect(g.results.filter(r => r.type === "_group")).to.have.length(2);
@@ -1265,6 +1267,32 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         // them, "m0.1" alone still resolves (to the first array slot) via the true-duplicate tie-break.
         g.move(`use 03/orient m0.1.N U/with m0.1 at m0 create U`);
         expect(g.board.get(0, 0)!.pieces.length).eq(4); // ignoreCapacity let a 4th piece in
+    });
+
+    it("markers: a controlled territory has no player outline, and only a created territory outlines its cell", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AD" }],
+            hands: [filler, filler],
+        });
+        const outlines = (rep: { board: { markers?: { type: string }[] } }) => (rep.board.markers ?? []).filter(m => m.type === "outline");
+        expect(outlines(g.render().at(-1) as never)).to.have.length(0);
+
+        const made = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }], hands: [["AS", ...filler.slice(1)], filler] });
+        made.move("use AC/with m0.1 at n0 create AS");
+        const rep = made.render().at(-1) as unknown as { annotations?: { type: string }[] };
+        expect(rep.annotations?.map(a => a.type)).to.deep.equal(["enter"]);
+    });
+
+    it("chatLogEntries (what the front end reads) carries the acting seat and the other player's name, not just chatLog", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AR", pieces: [[2, 2, "W"]] }],
+            hands: [filler, filler],
+        });
+        g.move("use AS/with m0.2 shrink n0.2 1");
+        const entries = g.chatLogEntries(["Alice", "Bob"]);
+        const line = entries[entries.length - 1].lines.find(l => l.textKey.startsWith("apresults:CONVERT.gnostica_piece"))!;
+        expect(line.actor).to.deep.equal({ kind: "seat", seat: 1 });
+        expect(line.textParams).to.include({ player: "Player 1", target: "Bob" });
     });
 
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
