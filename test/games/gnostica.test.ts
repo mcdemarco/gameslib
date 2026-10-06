@@ -1267,6 +1267,25 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(g.board.get(0, 0)!.pieces.length).eq(4); // ignoreCapacity let a 4th piece in
     });
 
+    it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "21", pieces: [[1, 1, "U"]] },
+                { x: -1, y: 0, uid: "15" },
+                { x: 1, y: 0, uid: "AC", pieces: [[2, 1, "U"]] },
+            ],
+            hands: [filler, filler],
+        });
+        g.move("use 21 as 15/with m0.1 orient m0.1 E/with m0.1 orient n0.1 W");
+        expect(g.frames.length).eq(2);
+        expect(g.frames[0].board.get(0, 0)!.pieces[0].orientation).eq("U");
+        expect(g.frames[1].board.get(0, 0)!.pieces[0].orientation).eq("E");
+        expect((g.render() as unknown[]).length).eq(3);
+        const groups = g.results.filter((r): r is Extract<typeof r, { type: "_group" }> => r.type === "_group");
+        expect(groups.length).eq(2);
+        expect(groups[0].results.some(r => r.type === "use" && r.count === 21)).to.be.true;
+    });
+
     it("orientMinion: a same-facing (no-op) reorientation is rejected, not silently accepted as a real step", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 1, "E"]] }], hands: [filler, filler] });
         const validated = g.validateMove(`use 03/orient m0.1 E`);

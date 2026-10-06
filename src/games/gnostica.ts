@@ -4609,10 +4609,13 @@ export class GnosticaGame extends GameBaseSequenced {
         const chained = steps.length + (asUid !== undefined ? 1 : 0) > 1;
         let counted = 0;
         let at = 0;
+        // Where the World's "use" result sits: it changes nothing on the board, so it has no frame and joins the next step's group.
+        let worldResult: number | undefined;
         // One step: a snapshot of the board before it, and its results grouped when the submission is chained; false if it didn't complete.
         const count = (apply: () => boolean): boolean => {
             this.frames.push({ board: this.board.clone().store, discardSummary: this.summarizeDiscardPile(this.discardPile) });
-            const resultsBefore = this.results.length;
+            const resultsBefore = worldResult ?? this.results.length;
+            worldResult = undefined;
             const hiddenBefore = this.hidden.length;
             if (!apply()) {
                 this.frames.pop();
@@ -4640,10 +4643,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (asUid === undefined) {
                     return "stopped";
                 }
-                count(() => {
-                    this.results.push({ type: "use", what: asUid, count: 21 });
-                    return true;
-                });
+                this.results.push({ type: "use", what: asUid, count: 21 });
+                worldResult = this.results.length - 1;
                 return run(asUid);
             }
             if (card === "00") {
