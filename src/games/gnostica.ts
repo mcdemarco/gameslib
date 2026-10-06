@@ -352,6 +352,7 @@ export class GnosticaGame extends GameBaseSequenced {
     public drawPile: string[] = [];
     public discardPile: string[] = [];
     public stashes!: Map<playerid, Stash>;
+    private rejected = false;
     public eliminated: playerid[] = [];
     public lastTurner: playerid | undefined;
     public gameover = false;
@@ -549,6 +550,21 @@ export class GnosticaGame extends GameBaseSequenced {
         return state;
     }
 
+    // Previews a move that fails validation as the longest valid part of it, flagged so render offers only Undo.
+    private previewRejected(m: string): GnosticaGame {
+        let parsed = this.parseMove(m);
+        while (parsed.head !== undefined || parsed.announceLast) {
+            parsed = this.retractedMove(parsed);
+            const prefix = this.pickleMove(parsed);
+            if (prefix !== "" && this.validateMove(prefix).valid) {
+                this.move(prefix, { partial: true });
+                break;
+            }
+        }
+        this.rejected = true;
+        return this;
+    }
+
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
@@ -695,6 +711,9 @@ export class GnosticaGame extends GameBaseSequenced {
         if (! trusted) {
             const result = this.validateMove(m);
             if (! result.valid) {
+                if (partial && this.phase === "main") {
+                    return this.previewRejected(m);
+                }
                 throw new UserFacingError("VALIDATION_GENERAL", result.message);
             }
             if (! partial && ( result.complete === undefined || result.complete < 0) ) {
@@ -702,6 +721,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
 
+        this.rejected = false;
         this.results = [];
         this.hidden = [];
         this.frames = [];
@@ -3054,6 +3074,22 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
 
+    // The nearest legal distance for a Rod's territory push, or the first distance's failure when none is.
+    private rodPushDistance(minion: IMinionRef): { dist?: number; failure?: PowerFailure } {
+        const piece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
+        const [tx, ty] = this.minorTargetCell(minion);
+        const ctx = this.buildPowerContext();
+        let first: PowerFailure | undefined;
+        for (let dist = 1; dist <= piece.size; dist++) {
+            const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, dist);
+            if (failure === undefined) {
+                return { dist };
+            }
+            first ??= failure;
+        }
+        return { failure: first };
+    }
+
     // Best-effort feasibility check for which modes are worth offering as buttons - not a full legality check; a struck-through mode still gets a button, rejected on click.
     public minorModeAvailability(pending: { suitUid?: MinorSuitUid; minion: IMinionRef; opts: Record<string, unknown> }): Map<MinorMode, { key: string; params?: Record<string, unknown> } | undefined> {
         // Only ever called for a suit-shaped pending - suitUid is guaranteed set here.
@@ -3091,8 +3127,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     break;
                 case "R.piece":
-                case "R.tile":
                     result.set(mode, this.rodNeedsFacingReason("R", minion));
+                    break;
+                case "R.tile":
+                    result.set(mode, this.rodNeedsFacingReason("R", minion) ?? this.rodPushDistance(pending.minion).failure);
                     break;
                 case "D.tile": {
                     const current = targetT?.pointValue() ?? 0;
@@ -3231,8 +3269,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 step.amount = onlyCount;
             }
         } else if (suitUid === "R") {
-            // Rods' "tile" mode always seeds a real distance of 1 - a further destination-cell click is how the player reaches any distance beyond 1.
-            step = { action, withPiece: minionRef, targetCell, amount: 1 };
+            // Rods' "tile" mode seeds the nearest distance that is legal (1 unless that space is occupied) - a destination-cell click reaches any other.
+            step = { action, withPiece: minionRef, targetCell, amount: this.rodPushDistance(pending.minion).dist ?? 1 };
         } else {
             // A territory's shrink is set by the replacement card (or the Destroy button), not chosen up front.
             step = { action, withPiece: minionRef, targetCell };
@@ -3581,7 +3619,8 @@ export class GnosticaGame extends GameBaseSequenced {
             result = outcome;
         }
         // The front end only re-renders a live partial preview when `canrender` or `complete >= 0` is set - set unconditionally here for any valid result.
-        if (result.valid) {
+        // A click-built move that fails validation is still previewed, as its valid part plus an Undo, rather than falling back to the turn-start buttons.
+        if (result.valid || (typeof outcome === "string" && outcome !== move && outcome !== "" && this.phase === "main")) {
             result.canrender = true;
         }
         return result;
@@ -6372,7 +6411,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
-                const actionButtons = this.withUndo(this.getActionButtons());
+                const actionButtons = this.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons());
                 if (actionButtons !== undefined) {
                     areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
                 }
@@ -6909,7 +6948,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // A previewed first step of Strength or the Sun can dip an empty size below zero until the second step returns it.
         return stash.map((count, i) => ({
             count: Math.max(0, count),
-            glyph: { name: `pyramid-up-${sizeNames[i]}`, colour: player },
+            glyph: { name: `pyramid-flat-${sizeNames[i]}`, colour: player },
             movePart: (i + 1).toString(),
         }));
     }

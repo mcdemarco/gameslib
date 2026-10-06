@@ -2067,6 +2067,32 @@ describe("Gnostica: handleClick", () => {
         expect(east.move).eq("orient m0.1 E");
     });
 
+    it("a click-built move that fails validation keeps the whole move, previews as its valid part, and offers only an enabled Undo", () => {
+        const start = () => {
+            const g = new GnosticaGame(2);
+            g.move("place m0 U");
+            g.move("place l0 U");
+            return g;
+        };
+        const [row, col] = rowColFor(start(), 0, 0);
+        const g = start();
+        const seed = g.handleClick("", -1, -1, "_btn_orient");
+        const first = g.handleClick(seed.move, row, col);
+        const same = g.handleClick(first.move, row, col);
+        expect(same.valid).to.be.false;
+        expect(same.canrender).to.be.true;
+        expect(same.move).eq("orient m0.1 U");
+
+        const preview = start();
+        preview.move(same.move, { partial: true });
+        const bar = (preview.render().at(-1) as unknown as { areas: { type: string; buttons?: { value: string; attributes?: unknown }[] }[] })
+            .areas.find(a => a.type === "buttonBar")!.buttons!;
+        expect(bar.map(b => b.value)).to.deep.equal(["undo"]);
+        expect(bar[0].attributes).to.be.undefined;
+
+        expect(start().handleClick(same.move, -1, -1, "_btn_undo").move).eq("orient m0.1");
+    });
+
     it("orient: clicking a non-adjacent/unoccupied cell falls back to fresh-selection handling", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
@@ -2857,6 +2883,29 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         g2.move(distClick2.move);
         expect(g2.board.has(1, 0)).eq(false);
         expect(g2.board.get(3, 0)!.card).to.not.eq(undefined);
+    });
+
+    it("Rods (tile): seeds the nearest legal distance when the first space is occupied, and strikes the mode out when none is legal", () => {
+        const skipsOccupied = testGame({
+            board: [{ x: 0, y: 0, uid: "3R", pieces: [[1, 3, "E"]] }, { x: 1, y: 0, uid: "AD" }, { x: 2, y: 0, uid: "2C" }],
+            hands: [filler, filler],
+        });
+        const seed = skipsOccupied.handleClick("", -1, -1, "_btn_use");
+        const [row, col] = rowColFor(skipsOccupied, 0, 0);
+        const cellClick = skipsOccupied.handleClick(seed.move, row, col);
+        const modeClick = skipsOccupied.handleClick(cellClick.move, -1, -1, "_btn_target_n0");
+        expect(modeClick.valid).to.be.true;
+        expect(modeClick.move).eq("use 3R/with m0.3 move n0 2");
+
+        const blocked = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD" }, { x: 2, y: 0, uid: "2C" }],
+            hands: [filler, filler],
+        });
+        const blockedSeed = blocked.handleClick("", -1, -1, "_btn_use");
+        const [bRow, bCol] = rowColFor(blocked, 0, 0);
+        const blockedCell = blocked.handleClick(blockedSeed.move, bRow, bCol);
+        const blockedMode = blocked.handleClick(blockedCell.move, -1, -1, "_btn_target_n0");
+        expect(blockedMode.move).eq(blockedCell.move);
     });
 
     it("Discs (piece): the only candidate at the (self) target cell is the minion itself", () => {
