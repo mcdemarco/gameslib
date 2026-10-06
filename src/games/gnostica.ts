@@ -6787,7 +6787,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (owner > 0) {
             backdrop.colour = owner;
-            backdrop.opacity = 0.05;
+            backdrop.opacity = 0.12;
         }
         const stack: Glyph[] = [backdrop];
 
