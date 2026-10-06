@@ -6799,13 +6799,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 rankText += "\u00A0";
             }
         }
-        const rankScale = spaced ? 0.25 : 0.45;
+        const rankScale = spaced ? (card.major ? 0.3 : 0.25): 0.45;
         const corner = spaced ? BOARD_TILE_GRID_CORNER : 250;
         let rankShiftX = spaced ? -675 : -corner;
         let rankShiftY = rankShiftX;
         if (card.major) {
             rankShiftX += spaced ? 675 : 250;
-            rankShiftY += spaced ? -175 : -175;
+            rankShiftY += spaced ? -50 : -175;
         }
 
         // top-left: the rank (minors) or major arcana numeral, plain text.
