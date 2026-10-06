@@ -48,8 +48,8 @@ Refactoring:
 Rebasing:
 	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
 	- #116 - On next rebase, credit Russ with his variant. @done(2026-10-05)
-	- #132 - On rebase use dotted red piece.
-	- #133 - Test hidden info in playground!
+	- #132 - On rebase use dashed red piece. @done(2026-10-05)
+	- #133 - Test hidden info in playground! (Basics done, more to do.)
 	- #134 - Add icons to buttons (and remove from key?)
 	- #135 - Change stash sidebar now that it can contain "full legend definitions"?
 	- #136 - Consider using piece area text labels.
