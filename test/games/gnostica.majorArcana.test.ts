@@ -2,7 +2,7 @@
 import "mocha";
 import { expect } from "chai";
 import { majorCards } from "../../src/common/tarot";
-import { MAJOR_ARCANA, POWERS, getMajorArcanaIcons, getMajorArcanaDef } from "../../src/games/gnostica/majorArcana";
+import { MAJOR_ARCANA, POWERS, getMajorArcanaDef } from "../../src/games/gnostica/majorArcana";
 
 describe("Gnostica major arcana", () => {
     it("has a definition for every major arcana card, 1-3 powers each, each with an icon", () => {
@@ -23,9 +23,8 @@ describe("Gnostica major arcana", () => {
         }
     });
 
-    it("getMajorArcanaDef/getMajorArcanaIcons look up by card", () => {
+    it("getMajorArcanaDef looks up by card", () => {
         const fool = majorCards.find(c => c.rank.seq === 0)!;
-        expect(getMajorArcanaIcons(fool)).to.deep.equal(["gnostica-cardQuestion", "gnostica-cardQuestion"]);
         expect(getMajorArcanaDef(fool).powers).to.deep.equal([POWERS.fool, POWERS.fool]);
     });
 

@@ -162,6 +162,3 @@ export const MAJOR_ARCANA: Record<string, MajorArcanaDef> = {
 };
 
 export const getMajorArcanaDef = (card: Card): MajorArcanaDef => MAJOR_ARCANA[card.uid];
-
-// Separate accessor since rendering code only ever wants the icon list, in power order.
-export const getMajorArcanaIcons = (card: Card): string[] => MAJOR_ARCANA[card.uid].powers.map(power => power.icon);

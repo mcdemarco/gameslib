@@ -1295,6 +1295,26 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(line.textParams).to.include({ player: "Player 1", target: "Bob" });
     });
 
+    it("the letters display prints power uids instead of icons, with an em dash for an empty slot", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "05", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AC" }],
+            hands: [filler, filler],
+        });
+        type Layer = { text?: string; name?: string };
+        const layers = (opts?: { altDisplay: string }) => {
+            const legend = (g.render(opts).at(-1) as unknown as { legend: Record<string, Layer[]> }).legend;
+            return { hierophant: legend.c05, ace: legend.cAC };
+        };
+        const plain = layers();
+        expect(plain.hierophant.some(l => l.name === "gnostica-transform")).to.be.true;
+        expect(plain.hierophant.some(l => l.text === "H")).to.be.false;
+
+        const letters = layers({ altDisplay: "letters" });
+        expect(letters.hierophant.map(l => l.text).filter(t => t !== undefined && t.length > 0 && !/^[IVX]+$/.test(t))).to.deep.equal(["H", "\u2014", "\u2014"]);
+        expect(letters.hierophant.some(l => l.name === "gnostica-transform")).to.be.false;
+        expect(letters.ace.some(l => l.text === "C")).to.be.true;
+    });
+
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
         const g = testGame({
             board: [

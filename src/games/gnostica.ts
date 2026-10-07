@@ -30,7 +30,7 @@ import {
     ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_ACTIONS,
     MinorSuitUid, TargetMode, CupsMode, MinorMode,
 } from "./gnostica/powers.js";
-import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaIcons } from "./gnostica/majorArcana.js";
+import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, SpecialPower, SuitPrimitive } from "./gnostica/majorArcana.js";
 import { generateRandomMove } from "./gnostica/randomMove.js";
 
 import i18next from "i18next";
@@ -45,6 +45,9 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
     D: { verb: "Grow", tile: "Grow Territory" },
     S: { verb: "Attack", tile: "Attack Territory" },
 };
+
+// Printed in the "letters" display where a card has a slot but no power in it.
+const EMPTY_SLOT_MARK = "\u2014";
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 // The greyed button: MUTED_FILL's dark-theme grey, lightened to about #ccc in the light theme.
@@ -357,6 +360,8 @@ export class GnosticaGame extends GameBaseSequenced {
     public discardPile: string[] = [];
     public stashes!: Map<playerid, Stash>;
     private rejected = false;
+    // The "letters" display: powers are shown by their uids instead of their icons.
+    private uidDisplay = false;
     public eliminated: playerid[] = [];
     public lastTurner: playerid | undefined;
     public gameover = false;
@@ -6233,7 +6238,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Each frame of a 2+-step chain holds the board before a step and shows the results of the step that led to it; the live state comes last and alone carries the hands, pools and buttons.
     public render(opts?: IRenderOpts): APRenderRep[] {
-        const largerCards = opts?.altDisplay === "larger-cards";
+        const displays = opts?.altDisplays ?? (opts?.altDisplay === undefined ? [] : [opts.altDisplay]);
+        const largerCards = displays.includes("larger-cards");
+        this.uidDisplay = displays.includes("letters");
 
         // A chain wraps each step's results into a _group entry; whatever else the move did (a "use", a declaration) goes with the last rep.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
@@ -6396,16 +6403,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 // undefined once nothing is mid-build, including right after a commit (this.preview is cleared then).
                 const activeCard = allCards().find(c => c.uid === this.preview?.pending?.activeCardUid);
                 if (activeCard !== undefined) {
-                    const icons = activeCard.major ? getMajorArcanaIcons(activeCard) : (activeCard.suit.glyph !== undefined ? [activeCard.suit.glyph] : []);
-                    for (const icon of icons) {
-                        const key = `activecard_${icon}`;
+                    for (const mark of this.cardMarks(activeCard)) {
+                        // Keys end up as literal DOM ids, so a uid's "+" or "?" can't appear in one.
+                        const key = `activecard_${[...mark].map(c => c.charCodeAt(0).toString(16)).join("_")}`;
                         if (!(key in legend)) {
                             // Circle-backed, matching every other place these icons appear (buildCardFace's own pushCircle) - a bare
                             // icon glyph alone reads too thin/low-contrast next to the turn-order rows' own solid pyramids.
-                            legend[key] = [
-                                { name: "piece", colour: "_context_board" },
-                                { name: icon, scale: 0.5 },
-                            ];
+                            legend[key] = this.uidDisplay
+                                ? [this.markText(mark, 0.6)]
+                                : [{ name: "piece", colour: "_context_board" }, { name: mark, scale: 0.5 }];
                         }
                         list.push({ piece: key, name: "" });
                     }
@@ -6780,6 +6786,23 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Gnostica's own card face, rebuilt.  Also handles summary tokens.
+    // What a card prints for its powers, in slot order: icon names, or uids in the "letters" display. A minor's one power is its suit's.
+    private cardMarks(card: TarotCard): string[] {
+        if (card.major) {
+            return MAJOR_ARCANA[card.uid].powers.map(power => this.uidDisplay ? power.uid : power.icon);
+        }
+        const mark = this.uidDisplay ? card.suit.uid : card.suit.glyph;
+        return mark === undefined ? [] : [mark];
+    }
+
+    // A power's uid as a glyph, upright and in the numerals' typeface.
+    private markText(text: string, scale: number, nudge?: { dx: number; dy: number }): Glyph {
+        return {
+            text, scale, colour: "_context_strokes", fontFamily: "Georgia,serif", orientation: "vertical",
+            ...(nudge === undefined ? {} : { nudge: { ...nudge, relativeTo: "glyph" as const } }),
+        };
+    }
+
     private buildCardFace(card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: ColourResolvable } = {}): Glyph[] {
         // `borderless` drops the card-square background for summary tokens.
         const BOARD_TILE_GRID_CORNER = 650;
@@ -6824,29 +6847,34 @@ export class GnosticaGame extends GameBaseSequenced {
             orientation: "vertical",
         });
 
-        const icons = card.major
-            ? getMajorArcanaIcons(card)
-            : card.suit.glyph !== undefined ? [card.suit.glyph!] : [];
+        const marks = this.cardMarks(card);
         const circleScale = spaced ? 0.25 : 0.45;
         const iconScale = spaced ? 0.15 : 0.30;
         // `iconShift` compensates for nudging issues, so an
         // icon still lands centred on its larger coin.
         const iconShift = spaced ? 1075 : 375;
-        const pushCircle = (xdir: number, ydir: number, iconName?: string) => {
+        const pushCircle = (xdir: number, ydir: number, mark?: string) => {
+            // Uids stand alone, so an empty slot needs its own mark; uids are drawn at the ranks' size, and a glyph-relative nudge is scaled with the glyph, so the shift that centres one where the circle would be depends on that size.
+            if (this.uidDisplay) {
+                const shift = corner * circleScale / rankScale;
+                stack.push(this.markText(mark ?? EMPTY_SLOT_MARK, rankScale, { dx: xdir * shift, dy: ydir * shift }));
+                return;
+            }
+            const nudge = { dx: xdir * iconShift, dy: ydir * iconShift };
             stack.push({ name: "piece", scale: circleScale, colour: "_context_board", nudge: { dx: xdir * corner, dy: ydir * corner }, orientation: "vertical" });
-            if (iconName !== undefined) {
-                stack.push({ name: iconName, scale: iconScale, nudge: { dx: xdir * iconShift, dy: ydir * iconShift }, orientation: "vertical" });
+            if (mark !== undefined) {
+                stack.push({ name: mark, scale: iconScale, nudge, orientation: "vertical" });
             }
         };
 
         // Top-right: always populated with a "piece" circle holding the suit icon (minors) or the major's first power icon.
-        pushCircle(1, -1, icons[0]);
+        pushCircle(1, -1, marks[0]);
 
         //Bottom-left: nothing at all for minors; for majors, an empty circle except filled for the Devil.
         //Bottom-right: nothing for pip minors (A-10); an empty circle for court minors (P/N/Q/K); for majors, populated with the 2nd power icon (or empty).
         if (card.major) {
-            pushCircle(-1, 1, icons[2]);
-            pushCircle(1, 1, icons[1]);
+            pushCircle(-1, 1, marks[2]);
+            pushCircle(1, 1, marks[1]);
         } else if (card.court) {            
             pushCircle(1, 1, undefined);
         }
