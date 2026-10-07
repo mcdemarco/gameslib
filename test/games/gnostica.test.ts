@@ -1315,6 +1315,18 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(letters.ace.some(l => l.text === "\u00A0C")).to.be.true;
     });
 
+    it("the icons display prints bare icons without circles, with an em dash for an empty slot", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "05", pieces: [[1, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        type Layer = { text?: string; name?: string };
+        const legend = (g.render({ altDisplay: "icons" }).at(-1) as unknown as { legend: Record<string, Layer[]> }).legend;
+        expect(legend.c05.some(l => l.name === "gnostica-transform")).to.be.true;
+        expect(legend.c05.some(l => l.name === "piece")).to.be.false;
+        expect(legend.c05.filter(l => l.text === "\u2014")).to.have.length(2);
+    });
+
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
         const g = testGame({
             board: [

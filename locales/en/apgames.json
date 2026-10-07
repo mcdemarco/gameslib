@@ -4709,7 +4709,11 @@
             }
         },
         "gnostica": {
-            "#icons": {
+            "#circles": {
+                "description": "Draw cards with the traditional Gnostica power icons in circles.",
+                "name": "Show icons in circles"
+            },
+            "icons": {
                 "description": "Draw cards with the traditional Gnostica power icons.",
                 "name": "Show icons"
             },

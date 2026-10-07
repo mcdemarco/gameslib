@@ -48,6 +48,10 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
 
 // Printed in the "letters" display where a card has a slot but no power in it.
 const EMPTY_SLOT_MARK = "\u2014";
+// A bare icon, with no circle around it, is drawn larger than one inside a circle.
+const BARE_ICON_FACTOR = 1.25;
+
+type MarkDisplay = "circled" | "icons" | "letters";
 
 // Legend keys for the pieces drawn on buttons.
 const PIECE_BUTTON_GLYPH_PREFIX = "buttonpiece_";
@@ -350,8 +354,9 @@ export class GnosticaGame extends GameBaseSequenced {
         flags: ["experimental", "no-moves", "custom-randomization", "no-explore", "player-stashes", "autopass", "scores"],
         displays: [
             { uid: "larger-cards" },
-            { uid: "#icons", group: "icons" },
-            { uid: "letters", group: "icons" }
+            { uid: "#circles", group: "circles" },
+            { uid: "icons", group: "circles" },
+            { uid: "letters", group: "circles" }
         ],
     };
 
@@ -364,8 +369,8 @@ export class GnosticaGame extends GameBaseSequenced {
     public discardPile: string[] = [];
     public stashes!: Map<playerid, Stash>;
     private rejected = false;
-    // The "letters" display: powers are shown by their uids instead of their icons.
-    private uidDisplay = false;
+    // How a card prints its powers: icons in circles, bare icons ("icons"), or uids ("letters").
+    private markDisplay: MarkDisplay = "circled";
     public eliminated: playerid[] = [];
     public lastTurner: playerid | undefined;
     public gameover = false;
@@ -6252,7 +6257,7 @@ export class GnosticaGame extends GameBaseSequenced {
     public render(opts?: IRenderOpts): APRenderRep[] {
         const displays = opts?.altDisplays ?? (opts?.altDisplay === undefined ? [] : [opts.altDisplay]);
         const largerCards = displays.includes("larger-cards");
-        this.uidDisplay = displays.includes("letters");
+        this.markDisplay = displays.includes("letters") ? "letters" : displays.includes("icons") ? "icons" : "circled";
 
         // A chain wraps each step's results into a _group entry; whatever else the move did (a "use", a declaration) goes with the last rep.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
@@ -6421,9 +6426,11 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (!(key in legend)) {
                             // Circle-backed, matching every other place these icons appear (buildCardFace's own pushCircle) - a bare
                             // icon glyph alone reads too thin/low-contrast next to the turn-order rows' own solid pyramids.
-                            legend[key] = this.uidDisplay
+                            legend[key] = this.markDisplay === "letters"
                                 ? [this.markText(mark, 0.6)]
-                                : [{ name: "piece", colour: "_context_board" }, { name: mark, scale: 0.5 }];
+                                : this.markDisplay === "icons"
+                                    ? [{ name: mark, scale: 0.8 }]
+                                    : [{ name: "piece", colour: "_context_board" }, { name: mark, scale: 0.5 }];
                         }
                         list.push({ piece: key, name: "" });
                     }
@@ -6806,9 +6813,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // What a card prints for its powers, in slot order: icon names, or uids in the "letters" display. A minor's one power is its suit's.
     private cardMarks(card: TarotCard): string[] {
         if (card.major) {
-            return MAJOR_ARCANA[card.uid].powers.map(power => this.uidDisplay ? power.uid : power.icon);
+            return MAJOR_ARCANA[card.uid].powers.map(power => this.markDisplay === "letters" ? power.uid : power.icon);
         }
-        const mark = this.uidDisplay ? card.suit.uid : card.suit.glyph;
+        const mark = this.markDisplay === "letters" ? card.suit.uid : card.suit.glyph;
         return mark === undefined ? [] : [mark];
     }
 
@@ -6871,12 +6878,19 @@ export class GnosticaGame extends GameBaseSequenced {
         // icon still lands centred on its larger coin.
         const iconShift = spaced ? 1075 : 375;
         const pushCircle = (xdir: number, ydir: number, mark?: string) => {
-            // Uids stand alone, so an empty slot needs its own mark; uids are drawn at the ranks' size, and a glyph-relative nudge is scaled with the glyph, so the shift that centres one where the circle would be depends on that size.
-            if (this.uidDisplay) {
-                const shift = corner * circleScale / rankScale;
-                // A one-character uid gets a leading space, like a one-character rank's trailing one.
-                const text = mark === undefined ? EMPTY_SLOT_MARK : mark.length === 1 ? `\u00A0${mark}` : mark;
-                stack.push(this.markText(text, rankScale, { dx: xdir * shift, dy: ydir * shift }));
+            // Without circles an empty slot needs its own mark, and a glyph-relative nudge is scaled with the glyph, so the shift that centres one where the circle would be depends on its size.
+            if (this.markDisplay !== "circled") {
+                const bare = this.markDisplay === "icons" && mark !== undefined;
+                const markScale = bare ? BARE_ICON_FACTOR * iconScale : rankScale;
+                const shift = corner * circleScale / markScale;
+                const nudge = { dx: xdir * shift, dy: ydir * shift };
+                if (bare) {
+                    stack.push({ name: mark, scale: markScale, nudge, orientation: "vertical" });
+                } else {
+                    // Uids are drawn at the ranks' size; a one-character uid gets a leading space, like a one-character rank's trailing one.
+                    const text = mark === undefined ? EMPTY_SLOT_MARK : mark.length === 1 ? `\u00A0${mark}` : mark;
+                    stack.push(this.markText(text, markScale, nudge));
+                }
                 return;
             }
             const nudge = { dx: xdir * iconShift, dy: ydir * iconShift };
