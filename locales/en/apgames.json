@@ -4709,9 +4709,17 @@
             }
         },
         "gnostica": {
+            "#icons": {
+                "description": "Draw cards with the traditional Gnostica power icons.",
+                "name": "Show icons"
+            },
             "larger-cards": {
                 "description": "Display board cards larger when unoccupied.",
                 "name": "Show larger cards"
+            },
+            "letters": {
+                "description": "Draw cards using letters instead of icons.",
+                "name": "Show letters"
             }
         },
         "go": {

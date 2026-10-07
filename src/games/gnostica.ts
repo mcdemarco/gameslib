@@ -341,7 +341,11 @@ export class GnosticaGame extends GameBaseSequenced {
         ],
         categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>hidden", "mechanic>random>play", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
         flags: ["experimental", "no-moves", "custom-randomization", "no-explore", "player-stashes", "autopass", "scores"],
-        displays: [{ uid: "larger-cards" }],
+        displays: [
+            { uid: "larger-cards" },
+            { uid: "#icons", group: "icons" },
+            { uid: "letters", group: "icons" }
+        ],
     };
 
     public numplayers!: number;
