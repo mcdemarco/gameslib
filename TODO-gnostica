@@ -19,41 +19,29 @@ Miscellany:
 	- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
 	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
 	- #115 - The question of case-sensitivity of directions.
-	- #117 - Determine what, if anything, is the difference between sameTargetShortcut and skipStashCheck (in majorArcana.ts)? @done(2026-10-05)
-	- #123 - Swords territory clicks seed values removed re Death shortcut. @done(2026-09-26)
-	- #124 - StepShape (powers.ts) incomplete/complete values replaced with parsed moves complete value. @done(2026-09-26)
-	- #127 - minorModeAvailability's "own" case for Cups only checks cell capacity, not stash. @done(2026-09-28)
-	- #129 - A bug with passing on your last, winning turn after Fool. @done(2026-09-28)
 	- #131 - More analysis of this.preview.
 
 UX:
 	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves. @done(2026-10-04)
 	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
-	- #120 - Add another display mode for letters instead of icons.
-	- #125 - UI for using only second power of different-powered major arcana cards.
+	- #120 - Add another display mode for letters instead of icons. @done(2026-10-07)
+	- #125 - UI for using only second power of different-powered major arcana cards. @done(2026-10-07)
 	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups.
 	- #128 - After next merge, add text labels to hand cards (for major arcana names)
 
 Refactoring:
-	- #90 - Replace this.liveMove with fields for render() to read. @done(2026-09-27)
-	- #95 - Replace cloneLive() with clone(). @done(2026-09-26)
 	- #99 - Remove one-liner wrappers like invalid() and failureResult().
 	- #107 - Tests should not assemble internal structures manually. Done? but some unit testing remains to be removed for #29.
-	- #118 - Finish removing stepSegments. @done(2026-09-24)
-	- #119 - Remove all echos of stepSegments and rest from other structures.  Done?
-	- #121 - There's still an unprecendented amount of throwing of errors in the code. @done(2026-09-29)
-	- #122 - Determine whether the initial structural stepShapes are still needed, and whether the rest is as well. @done(2026-09-24)
-	- #130 - Remove pendingLastTurner. @done(2026-10-01)
 	
 Rebasing:
 	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
 	- #116 - On next rebase, credit Russ with his variant. @done(2026-10-05)
 	- #132 - On rebase use dashed red piece. @done(2026-10-05)
 	- #133 - Test hidden info in playground! (Basics done, more to do.)
-	- #134 - Add icons to buttons (and remove from key?)
-	- #135 - Change stash sidebar now that it can contain "full legend definitions"?
+	- #134 - Add icons to buttons (and remove from key?), in progress
+	- #135 - Change stash sidebar now that it can contain "full legend definitions"? @done(2026-10-07)
 	- #136 - Consider using piece area text labels.
-	- #137 - Consider combinable display options (once I have a second one)
-	- #138 - Deal with the changes to chatLog.
+	- #137 - Consider combinable display options (once I have a second one) @done(2026-10-07)
+	- #138 - Deal with the changes to chatLog. @done(2026-10-07)
 	- #139 - Move the rest of the render path to the structured label style (action button labels, the hard-coded "(declarer)" text, any remaining i18next.t calls).
 
