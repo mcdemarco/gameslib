@@ -1310,9 +1310,9 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(plain.hierophant.some(l => l.text === "H")).to.be.false;
 
         const letters = layers({ altDisplay: "letters" });
-        expect(letters.hierophant.map(l => l.text).filter(t => t !== undefined && t.length > 0 && !/^[IVX]+$/.test(t))).to.deep.equal(["H", "\u2014", "\u2014"]);
+        expect(letters.hierophant.map(l => l.text).filter(t => t !== undefined && t.length > 0 && !/^[IVX]+$/.test(t))).to.deep.equal(["\u00A0H", "\u2014", "\u2014"]);
         expect(letters.hierophant.some(l => l.name === "gnostica-transform")).to.be.false;
-        expect(letters.ace.some(l => l.text === "C")).to.be.true;
+        expect(letters.ace.some(l => l.text === "\u00A0C")).to.be.true;
     });
 
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
@@ -3160,8 +3160,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 
             const g2 = setup();
             g2.move(move, { partial: true });
-            const buttons = (g2.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
-            expect(buttons.filter(b => b.value?.startsWith("minion_")).map(b => b.label).sort()).to.deep.equal(["1-pip pointing E", "1-pip pointing W", "2-pip pointing N"]);
+            const rep = g2.render().at(-1) as { legend: Record<string, { name?: string }>; areas?: { type: string; buttons?: { value?: string; glyph?: string }[] }[] };
+            const buttons = rep.areas!.find(a => a.type === "buttonBar")!.buttons!;
+            const glyphs = buttons.filter(b => b.value?.startsWith("minion_")).map(b => b.glyph!).sort();
+            expect(glyphs).to.deep.equal(["buttonpiece_21E", "buttonpiece_21W", "buttonpiece_22N"]);
+            expect(glyphs.every(key => rep.legend[key]?.name?.startsWith("pyramid-"))).to.be.true;
         });
 
         it("every one of those buttons can be clicked, including the reoriented piece and its untouched twin", () => {
@@ -3187,10 +3190,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const move = "play 03/orient m0.1.E.2 N";
             const withMinion = g.handleClick(move, -1, -1, "_btn_minion_m0.1.E");
             g.move(withMinion.move, { partial: true });
-            const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
+            const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string; glyph?: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.some(b => b.value === "target_own")).to.be.true;
             const enemyBtn = buttons.find(b => b.value === "target_n0.1")!;
-            expect(enemyBtn.label).to.eq("Create Enemy Player 1's 1-pip pointing up");
+            expect(enemyBtn.label).to.eq("Create Enemy Player 1's");
+            expect(enemyBtn.glyph).to.eq("buttonpiece_11U");
             const territory = buttons.find(b => b.value === "target_new")!;
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         });
@@ -3229,10 +3233,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             });
             const internal = g as unknown as {
                 parsePendingStep: (m: unknown) => { advanced?: object };
-                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
+                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: string }[];
             };
             const pending = internal.parsePendingStep(g.parseMove("use AS")).advanced!;
-            const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => c.label.includes(" own ") ? "own" : "enemy");
+            const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => c.label!.endsWith(" own") ? "own" : "enemy");
             expect(owners).to.deep.equal(["enemy", "enemy", "own", "own"]);
         });
 
@@ -3249,7 +3253,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             };
             const pending = internal.parsePendingStep(g.parseMove("use AC")).advanced!;
             const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label).sort();
-            expect(enemyLabels).to.deep.equal(["Create Enemy Player 2's 1-pip pointing up", "Create Enemy Player 3's 1-pip pointing up"]);
+            expect(enemyLabels).to.deep.equal(["Create Enemy Player 2's", "Create Enemy Player 3's"]);
 
             const g2 = testGame({
                 board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
@@ -3261,7 +3265,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             };
             const pending2 = internal2.parsePendingStep(g2.parseMove("use AC")).advanced!;
             const candidates2 = internal2.suitTargetCandidates(pending2, "C");
-            expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy Player 2's 1-pip pointing up");
+            expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy Player 2's");
         });
 
         it("Create Minion is struck through once the acting player's own stash has no 1-pip piece left, and a click on it does nothing", () => {

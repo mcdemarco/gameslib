@@ -46,7 +46,7 @@ export const POWERS = {
     growFromDiscard: { uid: "Dx", primitive: "grow", opts: { replacementSource: "discard" }, icon: "gnostica-starCycle" },
     fool: { uid: "F", special: "fool", icon: "gnostica-cardQuestion" },
     magicianChoice: { uid: "M", special: "magicianChoice", icon: "gnostica-allSuits" },
-    highPriestess: { uid: "HP", special: "highPriestess", icon: "gnostica-hand" },
+    highPriestess: { uid: "Dr", special: "highPriestess", icon: "gnostica-hand" },
     orientMinion: { uid: "O", special: "orientMinion", icon: "gnostica-tip" },
     orientAny: { uid: "V", special: "orientAny", icon: "gnostica-tip" },
     hierophantReplace: { uid: "H", special: "hierophantReplace", icon: "gnostica-transform" },

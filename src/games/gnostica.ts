@@ -49,6 +49,9 @@ const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile
 // Printed in the "letters" display where a card has a slot but no power in it.
 const EMPTY_SLOT_MARK = "\u2014";
 
+// Legend keys for the pieces drawn on buttons.
+const PIECE_BUTTON_GLYPH_PREFIX = "buttonpiece_";
+
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 // The greyed button: MUTED_FILL's dark-theme grey, lightened to about #ccc in the light theme.
 const GREYED_BUTTON_FILL: Colourfuncs = {
@@ -69,7 +72,8 @@ export type FrameState = {
 // One button-bar choice, before its value gets a `<prefix>_` prepended - see buildChoiceButtons' own docs.
 interface ChoiceOption {
     value: string;
-    label: string;
+    label?: string;
+    glyph?: string; // A legend key; the render adds the entry for a piece's.
     disabledReason?: { key: string; params?: Record<string, unknown> };
 }
 
@@ -2292,8 +2296,15 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Pick one value from a small labeled set: available is plain, unavailable (a `disabledReason`, shared with minorModeAvailability) is crossed out, the `current` one is greyed.
     private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
-        return options.map(({ value, label, disabledReason }) => {
-            const button: ButtonBarButton = { label, value: `${prefix}_${value}` };
+        return options.map(({ value, label, glyph, disabledReason }) => {
+            const button: ButtonBarButton = { value: `${prefix}_${value}` };
+            if (label !== undefined) {
+                button.label = label;
+            }
+            if (glyph !== undefined) {
+                button.glyph = glyph;
+                button.glyphPosition = "suffix";
+            }
             if (disabledReason !== undefined) {
                 button.attributes = [{ name: "text-decoration", value: "line-through" }];
             } else if (value === current) {
@@ -2497,7 +2508,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 continue;
             }
             seenRefs.add(ref);
-            options.push({ value: ref, label: this.textFormat(this.board.get(m.x, m.y)!.pieces[m.index]) });
+            const piece = this.board.get(m.x, m.y)!.pieces[m.index];
+            options.push({ value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece) });
         }
         return [
             { label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] },
@@ -2534,7 +2546,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             seenRefs.add(ref);
             const piece = this.board.get(m.x, m.y)!.pieces[m.index];
-            options.push({ value: ref, label: this.textFormat(piece), disabledReason: this.rodNeedsFacingReason(pendingMinor.suitUid, piece) });
+            options.push({ value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason: this.rodNeedsFacingReason(pendingMinor.suitUid, piece) });
         }
         buttons.push(...this.buildChoiceButtons("minion", options, undefined));
         if (declareBtn !== undefined) {
@@ -2595,7 +2607,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             seen.add(ref);
             const piece = this.board.get(x, y)!.pieces[index];
-            const option = { value: ref, label: `${verb} ${this.ownerLabel(piece.owner)} ${this.textFormat(piece)}`, disabledReason };
+            const option = { value: ref, label: `${verb} ${this.ownerLabel(piece.owner)}`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason };
             (ownLast && piece.owner === this.currplayer ? own : options).push(option);
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
@@ -2610,7 +2622,12 @@ export class GnosticaGame extends GameBaseSequenced {
         return [...options, ...own];
     }
 
-    // Every target-piece button names whose piece it is, since size/facing alone (textFormat) can match across different opponents.
+    // The legend key for a piece shown on a button; the render adds its entry.
+    private static pieceButtonGlyph(piece: Piece): string {
+        return `${PIECE_BUTTON_GLYPH_PREFIX}${piece.id()}`;
+    }
+
+    // Every target-piece button names whose piece it is, since size/facing alone can match across different opponents.
     private ownerLabel(owner: number): string {
         return owner === this.currplayer ? "own" : `Player ${owner}'s`;
     }
@@ -2636,7 +2653,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const enemyEntries: ChoiceOption[] = [];
             cellPieces.forEach((p, index) => {
                 if (p.owner !== this.currplayer) {
-                    enemyEntries.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Create Enemy ${this.ownerLabel(p.owner)} ${this.textFormat(p)}`, disabledReason: availability.get("enemy") });
+                    enemyEntries.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Create Enemy ${this.ownerLabel(p.owner)}`, glyph: GnosticaGame.pieceButtonGlyph(p), disabledReason: availability.get("enemy") });
                 }
             });
             if (enemyEntries.length > 0) {
@@ -3061,11 +3078,6 @@ export class GnosticaGame extends GameBaseSequenced {
             facing,
             who: this.board.get(x, y)!.pieces[index].owner,
         });
-    }
-
-    // Reads size/orientation off the piece itself rather than parsing a ref string - a ref only carries orientation when it was needed to disambiguate.
-    private textFormat(piece: Piece): string {
-        return `${piece.size}-pip pointing ${piece.orientation === "U" ? "up" : piece.orientation}`;
     }
 
     // Click-to-orient: clicking the piece's own cell means "face up"; clicking an orthogonal neighbour means "face that way" - one click states the direction outright.
@@ -6423,6 +6435,11 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
                 const actionButtons = this.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons());
+                for (const button of actionButtons ?? []) {
+                    if (button.glyph?.startsWith(PIECE_BUTTON_GLYPH_PREFIX) && !(button.glyph in legend)) {
+                        legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice(PIECE_BUTTON_GLYPH_PREFIX.length)));
+                    }
+                }
                 if (actionButtons !== undefined) {
                     areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
                 }
@@ -6857,7 +6874,9 @@ export class GnosticaGame extends GameBaseSequenced {
             // Uids stand alone, so an empty slot needs its own mark; uids are drawn at the ranks' size, and a glyph-relative nudge is scaled with the glyph, so the shift that centres one where the circle would be depends on that size.
             if (this.uidDisplay) {
                 const shift = corner * circleScale / rankScale;
-                stack.push(this.markText(mark ?? EMPTY_SLOT_MARK, rankScale, { dx: xdir * shift, dy: ydir * shift }));
+                // A one-character uid gets a leading space, like a one-character rank's trailing one.
+                const text = mark === undefined ? EMPTY_SLOT_MARK : mark.length === 1 ? `\u00A0${mark}` : mark;
+                stack.push(this.markText(text, rankScale, { dx: xdir * shift, dy: ydir * shift }));
                 return;
             }
             const nudge = { dx: xdir * iconShift, dy: ydir * iconShift };
