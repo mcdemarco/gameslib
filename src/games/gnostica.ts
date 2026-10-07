@@ -30,7 +30,7 @@ import {
     ALL_SUITS, RDS_VERBS, stepMinorMode, stepHermitMode, SPECIAL_STEP_ACTIONS,
     MinorSuitUid, TargetMode, CupsMode, MinorMode,
 } from "./gnostica/powers.js";
-import { MAJOR_ARCANA, MajorArcanaDef, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaIcons } from "./gnostica/majorArcana.js";
+import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, SpecialPower, SuitPrimitive, getMajorArcanaIcons } from "./gnostica/majorArcana.js";
 import { generateRandomMove } from "./gnostica/randomMove.js";
 
 import i18next from "i18next";
@@ -4892,7 +4892,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (card === undefined) {
             throw new UserFacingError("VALIDATION_GENERAL", i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: cardUid }));
         }
-        return { uid: cardUid, name: card.name, seq: -1, icons: [], powers: [{ primitive: GnosticaGame.SUIT_TO_PRIMITIVE[suitUidOf(card)] }] };
+        return { uid: cardUid, name: card.name, seq: -1, powers: [POWERS[GnosticaGame.SUIT_TO_PRIMITIVE[suitUidOf(card)]]] };
     }
 
     // Applies a step's own outcome.newMinion chaining to `minions`: appends it, first removing whichever existing entry it supersedes (a splice can shift later same-cell indices down by one).

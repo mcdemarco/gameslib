@@ -2,17 +2,16 @@
 import "mocha";
 import { expect } from "chai";
 import { majorCards } from "../../src/common/tarot";
-import { MAJOR_ARCANA, MAJOR_ARCANA_ICONS, getMajorArcanaIcons, getMajorArcanaDef } from "../../src/games/gnostica/majorArcana";
+import { MAJOR_ARCANA, POWERS, getMajorArcanaIcons, getMajorArcanaDef } from "../../src/games/gnostica/majorArcana";
 
 describe("Gnostica major arcana", () => {
-    it("has a definition for every major arcana card, 1-3 icons each, matching power-step count", () => {
+    it("has a definition for every major arcana card, 1-3 powers each, each with an icon", () => {
         for (const card of majorCards) {
             const def = MAJOR_ARCANA[card.uid];
             expect(def, `missing definition for ${card.uid} (${card.name})`).to.not.be.undefined;
-            expect(def.icons.length).to.be.within(1, 3);
-            expect(def.powers.length).to.equal(def.icons.length);
-            for (const icon of def.icons) {
-                expect(icon).to.match(/^gnostica-/);
+            expect(def.powers.length).to.be.within(1, 3);
+            for (const power of def.powers) {
+                expect(power.icon).to.match(/^gnostica-/);
             }
         }
     });
@@ -27,8 +26,7 @@ describe("Gnostica major arcana", () => {
     it("getMajorArcanaDef/getMajorArcanaIcons look up by card", () => {
         const fool = majorCards.find(c => c.rank.seq === 0)!;
         expect(getMajorArcanaIcons(fool)).to.deep.equal(["gnostica-cardQuestion", "gnostica-cardQuestion"]);
-        expect(getMajorArcanaDef(fool).powers).to.deep.equal([{ special: "fool" }, { special: "fool" }]);
-        expect(MAJOR_ARCANA_ICONS["00"]).to.deep.equal(["gnostica-cardQuestion", "gnostica-cardQuestion"]);
+        expect(getMajorArcanaDef(fool).powers).to.deep.equal([POWERS.fool, POWERS.fool]);
     });
 
     it("flags the three same-target-shortcut cards (Chariot, Strength, Death) plus Sun", () => {
