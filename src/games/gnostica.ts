@@ -6113,7 +6113,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.hidden.push({ type: "draw", count: Number(drawCountStr), setsCardsDrawn: false, joinsGroup: !partial && discardUids.length > 0 });
     }
 
-    public validateHighPriestess(step: IStep | undefined): IValidationResult {
+    private validateHighPriestess(step: IStep | undefined): IValidationResult {
         if (step !== undefined && step.action !== "discard") {
             return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" });
         }
@@ -6489,6 +6489,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
                 }
             }
+            if (last) {
+                for (const cell of this.worldPickCells()) {
+                    const [x, y] = cell.split(",").map(Number);
+                    annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
+                }
+            }
             if (annotations.length > 0) {
                 rep.annotations = annotations;
             }
@@ -6698,6 +6704,21 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return rings;
+    }
+
+    // While the World's borrowed card is still to be picked, the major arcana territories it may borrow from (every one on the board but the World itself).
+    private worldPickCells(): Set<string> {
+        const pending = this.computePendingMinor();
+        const cells = new Set<string>();
+        if (pending?.special !== "worldUseAny" || pending.asUid !== undefined) {
+            return cells;
+        }
+        for (const [x, y, t] of this.board.entries()) {
+            if (t.card?.major === true && t.card.uid !== "21") {
+                cells.add(`${x},${y}`);
+            }
+        }
+        return cells;
     }
 
     // The pieces to ring in a live preview: the step's minion (or every candidate while it's still ambiguous which one is meant), and the target piece once picked, which wins on a self-target.

@@ -6,9 +6,9 @@ Mark items done with @done(date) only as they're confirmed.
 Pre-release:
 	- #29 - reduce test count towards 50-100.  Progress so far: 514 -> 408  Not yet reviewed:  gnostica.bidding.test.ts, "Fool and World". Doomed: randomMove.
 	- #66 - test fool messaging on reload in production
-	- #86 - Once gnostica/randomMove.ts is deleted (or no longer needs them - see #85), revert these 28 gnostica.ts methods from public back to private (all were private before #85; only made public so randomMove.ts could call them cross-file): buildViaMove, cloneLive, computeShortcutOpts, eligibleMinionsForActivate, eligibleMinionsForPlay, hasPiecesOnBoard, minorModeAvailability, minorTargetCell, pickleMove, pieceRefStr, primitiveToSuit, renderWindow, scoreFor, targetScore, validateHermitStep, validateHierophantReplace, validateHighPriestess, validateJudgementDraw, validateMagicianChoice, validateMajorPower, validateMinorPower, validateOrientAny, validateOrientMinion, validateSuitPrimitive, validateTradeHands, victimRefStr, applyPowerStep, validatePowerStep.
+	- #86 - Once randomMove.ts is deleted and tests are reduced, return these gnostica.ts methods to private: (random move) eligibleMinionsForActivate, hasPiecesOnBoard, minorModeAvailability, minorTargetCell, primitiveToSuit, scoreFor, validateHermitStep, validateHierophantReplace, validateJudgementDraw, validateMajorPower, validateMinorPower, validateOrientAny, validateOrientMinion, validateSuitPrimitive, validateTradeHands, applyPowerStep, validatePowerStep; (tests) computeShortcutOpts, eligibleMinionsForPlay, pieceRefStr, renderWindow and pickleMove.
 	- #87 - Remove randomMove.ts and tests thereof.
-	- #88 - Also revert the IMinionRef/IStepOutcome/StepValidation/ALL_SUITS export/relocation changes #85 made once randomMove.ts is gone.
+	- #88 - Once randomMove.ts is gone, un-export IMinionRef, IStepOutcome and IParsedMove from gnostica.ts.
 	- #89 - Test mutating the game state with a manual move in production (e.g. via Emu Ranchers) to see what the errors look like.
 
 Miscellany:
@@ -23,7 +23,7 @@ Miscellany:
 
 UX:
 	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves. @done(2026-10-04)
-	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick, of own minion cells for a play <carduid>, etc.
+	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick (done), etc.
 	- #120 - Add another display mode for letters instead of icons. @done(2026-10-07)
 	- #125 - UI for using only second power of different-powered major arcana cards. @done(2026-10-07)
 	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups.

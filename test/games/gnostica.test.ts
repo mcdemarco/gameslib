@@ -1327,6 +1327,21 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(legend.c05.filter(l => l.text === "\u2014")).to.have.length(2);
     });
 
+    it("World: while its borrowed card is still to be picked, the major arcana it may borrow are marked with an enter annotation", () => {
+        const outlined = (partial: string): { row: number; col: number }[] => {
+            const fresh = testGame({
+                board: [{ x: 0, y: 0, uid: "21", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "06" }, { x: 2, y: 0, uid: "AC" }, { x: 3, y: 0, uid: "15" }],
+                hands: [filler, filler],
+            });
+            fresh.move(partial, { partial: true });
+            const rep = fresh.render().at(-1) as unknown as { annotations?: { type: string; targets: { row: number; col: number }[] }[] };
+            const { minX } = (fresh as unknown as { renderWindow: () => { minX: number } }).renderWindow();
+            return (rep.annotations ?? []).filter(a => a.type === "enter").flatMap(a => a.targets).map(p => ({ ...p, col: p.col + minX }));
+        };
+        expect(outlined("use 21").map(p => p.col).sort()).to.deep.equal([1, 3]); // The Lovers and The Devil, not the World itself or the Ace
+        expect(outlined("use 21 as 06")).to.have.length(0);
+    });
+
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
         const g = testGame({
             board: [
