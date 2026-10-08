@@ -5849,7 +5849,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 const resultSize = beforeSize - pips;
                 const where = GnosticaBoard.coords2algebraic(target.x, target.y);
                 if (resultSize === 0) {
-                    this.results.push({ type: "destroy", where, what: this.getPipsFromRef(targetRef), who: owner });
+                    //Omit where to show this is a swords destroy.
+                    this.results.push({ type: "destroy", what: this.getPipsFromRef(targetRef), who: owner });
                 } else {
                     this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${resultSize}`, where, who: owner });
                 }
@@ -6483,6 +6484,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (r.type === "place" && r.where !== undefined && r.how === "territory") {
                     const [x, y] = GnosticaBoard.algebraic2coords(r.where);
                     annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
+                } else if (r.type === "destroy" && r.where !== undefined && r.who !== undefined) {
+                    // Only a Rods push into the void sets both: the piece is gone, so its old cell is marked.
+                    const [x, y] = GnosticaBoard.algebraic2coords(r.where);
+                    annotations.push({ type: "exit", targets: [{ row: y - minY, col: x - minX }] });
                 } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
                     const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
                     const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
@@ -7159,10 +7164,19 @@ export class GnosticaGame extends GameBaseSequenced {
                             if (r.who !== undefined) {
                                 //Someone's minion.
                                 const target = this.otherPlayerName(r.who, name, players);
-                                if (target === undefined) {
-                                    say("apresults:DESTROY.gnostica_piece_own", { what: r.what });
-                                } else {
-                                    say("apresults:DESTROY.gnostica_piece", { what: r.what, target });
+                                if (r.where !== undefined) {
+                                    //With a rod.
+                                     if (target === undefined) {
+                                         say("apresults:DESTROY.gnostica_rods_own", { what: r.what, where: r.where });
+                                    } else {
+                                        say("apresults:DESTROY.gnostica_rods", { what: r.what, where: r.where, target });
+                                    }
+                                } else {                                
+                                    if (target === undefined) {
+                                        say("apresults:DESTROY.gnostica_piece_own", { what: r.what });
+                                    } else {
+                                        say("apresults:DESTROY.gnostica_piece", { what: r.what, target });
+                                    }
                                 }
                             } else {
                                 //A territory.

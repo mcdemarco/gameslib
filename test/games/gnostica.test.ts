@@ -1257,6 +1257,30 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(lovers.board.get(-3, 0)?.pieces.length ?? 0).eq(0); // a final landing in the void destroys it
     });
 
+    it("a Rods push into the void marks the cell the piece left with an exit annotation, and a Swords destroy does not", () => {
+        const pushed = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        pushed.move("use AR/with m0.2 move n0.1 2");
+        expect(pushed.board.get(1, 0)?.pieces.length ?? 0).eq(0);
+        const destroy = pushed.results.find(r => r.type === "destroy");
+        expect(destroy).to.deep.include({ where: "n0", who: 2 });
+        const rep = pushed.render().at(-1) as unknown as { annotations?: { type: string; targets: { row: number; col: number }[] }[] };
+        const { minX, minY } = (pushed as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        const exits = (rep.annotations ?? []).filter(a => a.type === "exit").flatMap(a => a.targets).map(t => ({ col: t.col + minX, row: t.row + minY }));
+        expect(exits).to.deep.equal([{ col: 1, row: 0 }]);
+
+        const struck = testGame({
+            board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        struck.move("use AS/with m0.2 shrink n0.1 1");
+        expect(struck.results.find(r => r.type === "destroy")).to.not.have.property("where");
+        const struckRep = struck.render().at(-1) as unknown as { annotations?: { type: string }[] };
+        expect((struckRep.annotations ?? []).filter(a => a.type === "exit")).to.have.length(0);
+    });
+
     it("Empress: orienting the minion first, then creating with ignoreCapacity, still resolves the second step's ref even once orientation makes two pieces identical", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "03", pieces: [[1, 1, "N"], [1, 1, "U"], [1, 1, "U"]] }], // already 3 here

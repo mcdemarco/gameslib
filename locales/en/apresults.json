@@ -281,6 +281,8 @@
         },
         "gnostica_piece_own": "{{player}} destroyed their own {{what}}-pip piece.",
         "gnostica_piece": "{{player}} destroyed {{target}}'s {{what}}-pip piece.",
+        "gnostica_rods_own": "{{player}} pushed their own {{what}}-pip piece from {{where}} into the void.",
+        "gnostica_rods": "{{player}} pushed {{target}}'s {{what}}-pip piece from {{where}} into the void.",
         "gnostica_tile": "{{player}} destroyed {{what}} at {{where}}.",
         "logger": "{{player}} felled a tree at {{where}}.",
         "mattock": "{{player}} mined at {{where}}.",
