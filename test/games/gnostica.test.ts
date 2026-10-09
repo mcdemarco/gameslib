@@ -876,21 +876,37 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             expect(g2.stashes.get(1)).to.deep.equal([before[0] + 1, before[1] - 1, before[2]]);
         });
 
-        it("Strength: the second grow must act on the piece the first grow produced", () => {
+        it("Strength: the second grow is held to the first grow's piece only when the shortcut was needed for the first", () => {
             const g = setupStrength();
-            expect(g.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow n0.1").valid).to.be.false;
+            expect(g.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow n0.1").valid).to.be.true; // two ordinary grows
+            const noMedium = setupStrength();
+            noMedium.stashes.get(1)![1] = 0; // the first grow now needs the shortcut
+            expect(noMedium.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow n0.1").valid).to.be.false;
+            expect(noMedium.validateMove("use 08/with m0.1 grow m0.1/with m0.2 grow m0.2").valid).to.be.true;
             const before = g.stashes.get(1)!.slice();
             g.move("use 08/with m0.1 grow m0.1/with m0.2 grow m0.2");
             expect(g.stashes.get(1)).to.deep.equal([before[0] + 1, before[1], before[2] - 1]);
         });
 
-        it("Sun: the grow must act on the piece the create just made", () => {
-            const g = testGame({
-                board: [{ x: 0, y: 0, uid: "19", pieces: [[1, 1, "E"], [1, 2, "U"]] }],
-                hands: [filler, filler],
-            });
+        it("Sun: the grow is held to the created piece only when the shortcut was needed to create it", () => {
+            const board = [{ x: 0, y: 0, uid: "19", pieces: [[1, 1, "E"], [1, 2, "U"]] as TestPiece[] }];
+            const g = testGame({ board, hands: [filler, filler] });
             expect(g.validateMove("use 19/with m0.1 at n0 create U/with n0.1 grow n0.1").valid).to.be.true;
-            expect(g.validateMove("use 19/with m0.1 at n0 create U/with m0.2 grow m0.2").valid).to.be.false;
+            expect(g.validateMove("use 19/with m0.1 at n0 create U/with m0.2 grow m0.2").valid).to.be.true; // independent powers
+
+            const noSmallPieces = testGame({ board, hands: [filler, filler], stashes: { 1: [0, 5, 5] } });
+            expect(noSmallPieces.validateMove("use 19/with m0.1 at n0 create U/with n0.1 grow n0.1").valid).to.be.true;
+            expect(noSmallPieces.validateMove("use 19/with m0.1 at n0 create U/with m0.2 grow m0.2").valid).to.be.false;
+        });
+
+        it("Sun: with a 1-pip piece in the stash, the grow may instead act on a territory; without one it may not", () => {
+            const board = [{ x: 0, y: 0, uid: "19", pieces: [[1, 1, "E"]] as TestPiece[] }, { x: 1, y: 0, uid: "QS" }];
+            const hands = [["09", ...filler.slice(1)], filler];
+            const g = testGame({ board, hands });
+            expect(g.validateMove("use 19/with m0.1 at n0 create S/with m0.1 grow n0 to 09").valid).to.be.true;
+
+            const noSmallPieces = testGame({ board, hands, stashes: { 1: [0, 5, 5] } });
+            expect(noSmallPieces.validateMove("use 19/with m0.1 at n0 create S/with m0.1 grow n0 to 09").valid).to.be.false;
         });
 
         it("Chariot: a full-territory waypoint needs the same piece moved again; alone it stays incomplete", () => {

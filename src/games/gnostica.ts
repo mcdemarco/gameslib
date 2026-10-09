@@ -5199,6 +5199,9 @@ export class GnosticaGame extends GameBaseSequenced {
             const followed = i < steps.length;
             let paired = followed;
             const takenBefore = priorTaken;
+            // The shortcut is only for when both actions HAPPEN to hit the same target: the step is held to the same target only if it was legal solely thanks to its waiver.
+            const waiverNeeded = !(followed && "primitive" in step)
+                || (clone ?? this).validatePowerStep(step, top.minions, istep, frameDef, stepIndex, frameDef.powers.length, isFreshRootFool, borrowedForStep, false, takenBefore).failed;
             let stepResult = (clone ?? this).validatePowerStep(step, top.minions, istep, frameDef, stepIndex, frameDef.powers.length, isFreshRootFool, borrowedForStep, followed, takenBefore);
             if (stepResult.failed && !followed && stepIndex < frameDef.powers.length - 1) {
                 // Legal only WITH the waiver: fine as far as it goes, but the move can't be submitted until the paired second step is added.
@@ -5273,7 +5276,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                 }
             }
-            if (frameDef.sameTargetShortcut && followed && "primitive" in step) {
+            if (frameDef.sameTargetShortcut && followed && waiverNeeded && "primitive" in step) {
                 const produced = outcome.producedPiece ?? outcome.newMinion;
                 sameTargetWanted = produced === undefined ? undefined : { x: produced.x, y: produced.y, index: produced.index };
             }
