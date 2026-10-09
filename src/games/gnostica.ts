@@ -57,8 +57,9 @@ const BARE_ICON_FACTOR = 1.25;
 
 type MarkDisplay = "circled" | "icons" | "letters";
 
-// Legend keys for the pieces drawn on buttons.
+// Legend keys for the pieces and suits drawn on buttons.
 const PIECE_BUTTON_GLYPH_PREFIX = "buttonpiece_";
+const SUIT_BUTTON_GLYPH_PREFIX = "buttonsuit_";
 
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 // The greyed button: MUTED_FILL's dark-theme grey, lightened to about #ccc in the light theme.
@@ -81,7 +82,8 @@ export type FrameState = {
 interface ChoiceOption {
     value: string;
     label?: string;
-    glyph?: string; // A legend key; the render adds the entry for a piece's.
+    glyph?: string; // A legend key; the render adds the entry for a piece's or a suit's.
+    glyphPosition?: "prefix" | "suffix"; // Defaults to suffix.
     disabledReason?: { key: string; params?: Record<string, unknown> };
 }
 
@@ -2305,14 +2307,14 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Pick one value from a small labeled set: available is plain, unavailable (a `disabledReason`, shared with minorModeAvailability) is crossed out, the `current` one is greyed.
     private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
-        return options.map(({ value, label, glyph, disabledReason }) => {
+        return options.map(({ value, label, glyph, glyphPosition, disabledReason }) => {
             const button: ButtonBarButton = { value: `${prefix}_${value}` };
             if (label !== undefined) {
                 button.label = label;
             }
             if (glyph !== undefined) {
                 button.glyph = glyph;
-                button.glyphPosition = "suffix";
+                button.glyphPosition = glyphPosition ?? "suffix";
             }
             if (disabledReason !== undefined) {
                 button.attributes = [{ name: "text-decoration", value: "line-through" }];
@@ -2631,6 +2633,11 @@ export class GnosticaGame extends GameBaseSequenced {
         return [...options, ...own];
     }
 
+    // The legend key for a suit's icon shown on a button; the render adds its entry.
+    private static suitButtonGlyph(suitUid: MinorSuitUid): string {
+        return `${SUIT_BUTTON_GLYPH_PREFIX}${suitUid}`;
+    }
+
     // The legend key for a piece shown on a button; the render adds its entry.
     private static pieceButtonGlyph(piece: Piece): string {
         return `${PIECE_BUTTON_GLYPH_PREFIX}${piece.id()}`;
@@ -2698,14 +2705,14 @@ export class GnosticaGame extends GameBaseSequenced {
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
 
         const spacerLabel = pendingMinor.suitUid ? ALL_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
-        buttons.push({ label: spacerLabel, value: "_spacer",  attributes: [{ name: "font-style", value: "italic" }] });
+        buttons.push({ label: spacerLabel, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], ...(pendingMinor.suitUid ? { glyph: GnosticaGame.suitButtonGlyph(pendingMinor.suitUid) } : {}) });
 
         if (pendingMinor.special === "hermitTeleport") {
             if (stepHermitMode(pendingMinor.istep) === undefined) {
                 buttons.push(...this.buildChoiceButtons("target", this.hermitTargetCandidates(pendingMinor), undefined));
             }
         } else if (pendingMinor.special === "magicianChoice") {
-            const options = ALL_SUITS.map(suit => ({ value: suit.uid, label: suit.label }));
+            const options = ALL_SUITS.map(suit => ({ value: suit.uid, label: suit.label, glyph: GnosticaGame.suitButtonGlyph(suit.uid) }));
             buttons.push(...this.buildChoiceButtons("magician", options, undefined));
         } else {
             const suitUid = pendingMinor.suitUid!;
@@ -6452,6 +6459,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 for (const button of actionButtons ?? []) {
                     if (button.glyph?.startsWith(PIECE_BUTTON_GLYPH_PREFIX) && !(button.glyph in legend)) {
                         legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice(PIECE_BUTTON_GLYPH_PREFIX.length)));
+                    } else if (button.glyph?.startsWith(SUIT_BUTTON_GLYPH_PREFIX) && !(button.glyph in legend)) {
+                        legend[button.glyph] = { name: suits.find(suit => suit.uid === button.glyph!.slice(SUIT_BUTTON_GLYPH_PREFIX.length))!.glyph! };
                     }
                 }
                 if (actionButtons !== undefined) {
