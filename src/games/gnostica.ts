@@ -40,14 +40,18 @@ import i18next from "i18next";
 const suitUidOf = (card: TarotCard): MinorSuitUid => card.suit.uid as MinorSuitUid;
 
 // The target-button wording for Rods/Discs/Swords: the verb prefixing each piece candidate, and the whole-territory option.
-const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; tile: string }> = {
-    R: { verb: "Move", tile: "Push Territory" },
+// `selfVerb` is for the minion acting on itself, where it differs: a Rod moves its own minion but pushes any other piece or territory.
+const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; selfVerb?: string; tile: string }> = {
+    R: { verb: "Push", selfVerb: "Move", tile: "Push Territory" },
     D: { verb: "Grow", tile: "Grow Territory" },
     S: { verb: "Attack", tile: "Attack Territory" },
 };
 
 // Printed in the "letters" display where a card has a slot but no power in it.
 const EMPTY_SLOT_MARK = "\u2014";
+
+// Legend key for the mark left where a piece was destroyed.
+const DESTROYED_KEY = "destroyed";
 // A bare icon, with no circle around it, is drawn larger than one inside a circle.
 const BARE_ICON_FACTOR = 1.25;
 
@@ -2597,27 +2601,27 @@ export class GnosticaGame extends GameBaseSequenced {
     // `ownLast` moves the acting player's own pieces after everyone else's (Swords: destroying your own minion is the least likely pick).
     private pieceCandidateOptions(
         pending: IPendingStep, verb: string,
-        opts: { disabledReason?: { key: string; params?: Record<string, unknown> }; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean } = {},
+        opts: { disabledReason?: { key: string; params?: Record<string, unknown> }; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean; selfVerb?: string } = {},
     ): ChoiceOption[] {
-        const { disabledReason, includeSelf = true, filter, ownLast = false } = opts;
+        const { disabledReason, includeSelf = true, filter, ownLast = false, selfVerb = verb } = opts;
         const [tx, ty] = this.minorTargetCell(pending.minion);
         const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
         const options: ChoiceOption[] = [];
         const own: ChoiceOption[] = [];
         const seen = new Set<string>();
-        const pushPieceCandidate = (x: number, y: number, index: number): void => {
+        const pushPieceCandidate = (x: number, y: number, index: number, selfAction = false): void => {
             const ref = this.pieceRefStr({ x, y, index });
             if (seen.has(ref)) {
                 return;
             }
             seen.add(ref);
             const piece = this.board.get(x, y)!.pieces[index];
-            const option = { value: ref, label: `${verb} ${this.ownerLabel(piece.owner)}`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason };
+            const option = { value: ref, label: `${selfAction ? selfVerb : verb} ${this.ownerLabel(piece.owner)}`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason };
             (ownLast && piece.owner === this.currplayer ? own : options).push(option);
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
         if (includeSelf) {
-            pushPieceCandidate(pending.minion.x, pending.minion.y, pending.minion.index);
+            pushPieceCandidate(pending.minion.x, pending.minion.y, pending.minion.index, true);
         }
         cellPieces.forEach((p, index) => {
             if (filter === undefined || filter(p)) {
@@ -2670,10 +2674,10 @@ export class GnosticaGame extends GameBaseSequenced {
             options.push({ value: "new", label: "Create Territory", disabledReason: availability.get("new") });
             return options;
         }
-        const { verb, tile } = RDS_TARGET_LABELS[suitUid];
+        const { verb, selfVerb, tile } = RDS_TARGET_LABELS[suitUid];
         return [
             { value: targetCell, label: tile, disabledReason: availability.get("tile") },
-            ...this.pieceCandidateOptions(pending, verb, { disabledReason: availability.get("piece"), ownLast: suitUid === "S" }),
+            ...this.pieceCandidateOptions(pending, verb, { disabledReason: availability.get("piece"), ownLast: suitUid === "S", selfVerb }),
         ];
     }
 
@@ -5693,7 +5697,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
                 movePiece(ctx, actor.x, actor.y, actor.index, target.x, target.y, target.index, dist, newOrientation, waypoint);
                 if (destroyedInVoid) {
-                    this.results.push({ type: "destroy", where: origin, what: this.getPipsFromRef(targetRef), who: movedOwner });
+                    this.results.push({ type: "move", by, from: origin, to: GnosticaBoard.coords2algebraic(destX, destY), what: this.getPipsFromRef(targetRef), how: "rod-void", who: movedOwner });
                     // Still a real removeAt at target's old slot.  replacesMinion is reported even with no newMinion.
                     return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
                 }
@@ -5849,8 +5853,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const resultSize = beforeSize - pips;
                 const where = GnosticaBoard.coords2algebraic(target.x, target.y);
                 if (resultSize === 0) {
-                    //Omit where to show this is a swords destroy.
-                    this.results.push({ type: "destroy", what: this.getPipsFromRef(targetRef), who: owner });
+                    this.results.push({ type: "destroy", where, what: this.getPipsFromRef(targetRef), who: owner });
                 } else {
                     this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${resultSize}`, where, who: owner });
                 }
@@ -6301,7 +6304,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
             // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
             const rings = this.ringsFromResults(results, board);
-            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, faces, last ? new Map([...rings, ...this.pieceRings()]) : rings);
+            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, faces, last ? new Map([...rings, ...this.pieceRings()]) : rings, this.destroyedCells(results));
 
             const columnLabels: string[] = [];
             for (let x = minX; x <= maxX; x++) {
@@ -6484,14 +6487,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (r.type === "place" && r.where !== undefined && r.how === "territory") {
                     const [x, y] = GnosticaBoard.algebraic2coords(r.where);
                     annotations.push({ type: "enter", targets: [{ row: y - minY, col: x - minX }] });
-                } else if (r.type === "destroy" && r.where !== undefined && r.who !== undefined) {
-                    // Only a Rods push into the void sets both: the piece is gone, so its old cell is marked.
-                    const [x, y] = GnosticaBoard.algebraic2coords(r.where);
-                    annotations.push({ type: "exit", targets: [{ row: y - minY, col: x - minX }] });
                 } else if (r.type === "move" && r.from !== undefined && r.to !== undefined) {
                     const [fx, fy] = GnosticaBoard.algebraic2coords(r.from);
                     const [tx, ty] = GnosticaBoard.algebraic2coords(r.to);
-                    annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, { row: ty - minY, col: tx - minX }] });
+                    // A push into the void ends outside the window, so its arrow stops at the edge.
+                    const end = { row: Math.min(Math.max(ty - minY, 0), height - 1), col: Math.min(Math.max(tx - minX, 0), width - 1) };
+                    annotations.push({ type: "move", targets: [{ row: fy - minY, col: fx - minX }, end] });
                 }
             }
             if (last) {
@@ -6711,6 +6712,19 @@ export class GnosticaGame extends GameBaseSequenced {
         return rings;
     }
 
+    // The cells a move destroyed a piece in: a Swords destroy names the cell, and a Rods push into the void the cell the piece left.
+    private destroyedCells(results: APMoveResult[]): Set<string> {
+        const cells = new Set<string>();
+        for (const r of results) {
+            const cell = r.type === "destroy" && r.who !== undefined ? r.where : r.type === "move" && r.how === "rod-void" ? r.from : undefined;
+            if (cell !== undefined) {
+                const [x, y] = GnosticaBoard.algebraic2coords(cell);
+                cells.add(`${x},${y}`);
+            }
+        }
+        return cells;
+    }
+
     // While the World's borrowed card is still to be picked, the major arcana territories it may borrow from (every one on the board but the World itself).
     private worldPickCells(): Set<string> {
         const pending = this.computePendingMinor();
@@ -6755,6 +6769,7 @@ export class GnosticaGame extends GameBaseSequenced {
         board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number }, largerCards: boolean,
         legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>,
         rings?: Map<string, "minion" | "target">,
+        destroyed: Set<string> = new Set(),
     ): { pieceRows: string[][][]; markers: (MarkerOutline | MarkerGlyph)[] } {
         const pieceRows: string[][][] = [];
         const markers: (MarkerOutline | MarkerGlyph)[] = [];
@@ -6779,7 +6794,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const pieces = t?.pieces ?? [];
                 const slots = this.pieceGridSlots(pieces);
-                rowCells.push(pieces.flatMap((piece, i) => {
+                const keys = pieces.flatMap((piece, i) => {
                     // Keys end up as literal DOM ids in the renderer, so no "." (a rounded slot can't carry one).
                     const slot = slots[i];
                     const key = `p_${piece.id()}_${Math.round(slot.dx)}_${Math.round(slot.dy)}_${Math.round(slot.scale * 100)}`;
@@ -6805,7 +6820,15 @@ export class GnosticaGame extends GameBaseSequenced {
                         }], 1);
                     }
                     return [ringKey, key];
-                }));
+                });
+                if (destroyed.has(`${x},${y}`)) {
+                    // The mark takes the slot an upright piece would get, so it sits at the centre of an empty cell and in a free slot otherwise.
+                    const mark = this.pieceGridSlots([...pieces, new Piece(0, 1, "U")]).at(-1)!;
+                    const markKey = `${DESTROYED_KEY}_${Math.round(mark.dx)}_${Math.round(mark.dy)}_${Math.round(mark.scale * 100)}`;
+                    legend[markKey] ??= GnosticaGame.withBackdrop([{ text: "\u2718", scale: mark.scale, colour: "#d00", orientation: "vertical", nudge: { dx: mark.dx, dy: mark.dy } }], 1);
+                    keys.push(markKey);
+                }
+                rowCells.push(keys);
             }
             pieceRows.push(rowCells);
         }
@@ -7164,19 +7187,10 @@ export class GnosticaGame extends GameBaseSequenced {
                             if (r.who !== undefined) {
                                 //Someone's minion.
                                 const target = this.otherPlayerName(r.who, name, players);
-                                if (r.where !== undefined) {
-                                    //With a rod.
-                                     if (target === undefined) {
-                                         say("apresults:DESTROY.gnostica_rods_own", { what: r.what, where: r.where });
-                                    } else {
-                                        say("apresults:DESTROY.gnostica_rods", { what: r.what, where: r.where, target });
-                                    }
-                                } else {                                
-                                    if (target === undefined) {
-                                        say("apresults:DESTROY.gnostica_piece_own", { what: r.what });
-                                    } else {
-                                        say("apresults:DESTROY.gnostica_piece", { what: r.what, target });
-                                    }
+                                if (target === undefined) {
+                                    say("apresults:DESTROY.gnostica_piece_own", { what: r.what });
+                                } else {
+                                    say("apresults:DESTROY.gnostica_piece", { what: r.what, target });
                                 }
                             } else {
                                 //A territory.
@@ -7188,10 +7202,22 @@ export class GnosticaGame extends GameBaseSequenced {
                             const target = this.otherPlayerName(r.who, name, players);
                             switch (r.how) {
                                 case "rod-piece":
-                                    if (target === undefined) {
+                                    // `by` is only named when another minion did the pushing.
+                                    if (r.by === undefined) {
                                         say("apresults:MOVE.gnostica_rod_piece_own", { what: r.what, from: r.from, to: r.to });
+                                    } else if (target === undefined) {
+                                        say("apresults:MOVE.gnostica_rod_push_own", { what: r.what, from: r.from, to: r.to });
                                     } else {
-                                        say("apresults:MOVE.gnostica_rod_piece", { what: r.what, from: r.from, to: r.to, target });
+                                        say("apresults:MOVE.gnostica_rod_push", { what: r.what, from: r.from, to: r.to, target });
+                                    }
+                                    break;
+                                case "rod-void":
+                                    if (r.by === undefined) {
+                                        say("apresults:MOVE.gnostica_rod_void_self", { what: r.what, from: r.from });
+                                    } else if (target === undefined) {
+                                        say("apresults:MOVE.gnostica_rod_void_own", { what: r.what, from: r.from });
+                                    } else {
+                                        say("apresults:MOVE.gnostica_rod_void", { what: r.what, from: r.from, target });
                                     }
                                     break;
                                 case "rod-tile":

@@ -790,7 +790,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         // logs a line for each step of the chain.
         expect(g.results.filter(r => r.type === "_group")).to.have.length(2);
         const lastNode = g.chatLog(["Alice", "Bob"])[g.getPlies().length - 1];
-        expect(lastNode.some(l => l.includes("moved"))).eq(true); // step 1 (rod-piece)
+        expect(lastNode.some(l => l.includes("pushed"))).eq(true); // step 1 (rod-piece)
         expect(lastNode.some(l => l.includes("added"))).eq(true); // step 2 (cups-own)
     });
 
@@ -1257,28 +1257,48 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(lovers.board.get(-3, 0)?.pieces.length ?? 0).eq(0); // a final landing in the void destroys it
     });
 
-    it("a Rods push into the void marks the cell the piece left with an exit annotation, and a Swords destroy does not", () => {
+    it("a Rods push into the void is a rod-void move: a destroyed mark where the piece was, a shortened arrow, and a ring on the pusher; a Swords destroy keeps its cell", () => {
         const pushed = testGame({
             board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
             hands: [filler, filler],
         });
         pushed.move("use AR/with m0.2 move n0.1 2");
         expect(pushed.board.get(1, 0)?.pieces.length ?? 0).eq(0);
-        const destroy = pushed.results.find(r => r.type === "destroy");
-        expect(destroy).to.deep.include({ where: "n0", who: 2 });
-        const rep = pushed.render().at(-1) as unknown as { annotations?: { type: string; targets: { row: number; col: number }[] }[] };
-        const { minX, minY } = (pushed as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
-        const exits = (rep.annotations ?? []).filter(a => a.type === "exit").flatMap(a => a.targets).map(t => ({ col: t.col + minX, row: t.row + minY }));
-        expect(exits).to.deep.equal([{ col: 1, row: 0 }]);
+        expect(pushed.results.some(r => r.type === "destroy")).to.be.false;
+        expect(pushed.results.find(r => r.type === "move")).to.deep.include({ how: "rod-void", from: "n0", to: "p0", who: 2, by: "m0.12E" });
+        const rep = pushed.render().at(-1) as unknown as { legend: Record<string, { text?: string }[]>; pieces: string[][][]; annotations?: { type: string; targets: { row: number; col: number }[] }[] };
+        const { minX, minY, maxX } = (pushed as unknown as { renderWindow: () => { minX: number; minY: number; maxX: number } }).renderWindow();
+        expect(rep.pieces[0 - minY][1 - minX]).to.deep.equal(["destroyed_0_0_48"]); // an empty cell: the centre slot
+        expect(rep.legend["destroyed_0_0_48"].some(l => l.text === "\u2718")).to.be.true;
+        expect(rep.pieces.flat(2).filter(k => k.startsWith("destroyed_"))).to.have.length(1);
+        expect(rep.pieces[0 - minY][0 - minX].some(k => k.startsWith("ring_minion_"))).to.be.true;
+        const arrow = rep.annotations!.find(a => a.type === "move")!;
+        expect(arrow.targets[0]).to.deep.equal({ row: 0 - minY, col: 1 - minX });
+        expect(arrow.targets[1].col).eq(maxX - minX); // stops at the window's edge, short of the void cell
 
         const struck = testGame({
             board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
             hands: [filler, filler],
         });
         struck.move("use AS/with m0.2 shrink n0.1 1");
-        expect(struck.results.find(r => r.type === "destroy")).to.not.have.property("where");
-        const struckRep = struck.render().at(-1) as unknown as { annotations?: { type: string }[] };
-        expect((struckRep.annotations ?? []).filter(a => a.type === "exit")).to.have.length(0);
+        expect(struck.results.find(r => r.type === "destroy")).to.deep.include({ where: "n0", who: 2 });
+        const struckRep = struck.render().at(-1) as unknown as { pieces: string[][][] };
+        const struckWin = (struck as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        expect(struckRep.pieces[0 - struckWin.minY][1 - struckWin.minX]).to.deep.equal(["destroyed_0_0_48"]);
+
+        // With an upright piece left in the cell, the centre is taken, so the mark goes in a free slot beside it.
+        const crowded = testGame({
+            board: [{ x: 0, y: 0, uid: "AS", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"], [2, 1, "N"]] }],
+            hands: [filler, filler],
+        });
+        crowded.move("use AS/with m0.2 shrink n0.1.N 1");
+        const crowdedRep = crowded.render().at(-1) as unknown as { pieces: string[][][] };
+        const crowdedWin = (crowded as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        const cell = crowdedRep.pieces[0 - crowdedWin.minY][1 - crowdedWin.minX];
+        const markKey = cell.find(k => k.startsWith("destroyed_"))!;
+        expect(markKey).to.not.be.undefined;
+        expect(markKey).to.not.match(/^destroyed_0_0_/);
+        expect(cell.filter(k => k.startsWith("p_"))).to.have.length(1);
     });
 
     it("Empress: orienting the minion first, then creating with ignoreCapacity, still resolves the second step's ref even once orientation makes two pieces identical", () => {
@@ -1364,6 +1384,27 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         };
         expect(outlined("use 21").map(p => p.col).sort()).to.deep.equal([1, 3]); // The Lovers and The Devil, not the World itself or the Ace
         expect(outlined("use 21 as 06")).to.have.length(0);
+    });
+
+    it("a minion that moves itself into the void is said to have moved, not pushed", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "W"]] }], hands: [filler, filler] });
+        g.move("use AR/with m0.2 move m0.2 2 orient U");
+        const line = g.chatLog(["Alice", "Bob"]).flat().find(l => l.includes("void"));
+        expect(line).eq(i18next.t("apresults:MOVE.gnostica_rod_void_self", { player: "Alice", what: "2", from: "m0" }));
+    });
+
+    it("Rods buttons: the minion itself is moved, while another piece or a territory is pushed", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"], [1, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        const internal = g as unknown as {
+            parsePendingStep: (m: unknown) => { advanced?: object };
+            suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: string }[];
+        };
+        const pending = internal.parsePendingStep(g.parseMove("use AR/with m0.2")).advanced!;
+        const labels = internal.suitTargetCandidates(pending, "R").map(c => c.label);
+        expect(labels).to.deep.equal(["Push Territory", "Move own", "Push Player 2's", "Push own"]);
     });
 
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
@@ -4675,7 +4716,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:CONVERT.gnostica_tile_shrink", { player: "Alice", what: withArticle(card(oldUid).name), into: withArticle(card(spotUid).name), where: "n0" }));
     });
 
-    it("move (Rods piece): names whose minion was moved when it isn't the acting player's own", () => {
+    it("push (Rods piece): names whose piece was pushed when it isn't the acting player's own", () => {
         const g = new GnosticaGame(2);
         clearBoard(g);
         forceCardAt(g, 0, 0, () => aceOfRods());
@@ -4684,11 +4725,11 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.move("place n0 W"); // player 2, on the targeted cell
         g.move(`use AR/with m0.1 move n0.1 1 orient U`);
         const log = g.chatLog(["Alice", "Bob"]);
-        const line = log.flat().find(l => l.includes("moved"));
-        expect(line).eq(i18next.t("apresults:MOVE.gnostica_rod_piece", { player: "Alice", what: "1", from: "n0", to: "o0", target: "Bob" }));
+        const line = log.flat().find(l => l.includes("pushed"));
+        expect(line).eq(i18next.t("apresults:MOVE.gnostica_rod_push", { player: "Alice", what: "1", from: "n0", to: "o0", target: "Bob" }));
     });
 
-    it("move (Rods piece): no target named for the acting player's own minion", () => {
+    it("move (Rods piece): a minion moving itself is a move, with no target named", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => aceOfRods());
         g.move("place m0 E"); // player 1
