@@ -4407,10 +4407,9 @@ describe("Gnostica: choose-step click messaging", () => {
     // validateMove("") only populates the status line for the render
     // right after a commit (see playground.js's moveBtn handler). Every
     // state now has a real button to click - the ordinary bar, or a
-    // resume's own Play/Decline pair - so "click a button" always fits;
-    // the card's own real instructions come from the resume_power click,
-    // not prepopulated here. The one exception is a player with no piece
-    // down yet, who must place.
+    // resume's own Play/Decline pair - so "click a button" fits, except
+    // a player with no piece down yet, who must place, and a High
+    // Priestess owing her second round, who gets that round's own message.
     it("validateMove(\"\") is the generic click-a-button wording, or place instructions when no piece is down", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
@@ -4421,7 +4420,7 @@ describe("Gnostica: choose-step click messaging", () => {
 
         g.move(`use 02/discard ${discardUid} draw 1`); // pauses, awaiting round 2; 1 is max: 6 - 5 remaining
         expect(g.continued).to.not.be.empty;
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"));
 
         g.move(`discard draw 0 via 02`); // clears the obligation
         expect(g.continued).to.be.empty;
@@ -4621,6 +4620,12 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
         const round2Draw = g.handleClick(resumed.move, -1, -1, "_btn_hpdraw_0");
         expect(round2Draw.message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
+
+        // The Draw N button must keep the round-2 move resuming the High Priestess.
+        const resumed2 = g.handleClick("", -1, -1, "_btn_resume_power");
+        const picked = g.handleClick(resumed2.move, -1, -1, "_btn_drawcount_0");
+        expect(picked.move).eq("discard draw 0 via 02");
+        expect(g.validateMove(picked.move).valid).to.be.true;
 
         // Same message, computed directly by validateFrameStack itself now -
         // a hand-typed round 2 submission gets it without ever going

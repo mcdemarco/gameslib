@@ -15,10 +15,8 @@ import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, PrimitiveOpts, Special
 import { generateRandomMove } from "./gnostica/randomMove.js";
 import i18next from "i18next";
 
-// ---- Helpers and step grammar for the power rules below, formerly part of gnostica/powers.ts ----
-// Per-size counts of pieces still in reserve [small, medium, large]; mutated in place by takeFromStash/returnToStash below.
 type Stash = [number, number, number];
-// An i18next key suffix + params; every checkX function returns undefined ("legal") or one of these; only validation calls them.
+
 interface PowerFailure {
     key: string;
     params?: Record<string, unknown>;
@@ -59,8 +57,7 @@ const judgementDrawRoom = (minionSize: number, handSize: number): number => Math
 
 // ---- Power step grammar: suit/mode constants and IStep-based mode inference (never legality) ----
 
-// The four minor-arcana suits - a closed set in practice (card data, not user input), typed as such so
-// every switch/if-chain over a suit uid is compile-time exhaustive instead of needing a runtime fallback.
+// The four minor-arcana suits.
 type MinorSuitUid = "C" | "R" | "D" | "S";
 // Rods/Discs/Swords' own step target, and Hermit's fly mode (same shape, different power).
 type TargetMode = "piece" | "tile";
@@ -119,8 +116,7 @@ const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
 };
 // ---- end of the power helpers ----
 
-// card.suit.uid is typed as plain `string` by the shared tarot infra (src/common/tarot), but is always one
-// of the 4 minor suits in practice (fixed card data, not user input) - the one place that fact gets asserted.
+// card.suit.uid is typed as plain `string` by tarot, but is always one of the 4 minor suits.
 const suitUidOf = (card: TarotCard): MinorSuitUid => card.suit.uid as MinorSuitUid;
 
 // The target-button wording for Rods/Discs/Swords: the verb prefixing each piece candidate, and the whole-territory option.
@@ -721,9 +717,11 @@ export class GnosticaGame extends GameBaseSequenced {
             result.complete = -1;
             // The real client calls validateMove("") right after every commit to populate the status line; "click a button" fits every state but a fresh placement.
             result.message = i18next.t(
-                this.continued.length === 0 && !hasPieces
-                    ? "apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE"
-                    : "apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
+                this.getContinuedUid() === "02"
+                    ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"
+                    : this.continued.length === 0 && !hasPieces
+                        ? "apgames:validation.gnostica.INITIAL_INSTRUCTIONS_PLACE"
+                        : "apgames:validation.gnostica.INITIAL_INSTRUCTIONS");
             return result;
         }
 
@@ -3943,7 +3941,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (ctx.parsed.head !== "discard") {
             return ctx.noop;
         }
-        return ["discard", ...(ctx.parsed.steps[0]?.cardList ?? []), "draw", n].join(" ") + ctx.last;
+        const via = ctx.parsed.viaUid !== undefined ? ` via ${ctx.parsed.viaUid}` : "";
+        return ["discard", ...(ctx.parsed.steps[0]?.cardList ?? []), "draw", n].join(" ") + via + ctx.last;
     }
 
     // High Priestess's count-picker - mirrors drawcount_ but appends onto the CURRENT power step's own istep, not the top-level move's args.
