@@ -6709,6 +6709,7 @@
             "NO_CARD_TO_GROW": "You have no card in hand that could grow this territory.",
             "NO_ENEMY_THERE": "There must be an enemy in the target cell already in order to create a new enemy there.",
             "NO_MINIONS_THERE": "You must have a minion in the territory in order to use it.",
+            "OWNER_BUTTON": "{{verb}} {{player}}'s",
             "NO_PIECE_THERE": "You must target a piece in order to trade hands.",
             "NO_POWER_STEPS_HERE": "The move is incomplete.",
             "NO_SUCH_MAJOR_ON_BOARD": "That major arcana card is not currently on the board.",

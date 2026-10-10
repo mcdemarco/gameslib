@@ -14,20 +14,9 @@ import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from 
 import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive } from "./gnostica/majorArcana.js";
 import { generateRandomMove } from "./gnostica/randomMove.js";
 
-// ---- Power rules, formerly gnostica/powers.ts ----
+// ---- Helpers and step grammar for the power rules below, formerly part of gnostica/powers.ts ----
 // Per-size counts of pieces still in reserve [small, medium, large]; mutated in place by takeFromStash/returnToStash below.
 type Stash = [number, number, number];
-
-interface PowerContext {
-    board: GnosticaBoard;
-    currplayer: number;
-    stashes: Map<number, Stash>;
-    // Card uids, mutated in place as cards move between piles - callers that need to preserve pre-call state should clone first.
-    hand: string[];
-    discardPile: string[];
-    drawPile: string[];
-}
-
 // An i18next key suffix + params; every checkX function returns undefined ("legal") or one of these; only validation calls them.
 interface PowerFailure {
     key: string;
@@ -41,225 +30,11 @@ const takeFromPile = (pile: string[], uid: string): TarotCard => {
     return cardByUid(uid);
 };
 
-// Reshuffles discard into draw whenever draw is empty, in place (mirrors cmdDraw) since ctx.drawPile/discardPile alias GnosticaGame's own arrays.
-const reshuffle = (ctx: PowerContext): void => {
-    if (ctx.drawPile.length > 0 || ctx.discardPile.length === 0) {
-        return;
-    }
-    ctx.drawPile.push(...(shuffle(ctx.discardPile) as string[]));
-    ctx.discardPile.length = 0;
-};
-
-const stashOf = (ctx: PowerContext, player: number): Stash => ctx.stashes.get(player)!;
-
-// Exported: the engine needs this directly for the base "place" turn action too.
-const takeFromStash = (ctx: PowerContext, player: number, size: Pips): void => {
-    stashOf(ctx, player)[size - 1] -= 1;
-};
-
-const returnToStash = (ctx: PowerContext, player: number, size: Pips): void => {
-    stashOf(ctx, player)[size - 1] += 1;
-};
-
-// Non-mutating check used by checkX functions and validatePlace; the mutators just do the arithmetic.
-const hasStashAvailable = (ctx: PowerContext, player: number, size: Pips): boolean => {
-    const s = ctx.stashes.get(player);
-    return s !== undefined && s[size - 1] > 0;
-};
-
-const getCellContents = (ctx: PowerContext, x: number, y: number): CellContents => ctx.board.get(x, y)!;
-
-const getPiece = (ctx: PowerContext, x: number, y: number, index: number): Piece => getCellContents(ctx, x, y).pieces[index];
-
-// A cell "has an enemy" if any piece there belongs to someone other than `player`.
-const hasEnemyPieces = (ctx: PowerContext, x: number, y: number, player: number): boolean => {
-    const t = ctx.board.get(x, y);
-    if (t === undefined) {
-        return false;
-    }
-    return t.pieces.some(p => p.owner !== player);
-};
-
-// Pieces stranded in the void by destroyTerritory/pushTerritory return to their owner's stash; shared by Rods' push and Swords' attack-territory.
-const returnEvictedPieces = (ctx: PowerContext, evictions: IEvicted[]): void => {
-    for (const ev of evictions) {
-        for (const p of ev.pieces) {
-            returnToStash(ctx, p.owner, p.size);
-        }
-    }
-};
-
 const checkOwnMinion = (minion: Piece, player: number): PowerFailure | undefined => {
     if (minion.owner !== player) {
         return { key: "NOT_YOUR_MINION" };
     }
     return undefined;
-};
-
-// Shared legality check for a CELL-level target: the minion's own cell ("U") or the single cell it's pointing at.
-const checkValidCellTarget = (
-    ctx: PowerContext, minion: Piece, minionX: number, minionY: number, targetX: number, targetY: number,
-): PowerFailure | undefined => {
-    if (minion.orientation === "U") {
-        if (targetX === minionX && targetY === minionY) {
-            return undefined;
-        }
-        return { key: "MUST_TARGET_SELF" };
-    }
-    const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
-    if (targetX === minionX + dx && targetY === minionY + dy) {
-        return undefined;
-    }
-    return { key: "MUST_TARGET_FACING", params: { facing: minion.orientation } };
-};
-
-// Same, but for a specific PIECE target - a minion may always target itself regardless of orientation.
-const checkValidPieceTarget = (
-    ctx: PowerContext, minion: Piece, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number,
-): PowerFailure | undefined => {
-    const isSelf = targetX === minionX && targetY === minionY && targetIndex === minionIndex;
-    if (isSelf) {
-        return undefined;
-    }
-    return checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
-};
-
-// Cups - Create
-
-// Add one of the acting player's own small pieces to the target cell.
-const checkCreateOwn = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, opts: PrimitiveOpts = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
-    if (targetErr) return targetErr;
-    // A minion sitting on an isolated wasteland (not itself a territory)
-    // can face a cell that's genuinely void - unlike movePiece, which
-    // destroys a piece that lands in the void as a natural consequence of
-    // relocating an EXISTING piece, there's no equivalent cleanup for a
-    // brand-new piece, so it would otherwise just sit there forever,
-    // invisible to every void-eviction path. Reject outright instead,
-    // same as checkCreateTerritory's own wasteland-only restriction.
-    if (ctx.board.classify(targetX, targetY) === "void") {
-        return { key: "TARGET_IS_VOID" };
-    }
-    // The target cell may be a genuinely untouched wasteland (no stored
-    // CellContents object at all, since one is only ever created for a cell
-    // that already has a card or a piece) - that's zero pieces there, not
-    // an error. movePiece/hermitMovePiece already handle an
-    // absent destination the same way; this mirrors them.
-    const t = ctx.board.get(targetX, targetY);
-    const pieceCount = t?.pieces.length ?? 0;
-    if (!opts.ignoreCapacity && pieceCount >= 3) {
-        return { key: "CELL_FULL" };
-    }
-    if (!opts.skipStashCheck && !hasStashAvailable(ctx, ctx.currplayer, 1)) {
-        return { key: "STASH_EMPTY", params: { playerNum: ctx.currplayer, size: 1 } };
-    }
-    return undefined;
-};
-
-const createOwn = (ctx: PowerContext, targetX: number, targetY: number, orientation: Orientation): void => {
-    takeFromStash(ctx, ctx.currplayer, 1);
-    let t = ctx.board.get(targetX, targetY);
-    if (t === undefined) {
-        t = new CellContents(undefined);
-        ctx.board.store.set(targetX, targetY, t);
-    }
-    t.add(new Piece(ctx.currplayer, 1, orientation));
-};
-
-// Add one of the TARGETED enemy's own small pieces to the same cell, matching its orientation, drawn from the enemy's stash.
-const checkCreateEnemy = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
-    if (targetErr) return targetErr;
-    // A void cell can never legitimately have a victim, but check explicitly anyway - creation has no cleanup path for a stranded piece.
-    if (ctx.board.classify(targetX, targetY) === "void") {
-        return { key: "TARGET_IS_VOID" };
-    }
-    const t = ctx.board.get(targetX, targetY);
-    const victim = t?.pieces[victimIndex];
-    if (victim === undefined) {
-        return { key: "INVALID_MOVE", params: { reason: "NO_VICTIM_THERE" } };
-    }
-    if (victim.owner === ctx.currplayer) {
-        return { key: "MUST_TARGET_ENEMY" };
-    }
-    if (!opts.ignoreCapacity && (t?.pieces.length ?? 0) >= 3) {
-        return { key: "CELL_FULL" };
-    }
-    if (!hasStashAvailable(ctx, victim.owner, 1)) {
-        return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: 1 } };
-    }
-    return undefined;
-};
-
-const createEnemy = (ctx: PowerContext, targetX: number, targetY: number, victimIndex: number): void => {
-    const t = getCellContents(ctx, targetX, targetY);
-    const victim = t.pieces[victimIndex];
-    takeFromStash(ctx, victim.owner, 1);
-    t.add(new Piece(victim.owner, 1, victim.orientation));
-};
-
-// Create a territory on a wasteland with a spot card from hand, or (Wheel of Fortune's allowRandomDraw) an unrestricted draw-pile card instead.
-const checkCreateTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
-    if (targetErr) return targetErr;
-    if (ctx.board.classify(targetX, targetY) !== "wasteland") {
-        return { key: "NOT_A_WASTELAND" };
-    }
-    if (hasEnemyPieces(ctx, targetX, targetY, ctx.currplayer)) {
-        return { key: "CELL_HAS_ENEMY" };
-    }
-    if (opts.allowRandomDraw && cardUid === undefined) {
-        if (ctx.drawPile.length === 0 && ctx.discardPile.length === 0) {
-            return { key: "DRAW_PILE_EMPTY" };
-        }
-        return undefined;
-    }
-    if (cardUid === undefined) {
-        return { key: "CARD_UID_REQUIRED" };
-    }
-    if (!ctx.hand.includes(cardUid)) {
-        return { key: "NOT_IN_HAND", params: { uid: cardUid } };
-    }
-    const card = allCards().find(c => c.uid === cardUid);
-    if (card === undefined) {
-        return { key: "UNKNOWN_CARD", params: { uid: cardUid } };
-    }
-    // opts.allowRoyalty (the Sun's shortcut): a royalty card may stand in for creating a spot card and then growing it.
-    if (cardPointValue(card) !== 1 && !(opts.allowRoyalty && cardPointValue(card) === 2)) {
-        return { key: "MUST_BE_SPOT_CARD" };
-    }
-    return undefined;
-};
-
-const createTerritory = (ctx: PowerContext, targetX: number, targetY: number, cardUid: string): void => {
-    ctx.board.createTerritory(targetX, targetY, takeFromPile(ctx.hand, cardUid));
-};
-
-// Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
-const createTerritoryFromDeck = (ctx: PowerContext, targetX: number, targetY: number): TarotCard => {
-    reshuffle(ctx);
-    const card = cardByUid(ctx.drawPile.shift() as string);
-    ctx.board.createTerritory(targetX, targetY, card);
-    return card;
 };
 
 // Rods - Move
@@ -271,620 +46,15 @@ const checkCanUseRod = (minion: Piece): PowerFailure | undefined => {
     return undefined;
 };
 
-// Move the minion itself, or push a targeted piece, `dist` spaces in the minion's own direction.
-const checkMovePiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, dist: number,
-    opts: PrimitiveOpts & { skipLandingCheck?: boolean } = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const rodErr = checkCanUseRod(minion);
-    if (rodErr) return rodErr;
-    const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (targetErr) return targetErr;
-    if (dist < 1 || dist > minion.size) {
-        return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
-    }
-    if (!opts.skipLandingCheck) {
-        const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
-        const destX = targetX + dx * dist;
-        const destY = targetY + dy * dist;
-        // Landing in the void is legal here (unlike Hermit's teleport,
-        // which forbids it) - it just destroys the piece, same as any
-        // other piece that ends up in the void (see returnEvictedPieces).
-        const destT = ctx.board.get(destX, destY);
-        if (destT !== undefined && !destT.canAdd(opts.ignoreCapacity)) {
-            return { key: "CELL_FULL" };
-        }
-    }
-    return undefined;
-};
-
-const movePiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, dist: number,
-    newOrientation: Orientation | undefined, waypoint = false,
-): void => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
-    const destX = targetX + dx * dist;
-    const destY = targetY + dy * dist;
-
-    const srcT = getCellContents(ctx, targetX, targetY);
-    const moved = srcT.removeAt(targetIndex);
-    // The source cell never gets a piece back from this function (it
-    // either lands elsewhere or is destroyed in the void below) - prune
-    // it now if that was its last occupant, so an empty wasteland
-    // doesn't linger in the board's own stored map (see
-    // GnosticaBoard.pruneIfEmpty's own docs).
-    ctx.board.pruneIfEmpty(targetX, targetY);
-    // A genuine final landing in the void destroys the piece. A mid-chain
-    // waypoint (Chariot) must NOT - the piece still needs to be sitting
-    // there for the chain's next step to act on.
-    if (!waypoint && ctx.board.classify(destX, destY) === "void") {
-        returnToStash(ctx, moved.owner, moved.size);
-        return;
-    }
-    if (moved.owner === ctx.currplayer && newOrientation !== undefined) {
-        moved.orientation = newOrientation;
-    }
-    let destT = ctx.board.get(destX, destY);
-    if (destT === undefined) {
-        destT = new CellContents(undefined);
-        ctx.board.store.set(destX, destY, destT);
-    }
-    destT.add(moved);
-};
-
-// Push the territory at the minion-facing (srcX, srcY) `dist` spaces further, same direction; srcX/srcY are caller-supplied so the move string names it.
-const checkMoveTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    srcX: number, srcY: number, dist: number,
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const rodErr = checkCanUseRod(minion);
-    if (rodErr) return rodErr;
-    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, srcX, srcY);
-    if (targetErr) return targetErr;
-    if (ctx.board.classify(srcX, srcY) !== "territory") {
-        return { key: "NO_TERRITORY_THAT_WAY" };
-    }
-    if (hasEnemyPieces(ctx, srcX, srcY, ctx.currplayer)) {
-        return { key: "CELL_HAS_ENEMY" };
-    }
-    if (dist < 1 || dist > minion.size) {
-        return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
-    }
-    const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
-    const destX = srcX + dx * dist;
-    const destY = srcY + dy * dist;
-    if (destX === minionX && destY === minionY) {
-        return { key: "CANT_PUSH_ONTO_SELF" };
-    }
-    if (ctx.board.classify(destX, destY) !== "wasteland") {
-        return { key: "PUSH_NEEDS_WASTELAND" };
-    }
-    if (hasEnemyPieces(ctx, destX, destY, ctx.currplayer)) {
-        return { key: "DESTINATION_HAS_ENEMY" };
-    }
-    return undefined;
-};
-
-const moveTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    srcX: number, srcY: number, dist: number,
-): void => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const [dx, dy] = ctx.board.delta(minion.orientation as DirectionCardinal);
-    const destX = srcX + dx * dist;
-    const destY = srcY + dy * dist;
-    // Pushing the card out can strand pieces left at the departure cell if nothing else keeps it adjacent to a territory.
-    const evictions = ctx.board.pushTerritory(srcX, srcY, destX, destY);
-    returnEvictedPieces(ctx, evictions);
-};
-
 // Discs - Grow
 
 const nextSize = (size: Pips): Pips => (size + 1) as Pips;
 
-// Replace the minion (or a targeted piece) with one exactly one size larger, same owner, drawn from that owner's own stash.
-const checkGrowPiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number,
-    opts: { skipStashCheck?: boolean } = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (targetErr) return targetErr;
-    const target = ctx.board.get(targetX, targetY)?.pieces[targetIndex];
-    if (target === undefined) {
-        return { key: "NO_PIECE_THERE" };
-    }
-    if (target.size >= 3) {
-        return { key: "ALREADY_MAX_SIZE" };
-    }
-    if (!opts.skipStashCheck && !hasStashAvailable(ctx, target.owner, nextSize(target.size))) {
-        return { key: "STASH_EMPTY", params: { playerNum: target.owner, size: nextSize(target.size) } };
-    }
-    return undefined;
-};
-
-const growPiece = (
-    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation | undefined,
-): void => {
-    const t = getCellContents(ctx, targetX, targetY);
-    const target = t.pieces[targetIndex];
-    const grownSize = nextSize(target.size);
-    takeFromStash(ctx, target.owner, grownSize);
-    returnToStash(ctx, target.owner, target.size);
-    const orientation = target.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
-    t.removeAt(targetIndex);
-    t.add(new Piece(target.owner, grownSize, orientation));
-};
-
-// Grow the targeted territory by one point of value (or two, opts.skipLadder), replacing its card from hand or discard (opts.replacementSource).
-const checkGrowTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
-    if (targetErr) return targetErr;
-    if (hasEnemyPieces(ctx, targetX, targetY, ctx.currplayer)) {
-        return { key: "CELL_HAS_ENEMY" };
-    }
-    const t = ctx.board.get(targetX, targetY);
-    const current = t?.pointValue() ?? 0;
-    if (current === 0) {
-        return { key: "NOTHING_TO_GROW" };
-    }
-    if (!replacementCards(ctx, opts).includes(newCardUid)) {
-        return missingReplacement(opts, newCardUid);
-    }
-    const newCard = allCards().find(c => c.uid === newCardUid);
-    if (newCard === undefined) {
-        return { key: "UNKNOWN_CARD", params: { uid: newCardUid } };
-    }
-    const newValue = cardPointValue(newCard);
-    const maxDelta = opts.skipLadder ? 2 : 1;
-    if (newValue <= current || newValue > current + maxDelta) {
-        return { key: "BAD_GROWTH_VALUE", params: { current, newValue } };
-    }
-    return undefined;
-};
-
-// The replacement card comes from wherever it is: the hand, or (Tower/Star) the discards.
-const replacementPile = (ctx: PowerContext, uid: string): string[] => ctx.hand.includes(uid) ? ctx.hand : ctx.discardPile;
-
-// Tower/Star may take the replacement from the discards as well as the hand; every other card, from the hand alone.
-const replacementCards = (ctx: PowerContext, opts: { replacementSource?: "hand" | "discard" }): string[] =>
-    opts.replacementSource === "discard" ? [...ctx.hand, ...ctx.discardPile] : ctx.hand;
-
 const missingReplacement = (opts: { replacementSource?: "hand" | "discard" }, uid: string): PowerFailure =>
     opts.replacementSource === "discard" ? { key: "INVALID_MOVE", params: { reason: "NOT_IN_HAND_OR_DISCARD", uid } } : { key: "NOT_IN_HAND", params: { uid } };
 
-const growTerritory = (ctx: PowerContext, targetX: number, targetY: number, newCardUid: string): void => {
-    const t = getCellContents(ctx, targetX, targetY);
-    const newCard = takeFromPile(replacementPile(ctx, newCardUid), newCardUid);
-    ctx.discardPile.push((t.card as TarotCard).uid);
-    ctx.board.growTerritory(targetX, targetY, newCard);
-};
-
-// Swords - Attack
-
-// Shrink a targeted piece by up to `pips`, replacing it from the VICTIM's own stash - or destroying it outright if the result is 0 pips.
-// opts.bothSwords (Death's shortcut) lets `pips` be the total of both of the card's attacks, i.e. up to twice the minion's size.
-const checkAttackPiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, pips: number,
-    opts: { bothSwords?: boolean } = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (targetErr) return targetErr;
-    if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
-        return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
-    }
-    const victim = ctx.board.get(targetX, targetY)?.pieces[targetIndex];
-    if (victim === undefined) {
-        return { key: "NO_PIECE_THERE" };
-    }
-    const resultSize = victim.size - pips;
-    if (resultSize < 0) {
-        return { key: "TOO_FEW_PIPS", params: { size: victim.size, pips } };
-    }
-    if (resultSize > 0 && !hasStashAvailable(ctx, victim.owner, resultSize as Pips)) {
-        return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: resultSize } };
-    }
-    return undefined;
-};
-
-const attackPiece = (
-    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, pips: number,
-    newOrientation: Orientation | undefined,
-): void => {
-    const t = getCellContents(ctx, targetX, targetY);
-    const victim = t.pieces[targetIndex];
-    const resultSize = victim.size - pips;
-    if (resultSize === 0) {
-        returnToStash(ctx, victim.owner, victim.size);
-        t.removeAt(targetIndex);
-        ctx.board.pruneIfEmpty(targetX, targetY);
-        return;
-    }
-    stashOf(ctx, victim.owner)[resultSize - 1] -= 1;
-    returnToStash(ctx, victim.owner, victim.size);
-    const orientation = victim.owner === ctx.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
-    t.removeAt(targetIndex);
-    t.add(new Piece(victim.owner, resultSize as Pips, orientation));
-};
-
-// Shrink the targeted territory's value by up to `pips`, replacing its card, or destroying it outright if `newCardUid` is omitted.
-const checkAttackTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
-    opts: PrimitiveOpts & { bothSwords?: boolean } = {},
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
-    if (targetErr) return targetErr;
-    if (hasEnemyPieces(ctx, targetX, targetY, ctx.currplayer)) {
-        return { key: "CELL_HAS_ENEMY" };
-    }
-    if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
-        return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
-    }
-    const t = ctx.board.get(targetX, targetY);
-    const current = t?.pointValue() ?? 0;
-    if (current === 0) {
-        return { key: "NOTHING_TO_ATTACK" };
-    }
-    const resultValue = current - pips;
-    if (resultValue < 0) {
-        return { key: "TOO_FEW_PIPS_TERRITORY", params: { current, pips } };
-    }
-    if (resultValue === 0) {
-        if (newCardUid !== undefined) {
-            return { key: "DESTROYED_NEEDS_NO_CARD" };
-        }
-        return undefined;
-    }
-    if (newCardUid === undefined) {
-        return { key: "REPLACEMENT_CARD_REQUIRED" };
-    }
-    if (!replacementCards(ctx, opts).includes(newCardUid)) {
-        return missingReplacement(opts, newCardUid);
-    }
-    const newCard = allCards().find(c => c.uid === newCardUid);
-    if (newCard === undefined) {
-        return { key: "UNKNOWN_CARD", params: { uid: newCardUid } };
-    }
-    const newValue = cardPointValue(newCard);
-    if (newValue !== resultValue) {
-        return { key: "BAD_SHRINK_VALUE", params: { current, newValue, pips } };
-    }
-    return undefined;
-};
-
-const attackTerritory = (
-    ctx: PowerContext, targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
-): void => {
-    const t = getCellContents(ctx, targetX, targetY);
-    const current = t.pointValue();
-    const oldUid = (t.card as TarotCard).uid;
-    const resultValue = current - pips;
-    if (resultValue === 0) {
-        const evictions = ctx.board.destroyTerritory(targetX, targetY);
-        ctx.discardPile.push(oldUid);
-        returnEvictedPieces(ctx, evictions);
-        return;
-    }
-    const newCard = takeFromPile(replacementPile(ctx, newCardUid as string), newCardUid as string);
-    ctx.discardPile.push(oldUid);
-    ctx.board.shrinkTerritory(targetX, targetY, newCard);
-};
-
-// Special powers: the major arcana abilities that don't reduce to a suit primitive; chaining a card's own multi-step power list is gnostica.ts's job.
-
-// Orient one of the acting player's own minions - unlike suit primitives, no adjacency/self targeting restriction here.
-const checkOrientMinion = (ctx: PowerContext, x: number, y: number, index: number): PowerFailure | undefined => {
-    const p = getPiece(ctx, x, y, index);
-    return checkOwnMinion(p, ctx.currplayer);
-};
-
-// The one place any orientation actually gets written - orientMinion, orientAny, and the standalone "orient" command all funnel through here.
-const setPieceOrientation = (
-    ctx: PowerContext, x: number, y: number, index: number, newOrientation: Orientation,
-): void => {
-    getPiece(ctx, x, y, index).orientation = newOrientation;
-};
-
-const orientMinion = (
-    ctx: PowerContext, x: number, y: number, index: number, newOrientation: Orientation,
-): void => {
-    setPieceOrientation(ctx, x, y, index, newOrientation);
-};
-
-// Devil only: orient ANY piece, even an opponent's, still subject to the normal self/adjacent-cell targeting rule.
-const checkOrientAny = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number,
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (targetErr) return targetErr;
-    if (ctx.board.get(targetX, targetY)?.pieces[targetIndex] === undefined) {
-        return { key: "NO_PIECE_THERE" };
-    }
-    return undefined;
-};
-
-const orientAny = (
-    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
-): void => {
-    setPieceOrientation(ctx, targetX, targetY, targetIndex, newOrientation);
-};
-
-// Hierophant: replace the target piece with one of the acting player's own, same size; the displaced piece returns to its owner's stash.
-const checkHierophantReplace = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number,
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (targetErr) return targetErr;
-    const target = ctx.board.get(targetX, targetY)?.pieces[targetIndex];
-    if (target === undefined) {
-        return { key: "NO_PIECE_THERE" };
-    }
-    // Replacing your own piece with another of your own is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
-    if (target.owner === ctx.currplayer) {
-        return { key: "HIEROPHANT_MUST_TARGET_ENEMY" };
-    }
-    if (!hasStashAvailable(ctx, ctx.currplayer, target.size)) {
-        return { key: "STASH_EMPTY", params: { playerNum: ctx.currplayer, size: target.size } };
-    }
-    return undefined;
-};
-
-const hierophantReplace = (
-    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,
-): void => {
-    const t = getCellContents(ctx, targetX, targetY);
-    const target = t.pieces[targetIndex];
-    takeFromStash(ctx, ctx.currplayer, target.size);
-    returnToStash(ctx, target.owner, target.size);
-    t.removeAt(targetIndex);
-    t.add(new Piece(ctx.currplayer, target.size, newOrientation));
-};
-
-// Hermit, piece variant: move a targeted piece to ANY completely empty territory or wasteland, ignoring adjacency/distance limits.
-const checkHermitMovePiece = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number, destX: number, destY: number,
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (targetErr) return targetErr;
-    if (ctx.board.classify(destX, destY) === "void") {
-        return { key: "CANT_END_IN_VOID" };
-    }
-    const destT = ctx.board.get(destX, destY);
-    if (destT !== undefined && destT.pieces.length > 0) {
-        return { key: "HERMIT_NEEDS_EMPTY" };
-    }
-    return undefined;
-};
-
-const hermitMovePiece = (
-    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number,
-    destX: number, destY: number, newOrientation: Orientation | undefined,
-): void => {
-    const srcT = getCellContents(ctx, targetX, targetY);
-    const moved = srcT.removeAt(targetIndex);
-    ctx.board.pruneIfEmpty(targetX, targetY);
-    if (moved.owner === ctx.currplayer && newOrientation !== undefined) {
-        moved.orientation = newOrientation;
-    }
-    let dt = ctx.board.get(destX, destY);
-    if (dt === undefined) {
-        dt = new CellContents(undefined);
-        ctx.board.store.set(destX, destY, dt);
-    }
-    dt.add(moved);
-};
-
-// Hermit, territory variant: move a targeted territory to ANY non-enemy-occupied wasteland - a Rod's tile push without direction/distance limits.
-const checkHermitMoveTerritory = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, destX: number, destY: number,
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidCellTarget(ctx, minion, minionX, minionY, targetX, targetY);
-    if (targetErr) return targetErr;
-    if (hasEnemyPieces(ctx, targetX, targetY, ctx.currplayer)) {
-        return { key: "CELL_HAS_ENEMY" };
-    }
-    if (ctx.board.classify(destX, destY) !== "wasteland") {
-        return { key: "PUSH_NEEDS_WASTELAND" };
-    }
-    if (hasEnemyPieces(ctx, destX, destY, ctx.currplayer)) {
-        return { key: "DESTINATION_HAS_ENEMY" };
-    }
-    return undefined;
-};
-
-const hermitMoveTerritory = (
-    ctx: PowerContext, targetX: number, targetY: number, destX: number, destY: number,
-): void => {
-    const evictions = ctx.board.pushTerritory(targetX, targetY, destX, destY);
-    returnEvictedPieces(ctx, evictions);
-};
-
-// Justice / Hanged Man: swap hands with the owner of the targeted piece; caller must pass the other player's live hand array by reference.
-const checkTradeHands = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number,
-    targetX: number, targetY: number, targetIndex: number,
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const targetErr = checkValidPieceTarget(ctx, minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-    if (targetErr) return targetErr;
-    const target = ctx.board.get(targetX, targetY)?.pieces[targetIndex];
-    if (target === undefined) {
-        return { key: "NO_PIECE_THERE" };
-    }
-    // Swapping hands with yourself is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
-    if (target.owner === ctx.currplayer) {
-        return { key: "TRADEHANDS_MUST_TARGET_ENEMY" };
-    }
-    return undefined;
-};
-
-// Returns the target's owner so the caller can double-check it passed the right array.
-const tradeHands = (
-    ctx: PowerContext, targetX: number, targetY: number, targetIndex: number, otherHand: string[],
-): number => {
-    const target = getPiece(ctx, targetX, targetY, targetIndex);
-    const mine = [...ctx.hand];
-    ctx.hand.length = 0;
-    ctx.hand.push(...otherHand);
-    otherHand.length = 0;
-    otherHand.push(...mine);
-    return target.owner;
-};
-
 // How many cards a Judgement draw may take in all: one per pip of the acting minion, as far as the hand has room.
 const judgementDrawRoom = (minionSize: number, handSize: number): number => Math.min(minionSize, Math.max(0, 6 - handSize));
-
-// Judgement: draw chosen cards from the discard pile into hand, up to one per pip of the acting minion, capped by the 6-card hand limit.
-const checkJudgementDraw = (
-    ctx: PowerContext, minionX: number, minionY: number, minionIndex: number, cardUids: string[],
-): PowerFailure | undefined => {
-    const minion = getPiece(ctx, minionX, minionY, minionIndex);
-    const ownErr = checkOwnMinion(minion, ctx.currplayer);
-    if (ownErr) return ownErr;
-    const maxDraw = judgementDrawRoom(minion.size, ctx.hand.length);
-    if (cardUids.length > maxDraw) {
-        return { key: "TOO_MANY_TO_DRAW", params: { maxDraw, requested: cardUids.length } };
-    }
-    const seen = new Set<string>();
-    for (const uid of cardUids) {
-        if (seen.has(uid)) {
-            return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
-        }
-        seen.add(uid);
-        if (!ctx.discardPile.includes(uid)) {
-            return { key: "INVALID_MOVE", params: { reason: "NOT_IN_DISCARD", uid } };
-        }
-    }
-    return undefined;
-};
-
-const judgementDraw = (ctx: PowerContext, cardUids: string[]): void => {
-    for (const uid of cardUids) {
-        const idx = ctx.discardPile.indexOf(uid);
-        ctx.discardPile.splice(idx, 1);
-        ctx.hand.push(uid);
-    }
-};
-
-// Shared "discard any or none, then draw" primitive - one round is the ordinary end-of-turn action; High Priestess calls this twice.
-const checkDiscardDraw = (ctx: PowerContext, discardUids: string[], drawCountStr?: string): PowerFailure | undefined => {
-    const seen = new Set<string>();
-    for (const uid of discardUids) {
-        if (seen.has(uid)) {
-            return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
-        }
-        seen.add(uid);
-        if (!ctx.hand.includes(uid)) {
-            return { key: "NOT_IN_HAND", params: { uid } };
-        }
-    }
-    if (drawCountStr !== undefined) {
-        const maxDraw = Math.max(0, 6 - (ctx.hand.length - discardUids.length));
-        const count = Number(drawCountStr);
-        if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
-            return { key: "BAD_DRAW_COUNT", params: { requested: drawCountStr, max: maxDraw } };
-        }
-    }
-    return undefined;
-};
-
-const discardCards = (ctx: PowerContext, discardUids: string[]): void => {
-    for (const uid of discardUids) {
-        const idx = ctx.hand.indexOf(uid);
-        ctx.hand.splice(idx, 1);
-        ctx.discardPile.push(uid);
-    }
-};
-
-// Genuinely random, so only ever run once a move is committed; returns the actual count drawn.
-const drawCards = (ctx: PowerContext, count: number): number => {
-    let drawn = 0;
-    while (drawn < count) {
-        reshuffle(ctx);
-        if (ctx.drawPile.length === 0) {
-            break; // nothing left anywhere
-        }
-        ctx.hand.push(ctx.drawPile.shift() as string);
-        drawn++;
-    }
-    return drawn;
-};
-
-const checkFool = (ctx: PowerContext): PowerFailure | undefined =>
-    (ctx.drawPile.length === 0 && ctx.discardPile.length === 0) ? { key: "DRAW_PILE_EMPTY" } : undefined;
-
-// Fool: flip the top draw-pile card straight to discard; dispatching its power is the caller's job (the engine's full per-card dispatcher).
-const fool = (ctx: PowerContext): TarotCard => {
-    reshuffle(ctx);
-    const uid = ctx.drawPile.shift()!;
-    const flipped = cardByUid(uid);
-    ctx.discardPile.push(uid);
-    return flipped;
-};
-
-const checkWorldChoosePower = (ctx: PowerContext, chosenUid: string): PowerFailure | undefined => {
-    if (chosenUid === "21") {
-        return { key: "WORLD_SELF_REFERENCE" };
-    }
-    const present = [...ctx.board.entries()].some(([, , t]) =>
-        t.card !== undefined && t.card.major && t.card.uid === chosenUid);
-    if (!present) {
-        return { key: "NO_SUCH_MAJOR_ON_BOARD", params: { uid: chosenUid } };
-    }
-    if (MAJOR_ARCANA[chosenUid] === undefined) {
-        return { key: "UNKNOWN_CARD", params: { uid: chosenUid } };
-    }
-    return undefined;
-};
-
-// World: validates `chosenUid` names a major arcana card on the board (not World itself) and returns its MajorArcanaDef for the engine to dispatch.
-const worldChoosePower = (ctx: PowerContext, chosenUid: string): MajorArcanaDef => {
-    return MAJOR_ARCANA[chosenUid];
-};
 
 // ---- Power step grammar: suit/mode constants and IStep-based mode inference (never legality) ----
 
@@ -946,7 +116,7 @@ const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
     tradeHands: "trade",
     judgementDraw: "draw",
 };
-// ---- end of the power rules ----
+// ---- end of the power helpers ----
 
 import i18next from "i18next";
 
@@ -996,7 +166,7 @@ export type FrameState = {
 // One button-bar choice, before its value gets a `<prefix>_` prepended - see buildChoiceButtons' own docs.
 interface ChoiceOption {
     value: string;
-    label?: string;
+    label?: string | StructuredRenderLabel;
     glyph?: string; // A legend key; the render adds the entry for a piece's or a suit's.
     glyphPosition?: "prefix" | "suffix"; // Defaults to suffix.
     disabledReason?: { key: string; params?: Record<string, unknown> };
@@ -1811,26 +981,25 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Performs what move() recorded but a preview must not: every deck draw, in the order the steps recorded them, logging each into the step's own result group.
     private resolveHiddenEffects(): void {
-        const ctx = this.buildPowerContext();
         for (const effect of this.hidden) {
             let result: APMoveResult;
             switch (effect.type) {
                 case "flip":
-                    result = { type: "deckDraw", what: fool(ctx).uid, from: "fool" };
+                    result = { type: "deckDraw", what: this.fool().uid, from: "fool" };
                     break;
                 case "territory": {
-                    const card = createTerritoryFromDeck(ctx, effect.x, effect.y);
+                    const card = this.createTerritoryFromDeck(effect.x, effect.y);
                     result = { type: "place", where: GnosticaBoard.coords2algebraic(effect.x, effect.y), how: "territory", what: card.uid };
                     break;
                 }
                 case "trade": {
                     const owner = this.board.get(effect.x, effect.y)!.pieces[effect.index].owner;
-                    tradeHands(ctx, effect.x, effect.y, effect.index, this.hands[owner - 1]);
+                    this.tradeHands(effect.x, effect.y, effect.index, this.hands[owner - 1]);
                     result = { type: "swap", where: GnosticaBoard.coords2algebraic(effect.x, effect.y), who: owner };
                     break;
                 }
                 case "draw": {
-                    const drawn = drawCards(ctx, effect.count);
+                    const drawn = this.drawCards(effect.count);
                     if (effect.setsCardsDrawn) {
                         this.cardsDrawn[this.currplayer - 1] = drawn;
                     }
@@ -3559,7 +2728,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             seen.add(ref);
             const piece = this.board.get(x, y)!.pieces[index];
-            const option = { value: ref, label: `${selfAction ? selfVerb : verb} ${this.ownerLabel(piece.owner)}`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason };
+            const option = { value: ref, label: this.ownerButtonLabel(selfAction ? selfVerb : verb, piece.owner), glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason };
             (ownLast && piece.owner === this.currplayer ? own : options).push(option);
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
@@ -3584,9 +2753,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return `${PIECE_BUTTON_GLYPH_PREFIX}${piece.id()}`;
     }
 
-    // Every target-piece button names whose piece it is, since size/facing alone can match across different opponents.
-    private ownerLabel(owner: number): string {
-        return owner === this.currplayer ? "own" : `Player ${owner}'s`;
+    // Every target-piece button names whose piece it is, since size/facing alone can match across different opponents; another player's is named by seat, for the front end to fill in.
+    private ownerButtonLabel(verb: string, owner: number): string | StructuredRenderLabel {
+        return owner === this.currplayer ? `${verb} own` : this.seatAreaLabel(owner, "apgames:validation.gnostica.OWNER_BUTTON", { verb });
     }
 
     // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy, matching pickPieceTargetClick's own rule.
@@ -3610,7 +2779,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const enemyEntries: ChoiceOption[] = [];
             cellPieces.forEach((p, index) => {
                 if (p.owner !== this.currplayer) {
-                    enemyEntries.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: `Create Enemy ${this.ownerLabel(p.owner)}`, glyph: GnosticaGame.pieceButtonGlyph(p), disabledReason: availability.get("enemy") });
+                    enemyEntries.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: this.ownerButtonLabel("Create Enemy", p.owner), glyph: GnosticaGame.pieceButtonGlyph(p), disabledReason: availability.get("enemy") });
                 }
             });
             if (enemyEntries.length > 0) {
@@ -3690,11 +2859,10 @@ export class GnosticaGame extends GameBaseSequenced {
         const target = pending.game.resolvePieceRef(pending.istep.targetPiece);
         const victim = target.kind === "ok" ? target.ref.piece ?? pending.game.board.get(target.ref.x, target.ref.y)?.pieces[target.ref.index] : undefined;
         const maxPips = Math.min(minionPiece.size * (pending.opts.bothSwords === true ? 2 : 1), victim?.size ?? Infinity);
-        const ctx = pending.game.buildPowerContext();
         const options: ChoiceOption[] = [];
         for (let n = maxPips; n >= 1; n--) {
             const left = victim === undefined ? 0 : victim.size - n;
-            const stashEmpty = victim !== undefined && left > 0 && !hasStashAvailable(ctx, victim.owner, left as Pips);
+            const stashEmpty = victim !== undefined && left > 0 && !pending.game.hasStashAvailable(victim.owner, left as Pips);
             options.push({ value: String(n), label: `Attack for ${n}`, disabledReason: stashEmpty ? { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: left } } : undefined });
         }
         return options;
@@ -4059,10 +3227,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return [];
         }
         const piece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
-        const ctx = this.buildPowerContext();
         const legal: number[] = [];
         for (let dist = 1; dist <= piece.size; dist++) {
-            if (checkMovePiece(ctx, pending.minion.x, pending.minion.y, pending.minion.index, target.ref.x, target.ref.y, target.ref.index, dist) === undefined) {
+            if (this.checkMovePiece(pending.minion.x, pending.minion.y, pending.minion.index, target.ref.x, target.ref.y, target.ref.index, dist) === undefined) {
                 legal.push(dist);
             }
         }
@@ -4073,10 +3240,9 @@ export class GnosticaGame extends GameBaseSequenced {
     private rodPushDistance(minion: IMinionRef): { dist?: number; failure?: PowerFailure } {
         const piece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
         const [tx, ty] = this.minorTargetCell(minion);
-        const ctx = this.buildPowerContext();
         let first: PowerFailure | undefined;
         for (let dist = 1; dist <= piece.size; dist++) {
-            const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, dist);
+            const failure = this.checkMoveTerritory(minion.x, minion.y, minion.index, tx, ty, dist);
             if (failure === undefined) {
                 return { dist };
             }
@@ -4103,8 +3269,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         result.set(mode, { key: "CELL_FULL" });
                         break;
                     }
-                    const ctx = this.buildPowerContext();
-                    const stashOk = pending.opts.skipStashCheck === true || hasStashAvailable(ctx, this.currplayer, 1);
+                    const stashOk = pending.opts.skipStashCheck === true || this.hasStashAvailable(this.currplayer, 1);
                     result.set(mode, stashOk ? undefined : { key: "STASH_EMPTY", params: { playerNum: this.currplayer, size: 1 } });
                     break;
                 }
@@ -5337,7 +4502,7 @@ export class GnosticaGame extends GameBaseSequenced {
             this.board.store.set(x, y, territory);
         }
         // Your very first piece comes from your own stash, same as every other piece that ever enters play - it isn't manufactured out of nothing.
-        takeFromStash(this.buildPowerContext(), this.currplayer, 1);
+        this.takeFromStash(this.currplayer, 1);
         territory.add(new Piece(this.currplayer, 1, orientation));
         this.addBufferIfWasteland(x, y);
         this.results.push({ type: "place", where: cellStr, how: "initial" });
@@ -5380,7 +4545,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.addBufferIfWasteland(x, y);
         const orientation = orientationStr as Orientation;
         // Reorienting one of your own minions, with no adjacency restriction, is exactly what orientMinion already is - reuse it rather than mutating .orientation inline.
-        orientMinion(this.buildPowerContext(), x, y, index, orientation);
+        this.orientMinion(x, y, index, orientation);
         this.pushOrientResult(x, y, index, ref, orientation);
     }
 
@@ -5482,7 +4647,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private cmdDiscard(step: IStep): void {
         const discardUids = step.cardList ?? [];
         const drawCountStr = step.amount?.toString();
-        discardCards(this.buildPowerContext(), discardUids);
+        this.discardCards(discardUids);
         if (discardUids.length > 0) {
             this.discarded.push(...discardUids);
             this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
@@ -5494,7 +4659,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private validateDiscard(parsed: IParsedMove): IValidationResult {
         const discardUids = parsed.steps[0]?.cardList ?? [];
         const drawCountStr = parsed.steps[0]?.amount?.toString();
-        const failure = checkDiscardDraw(this.buildPowerContext(), discardUids, drawCountStr);
+        const failure = this.checkDiscardDraw(discardUids, drawCountStr);
         if (failure) {
             return this.failureResult(failure);
         }
@@ -5505,16 +4670,814 @@ export class GnosticaGame extends GameBaseSequenced {
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
-    // Use / play a card - both minor and major arcana.
-    private buildPowerContext(): PowerContext {
-        return {
-            board: this.board,
-            currplayer: this.currplayer,
-            stashes: this.stashes,
-            hand: this.hands[this.currplayer - 1],
-            discardPile: this.discardPile,
-            drawPile: this.drawPile,
-        };
+    // ---- The power rules: each checkX returns undefined if the action is legal, or a failure; the rest carry the action out ----
+
+    // Reshuffles discard into draw whenever draw is empty, in place (mirrors cmdDraw).
+    private reshuffle(): void {
+        if (this.drawPile.length > 0 || this.discardPile.length === 0) {
+            return;
+        }
+        this.drawPile.push(...(shuffle(this.discardPile) as string[]));
+        this.discardPile.length = 0;
+    }
+
+    private stashOf(player: number): Stash {
+        return this.stashes.get(player as playerid)!;
+    }
+
+    private takeFromStash(player: number, size: Pips): void {
+        this.stashOf(player)[size - 1] -= 1;
+    }
+
+    private returnToStash(player: number, size: Pips): void {
+        this.stashOf(player)[size - 1] += 1;
+    }
+
+    // Non-mutating check used by checkX functions and validatePlace; the mutators just do the arithmetic.
+    private hasStashAvailable(player: number, size: Pips): boolean {
+        const s = this.stashes.get(player as playerid);
+        return s !== undefined && s[size - 1] > 0;
+    }
+
+    private getCellContents(x: number, y: number): CellContents {
+        return this.board.get(x, y)!;
+    }
+
+    private getPiece(x: number, y: number, index: number): Piece {
+        return this.getCellContents(x, y).pieces[index];
+    }
+
+    // A cell "has an enemy" if any piece there belongs to someone other than `player`.
+    private hasEnemyPieces(x: number, y: number, player: number): boolean {
+        const t = this.board.get(x, y);
+        if (t === undefined) {
+            return false;
+        }
+        return t.pieces.some(p => p.owner !== player);
+    }
+
+    // Pieces stranded in the void by destroyTerritory/pushTerritory return to their owner's stash; shared by Rods' push and Swords' attack-territory.
+    private returnEvictedPieces(evictions: IEvicted[]): void {
+        for (const ev of evictions) {
+            for (const p of ev.pieces) {
+                this.returnToStash(p.owner, p.size);
+            }
+        }
+    }
+
+    // Shared legality check for a CELL-level target: the minion's own cell ("U") or the single cell it's pointing at.
+    private checkValidCellTarget(minion: Piece, minionX: number, minionY: number, targetX: number, targetY: number,): PowerFailure | undefined {
+        if (minion.orientation === "U") {
+            if (targetX === minionX && targetY === minionY) {
+                return undefined;
+            }
+            return { key: "MUST_TARGET_SELF" };
+        }
+        const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
+        if (targetX === minionX + dx && targetY === minionY + dy) {
+            return undefined;
+        }
+        return { key: "MUST_TARGET_FACING", params: { facing: minion.orientation } };
+    }
+
+    // Same, but for a specific PIECE target - a minion may always target itself regardless of orientation.
+    private checkValidPieceTarget(
+    minion: Piece, minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number,
+    ): PowerFailure | undefined {
+        const isSelf = targetX === minionX && targetY === minionY && targetIndex === minionIndex;
+        if (isSelf) {
+            return undefined;
+        }
+        return this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+    }
+
+    // Cups - Create
+
+    // Add one of the acting player's own small pieces to the target cell.
+    private checkCreateOwn(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, opts: PrimitiveOpts = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        if (targetErr) return targetErr;
+        // A minion sitting on an isolated wasteland (not itself a territory)
+        // can face a cell that's genuinely void - unlike movePiece, which
+        // destroys a piece that lands in the void as a natural consequence of
+        // relocating an EXISTING piece, there's no equivalent cleanup for a
+        // brand-new piece, so it would otherwise just sit there forever,
+        // invisible to every void-eviction path. Reject outright instead,
+        // same as checkCreateTerritory's own wasteland-only restriction.
+        if (this.board.classify(targetX, targetY) === "void") {
+            return { key: "TARGET_IS_VOID" };
+        }
+        // The target cell may be a genuinely untouched wasteland (no stored
+        // CellContents object at all, since one is only ever created for a cell
+        // that already has a card or a piece) - that's zero pieces there, not
+        // an error. movePiece/hermitMovePiece already handle an
+        // absent destination the same way; this mirrors them.
+        const t = this.board.get(targetX, targetY);
+        const pieceCount = t?.pieces.length ?? 0;
+        if (!opts.ignoreCapacity && pieceCount >= 3) {
+            return { key: "CELL_FULL" };
+        }
+        if (!opts.skipStashCheck && !this.hasStashAvailable(this.currplayer, 1)) {
+            return { key: "STASH_EMPTY", params: { playerNum: this.currplayer, size: 1 } };
+        }
+        return undefined;
+    }
+
+    private createOwn(targetX: number, targetY: number, orientation: Orientation): void {
+        this.takeFromStash(this.currplayer, 1);
+        let t = this.board.get(targetX, targetY);
+        if (t === undefined) {
+            t = new CellContents(undefined);
+            this.board.store.set(targetX, targetY, t);
+        }
+        t.add(new Piece(this.currplayer, 1, orientation));
+    }
+
+    // Add one of the TARGETED enemy's own small pieces to the same cell, matching its orientation, drawn from the enemy's stash.
+    private checkCreateEnemy(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        if (targetErr) return targetErr;
+        // A void cell can never legitimately have a victim, but check explicitly anyway - creation has no cleanup path for a stranded piece.
+        if (this.board.classify(targetX, targetY) === "void") {
+            return { key: "TARGET_IS_VOID" };
+        }
+        const t = this.board.get(targetX, targetY);
+        const victim = t?.pieces[victimIndex];
+        if (victim === undefined) {
+            return { key: "INVALID_MOVE", params: { reason: "NO_VICTIM_THERE" } };
+        }
+        if (victim.owner === this.currplayer) {
+            return { key: "MUST_TARGET_ENEMY" };
+        }
+        if (!opts.ignoreCapacity && (t?.pieces.length ?? 0) >= 3) {
+            return { key: "CELL_FULL" };
+        }
+        if (!this.hasStashAvailable(victim.owner, 1)) {
+            return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: 1 } };
+        }
+        return undefined;
+    }
+
+    private createEnemy(targetX: number, targetY: number, victimIndex: number): void {
+        const t = this.getCellContents(targetX, targetY);
+        const victim = t.pieces[victimIndex];
+        this.takeFromStash(victim.owner, 1);
+        t.add(new Piece(victim.owner, 1, victim.orientation));
+    }
+
+    // Create a territory on a wasteland with a spot card from hand, or (Wheel of Fortune's allowRandomDraw) an unrestricted draw-pile card instead.
+    private checkCreateTerritory(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        if (targetErr) return targetErr;
+        if (this.board.classify(targetX, targetY) !== "wasteland") {
+            return { key: "NOT_A_WASTELAND" };
+        }
+        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+            return { key: "CELL_HAS_ENEMY" };
+        }
+        if (opts.allowRandomDraw && cardUid === undefined) {
+            if (this.drawPile.length === 0 && this.discardPile.length === 0) {
+                return { key: "DRAW_PILE_EMPTY" };
+            }
+            return undefined;
+        }
+        if (cardUid === undefined) {
+            return { key: "CARD_UID_REQUIRED" };
+        }
+        if (!this.hands[this.currplayer - 1].includes(cardUid)) {
+            return { key: "NOT_IN_HAND", params: { uid: cardUid } };
+        }
+        const card = allCards().find(c => c.uid === cardUid);
+        if (card === undefined) {
+            return { key: "UNKNOWN_CARD", params: { uid: cardUid } };
+        }
+        // opts.allowRoyalty (the Sun's shortcut): a royalty card may stand in for creating a spot card and then growing it.
+        if (cardPointValue(card) !== 1 && !(opts.allowRoyalty && cardPointValue(card) === 2)) {
+            return { key: "MUST_BE_SPOT_CARD" };
+        }
+        return undefined;
+    }
+
+    private createTerritory(targetX: number, targetY: number, cardUid: string): void {
+        this.board.createTerritory(targetX, targetY, takeFromPile(this.hands[this.currplayer - 1], cardUid));
+    }
+
+    // Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
+    private createTerritoryFromDeck(targetX: number, targetY: number): TarotCard {
+        this.reshuffle();
+        const card = cardByUid(this.drawPile.shift() as string);
+        this.board.createTerritory(targetX, targetY, card);
+        return card;
+    }
+
+    // Move the minion itself, or push a targeted piece, `dist` spaces in the minion's own direction.
+    private checkMovePiece(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number, dist: number,
+        opts: PrimitiveOpts & { skipLandingCheck?: boolean } = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const rodErr = checkCanUseRod(minion);
+        if (rodErr) return rodErr;
+        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (targetErr) return targetErr;
+        if (dist < 1 || dist > minion.size) {
+            return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
+        }
+        if (!opts.skipLandingCheck) {
+            const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
+            const destX = targetX + dx * dist;
+            const destY = targetY + dy * dist;
+            // Landing in the void is legal here (unlike Hermit's teleport,
+            // which forbids it) - it just destroys the piece, same as any
+            // other piece that ends up in the void (see returnEvictedPieces).
+            const destT = this.board.get(destX, destY);
+            if (destT !== undefined && !destT.canAdd(opts.ignoreCapacity)) {
+                return { key: "CELL_FULL" };
+            }
+        }
+        return undefined;
+    }
+
+    private movePiece(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number, dist: number,
+        newOrientation: Orientation | undefined, waypoint = false,
+    ): void {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
+        const destX = targetX + dx * dist;
+        const destY = targetY + dy * dist;
+
+        const srcT = this.getCellContents(targetX, targetY);
+        const moved = srcT.removeAt(targetIndex);
+        // The source cell never gets a piece back from this function (it
+        // either lands elsewhere or is destroyed in the void below) - prune
+        // it now if that was its last occupant, so an empty wasteland
+        // doesn't linger in the board's own stored map (see
+        // GnosticaBoard.pruneIfEmpty's own docs).
+        this.board.pruneIfEmpty(targetX, targetY);
+        // A genuine final landing in the void destroys the piece. A mid-chain
+        // waypoint (Chariot) must NOT - the piece still needs to be sitting
+        // there for the chain's next step to act on.
+        if (!waypoint && this.board.classify(destX, destY) === "void") {
+            this.returnToStash(moved.owner, moved.size);
+            return;
+        }
+        if (moved.owner === this.currplayer && newOrientation !== undefined) {
+            moved.orientation = newOrientation;
+        }
+        let destT = this.board.get(destX, destY);
+        if (destT === undefined) {
+            destT = new CellContents(undefined);
+            this.board.store.set(destX, destY, destT);
+        }
+        destT.add(moved);
+    }
+
+    // Push the territory at the minion-facing (srcX, srcY) `dist` spaces further, same direction; srcX/srcY are caller-supplied so the move string names it.
+    private checkMoveTerritory(
+    minionX: number, minionY: number, minionIndex: number,
+        srcX: number, srcY: number, dist: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const rodErr = checkCanUseRod(minion);
+        if (rodErr) return rodErr;
+        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, srcX, srcY);
+        if (targetErr) return targetErr;
+        if (this.board.classify(srcX, srcY) !== "territory") {
+            return { key: "NO_TERRITORY_THAT_WAY" };
+        }
+        if (this.hasEnemyPieces(srcX, srcY, this.currplayer)) {
+            return { key: "CELL_HAS_ENEMY" };
+        }
+        if (dist < 1 || dist > minion.size) {
+            return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
+        }
+        const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
+        const destX = srcX + dx * dist;
+        const destY = srcY + dy * dist;
+        if (destX === minionX && destY === minionY) {
+            return { key: "CANT_PUSH_ONTO_SELF" };
+        }
+        if (this.board.classify(destX, destY) !== "wasteland") {
+            return { key: "PUSH_NEEDS_WASTELAND" };
+        }
+        if (this.hasEnemyPieces(destX, destY, this.currplayer)) {
+            return { key: "DESTINATION_HAS_ENEMY" };
+        }
+        return undefined;
+    }
+
+    private moveTerritory(
+    minionX: number, minionY: number, minionIndex: number,
+        srcX: number, srcY: number, dist: number,
+    ): void {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
+        const destX = srcX + dx * dist;
+        const destY = srcY + dy * dist;
+        // Pushing the card out can strand pieces left at the departure cell if nothing else keeps it adjacent to a territory.
+        const evictions = this.board.pushTerritory(srcX, srcY, destX, destY);
+        this.returnEvictedPieces(evictions);
+    }
+
+    // Replace the minion (or a targeted piece) with one exactly one size larger, same owner, drawn from that owner's own stash.
+    private checkGrowPiece(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number,
+        opts: { skipStashCheck?: boolean } = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (targetErr) return targetErr;
+        const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        if (target === undefined) {
+            return { key: "NO_PIECE_THERE" };
+        }
+        if (target.size >= 3) {
+            return { key: "ALREADY_MAX_SIZE" };
+        }
+        if (!opts.skipStashCheck && !this.hasStashAvailable(target.owner, nextSize(target.size))) {
+            return { key: "STASH_EMPTY", params: { playerNum: target.owner, size: nextSize(target.size) } };
+        }
+        return undefined;
+    }
+
+    private growPiece(targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation | undefined,): void {
+        const t = this.getCellContents(targetX, targetY);
+        const target = t.pieces[targetIndex];
+        const grownSize = nextSize(target.size);
+        this.takeFromStash(target.owner, grownSize);
+        this.returnToStash(target.owner, target.size);
+        const orientation = target.owner === this.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
+        t.removeAt(targetIndex);
+        t.add(new Piece(target.owner, grownSize, orientation));
+    }
+
+    // Grow the targeted territory by one point of value (or two, opts.skipLadder), replacing its card from hand or discard (opts.replacementSource).
+    private checkGrowTerritory(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        if (targetErr) return targetErr;
+        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+            return { key: "CELL_HAS_ENEMY" };
+        }
+        const t = this.board.get(targetX, targetY);
+        const current = t?.pointValue() ?? 0;
+        if (current === 0) {
+            return { key: "NOTHING_TO_GROW" };
+        }
+        if (!this.replacementCards(opts).includes(newCardUid)) {
+            return missingReplacement(opts, newCardUid);
+        }
+        const newCard = allCards().find(c => c.uid === newCardUid);
+        if (newCard === undefined) {
+            return { key: "UNKNOWN_CARD", params: { uid: newCardUid } };
+        }
+        const newValue = cardPointValue(newCard);
+        const maxDelta = opts.skipLadder ? 2 : 1;
+        if (newValue <= current || newValue > current + maxDelta) {
+            return { key: "BAD_GROWTH_VALUE", params: { current, newValue } };
+        }
+        return undefined;
+    }
+
+    // The replacement card comes from wherever it is: the hand, or (Tower/Star) the discards.
+    private replacementPile(uid: string): string[] {
+        return this.hands[this.currplayer - 1].includes(uid) ? this.hands[this.currplayer - 1] : this.discardPile;
+    }
+
+    // Tower/Star may take the replacement from the discards as well as the hand; every other card, from the hand alone.
+    private replacementCards(opts: { replacementSource?: "hand" | "discard" }): string[] {
+        return opts.replacementSource === "discard" ? [...this.hands[this.currplayer - 1], ...this.discardPile] : this.hands[this.currplayer - 1];
+    }
+
+    private growTerritory(targetX: number, targetY: number, newCardUid: string): void {
+        const t = this.getCellContents(targetX, targetY);
+        const newCard = takeFromPile(this.replacementPile(newCardUid), newCardUid);
+        this.discardPile.push((t.card as TarotCard).uid);
+        this.board.growTerritory(targetX, targetY, newCard);
+    }
+
+    // Swords - Attack
+
+    // Shrink a targeted piece by up to `pips`, replacing it from the VICTIM's own stash - or destroying it outright if the result is 0 pips.
+    // opts.bothSwords (Death's shortcut) lets `pips` be the total of both of the card's attacks, i.e. up to twice the minion's size.
+    private checkAttackPiece(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number, pips: number,
+        opts: { bothSwords?: boolean } = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (targetErr) return targetErr;
+        if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
+            return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
+        }
+        const victim = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        if (victim === undefined) {
+            return { key: "NO_PIECE_THERE" };
+        }
+        const resultSize = victim.size - pips;
+        if (resultSize < 0) {
+            return { key: "TOO_FEW_PIPS", params: { size: victim.size, pips } };
+        }
+        if (resultSize > 0 && !this.hasStashAvailable(victim.owner, resultSize as Pips)) {
+            return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: resultSize } };
+        }
+        return undefined;
+    }
+
+    private attackPiece(
+    targetX: number, targetY: number, targetIndex: number, pips: number,
+        newOrientation: Orientation | undefined,
+    ): void {
+        const t = this.getCellContents(targetX, targetY);
+        const victim = t.pieces[targetIndex];
+        const resultSize = victim.size - pips;
+        if (resultSize === 0) {
+            this.returnToStash(victim.owner, victim.size);
+            t.removeAt(targetIndex);
+            this.board.pruneIfEmpty(targetX, targetY);
+            return;
+        }
+        this.stashOf(victim.owner)[resultSize - 1] -= 1;
+        this.returnToStash(victim.owner, victim.size);
+        const orientation = victim.owner === this.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
+        t.removeAt(targetIndex);
+        t.add(new Piece(victim.owner, resultSize as Pips, orientation));
+    }
+
+    // Shrink the targeted territory's value by up to `pips`, replacing its card, or destroying it outright if `newCardUid` is omitted.
+    private checkAttackTerritory(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
+        opts: PrimitiveOpts & { bothSwords?: boolean } = {},
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        if (targetErr) return targetErr;
+        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+            return { key: "CELL_HAS_ENEMY" };
+        }
+        if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
+            return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
+        }
+        const t = this.board.get(targetX, targetY);
+        const current = t?.pointValue() ?? 0;
+        if (current === 0) {
+            return { key: "NOTHING_TO_ATTACK" };
+        }
+        const resultValue = current - pips;
+        if (resultValue < 0) {
+            return { key: "TOO_FEW_PIPS_TERRITORY", params: { current, pips } };
+        }
+        if (resultValue === 0) {
+            if (newCardUid !== undefined) {
+                return { key: "DESTROYED_NEEDS_NO_CARD" };
+            }
+            return undefined;
+        }
+        if (newCardUid === undefined) {
+            return { key: "REPLACEMENT_CARD_REQUIRED" };
+        }
+        if (!this.replacementCards(opts).includes(newCardUid)) {
+            return missingReplacement(opts, newCardUid);
+        }
+        const newCard = allCards().find(c => c.uid === newCardUid);
+        if (newCard === undefined) {
+            return { key: "UNKNOWN_CARD", params: { uid: newCardUid } };
+        }
+        const newValue = cardPointValue(newCard);
+        if (newValue !== resultValue) {
+            return { key: "BAD_SHRINK_VALUE", params: { current, newValue, pips } };
+        }
+        return undefined;
+    }
+
+    private attackTerritory(targetX: number, targetY: number, pips: number, newCardUid: string | undefined,): void {
+        const t = this.getCellContents(targetX, targetY);
+        const current = t.pointValue();
+        const oldUid = (t.card as TarotCard).uid;
+        const resultValue = current - pips;
+        if (resultValue === 0) {
+            const evictions = this.board.destroyTerritory(targetX, targetY);
+            this.discardPile.push(oldUid);
+            this.returnEvictedPieces(evictions);
+            return;
+        }
+        const newCard = takeFromPile(this.replacementPile(newCardUid as string), newCardUid as string);
+        this.discardPile.push(oldUid);
+        this.board.shrinkTerritory(targetX, targetY, newCard);
+    }
+
+    // Special powers: the major arcana abilities that don't reduce to a suit primitive; chaining a card's own multi-step power list is gnostica.ts's job.
+
+    // Orient one of the acting player's own minions - unlike suit primitives, no adjacency/self targeting restriction here.
+    private checkOrientMinion(x: number, y: number, index: number): PowerFailure | undefined {
+        const p = this.getPiece(x, y, index);
+        return checkOwnMinion(p, this.currplayer);
+    }
+
+    // The one place any orientation actually gets written - orientMinion, orientAny, and the standalone "orient" command all funnel through here.
+    private setPieceOrientation(x: number, y: number, index: number, newOrientation: Orientation,): void {
+        this.getPiece(x, y, index).orientation = newOrientation;
+    }
+
+    private orientMinion(x: number, y: number, index: number, newOrientation: Orientation,): void {
+        this.setPieceOrientation(x, y, index, newOrientation);
+    }
+
+    // Devil only: orient ANY piece, even an opponent's, still subject to the normal self/adjacent-cell targeting rule.
+    private checkOrientAny(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (targetErr) return targetErr;
+        if (this.board.get(targetX, targetY)?.pieces[targetIndex] === undefined) {
+            return { key: "NO_PIECE_THERE" };
+        }
+        return undefined;
+    }
+
+    private orientAny(targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,): void {
+        this.setPieceOrientation(targetX, targetY, targetIndex, newOrientation);
+    }
+
+    // Hierophant: replace the target piece with one of the acting player's own, same size; the displaced piece returns to its owner's stash.
+    private checkHierophantReplace(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (targetErr) return targetErr;
+        const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        if (target === undefined) {
+            return { key: "NO_PIECE_THERE" };
+        }
+        // Replacing your own piece with another of your own is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
+        if (target.owner === this.currplayer) {
+            return { key: "HIEROPHANT_MUST_TARGET_ENEMY" };
+        }
+        if (!this.hasStashAvailable(this.currplayer, target.size)) {
+            return { key: "STASH_EMPTY", params: { playerNum: this.currplayer, size: target.size } };
+        }
+        return undefined;
+    }
+
+    private hierophantReplace(targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,): void {
+        const t = this.getCellContents(targetX, targetY);
+        const target = t.pieces[targetIndex];
+        this.takeFromStash(this.currplayer, target.size);
+        this.returnToStash(target.owner, target.size);
+        t.removeAt(targetIndex);
+        t.add(new Piece(this.currplayer, target.size, newOrientation));
+    }
+
+    // Hermit, piece variant: move a targeted piece to ANY completely empty territory or wasteland, ignoring adjacency/distance limits.
+    private checkHermitMovePiece(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number, destX: number, destY: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (targetErr) return targetErr;
+        if (this.board.classify(destX, destY) === "void") {
+            return { key: "CANT_END_IN_VOID" };
+        }
+        const destT = this.board.get(destX, destY);
+        if (destT !== undefined && destT.pieces.length > 0) {
+            return { key: "HERMIT_NEEDS_EMPTY" };
+        }
+        return undefined;
+    }
+
+    private hermitMovePiece(
+    targetX: number, targetY: number, targetIndex: number,
+        destX: number, destY: number, newOrientation: Orientation | undefined,
+    ): void {
+        const srcT = this.getCellContents(targetX, targetY);
+        const moved = srcT.removeAt(targetIndex);
+        this.board.pruneIfEmpty(targetX, targetY);
+        if (moved.owner === this.currplayer && newOrientation !== undefined) {
+            moved.orientation = newOrientation;
+        }
+        let dt = this.board.get(destX, destY);
+        if (dt === undefined) {
+            dt = new CellContents(undefined);
+            this.board.store.set(destX, destY, dt);
+        }
+        dt.add(moved);
+    }
+
+    // Hermit, territory variant: move a targeted territory to ANY non-enemy-occupied wasteland - a Rod's tile push without direction/distance limits.
+    private checkHermitMoveTerritory(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, destX: number, destY: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        if (targetErr) return targetErr;
+        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+            return { key: "CELL_HAS_ENEMY" };
+        }
+        if (this.board.classify(destX, destY) !== "wasteland") {
+            return { key: "PUSH_NEEDS_WASTELAND" };
+        }
+        if (this.hasEnemyPieces(destX, destY, this.currplayer)) {
+            return { key: "DESTINATION_HAS_ENEMY" };
+        }
+        return undefined;
+    }
+
+    private hermitMoveTerritory(targetX: number, targetY: number, destX: number, destY: number,): void {
+        const evictions = this.board.pushTerritory(targetX, targetY, destX, destY);
+        this.returnEvictedPieces(evictions);
+    }
+
+    // Justice / Hanged Man: swap hands with the owner of the targeted piece; caller must pass the other player's live hand array by reference.
+    private checkTradeHands(
+    minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (targetErr) return targetErr;
+        const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        if (target === undefined) {
+            return { key: "NO_PIECE_THERE" };
+        }
+        // Swapping hands with yourself is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
+        if (target.owner === this.currplayer) {
+            return { key: "TRADEHANDS_MUST_TARGET_ENEMY" };
+        }
+        return undefined;
+    }
+
+    // Returns the target's owner so the caller can double-check it passed the right array.
+    private tradeHands(targetX: number, targetY: number, targetIndex: number, otherHand: string[],): number {
+        const target = this.getPiece(targetX, targetY, targetIndex);
+        const mine = [...this.hands[this.currplayer - 1]];
+        this.hands[this.currplayer - 1].length = 0;
+        this.hands[this.currplayer - 1].push(...otherHand);
+        otherHand.length = 0;
+        otherHand.push(...mine);
+        return target.owner;
+    }
+
+    // Judgement: draw chosen cards from the discard pile into hand, up to one per pip of the acting minion, capped by the 6-card hand limit.
+    private checkJudgementDraw(minionX: number, minionY: number, minionIndex: number, cardUids: string[],): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        const maxDraw = judgementDrawRoom(minion.size, this.hands[this.currplayer - 1].length);
+        if (cardUids.length > maxDraw) {
+            return { key: "TOO_MANY_TO_DRAW", params: { maxDraw, requested: cardUids.length } };
+        }
+        const seen = new Set<string>();
+        for (const uid of cardUids) {
+            if (seen.has(uid)) {
+                return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
+            }
+            seen.add(uid);
+            if (!this.discardPile.includes(uid)) {
+                return { key: "INVALID_MOVE", params: { reason: "NOT_IN_DISCARD", uid } };
+            }
+        }
+        return undefined;
+    }
+
+    private judgementDraw(cardUids: string[]): void {
+        for (const uid of cardUids) {
+            const idx = this.discardPile.indexOf(uid);
+            this.discardPile.splice(idx, 1);
+            this.hands[this.currplayer - 1].push(uid);
+        }
+    }
+
+    // Shared "discard any or none, then draw" primitive - one round is the ordinary end-of-turn action; High Priestess calls this twice.
+    private checkDiscardDraw(discardUids: string[], drawCountStr?: string): PowerFailure | undefined {
+        const seen = new Set<string>();
+        for (const uid of discardUids) {
+            if (seen.has(uid)) {
+                return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
+            }
+            seen.add(uid);
+            if (!this.hands[this.currplayer - 1].includes(uid)) {
+                return { key: "NOT_IN_HAND", params: { uid } };
+            }
+        }
+        if (drawCountStr !== undefined) {
+            const maxDraw = Math.max(0, 6 - (this.hands[this.currplayer - 1].length - discardUids.length));
+            const count = Number(drawCountStr);
+            if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
+                return { key: "BAD_DRAW_COUNT", params: { requested: drawCountStr, max: maxDraw } };
+            }
+        }
+        return undefined;
+    }
+
+    private discardCards(discardUids: string[]): void {
+        for (const uid of discardUids) {
+            const idx = this.hands[this.currplayer - 1].indexOf(uid);
+            this.hands[this.currplayer - 1].splice(idx, 1);
+            this.discardPile.push(uid);
+        }
+    }
+
+    // Genuinely random, so only ever run once a move is committed; returns the actual count drawn.
+    private drawCards(count: number): number {
+        let drawn = 0;
+        while (drawn < count) {
+            this.reshuffle();
+            if (this.drawPile.length === 0) {
+                break; // nothing left anywhere
+            }
+            this.hands[this.currplayer - 1].push(this.drawPile.shift() as string);
+            drawn++;
+        }
+        return drawn;
+    }
+
+    private checkFool(): PowerFailure | undefined {
+        return (this.drawPile.length === 0 && this.discardPile.length === 0) ? { key: "DRAW_PILE_EMPTY" } : undefined;
+    }
+
+    // Fool: flip the top draw-pile card straight to discard; dispatching its power is the caller's job (the engine's full per-card dispatcher).
+    private fool(): TarotCard {
+        this.reshuffle();
+        const uid = this.drawPile.shift()!;
+        const flipped = cardByUid(uid);
+        this.discardPile.push(uid);
+        return flipped;
+    }
+
+    private checkWorldChoosePower(chosenUid: string): PowerFailure | undefined {
+        if (chosenUid === "21") {
+            return { key: "WORLD_SELF_REFERENCE" };
+        }
+        const present = [...this.board.entries()].some(([, , t]) =>
+            t.card !== undefined && t.card.major && t.card.uid === chosenUid);
+        if (!present) {
+            return { key: "NO_SUCH_MAJOR_ON_BOARD", params: { uid: chosenUid } };
+        }
+        if (MAJOR_ARCANA[chosenUid] === undefined) {
+            return { key: "UNKNOWN_CARD", params: { uid: chosenUid } };
+        }
+        return undefined;
+    }
+
+    // World: validates `chosenUid` names a major arcana card on the board (not World itself) and returns its MajorArcanaDef for the engine to dispatch.
+    private worldChoosePower(chosenUid: string): MajorArcanaDef {
+        return MAJOR_ARCANA[chosenUid];
     }
 
     // "use <cardUid>" targets a card by its own identity, not a cell.  Cards are unique, so we can derive the cell.
@@ -5618,7 +5581,6 @@ export class GnosticaGame extends GameBaseSequenced {
     private applyPowers(uid: string | undefined, owed: Owed[], allSteps: IStep[], asUid: string | undefined, partial: boolean, how?: string): Owed[] | undefined {
         // A skip only names the power left unused; the step that follows it says everything that happens.
         const steps = allSteps.filter(step => step.action !== "skip");
-        const ctx = this.buildPowerContext();
         const chained = steps.length + (asUid !== undefined ? 1 : 0) > 1;
         let counted = 0;
         let at = 0;
@@ -5664,7 +5626,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (partial) {
                     return "stopped";
                 }
-                if (checkFool(ctx) !== undefined) {
+                if (this.checkFool() !== undefined) {
                     // Nothing left to flip: both flips are spent.
                     return "done";
                 }
@@ -5724,7 +5686,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (partial) {
                     return undefined;
                 }
-                if (checkFool(ctx) !== undefined) {
+                if (this.checkFool() !== undefined) {
                     owed.pop();
                     continue;
                 }
@@ -6319,7 +6281,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (borrowedPower === undefined) {
                 return undefined;
             }
-            const borrowedDef = worldChoosePower(this.buildPowerContext(), borrowedPower);
+            const borrowedDef = this.worldChoosePower(borrowedPower);
             this.results.push({ type: "use", what: borrowedPower, count: 21 });
             return { pushFrame: { cardUid: borrowedDef.uid, minions } };
         }
@@ -6329,7 +6291,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { forcePause: stepIndex + 1 < totalSteps };
         }
         if ("special" in step && step.special === "fool") {
-            const failure = checkFool(this.buildPowerContext());
+            const failure = this.checkFool();
             if (failure) {
                 // Nothing to flip: complete.  Validation already rejected the root Fool's own untouched first flip.
                 return {};
@@ -6406,7 +6368,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: false };
         }
         if ("special" in step && step.special === "fool") {
-            const failure = checkFool(this.buildPowerContext());
+            const failure = this.checkFool();
             if (failure) {
                 if (isFreshRootFool) {
                     // The ROOT Fool card's own untouched first flip stays a hard rejection.
@@ -6568,7 +6530,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Cups - own <cell> <orientation> | enemy <cell> <victimRef> | new <cell> (<uid>|random)
     private applyCups(mode: CupsMode, step: IStep): IStepOutcome {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "own": {
                 // The creation's mandatory initial facing, possibly still carrying a trailing "?" - makes no difference to the piece created, so it's stripped the same way cmdPlace strips its own.
@@ -6577,7 +6538,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
                 const orientation = orientationStr as Orientation;
-                createOwn(ctx, tx, ty, orientation);
+                this.createOwn(tx, ty, orientation);
                 this.addBufferIfWasteland(tx, ty);
                 this.results.push({ type: "place", where: cellStr, how: "cups-own" });
                 const newIndex = this.board.get(tx, ty)!.pieces.length - 1;
@@ -6590,7 +6551,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // victimRef is a full piece ref (#106) - validateCups already confirmed it names a piece at this cell, so its index is trusted directly.
                 const { index: victimIndex } = this.resolvePieceRefTrusted(victimRef);
                 const victimOwner = this.board.get(tx, ty)!.pieces[victimIndex].owner;
-                createEnemy(ctx, tx, ty, victimIndex);
+                this.createEnemy(tx, ty, victimIndex);
                 this.results.push({ type: "place", where: cellStr, how: "cups-enemy", who: victimOwner });
                 return {}; // the new piece belongs to the targeted enemy, not the acting player
             }
@@ -6603,7 +6564,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     this.hidden.push({ type: "territory", x: tx, y: ty });
                     return {};
                 }
-                createTerritory(ctx, tx, ty, cardArg!);
+                this.createTerritory(tx, ty, cardArg!);
                 this.results.push({ type: "place", where: cellStr, how: "territory", what: cardArg! });
                 return this.cardValueByUid(cardArg!) === 2 ? { consumesRest: true } : {};
             }
@@ -6611,14 +6572,13 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validateCups(minion: IMinionRef, mode: CupsMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "own": {
                 // A brand-new minion can't reasonably go unoriented - "U" is a real, always-legal choice, never auto-assigned but always REQUIRED as an explicit fact of creation.
                 const cellStr = step.atCell!;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 // parseMove already guarantees a valid N/E/S/W/U (with or without the "?" marking a seeded default), so there's nothing left to validate about the facing.
-                const failure = checkCreateOwn(ctx, minion.x, minion.y, minion.index, tx, ty, opts);
+                const failure = this.checkCreateOwn(minion.x, minion.y, minion.index, tx, ty, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6636,7 +6596,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (victimResult.ref.x !== tx || victimResult.ref.y !== ty) {
                     return { failed: true, result: this.failureResult({ key: "NO_VICTIM_THERE" }) };
                 }
-                const failure = checkCreateEnemy(ctx, minion.x, minion.y, minion.index, tx, ty, victimResult.ref.index, opts);
+                const failure = this.checkCreateEnemy(minion.x, minion.y, minion.index, tx, ty, victimResult.ref.index, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6648,8 +6608,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 // Mirrors applyCups's own "new" case - "drawn" is parsed as step.amount === 1, and only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
                 const failure = step.amount === 1 && opts.allowRandomDraw
-                    ? checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, undefined, opts)
-                    : checkCreateTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
+                    ? this.checkCreateTerritory(minion.x, minion.y, minion.index, tx, ty, undefined, opts)
+                    : this.checkCreateTerritory(minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6660,7 +6620,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Rods - piece <targetRef> <dist> [orientation] | tile <dist>
     private applyRods(minion: () => IMinionRef, mode: TargetMode, step: IStep, waypoint: boolean): IStepOutcome {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6681,7 +6640,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // A genuine final landing (not a Chariot-relaxed waypoint) in the void destroys the piece instead of moving it.
                 const destroyedInVoid = !waypoint && this.board.classify(destX, destY) === "void";
                 const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
-                movePiece(ctx, actor.x, actor.y, actor.index, target.x, target.y, target.index, dist, newOrientation, waypoint);
+                this.movePiece(actor.x, actor.y, actor.index, target.x, target.y, target.index, dist, newOrientation, waypoint);
                 if (destroyedInVoid) {
                     this.results.push({ type: "move", by, from: origin, to: GnosticaBoard.coords2algebraic(destX, destY), what: this.getPipsFromRef(targetRef), how: "rod-void", who: movedOwner });
                     // Still a real removeAt at target's old slot.  replacesMinion is reported even with no newMinion.
@@ -6704,7 +6663,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const actor = minion();
                 const actorPiece = actor.piece ?? this.board.get(actor.x, actor.y)!.pieces[actor.index];
                 const [dx, dy] = this.board.delta(actorPiece.orientation as Exclude<Orientation, "U">);
-                moveTerritory(ctx, actor.x, actor.y, actor.index, srcX, srcY, dist);
+                this.moveTerritory(actor.x, actor.y, actor.index, srcX, srcY, dist);
                 const to = GnosticaBoard.coords2algebraic(srcX + dx * dist, srcY + dy * dist);
                 this.results.push({ type: "move", by: this.pieceIdAt(actor.x, actor.y, actorPiece), from: cellStr, to, how: "rod-tile" });
                 return {};
@@ -6713,7 +6672,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validateRods(minion: IMinionRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6723,7 +6681,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                const failure = checkMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, opts);
+                const failure = this.checkMovePiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6733,7 +6691,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.targetCell!;
                 const dist = step.amount!;
                 const [srcX, srcY] = GnosticaBoard.algebraic2coords(cellStr);
-                const failure = checkMoveTerritory(ctx, minion.x, minion.y, minion.index, srcX, srcY, dist);
+                const failure = this.checkMoveTerritory(minion.x, minion.y, minion.index, srcX, srcY, dist);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6744,7 +6702,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Discs - piece <targetRef> [orientation] | tile <cell> <newCardUid>
     private applyDiscs(mode: TargetMode, step: IStep): IStepOutcome {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6754,7 +6711,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
-                growPiece(ctx, target.x, target.y, target.index, newOrientation);
+                this.growPiece(target.x, target.y, target.index, newOrientation);
                 this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: owner });
                 if (owner === this.currplayer) {
                     const grown = this.board.get(target.x, target.y)!.pieces;
@@ -6771,7 +6728,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const beforeUid = this.board.get(tx, ty)!.card!.uid;
                 const jumpsTwo = this.cardValueByUid(newCardUid) - this.board.get(tx, ty)!.pointValue() === 2;
-                growTerritory(ctx, tx, ty, newCardUid);
+                this.growTerritory(tx, ty, newCardUid);
                 this.results.push({ type: "convert", what: beforeUid, into: newCardUid, where: cellStr });
                 return jumpsTwo ? { consumesRest: true } : {};
             }
@@ -6779,7 +6736,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validateDiscs(minion: IMinionRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6788,7 +6744,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                const failure = checkGrowPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, opts);
+                const failure = this.checkGrowPiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6798,7 +6754,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.targetCell!;
                 const newCardUid = step.card!;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const failure = checkGrowTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, newCardUid, opts);
+                const failure = this.checkGrowTerritory(minion.x, minion.y, minion.index, tx, ty, newCardUid, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6823,7 +6779,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private applySwords(mode: TargetMode, step: IStep): IStepOutcome {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6835,7 +6790,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const pips = Math.min(step.amount!, targetPiece.size);
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
-                attackPiece(ctx, target.x, target.y, target.index, pips, newOrientation);
+                this.attackPiece(target.x, target.y, target.index, pips, newOrientation);
                 const resultSize = beforeSize - pips;
                 const where = GnosticaBoard.coords2algebraic(target.x, target.y);
                 if (resultSize === 0) {
@@ -6858,7 +6813,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const beforeUid = this.board.get(tx, ty)!.card!.uid;
                 const pips = Math.min(step.amount!, this.board.get(tx, ty)!.pointValue());
-                attackTerritory(ctx, tx, ty, pips, newCardUid);
+                this.attackTerritory(tx, ty, pips, newCardUid);
                 // A replacement card means the territory survived, shrunk; only a true wipeout (no replacement) is a "destroy".
                 if (newCardUid === undefined) {
                     this.results.push({ type: "destroy", where: cellStr, what: beforeUid });
@@ -6871,7 +6826,6 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private validateSwords(minion: IMinionRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
-        const ctx = this.buildPowerContext();
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6882,7 +6836,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const target = targetResult.ref;
                 const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
                 const pips = this.effectiveShrink(step.amount!, targetPiece.size, opts);
-                const failure = checkAttackPiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, opts);
+                const failure = this.checkAttackPiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6893,7 +6847,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const newCardUid = step.card;
                 const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
                 const pips = this.effectiveShrink(step.amount!, this.board.get(tx, ty)?.pointValue() ?? 0, opts);
-                const failure = checkAttackTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
+                const failure = this.checkAttackTerritory(minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6908,7 +6862,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const own = step.targetPiece === undefined || step.targetPiece.toLowerCase() === step.withPiece?.toLowerCase();
         const target = own ? minion() : this.resolvePieceRefTrusted(step.targetPiece!);
         const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
-        orientAny(this.buildPowerContext(), target.x, target.y, target.index, orientation);
+        this.orientAny(target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
         this.pushOrientResult(target.x, target.y, target.index, own ? this.pieceRefStr(target) : step.targetPiece!, orientation);
         return own || owner === this.currplayer ? { newMinion: target, replacesMinion: target } : {};
@@ -6917,7 +6871,7 @@ export class GnosticaGame extends GameBaseSequenced {
     public validateOrientMinion(minion: IMinionRef, step: IStep): StepValidation {
         // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
         const orientation = step.direction! as Orientation;
-        const failure = checkOrientMinion(this.buildPowerContext(), minion.x, minion.y, minion.index);
+        const failure = this.checkOrientMinion(minion.x, minion.y, minion.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
@@ -6940,7 +6894,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const target = targetResult.ref;
         // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
         const orientation = orientationStr as Orientation;
-        const failure = checkOrientAny(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
+        const failure = this.checkOrientAny(minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
@@ -6962,7 +6916,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const previousOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
         const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
         const orientation = orientationStr as Orientation;
-        hierophantReplace(this.buildPowerContext(), target.x, target.y, target.index, orientation);
+        this.hierophantReplace(target.x, target.y, target.index, orientation);
         this.addBufferIfWasteland(target.x, target.y);
         this.results.push({ type: "convert", what: this.getPipsFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: previousOwner });
         const replaced = this.board.get(target.x, target.y)!.pieces;
@@ -6983,7 +6937,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationToken }) };
         }
         // parseMove already guarantees a valid N/E/S/W/U (with or without a "?" marking the click handler's seeded default), so there's nothing left to validate about the facing.
-        const failure = checkHierophantReplace(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
+        const failure = this.checkHierophantReplace(minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
@@ -6993,7 +6947,6 @@ export class GnosticaGame extends GameBaseSequenced {
     // Hermit - <minionRef> fly <targetPieceRef> to <destCell> [orient <direction>] | <minionRef> fly <cardUid> to <destCell>
     private applyHermitStep(step: IStep): IStepOutcome {
         const mode = stepHermitMode(step)!;
-        const ctx = this.buildPowerContext();
         const destCellStr = step.targetCell!;
         switch (mode) {
             case "piece": {
@@ -7003,7 +6956,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
                 const newOrientation = step.direction as Orientation | undefined;
                 const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
-                hermitMovePiece(ctx, target.x, target.y, target.index, destX, destY, newOrientation);
+                this.hermitMovePiece(target.x, target.y, target.index, destX, destY, newOrientation);
                 this.results.push({ type: "move", from: origin, to: destCellStr, what: this.getPipsFromRef(targetRef), how: "hermit-piece", who: owner });
                 if (owner === this.currplayer) {
                     const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
@@ -7014,7 +6967,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const { x: tx, y: ty } = this.resolveTileCard(step.card)!;
                 const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
-                hermitMoveTerritory(ctx, tx, ty, destX, destY);
+                this.hermitMoveTerritory(tx, ty, destX, destY);
                 this.results.push({ type: "move", from: GnosticaBoard.coords2algebraic(tx, ty), to: destCellStr, how: "hermit-tile" });
                 return {};
             }
@@ -7023,7 +6976,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     public validateHermitStep(minion: IMinionRef, step: IStep): StepValidation {
         const mode = stepHermitMode(step)!;
-        const ctx = this.buildPowerContext();
         const destCellStr = step.targetCell!;
         const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
         switch (mode) {
@@ -7035,7 +6987,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const target = targetResult.ref;
                 // parseMove now rejects a non-single-letter direction here too (AMBIGUOUS_DIRECTION), so step.direction is always a real N/E/S/W/U (or absent) by now.
-                const failure = checkHermitMovePiece(ctx, minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY);
+                const failure = this.checkHermitMovePiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -7047,7 +6999,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.NO_SUCH_TILE", { card: step.card }) };
                 }
                 const { x: tx, y: ty } = targetCoords;
-                const failure = checkHermitMoveTerritory(ctx, minion.x, minion.y, minion.index, tx, ty, destX, destY);
+                const failure = this.checkHermitMoveTerritory(minion.x, minion.y, minion.index, tx, ty, destX, destY);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -7071,7 +7023,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
-        const failure = checkTradeHands(this.buildPowerContext(), minion.x, minion.y, minion.index, target.x, target.y, target.index);
+        const failure = this.checkTradeHands(minion.x, minion.y, minion.index, target.x, target.y, target.index);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
@@ -7081,13 +7033,13 @@ export class GnosticaGame extends GameBaseSequenced {
     // Judgement: <minionRef> draw <discardUid...>
     private applyJudgementDraw(step: IStep): void {
         const uids = step.cardList ?? [];
-        judgementDraw(this.buildPowerContext(), uids);
+        this.judgementDraw(uids);
         this.results.push({ type: "deckDraw", count: uids.length, from: "discard" });
     }
 
     public validateJudgementDraw(minion: IMinionRef, step: IStep): IValidationResult {
         const uids = step.cardList ?? [];
-        const failure = checkJudgementDraw(this.buildPowerContext(), minion.x, minion.y, minion.index, uids);
+        const failure = this.checkJudgementDraw(minion.x, minion.y, minion.index, uids);
         return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
@@ -7095,7 +7047,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private applyHighPriestess(step: IStep | undefined, partial: boolean): void {
         const discardUids = step?.cardList ?? [];
         const drawCountStr = step?.amount?.toString();
-        discardCards(this.buildPowerContext(), discardUids);
+        this.discardCards(discardUids);
         if (!partial && discardUids.length > 0) {
             this.discarded.push(...discardUids);
             this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
@@ -7109,7 +7061,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const discardUids = step?.cardList ?? [];
         const drawCountStr = step?.amount?.toString();
-        const failure = checkDiscardDraw(this.buildPowerContext(), discardUids, drawCountStr);
+        const failure = this.checkDiscardDraw(discardUids, drawCountStr);
         if (failure) {
             return this.failureResult(failure);
         }
@@ -7122,7 +7074,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // World: <chosenUid> - the minionRef itself is already stripped/resolved by applyPowerStep's own pre-switch logic, same as every other special.
     private validateWorldChoosePower(chosenUid: string): IValidationResult {
-        const failure = checkWorldChoosePower(this.buildPowerContext(), chosenUid);
+        const failure = this.checkWorldChoosePower(chosenUid);
         return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
@@ -7198,11 +7150,10 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The rule is that an eliminated player discards their hand.  A decision: Pieces are returned to stash.
     private eliminatePlayer(player: playerid): void {
-        const ctx = this.buildPowerContext();
         for (const [x, y, t] of this.board.entries()) {
             for (const p of t.pieces) {
                 if (p.owner === player) {
-                    returnToStash(ctx, p.owner, p.size);
+                    this.returnToStash(p.owner, p.size);
                 }
             }
             t.pieces = t.pieces.filter(p => p.owner !== player);

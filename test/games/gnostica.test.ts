@@ -590,6 +590,8 @@ describe("Gnostica: sidebarScores", () => {
 // testGame() (TODO #107) rather than forced onto a live, randomly-dealt game. Filler hand cards
 // are unrelated spot cards, present only so a hand isn't suspiciously empty.
 const filler = ["2R", "3R", "4R", "5D", "6D", "7D"];
+// The structured label a button gets for another player's piece.
+const ownerLabel = (seat: number, verb: string) => ({ textKey: "apgames:validation.gnostica.OWNER_BUTTON", actor: { kind: "seat", seat }, textParams: { verb } });
 
 describe("Gnostica: activate/play - minor arcana suit powers", () => {
     it("Cups (own): adds an own small piece to the target cell", () => {
@@ -1447,11 +1449,11 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         });
         const internal = g as unknown as {
             parsePendingStep: (m: unknown) => { advanced?: object };
-            suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: string }[];
+            suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: unknown }[];
         };
         const pending = internal.parsePendingStep(g.parseMove("use AR/with m0.2")).advanced!;
         const labels = internal.suitTargetCandidates(pending, "R").map(c => c.label);
-        expect(labels).to.deep.equal(["Push Territory", "Move own", "Push Player 2's", "Push own"]);
+        expect(labels).to.deep.equal(["Push Territory", "Move own", ownerLabel(2, "Push"), "Push own"]);
     });
 
     it("Use Territory: until a territory is chosen, the ones the player has a minion on are marked", () => {
@@ -3443,7 +3445,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string; glyph?: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.some(b => b.value === "target_own")).to.be.true;
             const enemyBtn = buttons.find(b => b.value === "target_n0.1")!;
-            expect(enemyBtn.label).to.eq("Create Enemy Player 1's");
+            expect(enemyBtn.label).to.deep.equal(ownerLabel(1, "Create Enemy"));
             expect(enemyBtn.glyph).to.eq("buttonpiece_11U");
             const territory = buttons.find(b => b.value === "target_new")!;
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
@@ -3483,10 +3485,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             });
             const internal = g as unknown as {
                 parsePendingStep: (m: unknown) => { advanced?: object };
-                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: string }[];
+                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: unknown }[];
             };
             const pending = internal.parsePendingStep(g.parseMove("use AS")).advanced!;
-            const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => c.label!.endsWith(" own") ? "own" : "enemy");
+            const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => typeof c.label === "string" && c.label.endsWith(" own") ? "own" : "enemy");
             expect(owners).to.deep.equal(["enemy", "enemy", "own", "own"]);
         });
 
@@ -3499,11 +3501,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             });
             const internal = g as unknown as {
                 parsePendingStep: (m: unknown) => { advanced?: object };
-                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
+                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: unknown }[];
             };
             const pending = internal.parsePendingStep(g.parseMove("use AC")).advanced!;
-            const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label).sort();
-            expect(enemyLabels).to.deep.equal(["Create Enemy Player 2's", "Create Enemy Player 3's"]);
+            const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label);
+            expect(enemyLabels).to.deep.equal([ownerLabel(2, "Create Enemy"), ownerLabel(3, "Create Enemy")]);
 
             const g2 = testGame({
                 board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
@@ -3511,11 +3513,11 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             });
             const internal2 = g2 as unknown as {
                 parsePendingStep: (m: unknown) => { advanced?: object };
-                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: string }[];
+                suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: unknown }[];
             };
             const pending2 = internal2.parsePendingStep(g2.parseMove("use AC")).advanced!;
             const candidates2 = internal2.suitTargetCandidates(pending2, "C");
-            expect(candidates2.find(c => c.value === "o0.1")!.label).to.eq("Create Enemy Player 2's");
+            expect(candidates2.find(c => c.value === "o0.1")!.label).to.deep.equal(ownerLabel(2, "Create Enemy"));
         });
 
         it("Create Minion is struck through once the acting player's own stash has no 1-pip piece left, and a click on it does nothing", () => {
