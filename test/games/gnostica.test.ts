@@ -3743,7 +3743,7 @@ describe("Gnostica: handleClick - minion disambiguation", () => {
 });
 
 // validateMove() is a genuine, non-mutating validator (gnostica.ts's
-// validateX tree + gnostica/powers.ts's checkX functions) - every
+// validateX tree + gnostica.ts's checkX functions) - every
 // powers.ts failure must surface its own real message, not a generic
 // INVALID_MOVE fallback, and validation must never mutate game state.
 describe("Gnostica: validateMove architecture (non-mutating validator)", () => {
