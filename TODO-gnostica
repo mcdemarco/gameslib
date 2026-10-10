@@ -34,6 +34,7 @@ Refactoring:
 	- #99 - Remove one-liner wrappers like invalid() and failureResult().
 	- #107 - Tests should not assemble internal structures manually. Done? but some unit testing remains to be removed for #29.
 	- #141 - Turn the power rules in gnostica.ts (formerly powers.ts) into methods, replacing PowerContext/buildPowerContext. @done(2026-10-10)
+	- #142 - Drop `index` from IPieceRef (a piece is its cell plus size, facing and owner); mutators find the piece by attributes instead.
 	
 Rebasing:
 	- #72 - Address the chatLog issue now in resolveChatSeat(), ideally on the next rebase onto develop.
