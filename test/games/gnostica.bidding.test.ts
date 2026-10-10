@@ -445,14 +445,6 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
 });
 
 describe("Gnostica: bidding variant, stage 3 (click support)", () => {
-    it("the bare 'Bid' button seeds an incomplete move with the right prompt", () => {
-        const g = new GnosticaGame(2, ["bidding"]);
-        const result = g.handleClick("", -1, -1, "_btn_bid");
-        expect(result.move).eq("bid");
-        expect(result.valid).to.be.true;
-        expect(result.complete).eq(-1);
-    });
-
     it("clicking a hand card during bidding builds bid <n> from its 1-based hand position", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.hands[0] = ["AC", "2C", "KS", "3C", "4C", "5C"];
@@ -479,14 +471,6 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         g.hands[0] = ["AC", "2C", "3C", "4C", "5C", "6C"];
         const result = g.handleClick("", -1, -1, "cKS");
         expect(result.valid).to.be.false;
-    });
-
-    it("the bare 'Redraw' button seeds an incomplete move with the right prompt", () => {
-        const g = setupRedraw();
-        const result = g.handleClick("", -1, -1, "_btn_redraw");
-        expect(result.move).eq("redraw");
-        expect(result.valid).to.be.true;
-        expect(result.complete).eq(-1);
     });
 
     it("clicking pool cards during redraw toggles a uid list, building redraw <uid...>", () => {
@@ -541,19 +525,19 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         expect(() => g.move("place l0 U")).to.not.throw();
     });
 
-    it("render() offers a single bold 'Bid'/'Redraw' button per phase, and the pool area only appears once populated", () => {
+    it("render() has no button bar in the bidding or redraw phase, and the pool area only appears once populated", () => {
         addResource("en");
         const bidding = new GnosticaGame(2, ["bidding"]);
         const biddingRep = bidding.render().at(-1) as APRenderRep;
         const biddingBar = biddingRep.areas?.find((a): a is AreaButtonBar => a.type === "buttonBar");
-        expect(biddingBar?.buttons).to.deep.equal([{ label: "Bid", value: "bid", attributes: [{ name: "font-weight", value: "bold" }] }]);
+        expect(biddingBar).to.be.undefined;
         const isPool = (a: { label?: unknown }) => typeof a.label === "object" && (a.label as { textKey?: string }).textKey === "apgames:validation.gnostica.LABEL_BIDDING_POOL";
         expect(biddingRep.areas?.some(a => a.type === "pieces" && isPool(a))).to.be.false;
 
         const redraw = setupRedraw();
         const redrawRep = redraw.render().at(-1) as APRenderRep;
         const redrawBar = redrawRep.areas?.find((a): a is AreaButtonBar => a.type === "buttonBar");
-        expect(redrawBar?.buttons).to.deep.equal([{ label: "Redraw", value: "redraw", attributes: [{ name: "font-weight", value: "bold" }] }]);
+        expect(redrawBar).to.be.undefined;
         const poolArea = redrawRep.areas?.find(a => a.type === "pieces" && isPool(a));
         expect(poolArea).to.not.be.undefined;
     });

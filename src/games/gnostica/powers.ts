@@ -887,7 +887,7 @@ export type TargetMode = "piece" | "tile";
 export type CupsMode = "own" | "enemy" | "new";
 export type MinorMode = CupsMode | TargetMode;
 
-// The four minor-arcana suits, shared by gnostica.ts and randomMove.ts (which can't import values from gnostica.ts).
+// The four minor-arcana suits.
 export const ALL_SUITS: { uid: MinorSuitUid; label: string }[] = [
     { uid: "C", label: "Cups" },
     { uid: "R", label: "Rods" },

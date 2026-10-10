@@ -1409,6 +1409,37 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(line).eq(i18next.t("apresults:MOVE.gnostica_rod_void_self", { player: "Alice", what: "2", from: "m0" }));
     });
 
+    it("Rods (piece): the distance is filled in when it is the only one that lands the piece legally", () => {
+        const g = testGame({
+            board: [
+                { x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] },
+                { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] },
+                { x: 2, y: 0, uid: "2D", pieces: [[2, 1, "U"], [2, 1, "U"], [2, 1, "U"]] }, // full, so distance 1 is out
+            ],
+            hands: [filler, filler],
+        });
+        const open = testGame({
+            board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        expect(g.handleClick("use AR", -1, -1, "_btn_target_n0.1").move).eq("use AR/with m0.2 move n0.1 2");
+        expect(open.handleClick("use AR", -1, -1, "_btn_target_n0.1").move).eq("use AR/with m0.2 move n0.1"); // both distances are open: still a choice
+    });
+
+    it("Moon: while the moved minion's facing is still open, the bar holds only Skip Reorient, not the next step's Swords buttons", () => {
+        const mk = () => testGame({
+            board: [{ x: 0, y: 0, uid: "18", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }, { x: 2, y: 0, uid: "2D" }],
+            hands: [filler, filler],
+        });
+        const bar = (g: GnosticaGame) => (g.render().at(-1) as unknown as { areas: { type: string; buttons?: { label?: string; value?: string }[] }[] }).areas.find(a => a.type === "buttonBar")!.buttons!.map(b => b.label ?? b.value);
+        const open = mk();
+        open.move("use 18/with m0.2 move m0.2 1", { partial: true });
+        expect(bar(open)).to.deep.equal(["Use Territory (18)", "Skip Reorient", "(Declare)", "Undo"]);
+        const settled = mk();
+        settled.move("use 18/with m0.2 move m0.2 1 orient E", { partial: true });
+        expect(bar(settled)).to.include("Swords");
+    });
+
     it("Rods buttons: the minion itself is moved, while another piece or a territory is pushed", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"], [1, 1, "U"]] }],
@@ -1421,6 +1452,81 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const pending = internal.parsePendingStep(g.parseMove("use AR/with m0.2")).advanced!;
         const labels = internal.suitTargetCandidates(pending, "R").map(c => c.label);
         expect(labels).to.deep.equal(["Push Territory", "Move own", "Push Player 2's", "Push own"]);
+    });
+
+    it("Use Territory: until a territory is chosen, the ones the player has a minion on are marked", () => {
+        const enters = (partial: string): number[] => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }, { x: 2, y: 0, uid: "AR" }, { x: 0, y: 1, uid: "AS", pieces: [[1, 1, "U"]] }],
+                hands: [filler, filler],
+            });
+            g.move(partial, { partial: true });
+            const rep = g.render().at(-1) as unknown as { annotations?: { type: string; targets: { row: number; col: number }[] }[] };
+            const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+            return (rep.annotations ?? []).filter(a => a.type === "enter").flatMap(a => a.targets).map(t => (t.row + minY) * 10 + t.col + minX).sort();
+        };
+        expect(enters("use")).to.deep.equal([0, 10]); // m0 and m-1; not the enemy's n0 or the empty o0
+        expect(enters("use AC")).to.deep.equal([]);
+    });
+
+    it("Rods: an upright minion can't act, so it isn't offered, and a lone facing minion needs no picker", () => {
+        const mk = (pieces: TestPiece[]) => testGame({ board: [{ x: 0, y: 0, uid: "AR", pieces }, { x: 1, y: 0, uid: "AD" }], hands: [filler, filler] });
+        const bar = (g: GnosticaGame) => (g.render().at(-1) as unknown as { areas: { type: string; buttons?: { label?: string; value?: string }[] }[] }).areas.find(a => a.type === "buttonBar")!.buttons!;
+
+        const one = mk([[1, 1, "U"], [1, 2, "E"]]);
+        one.move("use AR", { partial: true });
+        expect(bar(one).some(b => b.value?.startsWith("minion_"))).to.be.false; // the 2-pip facing east is the only candidate
+        expect(bar(one).some(b => b.value?.startsWith("target_"))).to.be.true;
+
+        const two = mk([[1, 1, "N"], [1, 2, "E"], [1, 3, "U"]]);
+        two.move("use AR", { partial: true });
+        expect(bar(two).filter(b => b.value?.startsWith("minion_"))).to.have.length(2); // both facing minions, not the upright one
+    });
+
+    it("Rods played from the hand: clicking a cell with one facing and one upright minion picks the facing one without a picker", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"], [1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[1, 1, "N"]] }],
+            hands: [["6R", ...filler.slice(1)], filler],
+        });
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        const clicked = g.handleClick("play 6R", 0 - minY, 0 - minX);
+        expect(clicked.move).eq("play 6R/with m0.2");
+        expect(clicked.message).to.not.eq(i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON"));
+    });
+
+    it("Orient: a click on a cell with none of the player's pieces leaves the move as it was and says what to click", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"], [1, 2, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [filler, filler],
+        });
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        const picked = g.handleClick("orient m0", 0 - minY, 1 - minX); // the enemy's cell
+        expect(picked).to.deep.include({ move: "orient m0", valid: true });
+        expect(picked.message).eq(i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT"));
+        expect(g.handleClick("orient", 0 - minY, 1 - minX)).to.deep.include({ move: "orient", valid: true });
+    });
+
+    it("Orient: picking among several pieces on a cell keeps the Orient and Declare buttons", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"], [1, 2, "U"]] }],
+            hands: [filler, filler],
+        });
+        g.move("orient m0", { partial: true });
+        const bar = (g.render().at(-1) as unknown as { areas: { type: string; buttons?: { label?: string; value?: string }[] }[] }).areas.find(a => a.type === "buttonBar")!.buttons!;
+        expect(bar.map(b => b.label ?? b.value)).to.deep.equal(["Orient", "Choose Minion", "1-pip", "2-pip", "(Declare)", "Undo"]);
+    });
+
+    it("Orient: until a piece is chosen, every one of the player's pieces is ringed", () => {
+        const ringed = (partial: string): string[] => {
+            const g = testGame({
+                board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"], [1, 2, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+                hands: [filler, filler],
+            });
+            g.move(partial, { partial: true });
+            return (g.render().at(-1) as unknown as { pieces: string[][][] }).pieces.flat(2).filter(k => k.startsWith("ring_")).sort();
+        };
+        expect(ringed("orient")).to.have.length(2); // both of the player's pieces, not the enemy's
+        expect(ringed("orient m0.1.E")).to.have.length(0);
     });
 
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
@@ -2278,7 +2384,8 @@ describe("Gnostica: handleClick", () => {
         expect(first.move).eq("orient m0.1");
         const [rowFar, colFar] = rowColFor(g, 2, 0); // "o0", not adjacent to m0, no piece there either
         const far = g.handleClick(first.move, rowFar, colFar);
-        expect(far.valid).to.be.false; // no piece of the acting player's there to (re-)select
+        expect(far.move).eq(first.move); // no piece of the acting player's there to (re-)select, so the selection stands
+        expect(far.message).eq(i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT"));
     });
 
     // Regression: orient's own first click used to grab whichever of the
@@ -2323,7 +2430,8 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U");
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("", row, col);
-        expect(result.valid).to.be.false;
+        expect(result.move).eq("");
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
     });
 
     it("Use Territory (activate) via the button bar, then a board click, builds a use move", () => {
@@ -2656,7 +2764,36 @@ describe("Gnostica: handleClick", () => {
         g.move("place l0 U"); // player 2 - now player 1's turn again
         const [row, col] = rowColFor(g, -1, 0); // "l0", player 2's piece
         const result = g.handleClick("", row, col);
-        expect(result.valid).to.be.false;
+        expect(result.move).eq("");
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+    });
+
+    it("World: a pick that isn't a borrowable major arcana leaves the move as it was, previewable, with its message", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "21", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AC" }],
+            hands: [filler, filler],
+        });
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        const minor = g.handleClick("use 21", 0 - minY, 1 - minX);
+        expect(minor).to.deep.include({ move: "use 21", valid: true });
+        expect(minor.message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
+        const self = g.handleClick("use 21", 0 - minY, 0 - minX);
+        expect(self).to.deep.include({ move: "use 21", valid: true });
+        expect(self.message).eq(i18next.t("apgames:validation.gnostica.WORLD_SELF_REFERENCE"));
+    });
+
+    it("a click on a cell that can't be used leaves a played card or used territory as it was, and previewable", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }, { x: 0, y: 1, uid: "AR", pieces: [[1, 2, "N"]] }],
+            hands: [["3C", ...filler.slice(1)], filler],
+        });
+        const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
+        const enemy = g.handleClick("play 3C", 0 - minY, 1 - minX);
+        expect(enemy).to.deep.include({ move: "play 3C", valid: true });
+        expect(enemy.message).to.not.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+        const use = g.handleClick("use", 0 - minY, 1 - minX);
+        expect(use).to.deep.include({ move: "use", valid: true });
+        expect(use.message).eq(i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell: "n0" }));
     });
 
     it("discard: clicking a hand card toggles it into a discard move/and clicking again toggles it back out", () => {
@@ -2674,21 +2811,26 @@ describe("Gnostica: handleClick", () => {
         expect(second.move).eq("discard");
     });
 
-    it("a bare hand-card click with no action selected yet is rejected, not defaulted into discard", () => {
+    it("a bare hand-card click with no action selected yet is ignored, not defaulted into discard", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
         const uid = g.hands[0][0];
         const result = g.handleClick("", -1, -1, `c${uid}`);
-        expect(result.valid).to.be.false;
+        expect(result.move).eq("");
         expect(result.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+        // With an action already chosen, the move's own prompt stands instead.
+        const orient = g.handleClick("orient", -1, -1, `c${uid}`);
+        expect(orient).to.deep.include({ move: "orient", valid: true });
+        expect(orient.message).to.not.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
     });
 
-    it("discard: rejects a hand-card click for a card not in the acting player's hand", () => {
+    it("discard: ignores a hand-card click for a card not in the acting player's hand, leaving the move as it was", () => {
         const g = new GnosticaGame(2);
         const uid = g.hands[1][0]; // player 2's card, player 1 is acting
-        const result = g.handleClick("", -1, -1, `c${uid}`);
-        expect(result.valid).to.be.false;
+        const result = g.handleClick("orient", -1, -1, `c${uid}`);
+        expect(result).to.deep.include({ move: "orient", valid: true });
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }));
     });
 
     // Hand redaction (blanking an opponent's hand uids to "") is the back
@@ -3581,7 +3723,6 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // a click there no-ops instead of appending a facing.
         const clickOnTarget = g.handleClick(targeted.move, rowFace, colFace);
         expect(clickOnTarget.move).eq(targeted.move); // unchanged - no facing appended
-        expect(clickOnTarget.valid).to.be.false;
     });
 });
 
@@ -4346,7 +4487,6 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const selfClick = g.handleClick(cellClick.move, row, col); // m0 itself, not n0
-        expect(selfClick.valid).to.be.false;
         expect(selfClick.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
         expect(selfClick.move).eq(cellClick.move); // the move string never advances into the doomed state
     });

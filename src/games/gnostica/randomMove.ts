@@ -31,7 +31,17 @@ import { cardPointValue } from "./cell.js";
 import { Orientation, allOrientations } from "./piece.js";
 import { GnosticaBoard } from "./board.js";
 import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana.js";
-import { ALL_SUITS, RDS_VERBS, MinorSuitUid, MinorMode } from "./powers.js";
+
+// Copies of powers.ts's suit and mode definitions, so this file can go without leaving anything behind.
+type MinorSuitUid = "C" | "R" | "D" | "S";
+type MinorMode = "own" | "enemy" | "new" | "piece" | "tile";
+const ALL_SUITS: { uid: MinorSuitUid; label: string }[] = [
+    { uid: "C", label: "Cups" },
+    { uid: "R", label: "Rods" },
+    { uid: "D", label: "Discs" },
+    { uid: "S", label: "Swords" },
+];
+const RDS_VERBS: Partial<Record<MinorSuitUid, string>> = { R: "move", D: "grow", S: "shrink" };
 
 // Mirrors GnosticaGame's own private static chainMinion exactly (see its
 // docs there, including #98/#100's own) - duplicated rather than imported
