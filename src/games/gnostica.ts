@@ -8,7 +8,7 @@ import { APMoveResult } from "../schemas/moveresults.js";
 import { Direction, DirectionCardinal, replacer, reviver, shuffle, UserFacingError } from "../common/index.js";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board.js";
 import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot/index.js";
-import { GnosticaBoard, IEvicted } from "./gnostica/board.js";
+import { CellClass, GnosticaBoard, IEvicted } from "./gnostica/board.js";
 import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell.js";
 import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece.js";
 import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive } from "./gnostica/majorArcana.js";
@@ -172,34 +172,37 @@ interface ILegendObj {
 }
 
 // A minion's board location; `piece` carries owner/size/orientation for a newMinion predicted by validate* before the board is actually mutated.
-export interface IMinionRef {
-    x: number;
-    y: number;
+export interface IPieceRef {
+    cell: string;
     index: number;
     piece?: Piece;
 }
 
+const xy = (cell: string): [number, number] => GnosticaBoard.algebraic2coords(cell);
+// The canonical spelling of a typed cell name, so it compares equal to the one a piece carries.
+const canonicalCell = (name: string): string => GnosticaBoard.coords2algebraic(...xy(name.toLowerCase()));
+
 // What a single suit-power step did, for chaining later steps of the same major-arcana activation (which of the acting player's own pieces moved).
 export interface IStepOutcome {
-    newMinion?: IMinionRef;
+    newMinion?: IPieceRef;
     // The EXISTING frame-pool entry (matched by x,y,index) newMinion supersedes - unset only when nothing existing became invalid (Cups' "create").
-    replacesMinion?: IMinionRef;
+    replacesMinion?: IPieceRef;
     // Hand off to a DIFFERENT card's power array (World's target, or Fool's flip).
-    pushFrame?: { cardUid: string; minions: IMinionRef[] };
+    pushFrame?: { cardUid: string; minions: IPieceRef[] };
     // Must pause here regardless of further supplied step segments - the outcome is hidden (Fool's flip) or a later sibling step needs it (High Priestess).
     forcePause?: boolean;
     // This step's tokens still carry a trailing "?" (Cups "own" creation's mandatory facing) - read by validateMinorPower/validateFrameStack as complete:0.
     softComplete?: boolean;
     // Rods "piece" mode's own landing cell, regardless of the moved piece's owner (newMinion is only set for the acting player's own) - Moon's own capacity-restoration check reads this.
-    movedToCell?: { x: number; y: number };
+    movedToCell?: string;
     // Swords "piece" mode's own cell, set only when the target was fully destroyed (not just shrunk in place) - Moon's own capacity-restoration check reads this too.
-    destroyedAtCell?: { x: number; y: number };
+    destroyedAtCell?: string;
     // A one-step shortcut (Strength's +2 grow, Sun's royalty create, Death's both-swords shrink) already did the card's whole job, so its remaining steps are spent.
     consumesRest?: boolean;
     // Swords: the pips actually removed - applyPowerStep compares it with the minion's size to decide consumesRest, so applying never needs the minion.
     shrunkBy?: number;
     // The piece a grow/create/move produced, for the not-tracked (an enemy's) cases newMinion leaves out - a two-step shortcut's second step must act on it.
-    producedPiece?: { x: number; y: number; index: number };
+    producedPiece?: IPieceRef;
 }
 
 // The non-mutating validator's verdict on one step: a failure, or a pass where `complete: false` marks a still-building step, not a finished one.
@@ -211,7 +214,7 @@ type StepValidation =
 
 // resolvePieceRef's result: "ok" (exactly one), "not_found" (zero matches, which includes text that isn't a piece reference), or "ambiguous" (2+, narrowable by more fields).
 type PieceRefResolution =
-    | { kind: "ok"; ref: IMinionRef }
+    | { kind: "ok"; ref: IPieceRef }
     | { kind: "not_found" }
     | { kind: "ambiguous" };
 
@@ -255,13 +258,13 @@ interface IPendingStep {
     // Set instead of suitUid for a major card's `special` power, dispatched to handlePendingSpecialBoardClick rather than the suit-mode machinery above.
     special?: SpecialPower;
     // Every one of the acting player's own eligible pieces, kept in full so a minion-selector ref can still disambiguate against the OTHER candidates.
-    eligible: IMinionRef[];
+    eligible: IPieceRef[];
     // eligible plus any newMinion chained in from earlier COMPLETE steps of the same activation; identical to eligible for a minor card or the first step.
-    minions: IMinionRef[];
+    minions: IPieceRef[];
     // Resolved from this step's typed minionRef, or minions[0] as a preview default; minionAmbiguous gates whether that default is trustworthy.
-    minion: IMinionRef;
+    minion: IPieceRef;
     minionAmbiguous: boolean;
-    minionCandidates: IMinionRef[];
+    minionCandidates: IPieceRef[];
     // Earlier complete power-step segments of the same activation, as typed IStep objects; always [] for a minor card.
     priorSteps: IStep[];
     // computeShortcutOpts's result for the CURRENT step - lets minorModeAvailability's button pre-filter account for a same-target-shortcut/Moon card.
@@ -281,10 +284,10 @@ type Owed = { uid: string; done: number; how?: string };
 
 type IHiddenEffect = (
     | { type: "flip" }
-    | { type: "territory"; x: number; y: number }
+    | { type: "territory"; cell: string }
     | { type: "draw"; count: number }
     // Justice or the Hanged Man: the acting player swaps hands with the owner of this piece.
-    | { type: "trade"; x: number; y: number; index: number }
+    | { type: "trade"; cell: string; index: number }
 ) & {
     // Set by the chain walker: the effect's results belong in the submission's per-step _group entries.
     grouped?: boolean;
@@ -334,7 +337,7 @@ interface DiscardSummary {
 interface IPowerFrame {
     cardUid: string;
     nextStepIndex: number;
-    minions: IMinionRef[];
+    minions: IPieceRef[];
 }
 
 // What a use, play or resume move is playing (see resolvePowerPlay).
@@ -347,7 +350,7 @@ interface IPowerPlay {
     // A persisted obligation being resumed, rather than a fresh use or play.
     resume: boolean;
     // Every piece that may act.
-    eligible: IMinionRef[];
+    eligible: IPieceRef[];
     // The typed power segments, with a High Priestess resume's own content folded back in.
     steps: IStep[];
     asUid?: string;
@@ -965,10 +968,10 @@ export class GnosticaGame extends GameBaseSequenced {
     private showUnrevealed(): void {
         for (const effect of this.hidden) {
             if (effect.type === "territory") {
-                this.board.createTerritory(effect.x, effect.y, UNREVEALED_CARD);
+                this.board.createTerritory(...xy(effect.cell), UNREVEALED_CARD);
             } else if (effect.type === "trade") {
                 // The player sees their old cards in the other hand, and none of the ones they get.
-                const owner = this.board.get(effect.x, effect.y)!.pieces[effect.index].owner;
+                const owner = this.cellContents(effect.cell)!.pieces[effect.index].owner;
                 const mine = this.hands[this.currplayer - 1];
                 this.hands[this.currplayer - 1] = this.hands[owner - 1].map(() => UNREVEALED_UID);
                 this.hands[owner - 1] = mine;
@@ -985,14 +988,14 @@ export class GnosticaGame extends GameBaseSequenced {
                     result = { type: "deckDraw", what: this.fool().uid, from: "fool" };
                     break;
                 case "territory": {
-                    const card = this.createTerritoryFromDeck(effect.x, effect.y);
-                    result = { type: "place", where: GnosticaBoard.coords2algebraic(effect.x, effect.y), how: "territory", what: card.uid };
+                    const card = this.createTerritoryFromDeck(effect.cell);
+                    result = { type: "place", where: effect.cell, how: "territory", what: card.uid };
                     break;
                 }
                 case "trade": {
-                    const owner = this.board.get(effect.x, effect.y)!.pieces[effect.index].owner;
-                    this.tradeHands(effect.x, effect.y, effect.index, this.hands[owner - 1]);
-                    result = { type: "swap", where: GnosticaBoard.coords2algebraic(effect.x, effect.y), who: owner };
+                    const owner = this.cellContents(effect.cell)!.pieces[effect.index].owner;
+                    this.tradeHands(effect, this.hands[owner - 1]);
+                    result = { type: "swap", where: effect.cell, who: owner };
                     break;
                 }
                 case "draw": {
@@ -2040,7 +2043,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "<cell>.<pips>[.<orientation>][.<player>]"; resolved against `pool` (minion-selector) if given, else every piece at the cell (a target, any owner).
-    private resolvePieceRef(ref: string | undefined, pool?: IMinionRef[]): PieceRefResolution {
+    private resolvePieceRef(ref: string | undefined, pool?: IPieceRef[]): PieceRefResolution {
         if (ref === undefined) {
             return { kind: "not_found" };
         }
@@ -2050,7 +2053,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const [cellStr, pipsStr, ...rest] = segments;
         // PIECE_REF_RE (parseMove) already guarantees cellStr decodes cleanly - same cell grammar and case as CELL_RE.
-        const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
+        const cell = canonicalCell(cellStr);
         const pips = parseInt(pipsStr, 10);
         if (Number.isNaN(pips) || pips < 1 || pips > 3) {
             return { kind: "not_found" };
@@ -2074,12 +2077,12 @@ export class GnosticaGame extends GameBaseSequenced {
             player = asPlayer;
         }
         const candidateRefs = pool !== undefined
-            ? pool.filter(p => p.x === x && p.y === y)
-            : (this.board.get(x, y)?.pieces ?? []).map((_, index): IMinionRef => ({ x, y, index }));
+            ? pool.filter(p => p.cell === cell)
+            : (this.cellContents(cell)?.pieces ?? []).map((_, index): IPieceRef => ({ cell, index }));
         let matches = candidateRefs
-            .map(r => ({ r, piece: r.piece ?? this.board.get(r.x, r.y)?.pieces[r.index] }))
+            .map(r => ({ r, piece: r.piece ?? this.cellContents(r.cell)?.pieces[r.index] }))
             // A pool entry can go stale mid-chain (an earlier step relocated whatever used to be there) - treat that as never matched, not a crash.
-            .filter((m): m is { r: IMinionRef; piece: Piece } => m.piece !== undefined)
+            .filter((m): m is { r: IPieceRef; piece: Piece } => m.piece !== undefined)
             .filter(({ piece }) => piece.size === pips);
         if (orientation !== undefined) {
             matches = matches.filter(({ piece }) => piece.orientation === orientation);
@@ -2095,27 +2098,27 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const { r, piece } = matches[0];
         // #98/#100: never hand back `r`'s stored index verbatim - a splice elsewhere can leave it stale; re-derive the CURRENT index by attribute, not identity.
-        const live = this.board.get(r.x, r.y)?.pieces ?? [];
+        const live = this.cellContents(r.cell)?.pieces ?? [];
         const freshIndex = live.findIndex(p => p.size === piece.size && p.orientation === piece.orientation && p.owner === piece.owner);
         if (freshIndex === -1) {
             return { kind: "not_found" };
         }
-        return { kind: "ok", ref: { x: r.x, y: r.y, index: freshIndex, piece: live[freshIndex] } };
+        return { kind: "ok", ref: { cell: r.cell, index: freshIndex, piece: live[freshIndex] } };
     }
 
     // For the mutating apply* side, where the matching validate* has already confirmed `ref` resolves - trusts that, rather than re-deciding what to do on failure.
-    private resolvePieceRefTrusted(ref: string | undefined, pool?: IMinionRef[]): IMinionRef {
-        return (this.resolvePieceRef(ref, pool) as { kind: "ok"; ref: IMinionRef }).ref;
+    private resolvePieceRefTrusted(ref: string | undefined, pool?: IPieceRef[]): IPieceRef {
+        return (this.resolvePieceRef(ref, pool) as { kind: "ok"; ref: IPieceRef }).ref;
     }
 
     // Resolves a territory's own card uid to its current cell - Hermit's "tile" mode names it this way; a card is unique, so no "ambiguous" outcome to report.
-    private resolveTileCard(cardUid: string | undefined): { x: number; y: number } | undefined {
+    private resolveTileCard(cardUid: string | undefined): string | undefined {
         if (cardUid === undefined) {
             return undefined;
         }
         for (const [x, y, t] of this.board.entries()) {
             if (t.cardUid === cardUid) {
-                return { x, y };
+                return GnosticaBoard.coords2algebraic(x, y);
             }
         }
         return undefined;
@@ -2123,23 +2126,22 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // A bare cell token (no ".") - a "click the cell your minion is on" click landed here; only meaningful when 2+ of `pool`'s minions actually sit there, but stays defensive.
     // Unlike a parsed step's own targetCell/targetPiece, `tok` isn't guaranteed cell-shaped at all here (e.g. orientMinion's own literal "orient" subhead reaches this same slot), so this still needs a real try/catch.
-    private isMinionCellStillNarrowing(tok: string, pool: IMinionRef[], suitUid?: MinorSuitUid): boolean {
+    private isMinionCellStillNarrowing(tok: string, pool: IPieceRef[], suitUid?: MinorSuitUid): boolean {
         if (tok.includes(".")) {
             return false;
         }
-        let coords: [number, number];
+        let cell: string;
         try {
-            coords = GnosticaBoard.algebraic2coords(tok.toLowerCase());
+            cell = canonicalCell(tok);
         } catch {
             return false;
         }
-        const [cx, cy] = coords;
-        return this.actingCandidates(pool.filter(m => m.x === cx && m.y === cy), suitUid).length > 1;
+        return this.actingCandidates(pool.filter(m => m.cell === cell), suitUid).length > 1;
     }
 
     // A Rod can't act while upright, so while choosing, only a facing minion is a candidate - unless none is, when the error should still show.
-    private actingCandidates(candidates: IMinionRef[], suitUid: MinorSuitUid | undefined): IMinionRef[] {
-        const facing = suitUid === "R" ? candidates.filter(m => this.rodNeedsFacingReason("R", m.piece ?? this.board.get(m.x, m.y)!.pieces[m.index]) === undefined) : candidates;
+    private actingCandidates(candidates: IPieceRef[], suitUid: MinorSuitUid | undefined): IPieceRef[] {
+        const facing = suitUid === "R" ? candidates.filter(m => this.rodNeedsFacingReason("R", m.piece ?? this.cellContents(m.cell)!.pieces[m.index]) === undefined) : candidates;
         return facing.length > 0 ? facing : candidates;
     }
 
@@ -2149,21 +2151,21 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // True when every candidate is the SAME cell AND the same owner/size/facing (Piece.id()) - picking any one has the exact same effect.
-    private allIndistinguishable(candidates: IMinionRef[]): boolean {
+    private allIndistinguishable(candidates: IPieceRef[]): boolean {
         if (candidates.length <= 1) {
             return true;
         }
-        if (candidates.some(m => m.x !== candidates[0].x || m.y !== candidates[0].y)) {
+        if (candidates.some(m => m.cell !== candidates[0].cell)) {
             return false;
         }
-        const ids = candidates.map(m => (m.piece ?? this.board.get(m.x, m.y)?.pieces[m.index])?.id());
+        const ids = candidates.map(m => (m.piece ?? this.cellContents(m.cell)?.pieces[m.index])?.id());
         return ids.every(id => id !== undefined && id === ids[0]);
     }
 
     // Resolves a step's typed minionRef against `pool`: a full ref resolves definitively, a bare cell token narrows `candidates` and sets ambiguous.
     private resolveStepMinion(
-        ref: string | undefined, pool: IMinionRef[], suitUid?: MinorSuitUid,
-    ): { minion: IMinionRef; ambiguous: boolean; candidates: IMinionRef[] } {
+        ref: string | undefined, pool: IPieceRef[], suitUid?: MinorSuitUid,
+    ): { minion: IPieceRef; ambiguous: boolean; candidates: IPieceRef[] } {
         if (ref === undefined) {
             pool = this.actingCandidates(pool, suitUid);
         }
@@ -2177,8 +2179,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { minion: resolved.ref, ambiguous: false, candidates: pool };
             }
             if (this.isMinionCellStillNarrowing(tok, pool, suitUid)) {
-                const coords = GnosticaBoard.algebraic2coords(tok);
-                const narrowed = this.actingCandidates(pool.filter(m => m.x === coords[0] && m.y === coords[1]), suitUid);
+                const narrowed = this.actingCandidates(pool.filter(m => m.cell === canonicalCell(tok)), suitUid);
                 // A cell with 2+ eligible minions that all happen to be identical isn't really ambiguous - pick one at random, as if there'd only been one.
                 if (this.allIndistinguishable(narrowed)) {
                     return { minion: narrowed[Math.floor(Math.random() * narrowed.length)], ambiguous: false, candidates: narrowed };
@@ -2194,7 +2195,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // #49/follow-up: which message a not-yet-finished use/play step carries, shared by hand-typed and click-driven moves alike; High Priestess is a special case.
-    private powerStepMessageKey(headArg: string, priorStepsCount: number, minions: IMinionRef[], minionRef?: string): { key: string; params?: Record<string, unknown> } {
+    private powerStepMessageKey(headArg: string, priorStepsCount: number, minions: IPieceRef[], minionRef?: string): { key: string; params?: Record<string, unknown> } {
         if (headArg === "02") {
             return { key: priorStepsCount > 0
                 ? "apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"
@@ -2220,7 +2221,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (!ambiguous) {
                 const step = this.resolveFrameDef(headArg).powers[0];
                 if ("special" in step) {
-                    const cell = GnosticaBoard.coords2algebraic(minion.x, minion.y);
+                    const cell = minion.cell;
                     switch (step.special) {
                         case "orientMinion":
                             return { key: "apgames:validation.gnostica.CHOOSE_STEP_ORIENT_MINION", params: { card: cardName, cell } };
@@ -2267,8 +2268,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // A fresh frame's own message: PICK_MINION_CELL when the eligible pool spans more than one cell, otherwise powerStepMessageKey's own step-0 wording.
-    private freshStepMessage(cardUid: string, priorStepsCount: number, minions: IMinionRef[]): { key: string; params?: Record<string, unknown> } {
-        if (priorStepsCount === 0 && new Set(minions.map(m => `${m.x},${m.y}`)).size > 1) {
+    private freshStepMessage(cardUid: string, priorStepsCount: number, minions: IPieceRef[]): { key: string; params?: Record<string, unknown> } {
+        if (priorStepsCount === 0 && new Set(minions.map(m => m.cell)).size > 1) {
             return { key: "apgames:validation.gnostica.PICK_MINION_CELL" };
         }
         return this.powerStepMessageKey(cardUid, priorStepsCount, minions);
@@ -2608,8 +2609,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (cell === undefined) {
             return undefined;
         }
-        const coords = GnosticaBoard.algebraic2coords(cell);
-        const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1]));
+        const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(cell));
         if (!ambiguous) {
             return undefined;
         }
@@ -2621,7 +2621,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 continue;
             }
             seenRefs.add(ref);
-            const piece = this.board.get(m.x, m.y)!.pieces[m.index];
+            const piece = this.cellContents(m.cell)!.pieces[m.index];
             options.push({ value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece) });
         }
         // Like minionPickerBar: the chosen top-level action stays, and Declare remains available.
@@ -2646,7 +2646,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private minionPickerBar(
         pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
     ): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const candidateCells = new Set(pendingMinor.minionCandidates.map(m => `${m.x},${m.y}`));
+        const candidateCells = new Set(pendingMinor.minionCandidates.map(m => m.cell));
         if (!pendingMinor.minionAmbiguous || candidateCells.size !== 1) {
             return undefined;
         }
@@ -2661,7 +2661,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 continue;
             }
             seenRefs.add(ref);
-            const piece = this.board.get(m.x, m.y)!.pieces[m.index];
+            const piece = this.cellContents(m.cell)!.pieces[m.index];
             options.push({ value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason: this.rodNeedsFacingReason(pendingMinor.suitUid, piece) });
         }
         buttons.push(...this.buildChoiceButtons("minion", options, undefined));
@@ -2711,28 +2711,28 @@ export class GnosticaGame extends GameBaseSequenced {
         opts: { disabledReason?: { key: string; params?: Record<string, unknown> }; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean; selfVerb?: string } = {},
     ): ChoiceOption[] {
         const { disabledReason, includeSelf = true, filter, ownLast = false, selfVerb = verb } = opts;
-        const [tx, ty] = this.minorTargetCell(pending.minion);
-        const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
+        const faceCell = this.minorTargetCell(pending.minion);
+        const cellPieces = this.cellContents(faceCell)?.pieces ?? [];
         const options: ChoiceOption[] = [];
         const own: ChoiceOption[] = [];
         const seen = new Set<string>();
-        const pushPieceCandidate = (x: number, y: number, index: number, selfAction = false): void => {
-            const ref = this.pieceRefStr({ x, y, index });
+        const pushPieceCandidate = (candidate: IPieceRef, selfAction = false): void => {
+            const ref = this.pieceRefStr(candidate);
             if (seen.has(ref)) {
                 return;
             }
             seen.add(ref);
-            const piece = this.board.get(x, y)!.pieces[index];
+            const piece = this.getPiece(candidate);
             const option = { value: ref, label: this.ownerButtonLabel(selfAction ? selfVerb : verb, piece.owner), glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason };
             (ownLast && piece.owner === this.currplayer ? own : options).push(option);
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
         if (includeSelf) {
-            pushPieceCandidate(pending.minion.x, pending.minion.y, pending.minion.index, true);
+            pushPieceCandidate(pending.minion, true);
         }
         cellPieces.forEach((p, index) => {
             if (filter === undefined || filter(p)) {
-                pushPieceCandidate(tx, ty, index);
+                pushPieceCandidate({ cell: faceCell, index });
             }
         });
         return [...options, ...own];
@@ -2765,16 +2765,16 @@ export class GnosticaGame extends GameBaseSequenced {
     // One candidate per real target for a fresh suit-power step - the tile at minorTargetCell plus every piece there, or Cups' "own"/every enemy piece/"new"; one click supplies mode + target.
     private suitTargetCandidates(pending: IPendingStep, suitUid: MinorSuitUid): ChoiceOption[] {
         const availability = this.minorModeAvailability(pending);
-        const [tx, ty] = this.minorTargetCell(pending.minion);
-        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        const faceCell = this.minorTargetCell(pending.minion);
+        const targetCell = faceCell;
         if (suitUid === "C") {
-            const cellPieces = this.board.get(tx, ty)?.pieces ?? [];
+            const cellPieces = this.cellContents(faceCell)?.pieces ?? [];
             const options: ChoiceOption[] = [{ value: "own", label: "Create Minion", disabledReason: availability.get("own") }];
             // The new piece is a gift added to the referenced enemy's own side, not a capture of anything - see applyCups' "enemy" case.
             const enemyEntries: ChoiceOption[] = [];
             cellPieces.forEach((p, index) => {
                 if (p.owner !== this.currplayer) {
-                    enemyEntries.push({ value: this.pieceRefStr({ x: tx, y: ty, index }), label: this.ownerButtonLabel("Create Enemy", p.owner), glyph: GnosticaGame.pieceButtonGlyph(p), disabledReason: availability.get("enemy") });
+                    enemyEntries.push({ value: this.pieceRefStr({ cell: faceCell, index }), label: this.ownerButtonLabel("Create Enemy", p.owner), glyph: GnosticaGame.pieceButtonGlyph(p), disabledReason: availability.get("enemy") });
                 }
             });
             if (enemyEntries.length > 0) {
@@ -2795,8 +2795,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Hermit's own twin of suitTargetCandidates - same tile-plus-self-plus-every-co-located-piece enumeration.
     private hermitTargetCandidates(pending: IPendingStep): ChoiceOption[] {
-        const [tx, ty] = this.minorTargetCell(pending.minion);
-        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        const faceCell = this.minorTargetCell(pending.minion);
+        const targetCell = faceCell;
         return [
             { value: targetCell, label: "Teleport Territory" },
             ...this.pieceCandidateOptions(pending, "Teleport"),
@@ -2829,9 +2829,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 buttons.push({ label: "Draw a card", value: "drawn" });
             }
             if (suitUid === "S" && stepMinorMode("S", pendingMinor.istep) === "tile" && pendingMinor.istep.card === undefined) {
-                const [tx, ty] = GnosticaBoard.algebraic2coords(pendingMinor.istep.targetCell!);
-                const size = (pendingMinor.minion.piece ?? this.board.get(pendingMinor.minion.x, pendingMinor.minion.y)!.pieces[pendingMinor.minion.index]).size;
-                const current = this.board.get(tx, ty)?.pointValue() ?? 0;
+                const faceCell = pendingMinor.istep.targetCell!;
+                const size = (pendingMinor.minion.piece ?? this.cellContents(pendingMinor.minion.cell)!.pieces[pendingMinor.minion.index]).size;
+                const current = this.cellContents(faceCell)?.pointValue() ?? 0;
                 if (current > 0 && current <= size * (pendingMinor.opts.bothSwords === true ? 2 : 1)) {
                     buttons.push({ label: "Destroy Territory", value: "destroy" });
                 }
@@ -2849,10 +2849,10 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The attack amounts a Swords piece step offers, each crossed out when the victim's owner couldn't take the shrunken piece back from their stash.
     private swordsPipsOptions(pending: IPendingStep): ChoiceOption[] {
-        const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const minionPiece = pending.minion.piece ?? this.cellContents(pending.minion.cell)!.pieces[pending.minion.index];
         // Anything past the victim's own pips is the same wipeout (or, with one sword, rejected), so it isn't offered.
         const target = pending.game.resolvePieceRef(pending.istep.targetPiece);
-        const victim = target.kind === "ok" ? target.ref.piece ?? pending.game.board.get(target.ref.x, target.ref.y)?.pieces[target.ref.index] : undefined;
+        const victim = target.kind === "ok" ? target.ref.piece ?? pending.game.cellContents(target.ref.cell)?.pieces[target.ref.index] : undefined;
         const maxPips = Math.min(minionPiece.size * (pending.opts.bothSwords === true ? 2 : 1), victim?.size ?? Infinity);
         const options: ChoiceOption[] = [];
         for (let n = maxPips; n >= 1; n--) {
@@ -2907,7 +2907,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // A resumed Justice keeps the verb its first turn used, which decides who may act; every other resume is a play.
         const head: "use" | "play" = resume ? (headArg === "11" && parsed.head === "use" ? "use" : "play") : parsed.head as "use" | "play";
         let card: Card | undefined;
-        let eligible: IMinionRef[];
+        let eligible: IPieceRef[];
         // A card revealed by Fool (headArg names it directly for a resume) is always play-pool eligible regardless.
         if (resume) {
             card = allCards().find(c => c.uid === headArg);
@@ -2917,8 +2917,8 @@ export class GnosticaGame extends GameBaseSequenced {
             if (loc === undefined) {
                 return undefined;
             }
-            card = this.board.get(loc.x, loc.y)?.card;
-            eligible = this.eligibleMinionsForActivate(loc.x, loc.y);
+            card = this.cellContents(loc)?.card;
+            eligible = this.eligibleMinionsForActivate(loc);
         } else {
             card = allCards().find(c => c.uid === headArg);
             eligible = this.eligibleMinionsForPlay();
@@ -2944,7 +2944,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The walk goes on to apply the held step's own segment, which reorients the very Piece objects its minion snapshots point at; the held view needs its own copies.
     private static detachPieces(pending: Omit<IPendingStep, "game">): Omit<IPendingStep, "game"> {
-        const detach = (m: IMinionRef): IMinionRef => m.piece === undefined ? m : { ...m, piece: m.piece.clone() };
+        const detach = (m: IPieceRef): IPieceRef => m.piece === undefined ? m : { ...m, piece: m.piece.clone() };
         return { ...pending, eligible: pending.eligible.map(detach), minions: pending.minions.map(detach), minion: detach(pending.minion), minionCandidates: pending.minionCandidates.map(detach) };
     }
 
@@ -2973,7 +2973,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         // A resolution stack local to this UI-only walk - `eligible` (frozen at push time) stays tracked separately from `minions` (which keeps accreting).
-        const stack: { cardUid: string; nextStepIndex: number; eligible: IMinionRef[]; minions: IMinionRef[] }[] =
+        const stack: { cardUid: string; nextStepIndex: number; eligible: IPieceRef[]; minions: IPieceRef[] }[] =
             play.frames.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }));
 
         // The World's sole step (worldUseAny) takes no segment - the borrowed card is "as <uid>" in the head. Splice its frame on now, as validateFrameStack does.
@@ -3095,7 +3095,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice once its suit is chosen, which is treated as a plain suit step.
     private buildSpecialPending(
         ctx: GnosticaGame, special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
-        eligible: IMinionRef[], minions: IMinionRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: MinorSuitUid, announceLast = false,
+        eligible: IPieceRef[], minions: IPieceRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: MinorSuitUid, announceLast = false,
     ): Omit<IPendingStep, "game"> {
         if (special === "magicianChoice" && asSuit !== undefined) {
             const { minion, ambiguous, candidates } = ctx.resolveStepMinion(istep.withPiece, minions, asSuit);
@@ -3111,25 +3111,26 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The single valid cell a minor suit-power step may affect: the minion's own cell if facing "U", otherwise the one cell it's pointing at.
-    public minorTargetCell(minion: IMinionRef): [number, number] {
+    public minorTargetCell(minion: IPieceRef): string {
         // `minion.piece`, when set, is a snapshot from a clone that already replayed an earlier step - preferred over a fresh board read (pre-mutation until commit).
-        const piece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
+        const piece = minion.piece ?? this.cellContents(minion.cell)!.pieces[minion.index];
         if (piece.orientation === "U") {
-            return [minion.x, minion.y];
+            return minion.cell;
         }
         const [dx, dy] = this.board.delta(piece.orientation as Exclude<Orientation, "U">);
-        return [minion.x + dx, minion.y + dy];
+        const [x, y] = xy(minion.cell);
+        return GnosticaBoard.coords2algebraic(x + dx, y + dy);
     }
 
     // Whether `step` is a piece-target special (tradeHands/hierophantReplace, the only two requiring an ENEMY on the self-or-facing cell) with NO legal candidate right now.
-    private specialStepHasNoLegalTarget(ctx: GnosticaGame, step: PowerStep, minions: readonly IMinionRef[]): boolean {
+    private specialStepHasNoLegalTarget(ctx: GnosticaGame, step: PowerStep, minions: readonly IPieceRef[]): boolean {
         if (!("special" in step) || (step.special !== "tradeHands" && step.special !== "hierophantReplace")) {
             return false;
         }
         // Checked against EVERY minion in `minions` (chainMinion may leave 2+ live candidates); `ctx` matters because validateFrameStack applies to a CLONE, not `this`.
         return minions.every(m => {
-            const [faceX, faceY] = ctx.minorTargetCell(m);
-            const t = ctx.board.get(faceX, faceY);
+            const faceCell = ctx.minorTargetCell(m);
+            const t = ctx.cellContents(faceCell);
             return t === undefined || !t.pieces.some(p => p.owner !== ctx.currplayer);
         });
     }
@@ -3154,23 +3155,22 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Inverse of resolvePieceRef: the shortest ref that resolves back to this exact piece in the pool. Tries pips, then pips+orientation, then pips+player, then all three.
     // With a pool, the owner's other pieces in the cell count too: a later step may resolve the ref against all of the owner's pieces, not only the pool.
-    public pieceRefStr(minion: IMinionRef, pool?: IMinionRef[]): string {
-        const { x, y, index } = minion;
-        const piece = minion.piece ?? this.board.get(x, y)!.pieces[index];
-        const cell = GnosticaBoard.coords2algebraic(x, y);
-        let candidateRefs: IMinionRef[];
+    public pieceRefStr(minion: IPieceRef, pool?: IPieceRef[]): string {
+        const { cell, index } = minion;
+        const piece = minion.piece ?? this.cellContents(cell)!.pieces[index];
+        let candidateRefs: IPieceRef[];
         if (pool === undefined) {
-            candidateRefs = (this.board.get(x, y)?.pieces ?? []).map((_, i): IMinionRef => ({ x, y, index: i }));
+            candidateRefs = (this.cellContents(cell)?.pieces ?? []).map((_, i): IPieceRef => ({ cell, index: i }));
         } else {
-            candidateRefs = pool.filter(p => p.x === x && p.y === y);
-            (this.board.get(x, y)?.pieces ?? []).forEach((p, i) => {
+            candidateRefs = pool.filter(p => p.cell === cell);
+            (this.cellContents(cell)?.pieces ?? []).forEach((p, i) => {
                 if (p.owner === piece.owner && !candidateRefs.some(r => r.index === i)) {
-                    candidateRefs.push({ x, y, index: i });
+                    candidateRefs.push({ cell, index: i });
                 }
             });
         }
         const byPips = candidateRefs
-            .map(r => r.piece ?? this.board.get(r.x, r.y)!.pieces[r.index])
+            .map(r => r.piece ?? this.cellContents(r.cell)!.pieces[r.index])
             .filter(p => p.size === piece.size);
         if (byPips.length <= 1) {
             return `${cell}.${piece.size}`;
@@ -3190,21 +3190,23 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The one place an "orient" result is built - "orient", orientMinion, and orientAny all funnel through here. Call after the facing is set.
-    private pushOrientResult(x: number, y: number, index: number, ref: string, facing: Orientation): void {
+    private pushOrientResult(piece: IPieceRef, pieceRef: string, facing: Orientation): void {
         this.results.push({
             type: "orient",
-            where: GnosticaBoard.coords2algebraic(x, y),
-            what: this.getPipsFromRef(ref),
+            where: piece.cell,
+            what: this.getPipsFromRef(pieceRef),
             facing,
-            who: this.board.get(x, y)!.pieces[index].owner,
+            who: this.getPiece(piece).owner,
         });
     }
 
     // Click-to-orient: clicking the piece's own cell means "face up"; clicking an orthogonal neighbour means "face that way" - one click states the direction outright.
-    private orientationTowardClick(fromX: number, fromY: number, toX: number, toY: number): Orientation | undefined {
-        if (fromX === toX && fromY === toY) {
+    private orientationTowardClick(fromCell: string, toCell: string): Orientation | undefined {
+        if (fromCell === toCell) {
             return "U";
         }
+        const [fromX, fromY] = xy(fromCell);
+        const [toX, toY] = xy(toCell);
         for (const dir of cardinalOrientations) {
             const [dx, dy] = this.board.delta(dir as Exclude<Orientation, "U">);
             if (fromX + dx === toX && fromY + dy === toY) {
@@ -3221,10 +3223,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (target.kind !== "ok") {
             return [];
         }
-        const piece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const piece = pending.minion.piece ?? this.cellContents(pending.minion.cell)!.pieces[pending.minion.index];
         const legal: number[] = [];
         for (let dist = 1; dist <= piece.size; dist++) {
-            if (this.checkMovePiece(pending.minion.x, pending.minion.y, pending.minion.index, target.ref.x, target.ref.y, target.ref.index, dist) === undefined) {
+            if (this.checkMovePiece(pending.minion, target.ref, dist) === undefined) {
                 legal.push(dist);
             }
         }
@@ -3232,12 +3234,12 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The nearest legal distance for a Rod's territory push, or the first distance's failure when none is.
-    private rodPushDistance(minion: IMinionRef): { dist?: number; failure?: PowerFailure } {
-        const piece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
-        const [tx, ty] = this.minorTargetCell(minion);
+    private rodPushDistance(minion: IPieceRef): { dist?: number; failure?: PowerFailure } {
+        const piece = minion.piece ?? this.cellContents(minion.cell)!.pieces[minion.index];
+        const faceCell = this.minorTargetCell(minion);
         let first: PowerFailure | undefined;
         for (let dist = 1; dist <= piece.size; dist++) {
-            const failure = this.checkMoveTerritory(minion.x, minion.y, minion.index, tx, ty, dist);
+            const failure = this.checkMoveTerritory(minion, faceCell, dist);
             if (failure === undefined) {
                 return { dist };
             }
@@ -3247,13 +3249,13 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Best-effort feasibility check for which modes are worth offering as buttons - not a full legality check; a struck-through mode still gets a button, rejected on click.
-    public minorModeAvailability(pending: { suitUid?: MinorSuitUid; minion: IMinionRef; opts: Record<string, unknown> }): Map<MinorMode, { key: string; params?: Record<string, unknown> } | undefined> {
+    public minorModeAvailability(pending: { suitUid?: MinorSuitUid; minion: IPieceRef; opts: Record<string, unknown> }): Map<MinorMode, { key: string; params?: Record<string, unknown> } | undefined> {
         // Only ever called for a suit-shaped pending - suitUid is guaranteed set here.
         const suitUid = pending.suitUid!;
-        const minion = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
-        const [tx, ty] = this.minorTargetCell(pending.minion);
-        const targetT = this.board.get(tx, ty);
-        const cell = GnosticaBoard.coords2algebraic(tx, ty);
+        const minion = pending.minion.piece ?? this.cellContents(pending.minion.cell)!.pieces[pending.minion.index];
+        const faceCell = this.minorTargetCell(pending.minion);
+        const targetT = this.cellContents(faceCell);
+        const cell = faceCell;
         const hand = this.hands[this.currplayer - 1];
         const result = new Map<MinorMode, { key: string; params?: Record<string, unknown> } | undefined>();
         const minorModeNames: MinorMode[] = suitUid === "C" ? ["own", "enemy", "new"] : ["piece", "tile"];
@@ -3273,7 +3275,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         ? undefined : { key: "NO_ENEMY_THERE", params: { cell } });
                     break;
                 case "C.new":
-                    if (this.board.classify(tx, ty) !== "wasteland") {
+                    if (this.classifyCell(faceCell) !== "wasteland") {
                         result.set(mode, { key: "NOT_A_WASTELAND" });
                     } else if (pending.opts.allowRandomDraw === true || handHasCardOfValue(hand, 1) || (pending.opts.allowRoyalty === true && handHasCardOfValue(hand, 2))) {
                         result.set(mode, undefined);
@@ -3395,8 +3397,8 @@ export class GnosticaGame extends GameBaseSequenced {
         // Only ever called for a suit-shaped pending - suitUid is guaranteed set in every case.
         const suitUid = pending.suitUid!;
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-        const [tx, ty] = this.minorTargetCell(pending.minion);
-        const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
+        const faceCell = this.minorTargetCell(pending.minion);
+        const targetCell = faceCell;
         if (suitUid === "C") {
             let step: IStep;
             if (targetRef === "own") {
@@ -3409,7 +3411,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return this.assembleStepMove(pending, step);
         }
-        const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const minionPiece = pending.minion.piece ?? this.cellContents(pending.minion.cell)!.pieces[pending.minion.index];
         // A size-1 minion has only one legal dist/pips value, supplied here; a size>1 minion is left unset so the step reads as still-incomplete, not a guessed default.
         const isPieceTarget = targetRef.includes(".");
         let onlyCount = minionPiece.size === 1 ? 1 : undefined;
@@ -3444,7 +3446,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (targetRef.includes(".")) {
             return this.assembleStepMove(pending, { action: "fly", withPiece: minionRef, targetPiece: targetRef });
         }
-        const cardUid = this.board.get(...this.minorTargetCell(pending.minion))?.cardUid;
+        const faceCell = this.minorTargetCell(pending.minion);
+        const cardUid = this.cellContents(faceCell)?.cardUid;
         const step: IStep = { action: "fly", withPiece: minionRef };
         if (cardUid !== undefined) {
             step.card = cardUid;
@@ -3453,7 +3456,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Board-click handling once a minor-arcana power step's MODE is already chosen - cycling or switching whichever trailing arg(s) that mode's shape supports.
-    private handlePendingStepBoardClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
+    private handlePendingStepBoardClick(pending: IPendingStep, clickedCell: string): string | IClickResult | undefined {
         if (this.pendingMode(pending) === undefined) {
             return undefined;
         }
@@ -3462,34 +3465,33 @@ export class GnosticaGame extends GameBaseSequenced {
         const mode = this.pendingMode(pending)!;
         // Fills the rebuilt move's selector slot; the "piece"-shape branch's own self-or-facing target instead goes through pickPieceTargetClick.
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
-        const minionPiece = pending.minion.piece ?? this.board.get(pending.minion.x, pending.minion.y)!.pieces[pending.minion.index];
+        const minionPiece = pending.minion.piece ?? this.cellContents(pending.minion.cell)!.pieces[pending.minion.index];
         // Only ever reached for R/D/S - every Cups branch below returns early instead (so RDS_VERBS always has an entry here). Always a fresh step, so stale trailing fields (e.g. a facing correction) drop off.
         const rebuild = (fields: Partial<IStep>): string =>
             this.assembleStepMove(pending, { action: RDS_VERBS[suitUid]!, withPiece: minionRef, ...fields });
 
         if (mode !== "piece") {
-            const [tx, ty] = this.minorTargetCell(pending.minion);
+            const faceCell = this.minorTargetCell(pending.minion);
             // Cups "own" is the one cell-shape mode with an orientation arg; a click here sets the OPTIONAL 3rd token, over the target cell PLUS its neighbours.
             if (suitUid === "C" && mode === "own") {
-                const dir = this.orientationTowardClick(tx, ty, x, y);
+                const dir = this.orientationTowardClick(faceCell, clickedCell);
                 if (dir === undefined) {
                     return undefined;
                 }
-                const cell = GnosticaBoard.coords2algebraic(tx, ty);
+                const cell = faceCell;
                 // Cups carries no mode word - built directly here instead of via `rebuild`, which would wrongly splice "own" back in.
                 return this.assembleStepMove(pending, { action: "create", withPiece: minionRef, atCell: cell, direction: dir });
             }
             // Rods' "tile" mode: the cell is fixed (the facing cell) - a click instead sets DISTANCE, anchored on the facing cell rather than a chosen piece target.
             if (suitUid === "R") {
-                const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
                 for (let n = 1; n <= minionPiece.size; n++) {
-                    if (x === tx + dx * n && y === ty + dy * n) {
+                    if (clickedCell === this.cellBeyond(faceCell, minionPiece.orientation, n)) {
                         return rebuild({ targetCell: pending.istep.targetCell!, amount: n });
                     }
                 }
                 return undefined;
             }
-            if (x !== tx || y !== ty) {
+            if (clickedCell !== faceCell) {
                 return undefined;
             }
             // "new" (Cups) - the only remaining arg is a hand-card uid, nothing to cycle here; "enemy"'s victim is already chosen the instant the mode is inferred.
@@ -3513,9 +3515,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
             // Rods' distance is a real destination cell, along the ACTING minion's own facing (matches movePiece's own computation); once chosen, Undo is how to change it.
             if (suitUid === "R" && pending.istep.amount === undefined) {
-                const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
                 for (let n = 1; n <= minionPiece.size; n++) {
-                    if (x === target.x + dx * n && y === target.y + dy * n) {
+                    if (clickedCell === this.cellBeyond(target.cell, minionPiece.orientation, n)) {
                         return rebuild({ targetPiece: pending.istep.targetPiece, amount: n });
                     }
                 }
@@ -3525,19 +3526,12 @@ export class GnosticaGame extends GameBaseSequenced {
             if ((pending.istep.complete ?? -1) < 0) {
                 return undefined;
             }
-            const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+            const targetPiece = this.cellContents(target.cell)!.pieces[target.index];
             if (targetPiece.owner !== this.currplayer) {
                 return undefined;
             }
-            let effX = target.x;
-            let effY = target.y;
-            if (suitUid === "R") {
-                const [dx, dy] = this.board.delta(minionPiece.orientation as Exclude<Orientation, "U">);
-                const dist = pending.istep.amount!;
-                effX = target.x + dx * dist;
-                effY = target.y + dy * dist;
-            }
-            const dir = this.orientationTowardClick(effX, effY, x, y);
+            const effCell = suitUid === "R" ? this.cellBeyond(target.cell, minionPiece.orientation, pending.istep.amount!) : target.cell;
+            const dir = this.orientationTowardClick(effCell, clickedCell);
             if (dir === undefined) {
                 return undefined;
             }
@@ -3572,8 +3566,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         if (key === "S.tile") {
-            const [tx, ty] = GnosticaBoard.algebraic2coords(istep.targetCell!);
-            const amount = (this.board.get(tx, ty)?.pointValue() ?? 0) - this.cardValueByUid(uid);
+            const faceCell = istep.targetCell!;
+            const amount = (this.cellContents(faceCell)?.pointValue() ?? 0) - this.cardValueByUid(uid);
             return this.assembleStepMove(pending, { ...istep, withPiece: minionRef, card: uid, amount });
         }
         // Everything typed so far stays; the uid is the only thing this click adds.
@@ -3581,21 +3575,21 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Shared self-or-facing-cell target pick, used by tradeHands/orientAny/hierophantReplace/hermitTeleport's "piece" mode alike; undefined when the click is off-target.
-    private pickPieceTargetClick(minion: IMinionRef, x: number, y: number, cell: string, pendingForError: IPendingStep): string | IClickResult | undefined {
-        const [faceX, faceY] = this.minorTargetCell(minion);
+    private pickPieceTargetClick(minion: IPieceRef, cell: string, pendingForError: IPendingStep): string | IClickResult | undefined {
+        const faceCell = this.minorTargetCell(minion);
         // tradeHands/hierophantReplace must target an enemy; orientAny/hermitTeleport don't - reject a self-target immediately rather than fail only at submit.
         const requiresEnemy = pendingForError.special === "tradeHands" || pendingForError.special === "hierophantReplace";
         const enemyKey = pendingForError.special === "tradeHands" ? "TRADEHANDS_MUST_TARGET_ENEMY" : "HIEROPHANT_MUST_TARGET_ENEMY";
-        if (x === minion.x && y === minion.y) {
+        if (cell === minion.cell) {
             if (requiresEnemy) {
                 return { move: this.describePendingMove(pendingForError, pendingForError.priorSteps), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
             }
             return this.pieceRefStr(minion);
         }
-        if (x !== faceX || y !== faceY) {
+        if (cell !== faceCell) {
             return undefined;
         }
-        const t = this.board.get(faceX, faceY);
+        const t = this.cellContents(faceCell);
         if (t === undefined || t.pieces.length === 0) {
             return { move: this.describePendingMove(pendingForError, pendingForError.priorSteps), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
         }
@@ -3604,33 +3598,33 @@ export class GnosticaGame extends GameBaseSequenced {
             if (enemyIndex === -1) {
                 return { move: this.describePendingMove(pendingForError, pendingForError.priorSteps), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
             }
-            return this.pieceRefStr({ x: faceX, y: faceY, index: enemyIndex });
+            return this.pieceRefStr({ cell: faceCell, index: enemyIndex });
         }
-        return this.pieceRefStr({ x: faceX, y: faceY, index: 0 });
+        return this.pieceRefStr({ cell: faceCell, index: 0 });
     }
 
     // Dispatches a board click to whichever special power's own click handler is in progress - undefined for judgementDraw/highPriestess/magicianChoice/hermitTeleport stage 1.
-    private handlePendingSpecialBoardClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
+    private handlePendingSpecialBoardClick(pending: IPendingStep, cell: string): string | IClickResult | undefined {
         switch (pending.special) {
             case "orientMinion":
-                return this.handleOrientMinionClick(pending, x, y);
+                return this.handleOrientMinionClick(pending, cell);
             case "tradeHands":
-                return this.handleTradeHandsClick(pending, x, y, cell);
+                return this.handleTradeHandsClick(pending, cell);
             case "orientAny":
             case "hierophantReplace":
-                return this.handleOrientAnyOrHierophantClick(pending, x, y, cell);
+                return this.handleOrientAnyOrHierophantClick(pending, cell);
             case "hermitTeleport":
-                return this.handleHermitTeleportClick(pending, x, y, cell);
+                return this.handleHermitTeleportClick(pending, cell);
             case "worldUseAny":
-                return this.handleWorldChooseClick(pending, x, y);
+                return this.handleWorldChooseClick(pending, cell);
             default:
                 return undefined;
         }
     }
 
     // orientMinion: <minionRef> <orientation> - the acting minion IS the target, so this is just click-to-orient anchored at the fixed acting minion.
-    private handleOrientMinionClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
-        const dir = this.orientationTowardClick(pending.minion.x, pending.minion.y, x, y);
+    private handleOrientMinionClick(pending: IPendingStep, cell: string): string | IClickResult | undefined {
+        const dir = this.orientationTowardClick(pending.minion.cell, cell);
         if (dir === undefined) {
             return undefined;
         }
@@ -3650,7 +3644,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return undefined;
             }
             const capturedFacing = (targetResolution.ref.piece
-                ?? this.board.get(targetResolution.ref.x, targetResolution.ref.y)!.pieces[targetResolution.ref.index]).orientation;
+                ?? this.cellContents(targetResolution.ref.cell)!.pieces[targetResolution.ref.index]).orientation;
             // Trailing "?" - seeded from the captured piece's own prior facing, not yet a deliberate choice (mirrors Cups "own"'s identical convention).
             return this.assembleStepMove(pending, { action: "replace", withPiece: minionRef, targetPiece: targetRef, direction: `${capturedFacing}?` });
         }
@@ -3659,8 +3653,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // tradeHands: <minionRef> trade <targetRef> - a single self-or-facing-cell target pick, terminal.
-    private handleTradeHandsClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
-        const targetResult = this.pickPieceTargetClick(pending.minion, x, y, cell, pending);
+    private handleTradeHandsClick(pending: IPendingStep, cell: string): string | IClickResult | undefined {
+        const targetResult = this.pickPieceTargetClick(pending.minion, cell, pending);
         if (targetResult === undefined) {
             return undefined;
         }
@@ -3671,10 +3665,10 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // orientAny/hierophantReplace: <minionRef> <targetRef> <orientation> - same two-stage click shape; stage 1 picks the target, stage 2 sets its facing.
-    private handleOrientAnyOrHierophantClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
+    private handleOrientAnyOrHierophantClick(pending: IPendingStep, cell: string): string | IClickResult | undefined {
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         if (pending.istep.targetPiece === undefined) {
-            const targetResult = this.pickPieceTargetClick(pending.minion, x, y, cell, pending);
+            const targetResult = this.pickPieceTargetClick(pending.minion, cell, pending);
             if (targetResult === undefined) {
                 return undefined;
             }
@@ -3688,7 +3682,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (targetResolution.kind !== "ok") {
             return undefined;
         }
-        const dir = this.orientationTowardClick(targetResolution.ref.x, targetResolution.ref.y, x, y);
+        const dir = this.orientationTowardClick(targetResolution.ref.cell, cell);
         if (dir === undefined) {
             return undefined;
         }
@@ -3700,7 +3694,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // hermitTeleport: `<minionRef> fly <targetRef> to <destCell> [orient  <direction>]` | `<minionRef> fly <cardUid> to <destCell>` via a button.
-    private handleHermitTeleportClick(pending: IPendingStep, x: number, y: number, cell: string): string | IClickResult | undefined {
+    private handleHermitTeleportClick(pending: IPendingStep, cell: string): string | IClickResult | undefined {
         const minionRef = this.pieceRefStr(pending.minion, pending.minions);
         const mode = stepHermitMode(pending.istep);
         if (mode === undefined) {
@@ -3708,7 +3702,8 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         if (mode === "tile") {
             // No self-vs-face CHOICE for a cell-shaped target - so any click here just sets/replaces the (unrestricted) destination.
-            const cardUid = this.board.get(...this.minorTargetCell(pending.minion))?.cardUid;
+            const faceCell = this.minorTargetCell(pending.minion);
+        const cardUid = this.cellContents(faceCell)?.cardUid;
              if (cardUid === undefined) {
                 return undefined;
             }
@@ -3716,7 +3711,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // "piece" mode: the target is a genuine self-or-facing-cell choice until a destination is picked, then further clicks only replace it.
         if (pending.istep.targetCell === undefined) {
-            const targetResult = this.pickPieceTargetClick(pending.minion, x, y, cell, pending);
+            const targetResult = this.pickPieceTargetClick(pending.minion, cell, pending);
             if (typeof targetResult === "string") {
                 return this.assembleStepMove(pending, { action: "fly", withPiece: minionRef, targetPiece: targetResult });
             }
@@ -3735,8 +3730,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // worldUseAny: a click on any major currently on the board (except World itself) picks it as the borrowed card.
-    private handleWorldChooseClick(pending: IPendingStep, x: number, y: number): string | IClickResult | undefined {
-        const t = this.board.get(x, y);
+    private handleWorldChooseClick(pending: IPendingStep, cell: string): string | IClickResult | undefined {
+        const t = this.cellContents(cell);
         if (t?.card === undefined) {
             return undefined; // not a card cell at all - not this handler's click
         }
@@ -3858,7 +3853,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (resolved.kind !== "ok") {
             return ctx.noop;
         }
-        const clickedPiece = pending.game.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index];
+        const clickedPiece = pending.game.cellContents(resolved.ref.cell)!.pieces[resolved.ref.index];
         const rodReason = this.rodNeedsFacingReason(pending.suitUid, clickedPiece);
         if (rodReason !== undefined) {
             return ctx.noop;
@@ -3873,7 +3868,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return ctx.noop;
         }
         const resolved = this.resolvePieceRef(ref);
-        if (resolved.kind !== "ok" || this.board.get(resolved.ref.x, resolved.ref.y)!.pieces[resolved.ref.index].owner !== this.currplayer) {
+        if (resolved.kind !== "ok" || this.cellContents(resolved.ref.cell)!.pieces[resolved.ref.index].owner !== this.currplayer) {
             return ctx.noop;
         }
         return `orient ${this.pieceRefStr(resolved.ref)}${ctx.last}`;
@@ -4015,9 +4010,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "tile" || pending.istep.targetCell === undefined) {
                     return ctx.noop;
                 }
-                const [tx, ty] = GnosticaBoard.algebraic2coords(pending.istep.targetCell);
+                const faceCell = pending.istep.targetCell;
                 const minionRef = pending.game.pieceRefStr(pending.minion, pending.minions);
-                return pending.game.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: pending.game.board.get(tx, ty)?.pointValue() ?? 0 });
+                return pending.game.assembleStepMove(pending, { ...pending.istep, withPiece: minionRef, amount: pending.game.cellContents(faceCell)?.pointValue() ?? 0 });
             }
             default:
                 return ctx.noop;
@@ -4094,7 +4089,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const minionRef = game.pieceRefStr(pendingForDiscard.minion, pendingForDiscard.minions);
         // Leading "draw" may or may not be there yet depending on whether this is the first click - stripped before working the list, reattached when rebuilding.
         const selected = pendingForDiscard.istep.cardList ?? [];
-        const minionPiece = game.board.get(pendingForDiscard.minion.x, pendingForDiscard.minion.y)!.pieces[pendingForDiscard.minion.index];
+        const minionPiece = game.cellContents(pendingForDiscard.minion.cell)!.pieces[pendingForDiscard.minion.index];
         const maxDraw = judgementDrawRoom(minionPiece.size, game.hands[this.currplayer - 1]?.length ?? 0);
         const rebuildDiscard = (updated: string[]): string =>
             game.assembleStepMove(pendingForDiscard, { action: "draw", withPiece: minionRef, cardList: updated });
@@ -4164,29 +4159,25 @@ export class GnosticaGame extends GameBaseSequenced {
         if (head === "place") {
             // Click-to-orient: clicking the chosen cell again means "face up", a neighbour means "face that way"; any OTHER cell is a fresh placement (defaulting to "U").
             const prevCell = headSteps[0]?.targetCell;
-            let dir: Orientation | undefined;
-            if (prevCell !== undefined) {
-                const [px, py] = GnosticaBoard.algebraic2coords(prevCell);
-                dir = this.orientationTowardClick(px, py, x, y);
-            }
+            const dir = prevCell !== undefined ? this.orientationTowardClick(prevCell, cell) : undefined;
             return prevCell !== undefined && dir !== undefined ? `place ${prevCell} ${dir}${last}` : `place ${cell} U?${last}`;
         }
         if (head === "orient") {
             // Same click-to-orient model as "place", but relative to whichever piece is already selected (prevRef) rather than the clicked cell.
             const prevRef = headSteps[0]?.targetPiece;
             let dir: Orientation | undefined;
-            let prevLoc: { x: number; y: number; index: number } | undefined;
+            let prevLoc: IPieceRef | undefined;
             // A bare cell token (2+ own pieces there, none picked yet) isn't a resolvable piece ref - treat it the same as "nothing selected yet" below.
             if (prevRef !== undefined && prevRef.includes(".")) {
                 prevLoc = this.resolvePieceRefTrusted(prevRef);
-                dir = this.orientationTowardClick(prevLoc.x, prevLoc.y, x, y);
+                dir = this.orientationTowardClick(prevLoc.cell, cell);
             }
             if (prevLoc !== undefined && dir !== undefined) {
                 // validateOrient's own message already distinguishes a no-op from a real, complete reorientation - nothing to override here.
                 return `orient ${prevRef} ${dir}${last}`;
             }
             // Fresh selection - routed through the same minion-selection primitive "use"/"play" use, since 2+ distinguishable pieces here need a real choice.
-            const pool = this.eligibleMinionsForOrient(x, y);
+            const pool = this.eligibleMinionsForOrient(cell);
             if (pool.length === 0) {
                 // A click on a cell with none of the player's pieces changes nothing: the selection stands and the message says what to click.
                 return { move, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
@@ -4202,7 +4193,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (candidate === undefined || !candidate.minionAmbiguous) {
                     return undefined;
                 }
-                const atCell = this.actingCandidates(candidate.minions.filter(m => m.x === x && m.y === y), candidate.suitUid);
+                const atCell = this.actingCandidates(candidate.minions.filter(m => m.cell === cell), candidate.suitUid);
                 if (atCell.length === 0) {
                     return undefined;
                 }
@@ -4218,7 +4209,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (advancedPastCurrent) {
                 // A finished power whose piece can still be turned: the board turns it, and the buttons go on to the next power.
                 if (this.facingOpen(pending, advanced)) {
-                    const turned = pending!.game.handlePendingStepBoardClick(pending!, x, y);
+                    const turned = pending!.game.handlePendingStepBoardClick(pending!, cell);
                     if (turned === undefined) {
                         return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.FACE_OR_NEXT_POWER") };
                     }
@@ -4227,7 +4218,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // The next step is a button-less special whose start click may overlap the finished step's own: it wins, so the next step stays reachable.
                 if (!advanced.minionAmbiguous && advanced.special !== undefined && this.pendingSpecialUntouched(advanced)) {
-                    const result = advanced.game.handlePendingSpecialBoardClick(advanced, x, y, cell);
+                    const result = advanced.game.handlePendingSpecialBoardClick(advanced, cell);
                     if (result !== undefined) {
                         return result;
                     }
@@ -4246,13 +4237,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 return narrowed;
             }
             if (pending !== undefined && this.pendingMode(pending) !== undefined) {
-                const result = pending.game.handlePendingStepBoardClick(pending, x, y);
+                const result = pending.game.handlePendingStepBoardClick(pending, cell);
                 if (result !== undefined) {
                     return result;
                 }
             }
             if (pending !== undefined && pending.special !== undefined) {
-                const result = pending.game.handlePendingSpecialBoardClick(pending, x, y, cell);
+                const result = pending.game.handlePendingSpecialBoardClick(pending, cell);
                 if (result !== undefined) {
                     return result;
                 }
@@ -4500,7 +4491,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Your very first piece comes from your own stash, same as every other piece that ever enters play - it isn't manufactured out of nothing.
         this.takeFromStash(this.currplayer, 1);
         territory.add(new Piece(this.currplayer, 1, orientation));
-        this.addBufferIfWasteland(x, y);
+        this.addBufferIfWasteland(cellStr);
         this.results.push({ type: "place", where: cellStr, how: "initial" });
     }
 
@@ -4537,20 +4528,21 @@ export class GnosticaGame extends GameBaseSequenced {
         if (ref === undefined || !ref.includes(".") || orientationStr === undefined) {
             return;
         }
-        const { x, y, index } = this.resolvePieceRefTrusted(ref);
-        this.addBufferIfWasteland(x, y);
+        const piece = this.resolvePieceRefTrusted(ref);
+        this.addBufferIfWasteland(piece.cell);
         const orientation = orientationStr as Orientation;
         // Reorienting one of your own minions, with no adjacency restriction, is exactly what orientMinion already is - reuse it rather than mutating .orientation inline.
-        this.orientMinion(x, y, index, orientation);
-        this.pushOrientResult(x, y, index, ref, orientation);
+        this.orientMinion(piece, orientation);
+        this.pushOrientResult(piece, ref, orientation);
     }
 
     // Any board cell whose facing might get set/adjusted by a click needs a buffer on a side only if that side's void cell is ALSO outside the rendered window.
-    private addBufferIfWasteland(x: number, y: number): void {
-        if (this.board.classify(x, y) !== "wasteland") {
+    private addBufferIfWasteland(cell: string): void {
+        if (this.classifyCell(cell) !== "wasteland") {
             return;
         }
         const win = this.renderWindow();
+        const [x, y] = xy(cell);
         if (x === this.board.minX && x - 1 < win.minX) {
             this.buffers.push("W");
         }
@@ -4572,8 +4564,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (ref === undefined || turning?.direction !== undefined || !ref.includes(".")) {
             return;
         }
-        const [x, y] = GnosticaBoard.algebraic2coords(ref.split(".")[0]);
-        this.addBufferIfWasteland(x, y);
+        this.addBufferIfWasteland(ref.split(".")[0]);
     }
 
     // A Rods piece step still waiting for its distance: a landing cell can lie past the window, so a buffer on that side gives it something to click.
@@ -4582,15 +4573,16 @@ export class GnosticaGame extends GameBaseSequenced {
             return;
         }
         const target = pending.game.resolvePieceRef(pending.istep.targetPiece);
-        const minionPiece = pending.minion.piece ?? pending.game.board.get(pending.minion.x, pending.minion.y)?.pieces[pending.minion.index];
+        const minionPiece = pending.minion.piece ?? pending.game.cellContents(pending.minion.cell)?.pieces[pending.minion.index];
         if (target.kind !== "ok" || minionPiece === undefined || minionPiece.orientation === "U") {
             return;
         }
         const [dx, dy] = this.board.delta(minionPiece.orientation);
         const win = this.renderWindow();
+        const [targetX, targetY] = xy(target.ref.cell);
         for (let n = 1; n <= minionPiece.size; n++) {
-            const x = target.ref.x + dx * n;
-            const y = target.ref.y + dy * n;
+            const x = targetX + dx * n;
+            const y = targetY + dy * n;
             const side = x < win.minX ? "W" : x > win.maxX ? "E" : y < win.minY ? "N" : y > win.maxY ? "S" : undefined;
             if (side !== undefined) {
                 if (!this.buffers.includes(side)) {
@@ -4610,8 +4602,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A bare cell with 2+ of the player's own pieces means the acting minion hasn't been picked yet - still building, not a hard error, same tolerance every minion-selection context gets.
         if (!ref.includes(".")) {
-            const coords = GnosticaBoard.algebraic2coords(ref);
-            if (this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(coords[0], coords[1])).ambiguous) {
+            if (this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(ref)).ambiguous) {
                 return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
             }
         }
@@ -4619,8 +4610,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (result.kind !== "ok") {
             return this.invalidPieceRef(result.kind, ref);
         }
-        const { x, y, index } = result.ref;
-        const piece = this.board.get(x, y)!.pieces[index];
+        const piece = this.getPiece(result.ref);
         if (piece.owner !== this.currplayer) {
             return this.invalid("apgames:validation.gnostica.NOT_YOUR_MINION");
         }
@@ -4692,17 +4682,25 @@ export class GnosticaGame extends GameBaseSequenced {
         return s !== undefined && s[size - 1] > 0;
     }
 
-    private getCellContents(x: number, y: number): CellContents {
-        return this.board.get(x, y)!;
+    public cellContents(cell: string): CellContents | undefined {
+        return this.board.get(...GnosticaBoard.algebraic2coords(cell));
     }
 
-    private getPiece(x: number, y: number, index: number): Piece {
-        return this.getCellContents(x, y).pieces[index];
+    public classifyCell(cell: string): CellClass {
+        return this.board.classify(...GnosticaBoard.algebraic2coords(cell));
+    }
+
+    private getCellContents(cell: string): CellContents {
+        return this.cellContents(cell)!;
+    }
+
+    private getPiece(ref: IPieceRef): Piece {
+        return this.getCellContents(ref.cell).pieces[ref.index];
     }
 
     // A cell "has an enemy" if any piece there belongs to someone other than `player`.
-    private hasEnemyPieces(x: number, y: number, player: number): boolean {
-        const t = this.board.get(x, y);
+    private hasEnemyPieces(cell: string, player: number): boolean {
+        const t = this.cellContents(cell);
         if (t === undefined) {
             return false;
         }
@@ -4718,8 +4716,17 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
+    // The cell `dist` spaces from `cell` in the direction a piece faces.
+    private cellBeyond(cell: string, facing: Orientation, dist: number): string {
+        const [dx, dy] = this.board.delta(facing as DirectionCardinal);
+        const [x, y] = xy(cell);
+        return GnosticaBoard.coords2algebraic(x + dx * dist, y + dy * dist);
+    }
+
     // Shared legality check for a CELL-level target: the minion's own cell ("U") or the single cell it's pointing at.
-    private checkValidCellTarget(minion: Piece, minionX: number, minionY: number, targetX: number, targetY: number,): PowerFailure | undefined {
+    private checkValidCellTarget(minion: Piece, minionCell: string, targetCell: string,): PowerFailure | undefined {
+        const [minionX, minionY] = xy(minionCell);
+        const [targetX, targetY] = xy(targetCell);
         if (minion.orientation === "U") {
             if (targetX === minionX && targetY === minionY) {
                 return undefined;
@@ -4735,46 +4742,46 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The opening every piece-targeting check shares: the acting piece is the player's own, and the target piece is one it can reach.
     private checkOwnMinionTargetsPiece(
-        minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number,
+        minionRef: IPieceRef,
+        targetRef: IPieceRef,
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const minion = this.getPiece(minionRef);
         const ownErr = checkOwnMinion(minion, this.currplayer);
         if (ownErr) return ownErr;
-        return this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        return this.checkValidPieceTarget(minion, minionRef, targetRef);
     }
 
     // The cell-target counterpart of checkOwnMinionTargetsPiece.
     private checkOwnMinionTargetsCell(
-        minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number,
+        minionRef: IPieceRef,
+        targetCell: string,
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const minion = this.getPiece(minionRef);
         const ownErr = checkOwnMinion(minion, this.currplayer);
         if (ownErr) return ownErr;
-        return this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        return this.checkValidCellTarget(minion, minionRef.cell, targetCell);
     }
 
     // Same, but for a specific PIECE target - a minion may always target itself regardless of orientation.
     private checkValidPieceTarget(
-    minion: Piece, minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number,
+    minion: Piece, minionRef: IPieceRef,
+        targetRef: IPieceRef,
     ): PowerFailure | undefined {
-        const isSelf = targetX === minionX && targetY === minionY && targetIndex === minionIndex;
+        const isSelf = targetRef.cell === minionRef.cell && targetRef.index === minionRef.index;
         if (isSelf) {
             return undefined;
         }
-        return this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+        return this.checkValidCellTarget(minion, minionRef.cell, targetRef.cell);
     }
 
     // Cups - Create
 
     // Add one of the acting player's own small pieces to the target cell.
     private checkCreateOwn(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, opts: PrimitiveOpts = {},
+    minionRef: IPieceRef,
+        targetCell: string, opts: PrimitiveOpts = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
         if (minionErr) return minionErr;
         // A minion sitting on an isolated wasteland (not itself a territory)
         // can face a cell that's genuinely void - unlike movePiece, which
@@ -4783,7 +4790,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // brand-new piece, so it would otherwise just sit there forever,
         // invisible to every void-eviction path. Reject outright instead,
         // same as checkCreateTerritory's own wasteland-only restriction.
-        if (this.board.classify(targetX, targetY) === "void") {
+        if (this.classifyCell(targetCell) === "void") {
             return { key: "TARGET_IS_VOID" };
         }
         // The target cell may be a genuinely untouched wasteland (no stored
@@ -4791,7 +4798,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // that already has a card or a piece) - that's zero pieces there, not
         // an error. movePiece/hermitMovePiece already handle an
         // absent destination the same way; this mirrors them.
-        const t = this.board.get(targetX, targetY);
+        const t = this.cellContents(targetCell);
         const pieceCount = t?.pieces.length ?? 0;
         if (!opts.ignoreCapacity && pieceCount >= 3) {
             return { key: "CELL_FULL" };
@@ -4802,29 +4809,29 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    private createOwn(targetX: number, targetY: number, orientation: Orientation): void {
+    private createOwn(targetCell: string, orientation: Orientation): void {
         this.takeFromStash(this.currplayer, 1);
-        let t = this.board.get(targetX, targetY);
+        let t = this.cellContents(targetCell);
         if (t === undefined) {
             t = new CellContents(undefined);
-            this.board.store.set(targetX, targetY, t);
+            this.board.store.set(...GnosticaBoard.algebraic2coords(targetCell), t);
         }
         t.add(new Piece(this.currplayer, 1, orientation));
     }
 
     // Add one of the TARGETED enemy's own small pieces to the same cell, matching its orientation, drawn from the enemy's stash.
     private checkCreateEnemy(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
+    minionRef: IPieceRef,
+        targetRef: IPieceRef, opts: PrimitiveOpts = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetRef.cell);
         if (minionErr) return minionErr;
         // A void cell can never legitimately have a victim, but check explicitly anyway - creation has no cleanup path for a stranded piece.
-        if (this.board.classify(targetX, targetY) === "void") {
+        if (this.classifyCell(targetRef.cell) === "void") {
             return { key: "TARGET_IS_VOID" };
         }
-        const t = this.board.get(targetX, targetY);
-        const victim = t?.pieces[victimIndex];
+        const t = this.cellContents(targetRef.cell);
+        const victim = t?.pieces[targetRef.index];
         if (victim === undefined) {
             return { key: "INVALID_MOVE", params: { reason: "NO_VICTIM_THERE" } };
         }
@@ -4840,24 +4847,24 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    private createEnemy(targetX: number, targetY: number, victimIndex: number): void {
-        const t = this.getCellContents(targetX, targetY);
-        const victim = t.pieces[victimIndex];
+    private createEnemy(targetRef: IPieceRef): void {
+        const t = this.getCellContents(targetRef.cell);
+        const victim = t.pieces[targetRef.index];
         this.takeFromStash(victim.owner, 1);
         t.add(new Piece(victim.owner, 1, victim.orientation));
     }
 
     // Create a territory on a wasteland with a spot card from hand, or (Wheel of Fortune's allowRandomDraw) an unrestricted draw-pile card instead.
     private checkCreateTerritory(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
+    minionRef: IPieceRef,
+        targetCell: string, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
         if (minionErr) return minionErr;
-        if (this.board.classify(targetX, targetY) !== "wasteland") {
+        if (this.classifyCell(targetCell) !== "wasteland") {
             return { key: "NOT_A_WASTELAND" };
         }
-        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
         if (opts.allowRandomDraw && cardUid === undefined) {
@@ -4883,40 +4890,37 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    private createTerritory(targetX: number, targetY: number, cardUid: string): void {
-        this.board.createTerritory(targetX, targetY, takeFromPile(this.hands[this.currplayer - 1], cardUid));
+    private createTerritory(targetCell: string, cardUid: string): void {
+        this.board.createTerritory(...GnosticaBoard.algebraic2coords(targetCell), takeFromPile(this.hands[this.currplayer - 1], cardUid));
     }
 
     // Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
-    private createTerritoryFromDeck(targetX: number, targetY: number): TarotCard {
+    private createTerritoryFromDeck(targetCell: string): TarotCard {
         this.reshuffle();
         const card = cardByUid(this.drawPile.shift() as string);
-        this.board.createTerritory(targetX, targetY, card);
+        this.board.createTerritory(...GnosticaBoard.algebraic2coords(targetCell), card);
         return card;
     }
 
     // Move the minion itself, or push a targeted piece, `dist` spaces in the minion's own direction.
     private checkMovePiece(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number, dist: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef, dist: number,
         opts: PrimitiveOpts & { skipLandingCheck?: boolean } = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
-        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const minion = this.getPiece(minionRef);
         const rodErr = checkCanUseRod(minion);
         if (rodErr) return rodErr;
         if (dist < 1 || dist > minion.size) {
             return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
         }
         if (!opts.skipLandingCheck) {
-            const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
-            const destX = targetX + dx * dist;
-            const destY = targetY + dy * dist;
             // Landing in the void is legal here (unlike Hermit's teleport,
             // which forbids it) - it just destroys the piece, same as any
             // other piece that ends up in the void (see returnEvictedPieces).
-            const destT = this.board.get(destX, destY);
+            const destT = this.cellContents(this.cellBeyond(targetRef.cell, minion.orientation, dist));
             if (destT !== undefined && !destT.canAdd(opts.ignoreCapacity)) {
                 return { key: "CELL_FULL" };
             }
@@ -4925,97 +4929,89 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private movePiece(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number, dist: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef, dist: number,
         newOrientation: Orientation | undefined, waypoint = false,
     ): void {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
-        const destX = targetX + dx * dist;
-        const destY = targetY + dy * dist;
-
-        const srcT = this.getCellContents(targetX, targetY);
-        const moved = srcT.removeAt(targetIndex);
+        const minion = this.getPiece(minionRef);
+        const dest = this.cellBeyond(targetRef.cell, minion.orientation, dist);
+        const srcT = this.getCellContents(targetRef.cell);
+        const moved = srcT.removeAt(targetRef.index);
         // The source cell never gets a piece back from this function (it
         // either lands elsewhere or is destroyed in the void below) - prune
         // it now if that was its last occupant, so an empty wasteland
         // doesn't linger in the board's own stored map (see
         // GnosticaBoard.pruneIfEmpty's own docs).
-        this.board.pruneIfEmpty(targetX, targetY);
+        this.board.pruneIfEmpty(...xy(targetRef.cell));
         // A genuine final landing in the void destroys the piece. A mid-chain
         // waypoint (Chariot) must NOT - the piece still needs to be sitting
         // there for the chain's next step to act on.
-        if (!waypoint && this.board.classify(destX, destY) === "void") {
+        if (!waypoint && this.classifyCell(dest) === "void") {
             this.returnToStash(moved.owner, moved.size);
             return;
         }
         if (moved.owner === this.currplayer && newOrientation !== undefined) {
             moved.orientation = newOrientation;
         }
-        let destT = this.board.get(destX, destY);
+        let destT = this.cellContents(dest);
         if (destT === undefined) {
             destT = new CellContents(undefined);
-            this.board.store.set(destX, destY, destT);
+            this.board.store.set(...xy(dest), destT);
         }
         destT.add(moved);
     }
 
     // Push the territory at the minion-facing (srcX, srcY) `dist` spaces further, same direction; srcX/srcY are caller-supplied so the move string names it.
     private checkMoveTerritory(
-    minionX: number, minionY: number, minionIndex: number,
-        srcX: number, srcY: number, dist: number,
+    minionRef: IPieceRef,
+        srcCell: string, dist: number,
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, srcX, srcY);
+        const minionErr = this.checkOwnMinionTargetsCell(minionRef, srcCell);
         if (minionErr) return minionErr;
-        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const minion = this.getPiece(minionRef);
         const rodErr = checkCanUseRod(minion);
         if (rodErr) return rodErr;
-        if (this.board.classify(srcX, srcY) !== "territory") {
+        if (this.classifyCell(srcCell) !== "territory") {
             return { key: "NO_TERRITORY_THAT_WAY" };
         }
-        if (this.hasEnemyPieces(srcX, srcY, this.currplayer)) {
+        if (this.hasEnemyPieces(srcCell, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
         if (dist < 1 || dist > minion.size) {
             return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
         }
-        const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
-        const destX = srcX + dx * dist;
-        const destY = srcY + dy * dist;
-        if (destX === minionX && destY === minionY) {
+        const destCell = this.cellBeyond(srcCell, minion.orientation, dist);
+        if (destCell === minionRef.cell) {
             return { key: "CANT_PUSH_ONTO_SELF" };
         }
-        if (this.board.classify(destX, destY) !== "wasteland") {
+        if (this.classifyCell(destCell) !== "wasteland") {
             return { key: "PUSH_NEEDS_WASTELAND" };
         }
-        if (this.hasEnemyPieces(destX, destY, this.currplayer)) {
+        if (this.hasEnemyPieces(destCell, this.currplayer)) {
             return { key: "DESTINATION_HAS_ENEMY" };
         }
         return undefined;
     }
 
     private moveTerritory(
-    minionX: number, minionY: number, minionIndex: number,
-        srcX: number, srcY: number, dist: number,
+    minionRef: IPieceRef,
+        srcCell: string, dist: number,
     ): void {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const [dx, dy] = this.board.delta(minion.orientation as DirectionCardinal);
-        const destX = srcX + dx * dist;
-        const destY = srcY + dy * dist;
+        const minion = this.getPiece(minionRef);
         // Pushing the card out can strand pieces left at the departure cell if nothing else keeps it adjacent to a territory.
-        const evictions = this.board.pushTerritory(srcX, srcY, destX, destY);
+        const evictions = this.board.pushTerritory(...xy(srcCell), ...xy(this.cellBeyond(srcCell, minion.orientation, dist)));
         this.returnEvictedPieces(evictions);
     }
 
     // Replace the minion (or a targeted piece) with one exactly one size larger, same owner, drawn from that owner's own stash.
     private checkGrowPiece(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef,
         opts: { skipStashCheck?: boolean } = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
-        const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        const target = this.cellContents(targetRef.cell)?.pieces[targetRef.index];
         if (target === undefined) {
             return { key: "NO_PIECE_THERE" };
         }
@@ -5028,28 +5024,28 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    private growPiece(targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation | undefined,): void {
-        const t = this.getCellContents(targetX, targetY);
-        const target = t.pieces[targetIndex];
+    private growPiece(targetRef: IPieceRef, newOrientation: Orientation | undefined,): void {
+        const t = this.getCellContents(targetRef.cell);
+        const target = t.pieces[targetRef.index];
         const grownSize = nextSize(target.size);
         this.takeFromStash(target.owner, grownSize);
         this.returnToStash(target.owner, target.size);
         const orientation = target.owner === this.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
-        t.removeAt(targetIndex);
+        t.removeAt(targetRef.index);
         t.add(new Piece(target.owner, grownSize, orientation));
     }
 
     // Grow the targeted territory by one point of value (or two, opts.skipLadder), replacing its card from hand or discard (opts.replacementSource).
     private checkGrowTerritory(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
+    minionRef: IPieceRef,
+        targetCell: string, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
         if (minionErr) return minionErr;
-        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
-        const t = this.board.get(targetX, targetY);
+        const t = this.cellContents(targetCell);
         const current = t?.pointValue() ?? 0;
         if (current === 0) {
             return { key: "NOTHING_TO_GROW" };
@@ -5079,11 +5075,11 @@ export class GnosticaGame extends GameBaseSequenced {
         return opts.replacementSource === "discard" ? [...this.hands[this.currplayer - 1], ...this.discardPile] : this.hands[this.currplayer - 1];
     }
 
-    private growTerritory(targetX: number, targetY: number, newCardUid: string): void {
-        const t = this.getCellContents(targetX, targetY);
+    private growTerritory(targetCell: string, newCardUid: string): void {
+        const t = this.getCellContents(targetCell);
         const newCard = takeFromPile(this.replacementPile(newCardUid), newCardUid);
         this.discardPile.push((t.card as TarotCard).uid);
-        this.board.growTerritory(targetX, targetY, newCard);
+        this.board.growTerritory(...GnosticaBoard.algebraic2coords(targetCell), newCard);
     }
 
     // Swords - Attack
@@ -5091,17 +5087,17 @@ export class GnosticaGame extends GameBaseSequenced {
     // Shrink a targeted piece by up to `pips`, replacing it from the VICTIM's own stash - or destroying it outright if the result is 0 pips.
     // opts.bothSwords (Death's shortcut) lets `pips` be the total of both of the card's attacks, i.e. up to twice the minion's size.
     private checkAttackPiece(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number, pips: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef, pips: number,
         opts: { bothSwords?: boolean } = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
-        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const minion = this.getPiece(minionRef);
         if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
             return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
         }
-        const victim = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        const victim = this.cellContents(targetRef.cell)?.pieces[targetRef.index];
         if (victim === undefined) {
             return { key: "NO_PIECE_THERE" };
         }
@@ -5116,41 +5112,41 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private attackPiece(
-    targetX: number, targetY: number, targetIndex: number, pips: number,
+    targetRef: IPieceRef, pips: number,
         newOrientation: Orientation | undefined,
     ): void {
-        const t = this.getCellContents(targetX, targetY);
-        const victim = t.pieces[targetIndex];
+        const t = this.getCellContents(targetRef.cell);
+        const victim = t.pieces[targetRef.index];
         const resultSize = victim.size - pips;
         if (resultSize === 0) {
             this.returnToStash(victim.owner, victim.size);
-            t.removeAt(targetIndex);
-            this.board.pruneIfEmpty(targetX, targetY);
+            t.removeAt(targetRef.index);
+            this.board.pruneIfEmpty(...xy(targetRef.cell));
             return;
         }
         this.stashOf(victim.owner)[resultSize - 1] -= 1;
         this.returnToStash(victim.owner, victim.size);
         const orientation = victim.owner === this.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
-        t.removeAt(targetIndex);
+        t.removeAt(targetRef.index);
         t.add(new Piece(victim.owner, resultSize as Pips, orientation));
     }
 
     // Shrink the targeted territory's value by up to `pips`, replacing its card, or destroying it outright if `newCardUid` is omitted.
     private checkAttackTerritory(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
+    minionRef: IPieceRef,
+        targetCell: string, pips: number, newCardUid: string | undefined,
         opts: PrimitiveOpts & { bothSwords?: boolean } = {},
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
         if (minionErr) return minionErr;
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+        const minion = this.getPiece(minionRef);
+        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
         if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
             return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
         }
-        const t = this.board.get(targetX, targetY);
+        const t = this.cellContents(targetCell);
         const current = t?.pointValue() ?? 0;
         if (current === 0) {
             return { key: "NOTHING_TO_ATTACK" };
@@ -5182,64 +5178,63 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    private attackTerritory(targetX: number, targetY: number, pips: number, newCardUid: string | undefined,): void {
-        const t = this.getCellContents(targetX, targetY);
+    private attackTerritory(targetCell: string, pips: number, newCardUid: string | undefined,): void {
+        const t = this.getCellContents(targetCell);
         const current = t.pointValue();
         const oldUid = (t.card as TarotCard).uid;
         const resultValue = current - pips;
         if (resultValue === 0) {
-            const evictions = this.board.destroyTerritory(targetX, targetY);
+            const evictions = this.board.destroyTerritory(...GnosticaBoard.algebraic2coords(targetCell));
             this.discardPile.push(oldUid);
             this.returnEvictedPieces(evictions);
             return;
         }
         const newCard = takeFromPile(this.replacementPile(newCardUid as string), newCardUid as string);
         this.discardPile.push(oldUid);
-        this.board.shrinkTerritory(targetX, targetY, newCard);
+        this.board.shrinkTerritory(...GnosticaBoard.algebraic2coords(targetCell), newCard);
     }
 
     // Special powers: the major arcana abilities that don't reduce to a suit primitive; chaining a card's own multi-step power list is gnostica.ts's job.
 
     // Orient one of the acting player's own minions - unlike suit primitives, no adjacency/self targeting restriction here.
-    private checkOrientMinion(x: number, y: number, index: number): PowerFailure | undefined {
-        const p = this.getPiece(x, y, index);
-        return checkOwnMinion(p, this.currplayer);
+    private checkOrientMinion(ref: IPieceRef): PowerFailure | undefined {
+        return checkOwnMinion(this.getPiece(ref), this.currplayer);
     }
 
     // The one place any orientation actually gets written - orientMinion, orientAny, and the standalone "orient" command all funnel through here.
-    private setPieceOrientation(x: number, y: number, index: number, newOrientation: Orientation,): void {
-        this.getPiece(x, y, index).orientation = newOrientation;
+    private setPieceOrientation(ref: IPieceRef, newOrientation: Orientation,): void {
+        this.getPiece(ref).orientation = newOrientation;
     }
 
-    private orientMinion(x: number, y: number, index: number, newOrientation: Orientation,): void {
-        this.setPieceOrientation(x, y, index, newOrientation);
+    private orientMinion(ref: IPieceRef, newOrientation: Orientation,): void {
+        this.setPieceOrientation(ref, newOrientation);
     }
 
     // Devil only: orient ANY piece, even an opponent's, still subject to the normal self/adjacent-cell targeting rule.
     private checkOrientAny(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef,
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
-        if (this.board.get(targetX, targetY)?.pieces[targetIndex] === undefined) {
+        if (this.cellContents(targetRef.cell)?.pieces[targetRef.index] === undefined) {
             return { key: "NO_PIECE_THERE" };
         }
         return undefined;
     }
 
-    private orientAny(targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,): void {
-        this.setPieceOrientation(targetX, targetY, targetIndex, newOrientation);
+    private orientAny(targetRef: IPieceRef, newOrientation: Orientation,): void {
+        this.setPieceOrientation(targetRef, newOrientation);
     }
 
     // Hierophant: replace the target piece with one of the acting player's own, same size; the displaced piece returns to its owner's stash.
     private checkHierophantReplace(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef,
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
-        const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        const target = this.cellContents(targetRef.cell)?.pieces[targetRef.index];
         if (target === undefined) {
             return { key: "NO_PIECE_THERE" };
         }
@@ -5253,26 +5248,26 @@ export class GnosticaGame extends GameBaseSequenced {
         return undefined;
     }
 
-    private hierophantReplace(targetX: number, targetY: number, targetIndex: number, newOrientation: Orientation,): void {
-        const t = this.getCellContents(targetX, targetY);
-        const target = t.pieces[targetIndex];
+    private hierophantReplace(targetRef: IPieceRef, newOrientation: Orientation,): void {
+        const t = this.getCellContents(targetRef.cell);
+        const target = t.pieces[targetRef.index];
         this.takeFromStash(this.currplayer, target.size);
         this.returnToStash(target.owner, target.size);
-        t.removeAt(targetIndex);
+        t.removeAt(targetRef.index);
         t.add(new Piece(this.currplayer, target.size, newOrientation));
     }
 
     // Hermit, piece variant: move a targeted piece to ANY completely empty territory or wasteland, ignoring adjacency/distance limits.
     private checkHermitMovePiece(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number, destX: number, destY: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef, destCell: string,
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
-        if (this.board.classify(destX, destY) === "void") {
+        if (this.classifyCell(destCell) === "void") {
             return { key: "CANT_END_IN_VOID" };
         }
-        const destT = this.board.get(destX, destY);
+        const destT = this.cellContents(destCell);
         if (destT !== undefined && destT.pieces.length > 0) {
             return { key: "HERMIT_NEEDS_EMPTY" };
         }
@@ -5280,55 +5275,55 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private hermitMovePiece(
-    targetX: number, targetY: number, targetIndex: number,
-        destX: number, destY: number, newOrientation: Orientation | undefined,
+    targetRef: IPieceRef,
+        destCell: string, newOrientation: Orientation | undefined,
     ): void {
-        const srcT = this.getCellContents(targetX, targetY);
-        const moved = srcT.removeAt(targetIndex);
-        this.board.pruneIfEmpty(targetX, targetY);
+        const srcT = this.getCellContents(targetRef.cell);
+        const moved = srcT.removeAt(targetRef.index);
+        this.board.pruneIfEmpty(...xy(targetRef.cell));
         if (moved.owner === this.currplayer && newOrientation !== undefined) {
             moved.orientation = newOrientation;
         }
-        let dt = this.board.get(destX, destY);
+        let dt = this.cellContents(destCell);
         if (dt === undefined) {
             dt = new CellContents(undefined);
-            this.board.store.set(destX, destY, dt);
+            this.board.store.set(...GnosticaBoard.algebraic2coords(destCell), dt);
         }
         dt.add(moved);
     }
 
     // Hermit, territory variant: move a targeted territory to ANY non-enemy-occupied wasteland - a Rod's tile push without direction/distance limits.
     private checkHermitMoveTerritory(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, destX: number, destY: number,
+    minionRef: IPieceRef,
+        targetCell: string, destCell: string,
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
         if (minionErr) return minionErr;
-        if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
+        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
-        if (this.board.classify(destX, destY) !== "wasteland") {
+        if (this.classifyCell(destCell) !== "wasteland") {
             return { key: "PUSH_NEEDS_WASTELAND" };
         }
-        if (this.hasEnemyPieces(destX, destY, this.currplayer)) {
+        if (this.hasEnemyPieces(destCell, this.currplayer)) {
             return { key: "DESTINATION_HAS_ENEMY" };
         }
         return undefined;
     }
 
-    private hermitMoveTerritory(targetX: number, targetY: number, destX: number, destY: number,): void {
-        const evictions = this.board.pushTerritory(targetX, targetY, destX, destY);
+    private hermitMoveTerritory(targetCell: string, destCell: string,): void {
+        const evictions = this.board.pushTerritory(...GnosticaBoard.algebraic2coords(targetCell), ...GnosticaBoard.algebraic2coords(destCell));
         this.returnEvictedPieces(evictions);
     }
 
     // Justice / Hanged Man: swap hands with the owner of the targeted piece; caller must pass the other player's live hand array by reference.
     private checkTradeHands(
-    minionX: number, minionY: number, minionIndex: number,
-        targetX: number, targetY: number, targetIndex: number,
+    minionRef: IPieceRef,
+        targetRef: IPieceRef,
     ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
-        const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
+        const target = this.cellContents(targetRef.cell)?.pieces[targetRef.index];
         if (target === undefined) {
             return { key: "NO_PIECE_THERE" };
         }
@@ -5340,8 +5335,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Returns the target's owner so the caller can double-check it passed the right array.
-    private tradeHands(targetX: number, targetY: number, targetIndex: number, otherHand: string[],): number {
-        const target = this.getPiece(targetX, targetY, targetIndex);
+    private tradeHands(targetRef: IPieceRef, otherHand: string[],): number {
+        const target = this.getPiece(targetRef);
         const mine = [...this.hands[this.currplayer - 1]];
         this.hands[this.currplayer - 1].length = 0;
         this.hands[this.currplayer - 1].push(...otherHand);
@@ -5351,8 +5346,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Judgement: draw chosen cards from the discard pile into hand, up to one per pip of the acting minion, capped by the 6-card hand limit.
-    private checkJudgementDraw(minionX: number, minionY: number, minionIndex: number, cardUids: string[],): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
+    private checkJudgementDraw(minionRef: IPieceRef, cardUids: string[],): PowerFailure | undefined {
+        const minion = this.getPiece(minionRef);
         const ownErr = checkOwnMinion(minion, this.currplayer);
         if (ownErr) return ownErr;
         const maxDraw = judgementDrawRoom(minion.size, this.hands[this.currplayer - 1].length);
@@ -5458,10 +5453,10 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "use <cardUid>" targets a card by its own identity, not a cell.  Cards are unique, so we can derive the cell.
-    private findCardCell(uid: string): { x: number; y: number } | undefined {
+    private findCardCell(uid: string): string | undefined {
         for (const [x, y, t] of this.board.entries()) {
             if (t.card?.uid === uid) {
-                return { x, y };
+                return GnosticaBoard.coords2algebraic(x, y);
             }
         }
         return undefined;
@@ -5473,36 +5468,36 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Returns every piece the acting player owns on the activated cell, for the minion pool.
-    private piecesOwnedAt(x: number, y: number): IMinionRef[] {
-        const t = this.board.get(x, y);
+    private piecesOwnedAt(cell: string): IPieceRef[] {
+        const t = this.cellContents(cell);
         if (t === undefined) {
             return [];
         }
         return t.pieces
-            .map((p, index) => ({ x, y, index, piece: p }))
+            .map((p, index) => ({ cell: cell, index, piece: p }))
             .filter(ref => ref.piece.owner === this.currplayer);
     }
 
-    public eligibleMinionsForActivate(x: number, y: number): IMinionRef[] {
-        const t = this.board.get(x, y);
+    public eligibleMinionsForActivate(cell: string): IPieceRef[] {
+        const t = this.cellContents(cell);
         if (t === undefined || t.card === undefined) {
             return [];
         }
-        return this.piecesOwnedAt(x, y);
+        return this.piecesOwnedAt(cell);
     }
 
     // For the standalone "orient" command - same shape as eligibleMinionsForActivate but without the card requirement; you can orient a minion on a bare wasteland cell.
-    private eligibleMinionsForOrient(x: number, y: number): IMinionRef[] {
-        return this.piecesOwnedAt(x, y);
+    private eligibleMinionsForOrient(cell: string): IPieceRef[] {
+        return this.piecesOwnedAt(cell);
     }
 
     // Every piece the acting player owns anywhere on the board - the pool "play" draws minions from.
-    public eligibleMinionsForPlay(): IMinionRef[] {
-        const eligible: IMinionRef[] = [];
+    public eligibleMinionsForPlay(): IPieceRef[] {
+        const eligible: IPieceRef[] = [];
         for (const [x, y, t] of this.board.entries()) {
             t.pieces.forEach((p, index) => {
                 if (p.owner === this.currplayer) {
-                    eligible.push({ x, y, index, piece: p });
+                    eligible.push({ cell: GnosticaBoard.coords2algebraic(x, y), index, piece: p });
                 }
             });
         }
@@ -5545,12 +5540,12 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Who may act on a resumed obligation: for a Justice reached by a use, the minions in the territory it was used from (the World's, if it borrowed Justice); otherwise any of the player's.
-    private eligibleMinionsForOwed(owed: Owed): IMinionRef[] {
+    private eligibleMinionsForOwed(owed: Owed): IPieceRef[] {
         if (owed.uid !== "11" || owed.how === "play" || owed.how === "play21") {
             return this.eligibleMinionsForPlay();
         }
         const loc = this.findCardCell(owed.how === "use21" ? "21" : "11");
-        return loc === undefined ? [] : this.eligibleMinionsForActivate(loc.x, loc.y);
+        return loc === undefined ? [] : this.eligibleMinionsForActivate(loc);
     }
 
     // Applies a submission's power segments card by card (the head card, a World's borrowed card, a Fool's revealed card) straight off the string, then settles whatever
@@ -5727,7 +5722,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (loc === undefined) {
             return this.invalid("apgames:validation.gnostica.CARD_NOT_ON_BOARD", { uid: cardUid });
         }
-        if (this.eligibleMinionsForActivate(loc.x, loc.y).length === 0) {
+        if (this.eligibleMinionsForActivate(loc).length === 0) {
             return this.invalid("apgames:validation.gnostica.NO_MINIONS_THERE", { uid: cardUid });
         }
         return this.validatePlayedPower(this.resolvePowerPlay(parsed)!);
@@ -5788,7 +5783,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Mirrors applyMinorPower's own tolerance exactly - skipping, and an incomplete-so-far step, both validate as "fine, nothing to report yet".
-    public validateMinorPower(suitUid: MinorSuitUid, cardUid: string, eligible: IMinionRef[], steps: IStep[]): IValidationResult {
+    public validateMinorPower(suitUid: MinorSuitUid, cardUid: string, eligible: IPieceRef[], steps: IStep[]): IValidationResult {
         if (steps.some(step => step.action === "skip")) {
             return this.invalid("apgames:validation.gnostica.SKIP_NOT_ALLOWED");
         }
@@ -5848,15 +5843,15 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Applies a step's own outcome.newMinion chaining to `minions`: appends it, first removing whichever existing entry it supersedes (a splice can shift later same-cell indices down by one).
-    private static chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[] {
+    private static chainMinion(minions: IPieceRef[], outcome: IStepOutcome): IPieceRef[] {
         const stale = outcome.replacesMinion;
         // An in-place change (a reorientation) leaves every other piece's index alone; only a removeAt shifts later ones down.
-        const inPlace = stale !== undefined && outcome.newMinion?.x === stale.x && outcome.newMinion.y === stale.y && outcome.newMinion.index === stale.index;
+        const inPlace = stale !== undefined && outcome.newMinion?.cell === stale.cell && outcome.newMinion.index === stale.index;
         const base = stale === undefined
             ? minions
             : minions
-                .filter(m => !(m.x === stale.x && m.y === stale.y && m.index === stale.index))
-                .map(m => (!inPlace && m.x === stale.x && m.y === stale.y && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
+                .filter(m => !(m.cell === stale.cell && m.index === stale.index))
+                .map(m => (!inPlace && m.cell === stale.cell && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
         return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
     }
 
@@ -5994,13 +5989,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // How many more discards a Judgement draw step could still take, when the last step was one; same "last step wins" convention.
         let mayDrawMore = 0;
         // Set once Moon's own move step genuinely needed its capacity exemption (destination was already at 3); cleared once the attack step destroys a piece there, restoring it.
-        let moonRestoreCell: { x: number; y: number } | undefined;
+        let moonRestoreCell: string | undefined;
         // Set when the last step was only legal thanks to a two-step shortcut's waiver, which its (missing) paired second step would have earned.
         let awaitingPair = false;
         // False right after a power was skipped (a later power of the card used alone), so nothing was there to pass on to it; true once a step is processed.
         let priorTaken = true;
         // Where the previous step of a same-target-shortcut card left the piece it acted on; the next step must act on that same piece.
-        let sameTargetWanted: { x: number; y: number; index: number } | undefined;
+        let sameTargetWanted: IPieceRef | undefined;
         for (;;) {
             const top = stack[stack.length - 1];
             const poppedViaDecline = justDeclined;
@@ -6111,7 +6106,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (sameTargetWanted !== undefined && "primitive" in step && istep !== undefined && (istep.complete ?? -1) >= 0) {
                 const target = istep.targetPiece === undefined ? undefined : (clone ?? this).resolvePieceRef(istep.targetPiece);
-                if (target?.kind !== "ok" || target.ref.x !== sameTargetWanted.x || target.ref.y !== sameTargetWanted.y || target.ref.index !== sameTargetWanted.index) {
+                if (target?.kind !== "ok" || target.ref.cell !== sameTargetWanted.cell || target.ref.index !== sameTargetWanted.index) {
                     return this.invalid("apgames:validation.gnostica.SAME_TARGET_REQUIRED");
                 }
             }
@@ -6185,12 +6180,12 @@ export class GnosticaGame extends GameBaseSequenced {
             if (frameDef.moonCapacityExemption && "primitive" in step) {
                 if (step.primitive === "move" && outcome.movedToCell !== undefined) {
                     const cell = outcome.movedToCell;
-                    if ((clone.board.get(cell.x, cell.y)?.pieces.length ?? 0) >= 4) {
+                    if ((clone.cellContents(cell)?.pieces.length ?? 0) >= 4) {
                         moonRestoreCell = cell;
                     }
                 } else if (step.primitive === "attack" && moonRestoreCell !== undefined) {
                     const destroyed = outcome.destroyedAtCell;
-                    if (destroyed !== undefined && destroyed.x === moonRestoreCell.x && destroyed.y === moonRestoreCell.y) {
+                    if (destroyed !== undefined && destroyed === moonRestoreCell) {
                         moonRestoreCell = undefined;
                     } else {
                         return this.invalid("apgames:validation.gnostica.MOON_MUST_RESTORE_CAPACITY");
@@ -6199,7 +6194,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (frameDef.sameTargetShortcut && followed && waiverNeeded && "primitive" in step) {
                 const produced = outcome.producedPiece ?? outcome.newMinion;
-                sameTargetWanted = produced === undefined ? undefined : { x: produced.x, y: produced.y, index: produced.index };
+                sameTargetWanted = produced === undefined ? undefined : { cell: produced.cell, index: produced.index };
             }
             top.minions = GnosticaGame.chainMinion(top.minions, outcome);
             top.nextStepIndex = outcome.consumesRest ? frameDef.powers.length : top.nextStepIndex + 1;
@@ -6217,7 +6212,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    public validateMajorPower(def: MajorArcanaDef, eligible: IMinionRef[], steps: IStep[], asUid?: string, asSuit?: string): IValidationResult {
+    public validateMajorPower(def: MajorArcanaDef, eligible: IPieceRef[], steps: IStep[], asUid?: string, asSuit?: string): IValidationResult {
         return this.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, def.uid, asUid, asSuit);
     }
 
@@ -6249,7 +6244,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // "primitive" steps expect <minionRef> <mode> <args...> (same grammar as minor arcana); "special" steps have their own bespoke shapes. High Priestess alone has no minion reference at all.
     public applyPowerStep(
-        step: PowerStep, minions: IMinionRef[], istep: IStep | undefined, def: MajorArcanaDef, stepIndex: number, totalSteps: number, partial: boolean,
+        step: PowerStep, minions: IPieceRef[], istep: IStep | undefined, def: MajorArcanaDef, stepIndex: number, totalSteps: number, partial: boolean,
         borrowedPower?: string, paired = true, priorTaken = true,
     ): IStepOutcome | undefined {
         if ("special" in step && step.special === "worldUseAny") {
@@ -6301,7 +6296,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // One verb's effect, read off the step itself; shared by every caller that applies a step. `waypoint`: a Rods landing in the void is left standing for the next step.
-    private applyVerb(minion: () => IMinionRef, istep: IStep, waypoint = false): IStepOutcome {
+    private applyVerb(minion: () => IPieceRef, istep: IStep, waypoint = false): IStepOutcome {
         switch (istep.action) {
             case "create":
             case "move":
@@ -6328,7 +6323,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Mirrors applyPowerStep's own "incomplete step, still skipped" tolerance.
     public validatePowerStep(
-        step: PowerStep, minions: IMinionRef[], istep: IStep | undefined, def: MajorArcanaDef, stepIndex: number, totalSteps: number,
+        step: PowerStep, minions: IPieceRef[], istep: IStep | undefined, def: MajorArcanaDef, stepIndex: number, totalSteps: number,
         isFreshRootFool = false, borrowedPower?: string, paired = true, priorTaken = true,
     ): StepValidation {
         if ("special" in step && step.special === "worldUseAny") {
@@ -6420,7 +6415,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: jResult };
                 }
                 const taken = istep!.cardList ?? [];
-                const room = judgementDrawRoom((minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index]).size, this.hands[this.currplayer - 1].length) - taken.length;
+                const room = judgementDrawRoom((minion.piece ?? this.cellContents(minion.cell)!.pieces[minion.index]).size, this.hands[this.currplayer - 1].length) - taken.length;
                 return { failed: false, mayAddMore: room > 0 && this.discardPile.some(uid => !taken.includes(uid)) ? room : undefined };
             }
             default:
@@ -6477,7 +6472,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return opts;
     }
 
-    private applySuitPrimitive(minion: () => IMinionRef, step: IStep, waypoint = false): IStepOutcome {
+    private applySuitPrimitive(minion: () => IPieceRef, step: IStep, waypoint = false): IStepOutcome {
         const suitUid = ({ create: "C", move: "R", grow: "D", shrink: "S" } as Record<string, MinorSuitUid>)[step.action];
         const mode = stepMinorMode(suitUid, step)!;
         switch (suitUid) {
@@ -6494,7 +6489,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    public validateSuitPrimitive(suitUid: MinorSuitUid, minion: IMinionRef, step: IStep, opts: Record<string, unknown>): StepValidation {
+    public validateSuitPrimitive(suitUid: MinorSuitUid, minion: IPieceRef, step: IStep, opts: Record<string, unknown>): StepValidation {
         const mode = stepMinorMode(suitUid, step);
         if (mode === undefined) {
             // The step's action doesn't spell this suit's verb (or names no target) - not something a well-formed move for this power can contain.
@@ -6519,50 +6514,50 @@ export class GnosticaGame extends GameBaseSequenced {
                 // The creation's mandatory initial facing, possibly still carrying a trailing "?" - makes no difference to the piece created, so it's stripped the same way cmdPlace strips its own.
                 const cellStr = step.atCell!;
                 const orientationToken = step.direction!;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const targetCell = cellStr;
                 const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
                 const orientation = orientationStr as Orientation;
-                this.createOwn(tx, ty, orientation);
-                this.addBufferIfWasteland(tx, ty);
+                this.createOwn(targetCell, orientation);
+                this.addBufferIfWasteland(targetCell);
                 this.results.push({ type: "place", where: cellStr, how: "cups-own" });
-                const newIndex = this.board.get(tx, ty)!.pieces.length - 1;
-                return { newMinion: { x: tx, y: ty, index: newIndex }, softComplete: orientationToken.endsWith("?") };
+                const newIndex = this.cellContents(targetCell)!.pieces.length - 1;
+                return { newMinion: { cell: targetCell, index: newIndex }, softComplete: orientationToken.endsWith("?") };
             }
             case "enemy": {
                 const cellStr = step.atCell!;
                 const victimRef = step.targetPiece!;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const targetCell = cellStr;
                 // victimRef is a full piece ref (#106) - validateCups already confirmed it names a piece at this cell, so its index is trusted directly.
                 const { index: victimIndex } = this.resolvePieceRefTrusted(victimRef);
-                const victimOwner = this.board.get(tx, ty)!.pieces[victimIndex].owner;
-                this.createEnemy(tx, ty, victimIndex);
+                const victimOwner = this.cellContents(targetCell)!.pieces[victimIndex].owner;
+                this.createEnemy({ cell: targetCell, index: victimIndex });
                 this.results.push({ type: "place", where: cellStr, how: "cups-enemy", who: victimOwner });
                 return {}; // the new piece belongs to the targeted enemy, not the acting player
             }
             case "new": {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const targetCell = cellStr;
                 // "drawn" is parsed as step.amount === 1 (pickleMove's own sentinel, since step.card must always be a real card uid).
                 if (step.amount === 1) {
-                    this.hidden.push({ type: "territory", x: tx, y: ty });
+                    this.hidden.push({ type: "territory", cell: targetCell });
                     return {};
                 }
-                this.createTerritory(tx, ty, cardArg!);
+                this.createTerritory(targetCell, cardArg!);
                 this.results.push({ type: "place", where: cellStr, how: "territory", what: cardArg! });
                 return this.cardValueByUid(cardArg!) === 2 ? { consumesRest: true } : {};
             }
         }
     }
 
-    private validateCups(minion: IMinionRef, mode: CupsMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
+    private validateCups(minion: IPieceRef, mode: CupsMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
         switch (mode) {
             case "own": {
                 // A brand-new minion can't reasonably go unoriented - "U" is a real, always-legal choice, never auto-assigned but always REQUIRED as an explicit fact of creation.
                 const cellStr = step.atCell!;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const targetCell = cellStr;
                 // parseMove already guarantees a valid N/E/S/W/U (with or without the "?" marking a seeded default), so there's nothing left to validate about the facing.
-                const failure = this.checkCreateOwn(minion.x, minion.y, minion.index, tx, ty, opts);
+                const failure = this.checkCreateOwn(minion, targetCell, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6571,16 +6566,16 @@ export class GnosticaGame extends GameBaseSequenced {
             case "enemy": {
                 const cellStr = step.atCell!;
                 const victimRef = step.targetPiece!;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const targetCell = cellStr;
                 // victimRef is a full piece ref (#106), resolved board-wide, but Cups can only act on the SAME cell "at <cell>" already named - a ref elsewhere is rejected as "no victim there".
                 const victimResult = this.resolvePieceRef(victimRef);
                 if (victimResult.kind !== "ok") {
                     return { failed: true, result: this.invalidPieceRef(victimResult.kind, victimRef) };
                 }
-                if (victimResult.ref.x !== tx || victimResult.ref.y !== ty) {
+                if (victimResult.ref.cell !== targetCell) {
                     return { failed: true, result: this.failureResult({ key: "NO_VICTIM_THERE" }) };
                 }
-                const failure = this.checkCreateEnemy(minion.x, minion.y, minion.index, tx, ty, victimResult.ref.index, opts);
+                const failure = this.checkCreateEnemy(minion, victimResult.ref, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6589,11 +6584,11 @@ export class GnosticaGame extends GameBaseSequenced {
             case "new": {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
+                const targetCell = cellStr;
                 // Mirrors applyCups's own "new" case - "drawn" is parsed as step.amount === 1, and only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
                 const failure = step.amount === 1 && opts.allowRandomDraw
-                    ? this.checkCreateTerritory(minion.x, minion.y, minion.index, tx, ty, undefined, opts)
-                    : this.checkCreateTerritory(minion.x, minion.y, minion.index, tx, ty, cardArg, opts);
+                    ? this.checkCreateTerritory(minion, targetCell, undefined, opts)
+                    : this.checkCreateTerritory(minion, targetCell, cardArg, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6603,7 +6598,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Rods - piece <targetRef> <dist> [orientation] | tile <dist>
-    private applyRods(minion: () => IMinionRef, mode: TargetMode, step: IStep, waypoint: boolean): IStepOutcome {
+    private applyRods(minion: () => IPieceRef, mode: TargetMode, step: IStep, waypoint: boolean): IStepOutcome {
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6612,50 +6607,47 @@ export class GnosticaGame extends GameBaseSequenced {
                 const target = this.resolvePieceRefTrusted(targetRef);
                 const newOrientation = orientationStr as Orientation | undefined;
                 // Captured before the move mutates the board, to compute where the piece ends up for the log and minion-chaining check.
-                const movedOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
+                const movedOwner = this.cellContents(target.cell)!.pieces[target.index].owner;
                 const actor = minion();
-                const actorPiece = actor.piece ?? this.board.get(actor.x, actor.y)!.pieces[actor.index];
+                const actorPiece = actor.piece ?? this.cellContents(actor.cell)!.pieces[actor.index];
                 const facing = actorPiece.orientation;
                 // Named only when it stays put, so the render can ring it; a minion that moves itself is the moved piece.
-                const by = actor.x === target.x && actor.y === target.y && actor.index === target.index ? undefined : this.pieceIdAt(actor.x, actor.y, actorPiece);
-                const [dx, dy] = this.board.delta(facing as Exclude<Orientation, "U">);
-                const destX = target.x + dx * dist;
-                const destY = target.y + dy * dist;
+                const by = actor.cell === target.cell && actor.index === target.index ? undefined : this.pieceIdAt(actor.cell, actorPiece);
+                const destCell = this.cellBeyond(target.cell, facing, dist);
                 // A genuine final landing (not a Chariot-relaxed waypoint) in the void destroys the piece instead of moving it.
-                const destroyedInVoid = !waypoint && this.board.classify(destX, destY) === "void";
-                const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
-                this.movePiece(actor.x, actor.y, actor.index, target.x, target.y, target.index, dist, newOrientation, waypoint);
+                const destroyedInVoid = !waypoint && this.classifyCell(destCell) === "void";
+                const origin = target.cell;
+                this.movePiece(actor, target, dist, newOrientation, waypoint);
                 if (destroyedInVoid) {
-                    this.results.push({ type: "move", by, from: origin, to: GnosticaBoard.coords2algebraic(destX, destY), what: this.getPipsFromRef(targetRef), how: "rod-void", who: movedOwner });
+                    this.results.push({ type: "move", by, from: origin, to: destCell, what: this.getPipsFromRef(targetRef), how: "rod-void", who: movedOwner });
                     // Still a real removeAt at target's old slot.  replacesMinion is reported even with no newMinion.
-                    return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
+                    return { replacesMinion: { cell: target.cell, index: target.index } };
                 }
-                const dest = GnosticaBoard.coords2algebraic(destX, destY);
+                const dest = destCell;
                 this.results.push({ type: "move", by, from: origin, to: dest, what: this.getPipsFromRef(targetRef), how: "rod-piece", who: movedOwner });
                 if (movedOwner === this.currplayer) {
-                    const landed = this.board.get(destX, destY)!.pieces;
+                    const landed = this.cellContents(destCell)!.pieces;
                     const newIndex = landed.length - 1;
-                    return { newMinion: { x: destX, y: destY, index: newIndex, piece: landed[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined, movedToCell: { x: destX, y: destY } };
+                    return { newMinion: { cell: destCell, index: newIndex, piece: landed[newIndex] }, replacesMinion: { cell: target.cell, index: target.index }, softComplete: orientationStr === undefined, movedToCell: destCell };
                 }
-                const producedIndex = this.board.get(destX, destY)!.pieces.length - 1;
-                return { replacesMinion: { x: target.x, y: target.y, index: target.index }, movedToCell: { x: destX, y: destY }, producedPiece: { x: destX, y: destY, index: producedIndex } };
+                const producedIndex = this.cellContents(destCell)!.pieces.length - 1;
+                return { replacesMinion: { cell: target.cell, index: target.index }, movedToCell: destCell, producedPiece: { cell: destCell, index: producedIndex } };
             }
             case "tile": {
                 const cellStr = step.targetCell!;
                 const dist = step.amount!;
-                const [srcX, srcY] = GnosticaBoard.algebraic2coords(cellStr);
+                const srcCell = cellStr;
                 const actor = minion();
-                const actorPiece = actor.piece ?? this.board.get(actor.x, actor.y)!.pieces[actor.index];
-                const [dx, dy] = this.board.delta(actorPiece.orientation as Exclude<Orientation, "U">);
-                this.moveTerritory(actor.x, actor.y, actor.index, srcX, srcY, dist);
-                const to = GnosticaBoard.coords2algebraic(srcX + dx * dist, srcY + dy * dist);
-                this.results.push({ type: "move", by: this.pieceIdAt(actor.x, actor.y, actorPiece), from: cellStr, to, how: "rod-tile" });
+                const actorPiece = actor.piece ?? this.cellContents(actor.cell)!.pieces[actor.index];
+                this.moveTerritory(actor, srcCell, dist);
+                const to = this.cellBeyond(srcCell, actorPiece.orientation, dist);
+                this.results.push({ type: "move", by: this.pieceIdAt(actor.cell, actorPiece), from: cellStr, to, how: "rod-tile" });
                 return {};
             }
         }
     }
 
-    private validateRods(minion: IMinionRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
+    private validateRods(minion: IPieceRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6665,7 +6657,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                const failure = this.checkMovePiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, dist, opts);
+                const failure = this.checkMovePiece(minion, target, dist, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6674,8 +6666,8 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const cellStr = step.targetCell!;
                 const dist = step.amount!;
-                const [srcX, srcY] = GnosticaBoard.algebraic2coords(cellStr);
-                const failure = this.checkMoveTerritory(minion.x, minion.y, minion.index, srcX, srcY, dist);
+                const srcCell = cellStr;
+                const failure = this.checkMoveTerritory(minion, srcCell, dist);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6692,34 +6684,34 @@ export class GnosticaGame extends GameBaseSequenced {
                 const orientationStr = step.direction;
                 const target = this.resolvePieceRefTrusted(targetRef);
                 const newOrientation = orientationStr as Orientation | undefined;
-                const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+                const targetPiece = this.cellContents(target.cell)!.pieces[target.index];
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
-                this.growPiece(target.x, target.y, target.index, newOrientation);
-                this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: owner });
+                this.growPiece(target, newOrientation);
+                this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${beforeSize + 1}`, where: target.cell, who: owner });
                 if (owner === this.currplayer) {
-                    const grown = this.board.get(target.x, target.y)!.pieces;
+                    const grown = this.cellContents(target.cell)!.pieces;
                     const newIndex = grown.length - 1;
-                    return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: grown[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined };
+                    return { newMinion: { cell: target.cell, index: newIndex, piece: grown[newIndex] }, replacesMinion: { cell: target.cell, index: target.index }, softComplete: orientationStr === undefined };
                 }
                 // Grown into a piece this pool doesn't track (an enemy's) - still a real removeAt at target's old slot, so chainMinion still needs to know.
-                const grownIndex = this.board.get(target.x, target.y)!.pieces.length - 1;
-                return { replacesMinion: { x: target.x, y: target.y, index: target.index }, producedPiece: { x: target.x, y: target.y, index: grownIndex } };
+                const grownIndex = this.cellContents(target.cell)!.pieces.length - 1;
+                return { replacesMinion: { cell: target.cell, index: target.index }, producedPiece: { cell: target.cell, index: grownIndex } };
             }
             case "tile": {
                 const cellStr = step.targetCell!;
                 const newCardUid = step.card!;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const beforeUid = this.board.get(tx, ty)!.card!.uid;
-                const jumpsTwo = this.cardValueByUid(newCardUid) - this.board.get(tx, ty)!.pointValue() === 2;
-                this.growTerritory(tx, ty, newCardUid);
+                const targetCell = cellStr;
+                const beforeUid = this.cellContents(targetCell)!.card!.uid;
+                const jumpsTwo = this.cardValueByUid(newCardUid) - this.cellContents(targetCell)!.pointValue() === 2;
+                this.growTerritory(targetCell, newCardUid);
                 this.results.push({ type: "convert", what: beforeUid, into: newCardUid, where: cellStr });
                 return jumpsTwo ? { consumesRest: true } : {};
             }
         }
     }
 
-    private validateDiscs(minion: IMinionRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
+    private validateDiscs(minion: IPieceRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6728,7 +6720,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                const failure = this.checkGrowPiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, opts);
+                const failure = this.checkGrowPiece(minion, target, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6737,8 +6729,8 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const cellStr = step.targetCell!;
                 const newCardUid = step.card!;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const failure = this.checkGrowTerritory(minion.x, minion.y, minion.index, tx, ty, newCardUid, opts);
+                const targetCell = cellStr;
+                const failure = this.checkGrowTerritory(minion, targetCell, newCardUid, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6748,8 +6740,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Swords - piece <targetRef> <pips> [orientation] | tile <cell> <pips> [newCardUid]
-    private minionSize(minion: IMinionRef): number {
-        return (minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index]).size;
+    private minionSize(minion: IPieceRef): number {
+        return (minion.piece ?? this.cellContents(minion.cell)!.pieces[minion.index]).size;
     }
 
     // The value of a card by uid, for recognizing when a one-step shortcut was used.
@@ -6769,35 +6761,35 @@ export class GnosticaGame extends GameBaseSequenced {
                 const orientationStr = step.direction;
                 const target = this.resolvePieceRefTrusted(targetRef);
                 const newOrientation = orientationStr as Orientation | undefined;
-                const targetPiece = this.board.get(target.x, target.y)!.pieces[target.index];
+                const targetPiece = this.cellContents(target.cell)!.pieces[target.index];
                 // Death's one shrink for both swords may exceed what the victim has: the excess is wasted.
                 const pips = Math.min(step.amount!, targetPiece.size);
                 const owner = targetPiece.owner;
                 const beforeSize = targetPiece.size;
-                this.attackPiece(target.x, target.y, target.index, pips, newOrientation);
+                this.attackPiece(target, pips, newOrientation);
                 const resultSize = beforeSize - pips;
-                const where = GnosticaBoard.coords2algebraic(target.x, target.y);
+                const where = target.cell;
                 if (resultSize === 0) {
                     this.results.push({ type: "destroy", where, what: this.getPipsFromRef(targetRef), who: owner });
                 } else {
                     this.results.push({ type: "convert", what: `size ${beforeSize}`, into: `size ${resultSize}`, where, who: owner });
                 }
                 if (resultSize > 0 && owner === this.currplayer) {
-                    const shrunk = this.board.get(target.x, target.y)!.pieces;
+                    const shrunk = this.cellContents(target.cell)!.pieces;
                     const newIndex = shrunk.length - 1;
-                    return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: shrunk[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationStr === undefined, shrunkBy: pips };
+                    return { newMinion: { cell: target.cell, index: newIndex, piece: shrunk[newIndex] }, replacesMinion: { cell: target.cell, index: target.index }, softComplete: orientationStr === undefined, shrunkBy: pips };
                 }
                 // Destroyed outright, or shrunk but not into a piece this pool tracks (an enemy's) - still a real removeAt at target's old slot, so chainMinion still needs to know.
                 // Only a true destroy actually frees a slot at this cell - that alone satisfies Moon's capacity-restoration requirement.
-                return { replacesMinion: { x: target.x, y: target.y, index: target.index }, destroyedAtCell: resultSize === 0 ? { x: target.x, y: target.y } : undefined, shrunkBy: pips };
+                return { replacesMinion: { cell: target.cell, index: target.index }, destroyedAtCell: resultSize === 0 ? target.cell : undefined, shrunkBy: pips };
             }
             case "tile": {
                 const cellStr = step.targetCell!;
                 const newCardUid = step.card;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const beforeUid = this.board.get(tx, ty)!.card!.uid;
-                const pips = Math.min(step.amount!, this.board.get(tx, ty)!.pointValue());
-                this.attackTerritory(tx, ty, pips, newCardUid);
+                const targetCell = cellStr;
+                const beforeUid = this.cellContents(targetCell)!.card!.uid;
+                const pips = Math.min(step.amount!, this.cellContents(targetCell)!.pointValue());
+                this.attackTerritory(targetCell, pips, newCardUid);
                 // A replacement card means the territory survived, shrunk; only a true wipeout (no replacement) is a "destroy".
                 if (newCardUid === undefined) {
                     this.results.push({ type: "destroy", where: cellStr, what: beforeUid });
@@ -6809,7 +6801,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    private validateSwords(minion: IMinionRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
+    private validateSwords(minion: IPieceRef, mode: TargetMode, step: IStep, opts: Record<string, unknown> = {}): StepValidation {
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6818,9 +6810,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                const targetPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
+                const targetPiece = target.piece ?? this.cellContents(target.cell)!.pieces[target.index];
                 const pips = this.effectiveShrink(step.amount!, targetPiece.size, opts);
-                const failure = this.checkAttackPiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, pips, opts);
+                const failure = this.checkAttackPiece(minion, target, pips, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6829,9 +6821,9 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const cellStr = step.targetCell!;
                 const newCardUid = step.card;
-                const [tx, ty] = GnosticaBoard.algebraic2coords(cellStr);
-                const pips = this.effectiveShrink(step.amount!, this.board.get(tx, ty)?.pointValue() ?? 0, opts);
-                const failure = this.checkAttackTerritory(minion.x, minion.y, minion.index, tx, ty, pips, newCardUid, opts);
+                const targetCell = cellStr;
+                const pips = this.effectiveShrink(step.amount!, this.cellContents(targetCell)?.pointValue() ?? 0, opts);
+                const failure = this.checkAttackTerritory(minion, targetCell, pips, newCardUid, opts);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6841,26 +6833,26 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // orientMinion ("orient <ref> <facing>") turns the minion itself; orientAny (Devil, "with <ref> orient <target> <facing>") turns any piece. Same write either way.
-    private applyOrient(minion: () => IMinionRef, step: IStep): IStepOutcome {
+    private applyOrient(minion: () => IPieceRef, step: IStep): IStepOutcome {
         const orientation = step.direction! as Orientation;
         const own = step.targetPiece === undefined || step.targetPiece.toLowerCase() === step.withPiece?.toLowerCase();
         const target = own ? minion() : this.resolvePieceRefTrusted(step.targetPiece!);
-        const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
-        this.orientAny(target.x, target.y, target.index, orientation);
-        this.addBufferIfWasteland(target.x, target.y);
-        this.pushOrientResult(target.x, target.y, target.index, own ? this.pieceRefStr(target) : step.targetPiece!, orientation);
+        const owner = this.cellContents(target.cell)!.pieces[target.index].owner;
+        this.orientAny(target, orientation);
+        this.addBufferIfWasteland(target.cell);
+        this.pushOrientResult(target, own ? this.pieceRefStr(target) : step.targetPiece!, orientation);
         return own || owner === this.currplayer ? { newMinion: target, replacesMinion: target } : {};
     }
 
-    public validateOrientMinion(minion: IMinionRef, step: IStep): StepValidation {
+    public validateOrientMinion(minion: IPieceRef, step: IStep): StepValidation {
         // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
         const orientation = step.direction! as Orientation;
-        const failure = this.checkOrientMinion(minion.x, minion.y, minion.index);
+        const failure = this.checkOrientMinion(minion);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
         // Same hard rejection as the standalone "orient" command's own ORIENT_NO_OP - reorienting IS the whole action here too, so a no-op achieves nothing.
-        const currentPiece = minion.piece ?? this.board.get(minion.x, minion.y)!.pieces[minion.index];
+        const currentPiece = minion.piece ?? this.cellContents(minion.cell)!.pieces[minion.index];
         
         if (currentPiece.orientation === orientation) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
@@ -6868,7 +6860,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return { failed: false };
     }
 
-    public validateOrientAny(minion: IMinionRef, step: IStep): StepValidation {
+    public validateOrientAny(minion: IPieceRef, step: IStep): StepValidation {
         const targetRef = step.targetPiece!;
         const orientationStr = step.direction!;
         const targetResult = this.resolvePieceRef(targetRef);
@@ -6878,12 +6870,12 @@ export class GnosticaGame extends GameBaseSequenced {
         const target = targetResult.ref;
         // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
         const orientation = orientationStr as Orientation;
-        const failure = this.checkOrientAny(minion.x, minion.y, minion.index, target.x, target.y, target.index);
+        const failure = this.checkOrientAny(minion, target);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
         // reorienting the target IS the whole action here too, so a no-op is hard-rejected.
-        const currentPiece = target.piece ?? this.board.get(target.x, target.y)!.pieces[target.index];
+        const currentPiece = target.piece ?? this.cellContents(target.cell)!.pieces[target.index];
 
         if (currentPiece.orientation === orientation) {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.ORIENT_NO_OP") };
@@ -6897,19 +6889,19 @@ export class GnosticaGame extends GameBaseSequenced {
         const orientationToken = step.direction!;
         const target = this.resolvePieceRefTrusted(targetRef);
         // Captured before the replace mutates the board - the previous owner being displaced, for the result log.
-        const previousOwner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
+        const previousOwner = this.cellContents(target.cell)!.pieces[target.index].owner;
         const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
         const orientation = orientationStr as Orientation;
-        this.hierophantReplace(target.x, target.y, target.index, orientation);
-        this.addBufferIfWasteland(target.x, target.y);
-        this.results.push({ type: "convert", what: this.getPipsFromRef(targetRef), into: `owner-${this.currplayer}`, where: GnosticaBoard.coords2algebraic(target.x, target.y), who: previousOwner });
-        const replaced = this.board.get(target.x, target.y)!.pieces;
+        this.hierophantReplace(target, orientation);
+        this.addBufferIfWasteland(target.cell);
+        this.results.push({ type: "convert", what: this.getPipsFromRef(targetRef), into: `owner-${this.currplayer}`, where: target.cell, who: previousOwner });
+        const replaced = this.cellContents(target.cell)!.pieces;
         const newIndex = replaced.length - 1;
-        return { newMinion: { x: target.x, y: target.y, index: newIndex, piece: replaced[newIndex] }, replacesMinion: { x: target.x, y: target.y, index: target.index }, softComplete: orientationToken.endsWith("?") };
+        return { newMinion: { cell: target.cell, index: newIndex, piece: replaced[newIndex] }, replacesMinion: { cell: target.cell, index: target.index }, softComplete: orientationToken.endsWith("?") };
     }
 
     // Orientation is mandatory but without a no-op check. The default is the captured piece's prior orientation.
-    public validateHierophantReplace(minion: IMinionRef, step: IStep): StepValidation {
+    public validateHierophantReplace(minion: IPieceRef, step: IStep): StepValidation {
         const targetRef = step.targetPiece!;
         const orientationToken = step.direction;
         const targetResult = this.resolvePieceRef(targetRef);
@@ -6921,7 +6913,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalid("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationToken }) };
         }
         // parseMove already guarantees a valid N/E/S/W/U (with or without a "?" marking the click handler's seeded default), so there's nothing left to validate about the facing.
-        const failure = this.checkHierophantReplace(minion.x, minion.y, minion.index, target.x, target.y, target.index);
+        const failure = this.checkHierophantReplace(minion, target);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
@@ -6936,32 +6928,32 @@ export class GnosticaGame extends GameBaseSequenced {
             case "piece": {
                 const targetRef = step.targetPiece!;
                 const target = this.resolvePieceRefTrusted(targetRef);
-                const owner = this.board.get(target.x, target.y)!.pieces[target.index].owner;
-                const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
+                const owner = this.cellContents(target.cell)!.pieces[target.index].owner;
+                const destCell = destCellStr;
                 const newOrientation = step.direction as Orientation | undefined;
-                const origin = GnosticaBoard.coords2algebraic(target.x, target.y);
-                this.hermitMovePiece(target.x, target.y, target.index, destX, destY, newOrientation);
+                const origin = target.cell;
+                this.hermitMovePiece(target, destCell, newOrientation);
                 this.results.push({ type: "move", from: origin, to: destCellStr, what: this.getPipsFromRef(targetRef), how: "hermit-piece", who: owner });
                 if (owner === this.currplayer) {
-                    const newIndex = this.board.get(destX, destY)!.pieces.length - 1;
-                    return { newMinion: { x: destX, y: destY, index: newIndex }, replacesMinion: { x: target.x, y: target.y, index: target.index } };
+                    const newIndex = this.cellContents(destCell)!.pieces.length - 1;
+                    return { newMinion: { cell: destCell, index: newIndex }, replacesMinion: { cell: target.cell, index: target.index } };
                 }
-                return { replacesMinion: { x: target.x, y: target.y, index: target.index } };
+                return { replacesMinion: { cell: target.cell, index: target.index } };
             }
             case "tile": {
-                const { x: tx, y: ty } = this.resolveTileCard(step.card)!;
-                const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
-                this.hermitMoveTerritory(tx, ty, destX, destY);
-                this.results.push({ type: "move", from: GnosticaBoard.coords2algebraic(tx, ty), to: destCellStr, how: "hermit-tile" });
+                const targetCell = this.resolveTileCard(step.card)!;
+                const destCell = destCellStr;
+                this.hermitMoveTerritory(targetCell, destCell);
+                this.results.push({ type: "move", from: targetCell, to: destCellStr, how: "hermit-tile" });
                 return {};
             }
         }
     }
 
-    public validateHermitStep(minion: IMinionRef, step: IStep): StepValidation {
+    public validateHermitStep(minion: IPieceRef, step: IStep): StepValidation {
         const mode = stepHermitMode(step)!;
         const destCellStr = step.targetCell!;
-        const [destX, destY] = GnosticaBoard.algebraic2coords(destCellStr);
+        const destCell = destCellStr;
         switch (mode) {
             case "piece": {
                 const targetRef = step.targetPiece!;
@@ -6971,7 +6963,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const target = targetResult.ref;
                 // parseMove now rejects a non-single-letter direction here too (AMBIGUOUS_DIRECTION), so step.direction is always a real N/E/S/W/U (or absent) by now.
-                const failure = this.checkHermitMovePiece(minion.x, minion.y, minion.index, target.x, target.y, target.index, destX, destY);
+                const failure = this.checkHermitMovePiece(minion, target, destCell);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6982,8 +6974,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (targetCoords === undefined) {
                     return { failed: true, result: this.invalid("apgames:validation.gnostica.NO_SUCH_TILE", { card: step.card }) };
                 }
-                const { x: tx, y: ty } = targetCoords;
-                const failure = this.checkHermitMoveTerritory(minion.x, minion.y, minion.index, tx, ty, destX, destY);
+                const targetCell = targetCoords;
+                const failure = this.checkHermitMoveTerritory(minion, targetCell, destCell);
                 if (failure) {
                     return { failed: true, result: this.failureResult(failure) };
                 }
@@ -6996,27 +6988,27 @@ export class GnosticaGame extends GameBaseSequenced {
     private applyTradeHands(step: IStep): IStepOutcome {
         const targetRef = step.targetPiece!;
         const target = this.resolvePieceRefTrusted(targetRef);
-        this.hidden.push({ type: "trade", x: target.x, y: target.y, index: target.index });
+        this.hidden.push({ type: "trade", cell: target.cell, index: target.index });
         return {};
     }
 
-    public validateTradeHands(minion: IMinionRef, step: IStep): StepValidation {
+    public validateTradeHands(minion: IPieceRef, step: IStep): StepValidation {
         const targetRef = step.targetPiece!;
         const targetResult = this.resolvePieceRef(targetRef);
         if (targetResult.kind !== "ok") {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
-        const failure = this.checkTradeHands(minion.x, minion.y, minion.index, target.x, target.y, target.index);
+        const failure = this.checkTradeHands(minion, target);
         if (failure) {
             return { failed: true, result: this.failureResult(failure) };
         }
         return { failed: false };
     }
 
-    public validateJudgementDraw(minion: IMinionRef, step: IStep): IValidationResult {
+    public validateJudgementDraw(minion: IPieceRef, step: IStep): IValidationResult {
         const uids = step.cardList ?? [];
-        const failure = this.checkJudgementDraw(minion.x, minion.y, minion.index, uids);
+        const failure = this.checkJudgementDraw(minion, uids);
         return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
@@ -7494,8 +7486,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "<cell>.<piece id>": names a piece in a result well enough to find it again on the finished board.
-    private pieceIdAt(x: number, y: number, piece: Piece): string {
-        return `${GnosticaBoard.coords2algebraic(x, y)}.${piece.id()}`;
+    private pieceIdAt(cell: string, piece: Piece): string {
+        return `${cell}.${piece.id()}`;
     }
 
     // The pieces a move's results name, ringed like the live preview does: each target solid, and a Rods move's own minion dashed.
@@ -7503,10 +7495,10 @@ export class GnosticaGame extends GameBaseSequenced {
         const rings = new Map<string, "minion" | "target">();
         // The last match, since a piece that moved or changed hands is added to the end of its cell.
         const ring = (cell: string, kind: "minion" | "target", match: (p: Piece) => boolean) => {
-            const [x, y] = GnosticaBoard.algebraic2coords(cell);
-            const i = (board.get(x, y)?.pieces ?? []).map(match).lastIndexOf(true);
-            if (i >= 0 && (kind === "target" || !rings.has(`${x},${y},${i}`))) {
-                rings.set(`${x},${y},${i}`, kind);
+            const i = (board.get(...xy(cell))?.pieces ?? []).map(match).lastIndexOf(true);
+            const key = `${canonicalCell(cell)},${i}`;
+            if (i >= 0 && (kind === "target" || !rings.has(key))) {
+                rings.set(key, kind);
             }
         };
         for (const r of results) {
@@ -7562,7 +7554,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return cells;
         }
         for (const [x, y] of this.board.entries()) {
-            if (this.eligibleMinionsForActivate(x, y).length > 0) {
+            if (this.eligibleMinionsForActivate(GnosticaBoard.coords2algebraic(x, y)).length > 0) {
                 cells.add(`${x},${y}`);
             }
         }
@@ -7590,7 +7582,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Orient can turn any of the player's pieces, wherever they stand.
         if (this.preview?.choosingOrientPiece === true) {
             for (const [x, y] of this.board.entries()) {
-                this.eligibleMinionsForOrient(x, y).forEach(m => rings.set(`${m.x},${m.y},${m.index}`, "minion"));
+                this.eligibleMinionsForOrient(GnosticaBoard.coords2algebraic(x, y)).forEach(m => rings.set(`${m.cell},${m.index}`, "minion"));
             }
             return rings;
         }
@@ -7598,10 +7590,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pending === undefined) {
             return rings;
         }
-        const ringIfThere = (m: IMinionRef, kind: "minion" | "target") => {
-            const onBoard = this.board.get(m.x, m.y)?.pieces[m.index];
+        const ringIfThere = (m: IPieceRef, kind: "minion" | "target") => {
+            const onBoard = this.cellContents(m.cell)?.pieces[m.index];
             if (onBoard !== undefined && (m.piece === undefined || m.piece.id() === onBoard.id())) {
-                rings.set(`${m.x},${m.y},${m.index}`, kind);
+                rings.set(`${m.cell},${m.index}`, kind);
             }
         };
         for (const m of pending.minionAmbiguous ? pending.minionCandidates : [pending.minion]) {
@@ -7656,7 +7648,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         // Slots lie out to the edges of the cell, so the symbol has to be cell-sized (backdrop scale 1) or the outer pyramids are cropped.
                         legend[key] = GnosticaGame.withBackdrop([g], 1);
                     }
-                    const ring = rings?.get(`${x},${y},${i}`);
+                    const ring = rings?.get(`${GnosticaBoard.coords2algebraic(x, y)},${i}`);
                     if (ring === undefined) {
                         return [key];
                     }

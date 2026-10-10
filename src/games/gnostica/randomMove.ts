@@ -24,7 +24,7 @@
 // helper) is inlined locally instead (see its own docs below), so
 // gnostica.ts can import from here with no circular value import
 // either way.
-import { type GnosticaGame, type IMinionRef, type IStep, type IStepOutcome, type IParsedMove } from "../gnostica.js";
+import { type GnosticaGame, type IPieceRef, type IStep, type IStepOutcome, type IParsedMove } from "../gnostica.js";
 import { shuffle } from "../../common/index.js";
 import { Card, allCards } from "../../common/tarot/index.js";
 import { cardPointValue } from "./cell.js";
@@ -50,13 +50,13 @@ const RDS_VERBS: Partial<Record<MinorSuitUid, string>> = { R: "move", D: "grow",
 // and gnostica.ts. Keep this in sync by hand if that one ever changes -
 // #98's own crash went unfixed here for a full extra round exactly
 // because this copy was missed the first time.
-function chainMinion(minions: IMinionRef[], outcome: IStepOutcome): IMinionRef[] {
+function chainMinion(minions: IPieceRef[], outcome: IStepOutcome): IPieceRef[] {
     const stale = outcome.replacesMinion;
     const base = stale === undefined
         ? minions
         : minions
-            .filter(m => !(m.x === stale.x && m.y === stale.y && m.index === stale.index))
-            .map(m => (m.x === stale.x && m.y === stale.y && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
+            .filter(m => !(m.cell === stale.cell && m.index === stale.index))
+            .map(m => (m.cell === stale.cell && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
     return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
 }
 
@@ -417,11 +417,11 @@ function randomDiscardMove(game: GnosticaGame): string {
 // only if hasPiecesOnBoard's own scan somehow disagrees with this one
 // (defensive; can't happen in the only place this is called from).
 export function randomOrientMove(game: GnosticaGame): string | undefined {
-    const ownPieces: { x: number; y: number; index: number }[] = [];
+    const ownPieces: IPieceRef[] = [];
     for (const [x, y, t] of game.board.entries()) {
         t.pieces.forEach((p, index) => {
             if (p.owner === game.currplayer) {
-                ownPieces.push({ x, y, index });
+                ownPieces.push({ cell: GnosticaBoard.coords2algebraic(x, y), index });
             }
         });
     }
@@ -429,9 +429,9 @@ export function randomOrientMove(game: GnosticaGame): string | undefined {
         return undefined;
     }
     const picked = ownPieces[Math.floor(Math.random() * ownPieces.length)];
-    const { x, y, index } = picked;
+    const [x, y] = GnosticaBoard.algebraic2coords(picked.cell);
     const ref = game.pieceRefStr(picked);
-    const current = game.board.get(x, y)!.pieces[index].orientation;
+    const current = game.cellContents(picked.cell)!.pieces[picked.index].orientation;
     const orientation = weightedRandomOrientation(game, x, y, current);
     return `orient ${ref} ${orientation}`;
 }
@@ -442,12 +442,12 @@ export function randomOrientMove(game: GnosticaGame): string | undefined {
 // move string.
 export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): string | undefined {
     if (head === "use") {
-        const onBoard: { uid: string; eligible: IMinionRef[] }[] = [];
+        const onBoard: { uid: string; eligible: IPieceRef[] }[] = [];
         for (const [x, y, t] of game.board.entries()) {
             if (t.card === undefined) {
                 continue;
             }
-            const eligible = game.eligibleMinionsForActivate(x, y);
+            const eligible = game.eligibleMinionsForActivate(GnosticaBoard.coords2algebraic(x, y));
             if (eligible.length > 0) {
                 onBoard.push({ uid: t.card.uid, eligible });
             }
@@ -526,7 +526,7 @@ function randomWorldBorrowUid(game: GnosticaGame): string | undefined {
 // head as a second "as <suit>" (TODO-gnostica #105) rather than living in
 // its own step token, so it needs findRandomMagicianChain's own two-part
 // {suitUid, chain} instead of buildRandomChain's plain token segments.
-function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible: IMinionRef[]): string | undefined {
+function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible: IPieceRef[]): string | undefined {
     const borrowedUid = randomWorldBorrowUid(game);
     if (borrowedUid === undefined) {
         return undefined;
@@ -548,7 +548,7 @@ function buildRandomWorldMove(game: GnosticaGame, head: "use" | "play", eligible
 // branch). The suit goes in the head's "as <suit>", never in the step
 // itself. findRandomPrimitiveChoice does the real legality search, same
 // as an ordinary suit card's own single step (buildRandomSuitStep's twin).
-function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { suitUid: MinorSuitUid; chain: IStep[] } | undefined {
+function findRandomMagicianChain(game: GnosticaGame, minions: IPieceRef[]): { suitUid: MinorSuitUid; chain: IStep[] } | undefined {
     for (const suit of shuffle([...ALL_SUITS]) as typeof ALL_SUITS) {
         const choice = findRandomPrimitiveChoice(game, suit.uid, minions, {});
         if (choice === undefined) {
@@ -561,7 +561,7 @@ function findRandomMagicianChain(game: GnosticaGame, minions: IMinionRef[]): { s
 
 // Magician's own move string: "<head> 01 as <suit>/<minionRef> <mode>
 // <args>".
-function buildRandomMagicianMove(game: GnosticaGame, head: "use" | "play", minions: IMinionRef[]): string | undefined {
+function buildRandomMagicianMove(game: GnosticaGame, head: "use" | "play", minions: IPieceRef[]): string | undefined {
     const found = findRandomMagicianChain(game, minions);
     if (found === undefined) {
         return undefined;
@@ -575,18 +575,18 @@ function buildRandomMagicianMove(game: GnosticaGame, head: "use" | "play", minio
 // builder below that needs a piece-shaped target (R.piece/D.piece/
 // S.piece, tradeHands, orientAny, hierophantReplace, hermitTeleport's
 // own "piece" mode).
-function pieceTargetRefs(game: GnosticaGame, minion: IMinionRef): string[] {
-    const [tx, ty] = game.minorTargetCell(minion);
+function pieceTargetRefs(game: GnosticaGame, minion: IPieceRef): string[] {
+    const faceCell = game.minorTargetCell(minion);
     // Pass `minion` itself as a one-entry pool so pieceRefStr can find it
     // and use its own `.piece` (see #98/#100's own docs) - without a
     // pool, it falls straight to a raw `pieces[minion.index]` read, which
     // can be stale by the time a LATER step in the same chain calls this.
     const selfRef = game.pieceRefStr(minion, [minion]);
-    if (tx === minion.x && ty === minion.y) {
+    if (faceCell === minion.cell) {
         return [selfRef];
     }
-    const targetT = game.board.get(tx, ty);
-    const facingRefs = (targetT?.pieces ?? []).map((_, i) => game.pieceRefStr({ x: tx, y: ty, index: i }));
+    const targetT = game.cellContents(faceCell);
+    const facingRefs = (targetT?.pieces ?? []).map((_, i) => game.pieceRefStr({ cell: faceCell, index: i }));
     return [selfRef, ...facingRefs];
 }
 
@@ -598,17 +598,17 @@ function pieceTargetRefs(game: GnosticaGame, minion: IMinionRef): string[] {
 // hermitTeleport) has no such constructive/destructive distinction to
 // weight, so it isn't worth widening the shared helper's own return
 // type for them.
-function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IMinionRef): { ref: string; owner: number }[] {
-    const [tx, ty] = game.minorTargetCell(minion);
-    const selfOwner = (minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index]).owner;
+function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IPieceRef): { ref: string; owner: number }[] {
+    const faceCell = game.minorTargetCell(minion);
+    const selfOwner = (minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index]).owner;
     // See pieceTargetRefs' own matching docs on why `minion` is passed as
     // a one-entry pool here.
     const selfRef = game.pieceRefStr(minion, [minion]);
-    if (tx === minion.x && ty === minion.y) {
+    if (faceCell === minion.cell) {
         return [{ ref: selfRef, owner: selfOwner }];
     }
-    const targetT = game.board.get(tx, ty);
-    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ x: tx, y: ty, index: i }), owner: p.owner }));
+    const targetT = game.cellContents(faceCell);
+    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ cell: faceCell, index: i }), owner: p.owner }));
     return [{ ref: selfRef, owner: selfOwner }, ...facing];
 }
 
@@ -616,15 +616,15 @@ function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IMinionRef): { ref
 // orientation alongside it - hierophantReplace's own random mover needs
 // it to build the mandatory, seeded `<facing>?` token (validateHierophantReplace's
 // own convention - see its docs).
-function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IMinionRef): { ref: string; orientation: Orientation }[] {
-    const [tx, ty] = game.minorTargetCell(minion);
-    const selfOrientation = (minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index]).orientation;
+function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IPieceRef): { ref: string; orientation: Orientation }[] {
+    const faceCell = game.minorTargetCell(minion);
+    const selfOrientation = (minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index]).orientation;
     const selfRef = game.pieceRefStr(minion, [minion]);
-    if (tx === minion.x && ty === minion.y) {
+    if (faceCell === minion.cell) {
         return [{ ref: selfRef, orientation: selfOrientation }];
     }
-    const targetT = game.board.get(tx, ty);
-    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ x: tx, y: ty, index: i }), orientation: p.orientation }));
+    const targetT = game.cellContents(faceCell);
+    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ cell: faceCell, index: i }), orientation: p.orientation }));
     return [{ ref: selfRef, orientation: selfOrientation }, ...facing];
 }
 
@@ -635,7 +635,7 @@ function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IMinionRef):
 // Best-effort pre-filter only, same as minorModeAvailability itself -
 // buildRandomModeArgCandidates + validateSuitPrimitive remain the real
 // gate.
-function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: MinorSuitUid, opts: Record<string, unknown>): MinorMode[] {
+function legalModesForMinion(game: GnosticaGame, minion: IPieceRef, suitUid: MinorSuitUid, opts: Record<string, unknown>): MinorMode[] {
     return [...game.minorModeAvailability({ suitUid, minion, opts }).entries()]
         .filter(([, reason]) => reason === undefined)
         .map(([mode]) => mode);
@@ -657,11 +657,11 @@ function legalModesForMinion(game: GnosticaGame, minion: IMinionRef, suitUid: Mi
 // no self/other choice at all in their own target set (C.own/C.enemy/
 // C.new/R.tile, each always self-only, enemy-only, or plain territory)
 // get a flat weight of 1 throughout.
-function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, suitUid: MinorSuitUid, mode: MinorMode): { fields: Partial<IStep>; weight: number }[] {
-    const piece = minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index];
-    const [tx, ty] = game.minorTargetCell(minion);
-    const targetCell = GnosticaBoard.coords2algebraic(tx, ty);
-    const targetT = game.board.get(tx, ty);
+function buildRandomModeArgCandidates(game: GnosticaGame, minion: IPieceRef, suitUid: MinorSuitUid, mode: MinorMode): { fields: Partial<IStep>; weight: number }[] {
+    const piece = minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index];
+    const faceCell = game.minorTargetCell(minion);
+    const targetCell = faceCell;
+    const targetT = game.cellContents(faceCell);
     const hand = game.hands[game.currplayer - 1];
     const pieceTargets = pieceTargetRefsWithOwner(game, minion);
     const pips = Array.from({ length: piece.size }, (_, i) => i + 1);
@@ -683,7 +683,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
             return flat((targetT?.pieces ?? [])
                 .map((p, i) => ({ p, i }))
                 .filter(({ p }) => p.owner !== game.currplayer)
-                .map(({ i }) => ({ atCell: targetCell, targetPiece: game.pieceRefStr({ x: tx, y: ty, index: i }) })));
+                .map(({ i }) => ({ atCell: targetCell, targetPiece: game.pieceRefStr({ cell: faceCell, index: i }) })));
         case "C.new":
             return flat(cardsWorth(1).map(uid => ({ atCell: targetCell, card: uid })));
         case "R.piece": {
@@ -701,7 +701,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
             const [dx, dy] = game.board.delta(piece.orientation as Exclude<Orientation, "U">);
             const selfRef = game.pieceRefStr(minion);
             return pieceTargets.flatMap(({ ref, owner }) => {
-                const [bx, by] = ref === selfRef ? [minion.x, minion.y] : [tx, ty];
+                const [bx, by] = GnosticaBoard.algebraic2coords(ref === selfRef ? minion.cell : faceCell);
                 return pips.map(dist => {
                     const ownWeight = owner === game.currplayer ? 2 : 1;
                     const landsOnTerritory = owner === game.currplayer
@@ -760,9 +760,9 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IMinionRef, su
 // buildRandomSuitStep below is the thin wrapper that builds the step
 // for direct suit-mode use.
 function findRandomPrimitiveChoice(
-    game: GnosticaGame, suitUid: MinorSuitUid, minions: IMinionRef[], opts: Record<string, unknown>,
-): { minion: IMinionRef; fields: Partial<IStep> } | undefined {
-    const pool = shuffle([...minions]) as IMinionRef[];
+    game: GnosticaGame, suitUid: MinorSuitUid, minions: IPieceRef[], opts: Record<string, unknown>,
+): { minion: IPieceRef; fields: Partial<IStep> } | undefined {
+    const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
         const modeCandidates = legalModesForMinion(game, minion, suitUid, opts)
             .map(mode => ({ mode, candidates: buildRandomModeArgCandidates(game, minion, suitUid, mode) }));
@@ -792,8 +792,8 @@ function findRandomPrimitiveChoice(
                 return Math.max(...candidates.map(c => c.weight)) >= 4 ? 3 : 1;
             }
             if (key === "C.own") {
-                const [tx, ty] = game.minorTargetCell(minion);
-                return game.board.classify(tx, ty) === "territory" ? 3 : 1;
+                const faceCell = game.minorTargetCell(minion);
+                return game.classifyCell(faceCell) === "territory" ? 3 : 1;
             }
             return 3;
         };
@@ -811,7 +811,7 @@ function findRandomPrimitiveChoice(
     return undefined;
 }
 
-function buildRandomSuitStep(game: GnosticaGame, suitUid: MinorSuitUid, minions: IMinionRef[], opts: Record<string, unknown>): IStep | undefined {
+function buildRandomSuitStep(game: GnosticaGame, suitUid: MinorSuitUid, minions: IPieceRef[], opts: Record<string, unknown>): IStep | undefined {
     const choice = findRandomPrimitiveChoice(game, suitUid, minions, opts);
     if (choice === undefined) {
         return undefined;
@@ -829,15 +829,15 @@ function buildRandomSuitStep(game: GnosticaGame, suitUid: MinorSuitUid, minions:
 // legality, so skipping this would be safe, just needlessly weaker
 // coverage of those cards' own shortcut paths.
 function buildRandomPrimitiveStep(
-    game: GnosticaGame, primitive: SuitPrimitive, minions: IMinionRef[], def: MajorArcanaDef, stepOpts: PrimitiveOpts | undefined, stepIndex: number, totalSteps: number,
+    game: GnosticaGame, primitive: SuitPrimitive, minions: IPieceRef[], def: MajorArcanaDef, stepOpts: PrimitiveOpts | undefined, stepIndex: number, totalSteps: number,
 ): IStep | undefined {
     const suitUid = game.primitiveToSuit(primitive);
     const opts = game.computeShortcutOpts(def, primitive, stepIndex, totalSteps, stepOpts);
     return buildRandomSuitStep(game, suitUid, minions, opts);
 }
 
-function buildRandomOrientMinionStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
-    const pool = shuffle([...minions]) as IMinionRef[];
+function buildRandomOrientMinionStep(game: GnosticaGame, minions: IPieceRef[]): IStep | undefined {
+    const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
         for (const o of shuffle([...allOrientations]) as Orientation[]) {
@@ -850,8 +850,8 @@ function buildRandomOrientMinionStep(game: GnosticaGame, minions: IMinionRef[]):
     return undefined;
 }
 
-function buildRandomTradeHandsStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
-    const pool = shuffle([...minions]) as IMinionRef[];
+function buildRandomTradeHandsStep(game: GnosticaGame, minions: IPieceRef[]): IStep | undefined {
+    const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
         for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
@@ -873,8 +873,8 @@ function buildRandomTradeHandsStep(game: GnosticaGame, minions: IMinionRef[]): I
 // `undefined` joins hierophantReplace's shuffled correction candidates
 // so the random mover sometimes leaves that seeded default in place
 // instead of always overriding it.
-function buildRandomOrientAnyOrHierophantStep(game: GnosticaGame, minions: IMinionRef[], special: "orientAny" | "hierophantReplace"): IStep | undefined {
-    const pool = shuffle([...minions]) as IMinionRef[];
+function buildRandomOrientAnyOrHierophantStep(game: GnosticaGame, minions: IPieceRef[], special: "orientAny" | "hierophantReplace"): IStep | undefined {
+    const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
         if (special === "orientAny") {
@@ -901,12 +901,12 @@ function buildRandomOrientAnyOrHierophantStep(game: GnosticaGame, minions: IMini
     return undefined;
 }
 
-function buildRandomHermitStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
+function buildRandomHermitStep(game: GnosticaGame, minions: IPieceRef[]): IStep | undefined {
     const destinations = shuffle(emptyNonVoidCells(game)) as [number, number][];
     if (destinations.length === 0) {
         return undefined;
     }
-    const pool = shuffle([...minions]) as IMinionRef[];
+    const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
         for (const mode of shuffle(["piece", "tile"]) as string[]) {
@@ -916,7 +916,7 @@ function buildRandomHermitStep(game: GnosticaGame, minions: IMinionRef[]): IStep
             // already names.
             const targetToken = mode === "piece"
                 ? undefined // resolved per-candidate below (piece mode has several possible targets)
-                : game.board.get(...game.minorTargetCell(minion))?.cardUid;
+                : game.cellContents(game.minorTargetCell(minion))?.cardUid;
             if (mode === "tile" && targetToken === undefined) {
                 continue;
             }
@@ -938,11 +938,11 @@ function buildRandomHermitStep(game: GnosticaGame, minions: IMinionRef[]): IStep
     return undefined;
 }
 
-function buildRandomJudgementDrawStep(game: GnosticaGame, minions: IMinionRef[]): IStep | undefined {
-    const pool = shuffle([...minions]) as IMinionRef[];
+function buildRandomJudgementDrawStep(game: GnosticaGame, minions: IPieceRef[]): IStep | undefined {
+    const pool = shuffle([...minions]) as IPieceRef[];
     const hand = game.hands[game.currplayer - 1];
     for (const minion of pool) {
-        const piece = minion.piece ?? game.board.get(minion.x, minion.y)!.pieces[minion.index];
+        const piece = minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index];
         const maxDraw = Math.min(piece.size, Math.max(0, 6 - hand.length));
         const count = Math.floor(Math.random() * (maxDraw + 1));
         const uids = (shuffle([...game.discardPile]) as string[]).slice(0, count);
@@ -969,7 +969,7 @@ function buildRandomHighPriestessStep(game: GnosticaGame): IStep {
     return { action: "discard", cardList: discards, amount: Math.floor(Math.random() * (maxDraw + 1)) };
 }
 
-function buildRandomSpecialStep(game: GnosticaGame, special: SpecialPower, minions: IMinionRef[]): IStep | undefined {
+function buildRandomSpecialStep(game: GnosticaGame, special: SpecialPower, minions: IPieceRef[]): IStep | undefined {
     switch (special) {
         case "orientMinion": return buildRandomOrientMinionStep(game, minions);
         case "tradeHands": return buildRandomTradeHandsStep(game, minions);
@@ -989,7 +989,7 @@ function buildRandomSpecialStep(game: GnosticaGame, special: SpecialPower, minio
 }
 
 function buildRandomStepForPowerStep(
-    game: GnosticaGame, step: PowerStep, minions: IMinionRef[], def: MajorArcanaDef, stepIndex: number, totalSteps: number,
+    game: GnosticaGame, step: PowerStep, minions: IPieceRef[], def: MajorArcanaDef, stepIndex: number, totalSteps: number,
 ): IStep | undefined {
     if ("primitive" in step) {
         return buildRandomPrimitiveStep(game, step.primitive, minions, def, step.opts, stepIndex, totalSteps);
@@ -1014,7 +1014,7 @@ function buildRandomStepForPowerStep(
 // from the length assumed while speculatively building it. Always
 // terminates - validateMajorPower(def, eligible, []) is trivially
 // legal (no steps to check).
-function buildRandomChain(game: GnosticaGame, card: Card, eligible: IMinionRef[]): IStep[] {
+function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[]): IStep[] {
     if (!card.major) {
         if (eligible.length === 0 || Math.random() < 0.2) {
             return []; // skip outright - always legal

@@ -829,18 +829,18 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
     // purely additive (both the acting piece and the new one stay real, independent candidates).
     it("chainMinion: a relocation replaces its own pre-move ref; a creation is purely additive; no outcome leaves the pool unchanged", () => {
         const chainMinion = (GnosticaGame as unknown as {
-            chainMinion: (minions: { x: number; y: number; index: number }[], outcome: { newMinion?: { x: number; y: number; index: number }; replacesMinion?: { x: number; y: number; index: number } }) => { x: number; y: number; index: number }[];
+            chainMinion: (minions: { cell: string; index: number }[], outcome: { newMinion?: { cell: string; index: number }; replacesMinion?: { cell: string; index: number } }) => { cell: string; index: number }[];
         }).chainMinion;
 
-        const original = [{ x: 0, y: 0, index: 0 }];
+        const original = [{ cell: "m0", index: 0 }];
         // Relocation (Rods' move, Discs' grow, Swords' shrink, Hierophant's replace, Hermit's
         // teleport, orientMinion/orientAny's reorient all set replacesMinion) - the old ref is gone.
-        expect(chainMinion(original, { newMinion: { x: 1, y: 0, index: 0 }, replacesMinion: { x: 0, y: 0, index: 0 } }))
-            .to.deep.equal([{ x: 1, y: 0, index: 0 }]);
+        expect(chainMinion(original, { newMinion: { cell: "n0", index: 0 }, replacesMinion: { cell: "m0", index: 0 } }))
+            .to.deep.equal([{ cell: "n0", index: 0 }]);
         // Creation (Cups' own "create" modes - the only newMinion producer that never sets
         // replacesMinion) - both the original piece and the new one remain independent candidates.
-        expect(chainMinion(original, { newMinion: { x: 2, y: 0, index: 0 } }))
-            .to.deep.equal([{ x: 0, y: 0, index: 0 }, { x: 2, y: 0, index: 0 }]);
+        expect(chainMinion(original, { newMinion: { cell: "o0", index: 0 } }))
+            .to.deep.equal([{ cell: "m0", index: 0 }, { cell: "o0", index: 0 }]);
         // No outcome at all (judgementDraw, a skipped step, etc.) - the pool is unchanged.
         expect(chainMinion(original, {})).to.deep.equal(original);
     });
@@ -1205,12 +1205,12 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         // After step 1 the moved piece A sits beside B (same size, different facing); the pool holds only A.
         const moved = setup();
         moved.board.get(1, 0)!.pieces.push(new Piece(1, 2, "E"));
-        expect(moved.pieceRefStr({ x: 1, y: 0, index: 1 }, [{ x: 1, y: 0, index: 1 }])).eq("n0.2.E");
+        expect(moved.pieceRefStr({ cell: "n0", index: 1 }, [{ cell: "n0", index: 1 }])).eq("n0.2.E");
         // Nothing else in the cell: the plain ref is still enough.
-        expect(g.pieceRefStr({ x: 0, y: 0, index: 0 }, [{ x: 0, y: 0, index: 0 }])).eq("m0.2");
+        expect(g.pieceRefStr({ cell: "m0", index: 0 }, [{ cell: "m0", index: 0 }])).eq("m0.2");
         // The ref resolves to A against every piece the player owns, not only the pool.
-        const resolve = (moved as unknown as { resolvePieceRef: (ref: string, pool: { x: number; y: number; index: number }[]) => { kind: string; ref?: { index: number } } }).resolvePieceRef.bind(moved);
-        const resolved = resolve("n0.2.E", [{ x: 0, y: 0, index: 0 }, { x: 1, y: 0, index: 0 }, { x: 1, y: 0, index: 1 }]);
+        const resolve = (moved as unknown as { resolvePieceRef: (ref: string, pool: { cell: string; index: number }[]) => { kind: string; ref?: { index: number } } }).resolvePieceRef.bind(moved);
+        const resolved = resolve("n0.2.E", [{ cell: "m0", index: 0 }, { cell: "n0", index: 0 }, { cell: "n0", index: 1 }]);
         expect(resolved.kind).eq("ok");
         expect(resolved.ref!.index).eq(1);
 
@@ -1230,12 +1230,12 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             parseMove: (m: string) => unknown;
             parsePendingStep: (p: unknown) => { current?: PendingLike; advanced?: PendingLike };
         };
-        type PendingLike = { minions: { x: number; y: number; index: number; piece?: Piece }[]; game: GnosticaGame };
+        type PendingLike = { minions: { cell: string; index: number; piece?: Piece }[]; game: GnosticaGame };
         for (let k = 1; k <= 3; k++) {
             const views = internal.parsePendingStep(internal.parseMove(chain.split("/").slice(0, k).join("/")));
             for (const view of [views.current, views.advanced]) {
                 for (const m of view?.minions ?? []) {
-                    expect(m.piece?.id()).eq(view!.game.board.get(m.x, m.y)!.pieces[m.index].id());
+                    expect(m.piece?.id()).eq(view!.game.cellContents(m.cell)!.pieces[m.index].id());
                 }
             }
         }
