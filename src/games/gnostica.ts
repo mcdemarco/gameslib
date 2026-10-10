@@ -13,6 +13,7 @@ import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALE
 import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece.js";
 import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive } from "./gnostica/majorArcana.js";
 import { generateRandomMove } from "./gnostica/randomMove.js";
+import i18next from "i18next";
 
 // ---- Helpers and step grammar for the power rules below, formerly part of gnostica/powers.ts ----
 // Per-size counts of pieces still in reserve [small, medium, large]; mutated in place by takeFromStash/returnToStash below.
@@ -117,8 +118,6 @@ const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
     judgementDraw: "draw",
 };
 // ---- end of the power helpers ----
-
-import i18next from "i18next";
 
 // card.suit.uid is typed as plain `string` by the shared tarot infra (src/common/tarot), but is always one
 // of the 4 minor suits in practice (fixed card data, not user input) - the one place that fact gets asserted.
@@ -287,7 +286,7 @@ type Owed = { uid: string; done: number; how?: string };
 type IHiddenEffect = (
     | { type: "flip" }
     | { type: "territory"; x: number; y: number }
-    | { type: "draw"; count: number; setsCardsDrawn: boolean }
+    | { type: "draw"; count: number }
     // Justice or the Hanged Man: the acting player swaps hands with the owner of this piece.
     | { type: "trade"; x: number; y: number; index: number }
 ) & {
@@ -1000,9 +999,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 case "draw": {
                     const drawn = this.drawCards(effect.count);
-                    if (effect.setsCardsDrawn) {
-                        this.cardsDrawn[this.currplayer - 1] = drawn;
-                    }
+                    this.cardsDrawn[this.currplayer - 1] = drawn;
                     result = { type: "deckDraw", count: drawn, from: "deck" };
                     break;
                 }
@@ -2593,9 +2590,9 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Shared by the ordinary top-level "discard" action and High Priestess's own nested draw step - same picker, different click-value prefix routes it to its own destination in the move string.
-    private drawCountBar(prefix: string): [ButtonBarButton, ...ButtonBarButton[]] {
+    private drawCountBar(prefix: string, discarding = 0): [ButtonBarButton, ...ButtonBarButton[]] {
         const hand = this.hands[this.currplayer - 1] ?? [];
-        const maxDraw = Math.max(0, 6 - hand.length);
+        const maxDraw = Math.max(0, 6 - (hand.length - discarding));
         return this.buildChoiceButtons(prefix, this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
@@ -2706,7 +2703,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pendingMinor.special !== "highPriestess" || pendingMinor.istep.amount !== undefined) {
             return undefined;
         }
-        return this.drawCountBar("hpdraw");
+        return this.drawCountBar("hpdraw", pendingMinor.istep.cardList?.length ?? 0);
     }
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
@@ -2981,7 +2978,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const stack: { cardUid: string; nextStepIndex: number; eligible: IMinionRef[]; minions: IMinionRef[] }[] =
             play.frames.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }));
 
-        // The World's sole step (worldUseAny) takes no segment - the borrowed card is "as <uid>" in the head. Splice its frame on now (mirrors walkFrameStack).
+        // The World's sole step (worldUseAny) takes no segment - the borrowed card is "as <uid>" in the head. Splice its frame on now, as validateFrameStack does.
         if (worldBorrow) {
             const wt = stack[stack.length - 1];
             const wStep = this.resolveFrameDef(wt.cardUid).powers[wt.nextStepIndex];
@@ -4652,7 +4649,7 @@ export class GnosticaGame extends GameBaseSequenced {
             this.discarded.push(...discardUids);
             this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
         }
-        this.hidden.push({ type: "draw", count: Number(drawCountStr), setsCardsDrawn: true });
+        this.hidden.push({ type: "draw", count: Number(drawCountStr) });
     }
 
     // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar, using the same checkDiscardDraw primitive.
@@ -5645,7 +5642,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const step = steps[at++];
                 if (!count(() => {
-                    this.applyHighPriestess(step, partial);
+                    this.cmdDiscard(step);
                     return true;
                 })) {
                     return "stopped";
@@ -5903,7 +5900,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // Top step classification for walkFrameStack and validateFrameStack
+    // Top step classification for validateFrameStack
     private static classifyStep(step: PowerStep, steps: IStep[], i: number): "decline" | "world" | "fool" | "step" {
         if (steps[i]?.action === "decline") {
             return "decline";
@@ -6002,7 +5999,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return parsed.steps.slice(1);
     }
 
-    // Read-only counterpart to walkFrameStack; Fool's step is checked regardless of the segment cursor `i`, and validation always stops right at a forced-pause step, exactly once.
+    // Validation walks a frame stack where applyPowers walks the string, so the two must agree by hand; Fool's step is checked regardless of the segment cursor `i`, and validation always stops right at a forced-pause step, exactly once.
     private validateFrameStack(stack: IPowerFrame[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string): IValidationResult {
         let clone: GnosticaGame | undefined;
         let i = 0;
@@ -6053,7 +6050,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const stepIndex = top.nextStepIndex;
             const step = frameDef.powers[stepIndex];
             const kind = GnosticaGame.classifyStep(step, steps, i);
-            // Mirrors walkFrameStack's identical computation - the ROOT's own untouched first flip is the one case that stays a hard rejection.
+            // The ROOT's own untouched first flip is the one case that stays a hard rejection.
             const isFreshRootFool = kind === "fool" && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
             if (kind === "decline") {
                 i++;
@@ -6086,7 +6083,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
             }
             let istep: IStep | undefined;
-            // See walkFrameStack's own matching `borrowedForThisStep`.
             let borrowedForStep: string | undefined;
             if (kind === "world") {
                 borrowedForStep = asUid; // the borrowed card is named "as <uid>" in the head
@@ -6257,7 +6253,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.validateFrameStack(stack, steps, rootCardUid, asUid, asSuit);
     }
 
-    // Mirrors resumePendingPower's own dispatch, read-only; checks the card a "play" resume names (must be what the last flip left on top of discard), then walks the segments for legality.
+    // Read-only check of a resume; checks the card a "play" resume names (must be what the last flip left on top of discard), then walks the segments for legality.
     private validateResumePendingPower(parsed: IParsedMove): IValidationResult {
         const play = this.resolvePowerPlay(parsed)!;
         // The card named must be the one the last flip left on top - a decline names it too, since the announcement and the log read it from here.
@@ -6286,7 +6282,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return { pushFrame: { cardUid: borrowedDef.uid, minions } };
         }
         if ("special" in step && step.special === "highPriestess") {
-            this.applyHighPriestess(istep, partial);
+            if (istep !== undefined) {
+                this.cmdDiscard(istep);
+            }
             // Pause only if a LATER sibling step of THIS SAME card depends on this one's outcome.
             return { forcePause: stepIndex + 1 < totalSteps };
         }
@@ -7041,18 +7039,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const uids = step.cardList ?? [];
         const failure = this.checkJudgementDraw(minion.x, minion.y, minion.index, uids);
         return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
-    }
-
-    // High Priestess: [discard <discardUid...>] [draw <n>] - no minion reference, shares the ordinary end-of-turn discard/draw primitive outright; no result logged for a partial call.
-    private applyHighPriestess(step: IStep | undefined, partial: boolean): void {
-        const discardUids = step?.cardList ?? [];
-        const drawCountStr = step?.amount?.toString();
-        this.discardCards(discardUids);
-        if (!partial && discardUids.length > 0) {
-            this.discarded.push(...discardUids);
-            this.results.push({ type: "place", how: "discard", what: discardUids.join(",") });
-        }
-        this.hidden.push({ type: "draw", count: Number(drawCountStr), setsCardsDrawn: false, joinsGroup: !partial && discardUids.length > 0 });
     }
 
     private validateHighPriestess(step: IStep | undefined): IValidationResult {

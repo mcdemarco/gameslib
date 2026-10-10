@@ -4628,6 +4628,24 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.validateMove(round2Draw.move).message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
     });
 
+    it("highPriestess: the Draw N buttons grow as discards are added", () => {
+        const draws = (m: string) => {
+            const g = new GnosticaGame(2);
+            forceCardAt(g, 0, 0, () => major(2));
+            g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+            for (const uid of ["2C", "5C", "AR"]) {
+                pluckCard(g, uid);
+            }
+            g.hands[0] = ["2C", "5C", "AR"];
+            g.move(m, { partial: true });
+            const bar = (g.render().at(-1) as unknown as { areas: { type: string; buttons?: { value?: string }[] }[] }).areas.find(a => a.type === "buttonBar")!;
+            return bar.buttons!.filter(b => b.value?.startsWith("hpdraw_")).length - 1;
+        };
+        expect(draws("use 02")).eq(3);
+        expect(draws("use 02/discard 2C")).eq(4);
+        expect(draws("use 02/discard 2C 5C")).eq(5);
+    });
+
     // Clicking a "Draw N" button early, then going back to discard ANOTHER
     // card, must drop the stale "draw N" tail rather than appending the
     // new uid after it - a card added past the "draw" token must actually
@@ -5231,7 +5249,7 @@ describe("Gnostica: Fool and World", () => {
         // Resume: Lovers' own two steps, both in the same submission -
         // nothing about what a reveal grants stays hidden once the flip
         // itself has already happened. Fool's own draws are never
-        // optional (see walkFrameStack's own docs), so the moment
+        // optional, so the moment
         // Lovers' own frame is fully exhausted, Fool's second flip fires
         // automatically, IN THIS SAME submission - revealing a new card
         // and pausing on ITS OWN choice, rather than a separate "should
@@ -5311,7 +5329,7 @@ describe("Gnostica: Fool and World", () => {
 
         // Once Magician's own power genuinely completes (via this same
         // partial sync), Fool's own next flip becomes the active step -
-        // mandatory, not optional (see walkFrameStack's own docs) - so
+        // mandatory, not optional - so
         // there is nothing left to decline here at all.
         g.move(modeClick.move, { partial: true });
         expect(buttonValues(g)).to.not.include("decline_power");
@@ -5322,7 +5340,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(1);
     });
 
-    // Fool's own draws are never optional (walkFrameStack's own docs) -
+    // Fool's own draws are never optional -
     // declining what the first flip revealed auto-continues straight into
     // the second flip, IN THE SAME SUBMISSION, rather than needing a
     // separate "Continue"/resume round just to ask whether Fool should
@@ -5352,12 +5370,6 @@ describe("Gnostica: Fool and World", () => {
     // Same cascade as above, but the revealed card's own tail step is
     // skipped by OMISSION (no legal tradeHands target exists at all, so
     // there's nothing to type) rather than an explicit "decline" token.
-    // walkFrameStack's own "segments exhausted" skip branch used to just
-    // pop that one frame and stop, leaving Fool's own mandatory second
-    // flip sitting unexecuted with no button anywhere to trigger it (the
-    // bar only ever offers "Play Card X"/"Decline X" for a flip still at
-    // its own nextStepIndex 0 - see powerStepMessageKey's own docs) - a
-    // real dead end for the player.
     it("an implicitly-skipped tail step (no legal tradeHands target) also auto-continues Fool's own mandatory second flip", () => {
         const g = setupFool();
         g.board.get(0, 0)!.pieces = [new Piece(1, 1, "E")]; // a real facing - Rods' own move step needs one
@@ -5541,8 +5553,7 @@ describe("Gnostica: Fool and World", () => {
     });
 
     // Fool's own second flip is never a separate, optional choice - it
-    // fires automatically the moment declining a reveal exposes it (see
-    // walkFrameStack's own docs), so clicking "Decline" on a revealed
+    // fires automatically the moment declining a reveal exposes it, so clicking "Decline" on a revealed
     // card's own power already produces a complete, submit-ready move
     // whose real commit performs BOTH the decline and the automatic
     // second flip - the button bar has nothing Fool-specific to offer at
@@ -5648,8 +5659,7 @@ describe("Gnostica: Fool and World", () => {
     });
 
     // Declining a revealed card's own power exposes Fool's own remaining
-    // flip underneath (see walkFrameStack's own "lastWasExplicitDecline"
-    // docs) - the click PREVIEW of that decline must recognize this as a
+    // flip underneath - the click PREVIEW of that decline must recognize this as a
     // complete, submit-ready move (see reachedViaDecline's own docs), not
     // fall back to the generic top-level bar and a bare "Looks like a
     // valid move" message as if it were a fresh/mandatory activation.
@@ -5761,8 +5771,7 @@ describe("Gnostica: Fool and World", () => {
         expect(targetClick.move).eq(`play 21 as 05 via 00`);
     });
 
-    // A pure decline pushes no board/state results of its own (see
-    // walkFrameStack's own docs) - reused "announce" gives it a real chat
+    // A pure decline pushes no board/state results of its own - reused "announce" gives it a real chat
     // line anyway, so a turn that ends on a decline (nothing left to
     // auto-continue into) doesn't vanish from the log entirely.
     it("chatLog() also logs a pure decline, not just the deckDraw lines it may trigger", () => {
