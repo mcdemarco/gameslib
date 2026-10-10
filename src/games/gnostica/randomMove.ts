@@ -958,8 +958,7 @@ function buildRandomJudgementDrawStep(game: GnosticaGame, minions: IMinionRef[])
 // No minion involved at all - pure hand/pile manipulation. Always
 // legal by construction (a random subset of the acting player's own
 // hand, each uid distinct since it's drawn from `hand` itself);
-// "draw <n>" is required for completeness (see validateHighPriestess's
-// own docs), so always append a random legal count - both rounds share
+// "draw <n>" is required for completeness (see validateDiscard), so always append a random legal count - both rounds share
 // the identical <discardUid...> draw <n> grammar and legality
 // (checkHighPriestess never distinguishes them), so one function covers
 // round 1 (via the card's own activation chain) and round 2's resume alike.

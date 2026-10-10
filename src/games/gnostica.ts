@@ -802,7 +802,7 @@ export class GnosticaGame extends GameBaseSequenced {
         switch (head) {
             case "place": return this.validatePlace(parsed);
             case "orient": return this.validateOrient(parsed);
-            case "discard": return this.validateDiscard(parsed);
+            case "discard": return this.validateDiscard(parsed.steps[0]);
             case "use": return this.validateActivate(parsed);
             case "play": return this.validatePlay(parsed);
         }
@@ -1984,7 +1984,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private freshResumeMove(decline = false, announceLast = false): IParsedMove {
         const activeUid = this.getContinuedUid()!;
         if (activeUid === "02") {
-            // High Priestess can never decline (validateHighPriestess only accepts "discard"; no Decline button is ever offered for it).
+            // High Priestess can never decline (High Priestess's step only accepts "discard"; no Decline button is ever offered for it).
             return { announceLast, valid: true, head: "discard", viaUid: activeUid, steps: [{ action: "discard", complete: -1 }] };
         }
         if (activeUid === "11") {
@@ -4651,16 +4651,13 @@ export class GnosticaGame extends GameBaseSequenced {
         this.hidden.push({ type: "draw", count: Number(drawCountStr) });
     }
 
-    // Mirrors cmdDiscard's own "discard [uid...] [draw <n>]" grammar, using the same checkDiscardDraw primitive.
-    private validateDiscard(parsed: IParsedMove): IValidationResult {
-        const discardUids = parsed.steps[0]?.cardList ?? [];
-        const drawCountStr = parsed.steps[0]?.amount?.toString();
-        const failure = this.checkDiscardDraw(discardUids, drawCountStr);
+    // Shared by the top-level discard and High Priestess's rounds: "discard [uid...] draw <n>", where the count is the player's explicit choice.
+    private validateDiscard(step: IStep | undefined): IValidationResult {
+        const failure = this.checkDiscardDraw(step?.cardList ?? [], step?.amount?.toString());
         if (failure) {
             return this.failureResult(failure);
         }
-        // A missing "draw <n>" is never complete - the player must make an explicit choice.
-        if (parsed.steps[0]?.amount === undefined) {
+        if (step?.amount === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
@@ -4736,6 +4733,28 @@ export class GnosticaGame extends GameBaseSequenced {
         return { key: "MUST_TARGET_FACING", params: { facing: minion.orientation } };
     }
 
+    // The opening every piece-targeting check shares: the acting piece is the player's own, and the target piece is one it can reach.
+    private checkOwnMinionTargetsPiece(
+        minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number, targetIndex: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        return this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+    }
+
+    // The cell-target counterpart of checkOwnMinionTargetsPiece.
+    private checkOwnMinionTargetsCell(
+        minionX: number, minionY: number, minionIndex: number,
+        targetX: number, targetY: number,
+    ): PowerFailure | undefined {
+        const minion = this.getPiece(minionX, minionY, minionIndex);
+        const ownErr = checkOwnMinion(minion, this.currplayer);
+        if (ownErr) return ownErr;
+        return this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
+    }
+
     // Same, but for a specific PIECE target - a minion may always target itself regardless of orientation.
     private checkValidPieceTarget(
     minion: Piece, minionX: number, minionY: number, minionIndex: number,
@@ -4755,11 +4774,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, opts: PrimitiveOpts = {},
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        if (minionErr) return minionErr;
         // A minion sitting on an isolated wasteland (not itself a territory)
         // can face a cell that's genuinely void - unlike movePiece, which
         // destroys a piece that lands in the void as a natural consequence of
@@ -4801,11 +4817,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, victimIndex: number, opts: PrimitiveOpts = {},
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        if (minionErr) return minionErr;
         // A void cell can never legitimately have a victim, but check explicitly anyway - creation has no cleanup path for a stranded piece.
         if (this.board.classify(targetX, targetY) === "void") {
             return { key: "TARGET_IS_VOID" };
@@ -4839,11 +4852,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        if (minionErr) return minionErr;
         if (this.board.classify(targetX, targetY) !== "wasteland") {
             return { key: "NOT_A_WASTELAND" };
         }
@@ -4891,13 +4901,11 @@ export class GnosticaGame extends GameBaseSequenced {
         targetX: number, targetY: number, targetIndex: number, dist: number,
         opts: PrimitiveOpts & { skipLandingCheck?: boolean } = {},
     ): PowerFailure | undefined {
+        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (minionErr) return minionErr;
         const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
         const rodErr = checkCanUseRod(minion);
         if (rodErr) return rodErr;
-        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-        if (targetErr) return targetErr;
         if (dist < 1 || dist > minion.size) {
             return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
         }
@@ -4957,13 +4965,11 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         srcX: number, srcY: number, dist: number,
     ): PowerFailure | undefined {
+        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, srcX, srcY);
+        if (minionErr) return minionErr;
         const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
         const rodErr = checkCanUseRod(minion);
         if (rodErr) return rodErr;
-        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, srcX, srcY);
-        if (targetErr) return targetErr;
         if (this.board.classify(srcX, srcY) !== "territory") {
             return { key: "NO_TERRITORY_THAT_WAY" };
         }
@@ -5007,11 +5013,8 @@ export class GnosticaGame extends GameBaseSequenced {
         targetX: number, targetY: number, targetIndex: number,
         opts: { skipStashCheck?: boolean } = {},
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (minionErr) return minionErr;
         const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
         if (target === undefined) {
             return { key: "NO_PIECE_THERE" };
@@ -5041,11 +5044,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        if (minionErr) return minionErr;
         if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
@@ -5095,11 +5095,9 @@ export class GnosticaGame extends GameBaseSequenced {
         targetX: number, targetY: number, targetIndex: number, pips: number,
         opts: { bothSwords?: boolean } = {},
     ): PowerFailure | undefined {
+        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (minionErr) return minionErr;
         const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-        if (targetErr) return targetErr;
         if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
             return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
         }
@@ -5143,11 +5141,9 @@ export class GnosticaGame extends GameBaseSequenced {
         targetX: number, targetY: number, pips: number, newCardUid: string | undefined,
         opts: PrimitiveOpts & { bothSwords?: boolean } = {},
     ): PowerFailure | undefined {
+        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        if (minionErr) return minionErr;
         const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
-        if (targetErr) return targetErr;
         if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
@@ -5224,11 +5220,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, targetIndex: number,
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (minionErr) return minionErr;
         if (this.board.get(targetX, targetY)?.pieces[targetIndex] === undefined) {
             return { key: "NO_PIECE_THERE" };
         }
@@ -5244,11 +5237,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, targetIndex: number,
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (minionErr) return minionErr;
         const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
         if (target === undefined) {
             return { key: "NO_PIECE_THERE" };
@@ -5277,11 +5267,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, targetIndex: number, destX: number, destY: number,
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (minionErr) return minionErr;
         if (this.board.classify(destX, destY) === "void") {
             return { key: "CANT_END_IN_VOID" };
         }
@@ -5315,11 +5302,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, destX: number, destY: number,
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidCellTarget(minion, minionX, minionY, targetX, targetY);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsCell(minionX, minionY, minionIndex, targetX, targetY);
+        if (minionErr) return minionErr;
         if (this.hasEnemyPieces(targetX, targetY, this.currplayer)) {
             return { key: "CELL_HAS_ENEMY" };
         }
@@ -5342,11 +5326,8 @@ export class GnosticaGame extends GameBaseSequenced {
     minionX: number, minionY: number, minionIndex: number,
         targetX: number, targetY: number, targetIndex: number,
     ): PowerFailure | undefined {
-        const minion = this.getPiece(minionX, minionY, minionIndex);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const targetErr = this.checkValidPieceTarget(minion, minionX, minionY, minionIndex, targetX, targetY, targetIndex);
-        if (targetErr) return targetErr;
+        const minionErr = this.checkOwnMinionTargetsPiece(minionX, minionY, minionIndex, targetX, targetY, targetIndex);
+        if (minionErr) return minionErr;
         const target = this.board.get(targetX, targetY)?.pieces[targetIndex];
         if (target === undefined) {
             return { key: "NO_PIECE_THERE" };
@@ -6335,10 +6316,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.applyHermitStep(istep);
             case "trade":
                 return this.applyTradeHands(istep);
-            default: // draw (Judgement)
-                this.applyJudgementDraw(istep);
+            default: { // draw (Judgement): <minionRef> draw <discardUid...>
+                const uids = istep.cardList ?? [];
+                this.judgementDraw(uids);
+                this.results.push({ type: "deckDraw", count: uids.length, from: "discard" });
                 // A real (if empty) outcome, is not marked undefined.
                 return {};
+            }
         }
     }
 
@@ -6358,7 +6342,10 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: false };
         }
         if ("special" in step && step.special === "highPriestess") {
-            const hpResult = this.validateHighPriestess(istep);
+            if (istep !== undefined && istep.action !== "discard") {
+                return { failed: true, result: this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" }) };
+            }
+            const hpResult = this.validateDiscard(istep);
             if (!hpResult.valid) {
                 return { failed: true, result: hpResult };
             }
@@ -7027,34 +7014,10 @@ export class GnosticaGame extends GameBaseSequenced {
         return { failed: false };
     }
 
-    // Judgement: <minionRef> draw <discardUid...>
-    private applyJudgementDraw(step: IStep): void {
-        const uids = step.cardList ?? [];
-        this.judgementDraw(uids);
-        this.results.push({ type: "deckDraw", count: uids.length, from: "discard" });
-    }
-
     public validateJudgementDraw(minion: IMinionRef, step: IStep): IValidationResult {
         const uids = step.cardList ?? [];
         const failure = this.checkJudgementDraw(minion.x, minion.y, minion.index, uids);
         return failure ? this.failureResult(failure) : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
-    }
-
-    private validateHighPriestess(step: IStep | undefined): IValidationResult {
-        if (step !== undefined && step.action !== "discard") {
-            return this.invalid("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" });
-        }
-        const discardUids = step?.cardList ?? [];
-        const drawCountStr = step?.amount?.toString();
-        const failure = this.checkDiscardDraw(discardUids, drawCountStr);
-        if (failure) {
-            return this.failureResult(failure);
-        }
-        // A missing "draw <n>" is never complete - same rule validateDiscard gives the ordinary top-level discard action's own identical shape.
-        if (step?.amount === undefined) {
-            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
-        }
-        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // World: <chosenUid> - the minionRef itself is already stripped/resolved by applyPowerStep's own pre-switch logic, same as every other special.
@@ -7315,15 +7278,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
 
                 // The literal drawPile array isn't used for the draw-pile summary - "what's left to draw" is computed by elimination: every card in the full deck not visible somewhere else.
-                const drawArea = this.buildDeckSummaryArea(
-                    this.unseenCardUids(), legend, faces, this.neutralAreaLabel("apgames:validation.gnostica.LABEL_DECK")
+                const drawArea = this.buildAreaFromSummary(
+                    this.summarizeDiscardPile(this.unseenCardUids()), legend, faces, this.neutralAreaLabel("apgames:validation.gnostica.LABEL_DECK")
                 );
                 if (drawArea !== undefined) {
                     areas.push(drawArea);
                 }
                 // The discard pile is always face-up/public, unlike hands or the draw pile, so its contents are read directly.
-                const discardArea = this.buildDeckSummaryArea(
-                    this.discardPile, legend, faces, discardLabel, new Set(this.discarded)
+                const discardArea = this.buildAreaFromSummary(
+                    this.summarizeDiscardPile(this.discardPile), legend, faces, discardLabel, new Set(this.discarded)
                 );
                 if (discardArea !== undefined) {
                     areas.push(discardArea);
@@ -7464,7 +7427,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
     }
 
-    // The abbreviation FrameState.discardSummary itself stores; pure bucketing, no "new"/tinting concept - just the first half of buildDeckSummaryArea's own logic, minus newUids.
+    // The abbreviation FrameState.discardSummary itself stores: majors by uid, minors by suit and spot/royal count.
     private summarizeDiscardPile(uids: string[]): DiscardSummary {
         const majorUids: string[] = [];
         const counts = new Map<string, number>();
@@ -7483,73 +7446,23 @@ export class GnosticaGame extends GameBaseSequenced {
         return { majorUids, counts };
     }
 
-    // Builds a discard area straight from a DiscardSummary - used only for historical frames. Otherwise identical to buildDeckSummaryArea.
+    // Summary code because draw/discard piles can be large. Minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are shown individually. `newUids` are shaded as just added.
     private buildAreaFromSummary(
         summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: StructuredRenderLabel,
+        newUids: Set<string> = new Set(),
     ): AreaPieces | undefined {
+        const newBuckets = new Set<string>();
+        for (const uid of newUids) {
+            const card = allCards().find(c => c.uid === uid);
+            if (card !== undefined && !card.major) {
+                newBuckets.add(`${card.suit.uid}_${card.court ? "royal" : "spot"}`);
+            }
+        }
         const pieces: string[] = [];
         for (const suit of suits) {
             for (const category of ["spot", "royal"] as const) {
                 const bucket = `${suit.uid}_${category}`;
                 const count = summary.counts.get(bucket);
-                if (count === undefined) {
-                    continue;
-                }
-                const representativeRank = ranks.find(r => r.court === (category === "royal"))!;
-                const representative = new Card({ name: `${representativeRank.name} of ${suit.name}`, rank: representativeRank, suit, major: false });
-                const key = `${bucket}_${count}`;
-                if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(representative, false, 0, {
-                        borderless: true,
-                        rankText: `${count}x`,
-                    }) as [Glyph, ...Glyph[]];
-                }
-                pieces.push(key);
-            }
-        }
-        for (const uid of summary.majorUids.sort()) {
-            const key = GnosticaGame.cardKey(uid);
-            GnosticaGame.setCardFace(legend, faces, key, "full|false", () => this.buildCardFace(allCards().find(c => c.uid === uid)!, false));
-            pieces.push(key);
-        }
-        if (pieces.length === 0) {
-            return undefined;
-        }
-        return { type: "pieces", pieces: pieces as [string, ...string[]], label, spacing: 0.25, width: 10 };
-    }
-
-    // Summary code because Draw/discard piles can be large. Minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are shown individually.
-    private buildDeckSummaryArea(
-        uids: string[], legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: StructuredRenderLabel,
-        newUids: Set<string> = new Set(),
-    ): AreaPieces | undefined {
-        if (uids.length === 0) {
-            return undefined;
-        }
-        const counts = new Map<string, number>();
-        const newBuckets = new Set<string>();
-        const majorUids: string[] = [];
-        for (const uid of uids) {
-            const card = allCards().find(c => c.uid === uid);
-            if (card === undefined) {
-                continue;
-            }
-            if (card.major) {
-                majorUids.push(uid);
-            } else {
-                const bucket = `${card.suit.uid}_${card.court ? "royal" : "spot"}`;
-                counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
-                if (newUids.has(uid)) {
-                    newBuckets.add(bucket);
-                }
-            }
-        }
-
-        const pieces: string[] = [];
-        for (const suit of suits) {
-            for (const category of ["spot", "royal"] as const) {
-                const bucket = `${suit.uid}_${category}`;
-                const count = counts.get(bucket);
                 if (count === undefined) {
                     continue;
                 }
@@ -7567,24 +7480,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 pieces.push(key);
             }
         }
-        for (const uid of majorUids.sort()) {
+        for (const uid of summary.majorUids.sort()) {
             const isNew = newUids.has(uid);
             const key = GnosticaGame.cardKey(uid);
             GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(allCards().find(c => c.uid === uid)!, false, 0, isNew ? { background: MUTED_FILL } : {}));
             pieces.push(key);
         }
-
         if (pieces.length === 0) {
             return undefined;
         }
-        return {
-            type: "pieces",
-            pieces: pieces as [string, ...string[]],
-            label,
-            // Tighter and wider than the default auto-wrap; there's no more than ~30 distinct tokens (8 buckets + 22 majors) to display.
-            spacing: 0.25,
-            width: 10,
-        };
+        // Tighter and wider than the default auto-wrap; there's no more than ~30 distinct tokens (8 buckets + 22 majors) to display.
+        return { type: "pieces", pieces: pieces as [string, ...string[]], label, spacing: 0.25, width: 10 };
     }
 
     // "<cell>.<piece id>": names a piece in a result well enough to find it again on the finished board.

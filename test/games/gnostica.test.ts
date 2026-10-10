@@ -4563,9 +4563,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const click1 = g.handleClick(cellClick.move, -1, -1, "c2C");
         expect(click1.move).eq(`use 02/discard 2C`);
         expect(click1.valid).to.be.true;
-        // No "draw <n>" chosen yet - never complete without one
-        // (see validateHighPriestess's own docs), so a single discard
-        // toggle must never read as done.
+        // No "draw <n>" chosen yet - never complete without one.
         expect(click1.complete).eq(-1);
         const click2 = g.handleClick(click1.move, -1, -1, "c5C");
         expect(click2.move).eq(`use 02/discard 2C 5C`);
