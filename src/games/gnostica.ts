@@ -15,7 +15,13 @@ import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, PrimitiveOpts, Special
 import { generateRandomMove } from "./gnostica/randomMove.js";
 import i18next from "i18next";
 
+export type playerid = 1|2|3|4|5|6;
+
 type Stash = [number, number, number];
+
+interface ILegendObj {
+    [key: string]: Glyph|[Glyph, ...Glyph[]];
+}
 
 interface PowerFailure {
     key: string;
@@ -38,19 +44,7 @@ const checkOwnMinion = (minion: Piece, player: number): PowerFailure | undefined
 
 // Rods - Move
 
-const checkCanUseRod = (minion: Piece): PowerFailure | undefined => {
-    if (minion.orientation === "U") {
-        return { key: "ROD_NEEDS_FACING" };
-    }
-    return undefined;
-};
-
 // Discs - Grow
-
-const nextSize = (size: Pips): Pips => (size + 1) as Pips;
-
-const missingReplacement = (opts: { replacementSource?: "hand" | "discard" }, uid: string): PowerFailure =>
-    opts.replacementSource === "discard" ? { key: "INVALID_MOVE", params: { reason: "NOT_IN_HAND_OR_DISCARD", uid } } : { key: "NOT_IN_HAND", params: { uid } };
 
 // How many cards a Judgement draw may take in all: one per pip of the acting minion, as far as the hand has room.
 const judgementDrawRoom = (minionSize: number, handSize: number): number => Math.min(minionSize, Math.max(0, 6 - handSize));
@@ -119,28 +113,6 @@ const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
 // card.suit.uid is typed as plain `string` by tarot, but is always one of the 4 minor suits.
 const suitUidOf = (card: TarotCard): MinorSuitUid => card.suit.uid as MinorSuitUid;
 
-// The target-button wording for Rods/Discs/Swords: the verb prefixing each piece candidate, and the whole-territory option.
-// `selfVerb` is for the minion acting on itself, where it differs: a Rod moves its own minion but pushes any other piece or territory.
-const RDS_TARGET_LABELS: Record<Exclude<MinorSuitUid, "C">, { verb: string; selfVerb?: string; tile: string }> = {
-    R: { verb: "Push", selfVerb: "Move", tile: "Push Territory" },
-    D: { verb: "Grow", tile: "Grow Territory" },
-    S: { verb: "Attack", tile: "Attack Territory" },
-};
-
-// Printed in the "letters" display where a card has a slot but no power in it.
-const EMPTY_SLOT_MARK = "\u2014";
-
-// Legend key for the mark left where a piece was destroyed.
-const DESTROYED_KEY = "destroyed";
-// A bare icon, with no circle around it, is drawn larger than one inside a circle.
-const BARE_ICON_FACTOR = 1.25;
-
-type MarkDisplay = "circled" | "icons" | "letters";
-
-// Legend keys for the pieces and suits drawn on buttons.
-const PIECE_BUTTON_GLYPH_PREFIX = "buttonpiece_";
-const SUIT_BUTTON_GLYPH_PREFIX = "buttonsuit_";
-
 const MUTED_FILL: Colourfuncs = { func: "flatten", fg: "_context_strokes", bg: "_context_background", opacity: 0.3 };
 // The greyed button: MUTED_FILL's dark-theme grey, lightened to about #ccc in the light theme.
 const GREYED_BUTTON_FILL: Colourfuncs = {
@@ -150,25 +122,19 @@ const GREYED_BUTTON_FILL: Colourfuncs = {
     opacity: 0.2,
 };
 
-export type playerid = 1|2|3|4|5|6;
-
 // Major arcana chaining uses frames: the board before each step of a move of 2+ steps, as in Frogger and Rincala.  Discards are abbreviated.
 export type FrameState = {
     board: UnboundedSquareBoard<CellContents>;
     discardSummary: DiscardSummary;
 };
 
-// One button-bar choice, before its value gets a `<prefix>_` prepended - see buildChoiceButtons' own docs.
+// One button-bar choice, before its value gets a `<prefix>_` prepended.
 interface ChoiceOption {
     value: string;
     label?: string | StructuredRenderLabel;
     glyph?: string; // A legend key; the render adds the entry for a piece's or a suit's.
     glyphPosition?: "prefix" | "suffix"; // Defaults to suffix.
     disabledReason?: { key: string; params?: Record<string, unknown> };
-}
-
-interface ILegendObj {
-    [key: string]: Glyph|[Glyph, ...Glyph[]];
 }
 
 // A minion's board location; `piece` carries owner/size/orientation for a newMinion predicted by validate* before the board is actually mutated.
@@ -179,8 +145,6 @@ export interface IPieceRef {
 }
 
 const xy = (cell: string): [number, number] => GnosticaBoard.algebraic2coords(cell);
-// The canonical spelling of a typed cell name, so it compares equal to the one a piece carries.
-const canonicalCell = (name: string): string => GnosticaBoard.coords2algebraic(...xy(name.toLowerCase()));
 
 // What a single suit-power step did, for chaining later steps of the same major-arcana activation (which of the acting player's own pieces moved).
 export interface IStepOutcome {
@@ -462,8 +426,6 @@ export class GnosticaGame extends GameBaseSequenced {
     public discardPile: string[] = [];
     public stashes!: Map<playerid, Stash>;
     private rejected = false;
-    // How a card prints its powers: icons in circles, bare icons ("icons"), or uids ("letters").
-    private markDisplay: MarkDisplay = "circled";
     public eliminated: playerid[] = [];
     public lastTurner: playerid | undefined;
     public gameover = false;
@@ -1031,9 +993,9 @@ export class GnosticaGame extends GameBaseSequenced {
         const OTHERWORDS = ["as", "at", "create", "draw", "fly", "grow", "last", "move", "orient", "replace", "shrink", "to", "trade", "via"];
 
         const CARD_UID_RE = /^((a|10|[2-9]|p|n|q|k)[crds]|\d{2})$/i;
-        const CELL_RE = /^[a-z]{1,2}-?\d+$/i;
+        const CELL_RE = /^[a-z]{1,2}(0|-?[1-9]\d*)$/;
         const DIRECTION_RE = /^[NESWU]\??$/i;
-        const PIECE_REF_RE = /^[a-z]{1,2}-?\d+(\.[1-3](\.[NESWU])?(\.[1-6])?)?$/;
+        const PIECE_REF_RE = /^[a-z]{1,2}(0|-?[1-9]\d*)(\.[1-3](\.[NESWU])?(\.[1-6])?)?$/;
         const MAJOR_ARCANA_RE = /^[0-1][0-9]|20|21$/i;
         const NUMBER_RE = /^[0-6]$/i; //Used for player Ids, card counts, bids, etc.
         const SUIT_RE = /^[CDRS]$/i;
@@ -2043,9 +2005,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (segments.length < 2 || segments.length > 4) {
             return { kind: "not_found" };
         }
-        const [cellStr, pipsStr, ...rest] = segments;
-        // PIECE_REF_RE (parseMove) already guarantees cellStr decodes cleanly - same cell grammar and case as CELL_RE.
-        const cell = canonicalCell(cellStr);
+        // PIECE_REF_RE (parseMove) already guarantees the cell is spelled the way the game writes it - same cell grammar as CELL_RE.
+        const [cell, pipsStr, ...rest] = segments;
         const pips = parseInt(pipsStr, 10);
         if (Number.isNaN(pips) || pips < 1 || pips > 3) {
             return { kind: "not_found" };
@@ -2122,13 +2083,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (tok.includes(".")) {
             return false;
         }
-        let cell: string;
-        try {
-            cell = canonicalCell(tok);
-        } catch {
-            return false;
-        }
-        return this.actingCandidates(pool.filter(m => m.cell === cell), suitUid).length > 1;
+        return this.actingCandidates(pool.filter(m => m.cell === tok), suitUid).length > 1;
     }
 
     // A Rod can't act while upright, so while choosing, only a facing minion is a candidate - unless none is, when the error should still show.
@@ -2171,7 +2126,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { minion: resolved.ref, ambiguous: false, candidates: pool };
             }
             if (this.isMinionCellStillNarrowing(tok, pool, suitUid)) {
-                const narrowed = this.actingCandidates(pool.filter(m => m.cell === canonicalCell(tok)), suitUid);
+                const narrowed = this.actingCandidates(pool.filter(m => m.cell === tok), suitUid);
                 // A cell with 2+ eligible minions that all happen to be identical isn't really ambiguous - pick one at random, as if there'd only been one.
                 if (this.allIndistinguishable(narrowed)) {
                     return { minion: narrowed[Math.floor(Math.random() * narrowed.length)], ambiguous: false, candidates: narrowed };
@@ -2732,12 +2687,12 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The legend key for a suit's icon shown on a button; the render adds its entry.
     private static suitButtonGlyph(suitUid: MinorSuitUid): string {
-        return `${SUIT_BUTTON_GLYPH_PREFIX}${suitUid}`;
+        return `buttonsuit_${suitUid}`;
     }
 
     // The legend key for a piece shown on a button; the render adds its entry.
     private static pieceButtonGlyph(piece: Piece): string {
-        return `${PIECE_BUTTON_GLYPH_PREFIX}${piece.id()}`;
+        return `buttonpiece_${piece.id()}`;
     }
 
     // Every target-piece button names whose piece it is, since size/facing alone can match across different opponents; another player's is named by seat, for the front end to fill in.
@@ -2778,7 +2733,10 @@ export class GnosticaGame extends GameBaseSequenced {
             options.push({ value: "new", label: "Create Territory", disabledReason: availability.get("new") });
             return options;
         }
-        const { verb, selfVerb, tile } = RDS_TARGET_LABELS[suitUid];
+        // The verb prefixes each piece candidate. A Rod moves its own minion but pushes any other piece or territory, so only Rods have a separate selfVerb.
+        const verb = suitUid === "R" ? "Push" : suitUid === "D" ? "Grow" : "Attack";
+        const selfVerb = suitUid === "R" ? "Move" : undefined;
+        const tile = `${verb} Territory`;
         return [
             { value: targetCell, label: tile, disabledReason: availability.get("tile") },
             ...this.pieceCandidateOptions(pending, verb, { disabledReason: availability.get("piece"), ownLast: suitUid === "S", selfVerb }),
@@ -4899,8 +4857,9 @@ export class GnosticaGame extends GameBaseSequenced {
         const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
         if (minionErr) return minionErr;
         const minion = this.getPiece(minionRef);
-        const rodErr = checkCanUseRod(minion);
-        if (rodErr) return rodErr;
+        if (minion.orientation === "U") {
+            return { key: "ROD_NEEDS_FACING" };
+        }
         if (dist < 1 || dist > minion.size) {
             return { key: "BAD_DISTANCE", params: { size: minion.size, dist } };
         }
@@ -4957,8 +4916,9 @@ export class GnosticaGame extends GameBaseSequenced {
         const minionErr = this.checkOwnMinionTargetsCell(minionRef, srcCell);
         if (minionErr) return minionErr;
         const minion = this.getPiece(minionRef);
-        const rodErr = checkCanUseRod(minion);
-        if (rodErr) return rodErr;
+        if (minion.orientation === "U") {
+            return { key: "ROD_NEEDS_FACING" };
+        }
         if (this.classifyCell(srcCell) !== "territory") {
             return { key: "NO_TERRITORY_THAT_WAY" };
         }
@@ -5006,8 +4966,9 @@ export class GnosticaGame extends GameBaseSequenced {
         if (target.size >= 3) {
             return { key: "ALREADY_MAX_SIZE" };
         }
-        if (!opts.skipStashCheck && !this.hasStashAvailable(target.owner, nextSize(target.size))) {
-            return { key: "STASH_EMPTY", params: { playerNum: target.owner, size: nextSize(target.size) } };
+        const grownSize = (target.size + 1) as Pips;
+        if (!opts.skipStashCheck && !this.hasStashAvailable(target.owner, grownSize)) {
+            return { key: "STASH_EMPTY", params: { playerNum: target.owner, size: grownSize } };
         }
         return undefined;
     }
@@ -5015,7 +4976,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private growPiece(targetRef: IPieceRef, newOrientation: Orientation | undefined,): void {
         const t = this.cellContents(targetRef.cell)!;
         const target = t.pieces[targetRef.index];
-        const grownSize = nextSize(target.size);
+        const grownSize = (target.size + 1) as Pips;
         this.takeFromStash(target.owner, grownSize);
         this.returnToStash(target.owner, target.size);
         const orientation = target.owner === this.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
@@ -5039,7 +5000,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return { key: "NOTHING_TO_GROW" };
         }
         if (!this.replacementCards(opts).includes(newCardUid)) {
-            return missingReplacement(opts, newCardUid);
+            return opts.replacementSource === "discard"
+                ? { key: "INVALID_MOVE", params: { reason: "NOT_IN_HAND_OR_DISCARD", uid: newCardUid } }
+                : { key: "NOT_IN_HAND", params: { uid: newCardUid } };
         }
         const newCard = allCards().find(c => c.uid === newCardUid);
         if (newCard === undefined) {
@@ -5153,7 +5116,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return { key: "REPLACEMENT_CARD_REQUIRED" };
         }
         if (!this.replacementCards(opts).includes(newCardUid)) {
-            return missingReplacement(opts, newCardUid);
+            return opts.replacementSource === "discard"
+                ? { key: "INVALID_MOVE", params: { reason: "NOT_IN_HAND_OR_DISCARD", uid: newCardUid } }
+                : { key: "NOT_IN_HAND", params: { uid: newCardUid } };
         }
         const newCard = allCards().find(c => c.uid === newCardUid);
         if (newCard === undefined) {
@@ -7107,9 +7072,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Each frame of a 2+-step chain holds the board before a step and shows the results of the step that led to it; the live state comes last and alone carries the hands, pools and buttons.
     public render(opts?: IRenderOpts): APRenderRep[] {
-        const displays = opts?.altDisplays ?? (opts?.altDisplay === undefined ? [] : [opts.altDisplay]);
-        const largerCards = displays.includes("larger-cards");
-        this.markDisplay = displays.includes("letters") ? "letters" : displays.includes("icons") ? "icons" : "circled";
+        const displays = this.resolveActiveDisplays(opts);
 
         // A chain wraps each step's results into a _group entry; whatever else the move did (a "use", a declaration) goes with the last rep.
         const groups = this.results.filter((r): r is Extract<APMoveResult, { type: "_group" }> => r.type === "_group");
@@ -7152,7 +7115,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
             // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
             const rings = this.ringsFromResults(results, board);
-            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, largerCards, legend, faces, last ? new Map([...rings, ...this.pieceRings()]) : rings, this.destroyedCells(results));
+            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, displays, legend, faces, last ? new Map([...rings, ...this.pieceRings()]) : rings, this.destroyedCells(results));
 
             const columnLabels: string[] = [];
             for (let x = minX; x <= maxX; x++) {
@@ -7169,6 +7132,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (!last) {
                 // The discard pile is always face-up/public - the one non-board area worth reconstructing for an earlier frame; no "just discarded" tinting since that's a live-only concept.
                 const discardArea = this.buildAreaFromSummary(
+                    displays,
                     this.frames[i].discardSummary, legend, faces, discardLabel
                 );
                 if (discardArea !== undefined) {
@@ -7194,7 +7158,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         // A card just added to hand gets its face tinted so it's easy to spot regardless of sort order.
                         const isNew = newUids.has(uid);
                         const key = GnosticaGame.cardKey(uid);
-                        GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(card, false, 0, isNew ? { background: MUTED_FILL } : {}));
+                        GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(displays, card, false, 0, isNew ? { background: MUTED_FILL } : {}));
                         handKeys.push(key);
                     }
                     areas.push({
@@ -7213,7 +7177,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     for (const uid of this.biddingPool) {
                         const card = allCards().find(c => c.uid === uid)!;
                         const key = GnosticaGame.cardKey(uid);
-                        GnosticaGame.setCardFace(legend, faces, key, "full|false", () => this.buildCardFace(card, false));
+                        GnosticaGame.setCardFace(legend, faces, key, "full|false", () => this.buildCardFace(displays, card, false));
                         poolKeys.push(key);
                     }
                     areas.push({
@@ -7242,6 +7206,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 // The literal drawPile array isn't used for the draw-pile summary - "what's left to draw" is computed by elimination: every card in the full deck not visible somewhere else.
                 const drawArea = this.buildAreaFromSummary(
+                    displays,
                     this.summarizeDiscardPile(this.unseenCardUids()), legend, faces, this.neutralAreaLabel("apgames:validation.gnostica.LABEL_DECK")
                 );
                 if (drawArea !== undefined) {
@@ -7249,6 +7214,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // The discard pile is always face-up/public, unlike hands or the draw pile, so its contents are read directly.
                 const discardArea = this.buildAreaFromSummary(
+                    displays,
                     this.summarizeDiscardPile(this.discardPile), legend, faces, discardLabel, new Set(this.discarded)
                 );
                 if (discardArea !== undefined) {
@@ -7272,15 +7238,15 @@ export class GnosticaGame extends GameBaseSequenced {
                 // undefined once nothing is mid-build, including right after a commit (this.preview is cleared then).
                 const activeCard = allCards().find(c => c.uid === this.preview?.pending?.activeCardUid);
                 if (activeCard !== undefined) {
-                    for (const mark of this.cardMarks(activeCard)) {
+                    for (const mark of this.cardMarks(displays, activeCard)) {
                         // Keys end up as literal DOM ids, so a uid's "+" or "?" can't appear in one.
                         const key = `activecard_${[...mark].map(c => c.charCodeAt(0).toString(16)).join("_")}`;
                         if (!(key in legend)) {
                             // Circle-backed, matching every other place these icons appear (buildCardFace's own pushCircle) - a bare
                             // icon glyph alone reads too thin/low-contrast next to the turn-order rows' own solid pyramids.
-                            legend[key] = this.markDisplay === "letters"
+                            legend[key] = displays.includes("letters")
                                 ? [this.markText(mark, 0.6)]
-                                : this.markDisplay === "icons"
+                                : displays.includes("icons")
                                     ? [{ name: mark, scale: 0.8 }]
                                     : [{ name: "piece", colour: "_context_board" }, { name: mark, scale: 0.5 }];
                         }
@@ -7295,10 +7261,10 @@ export class GnosticaGame extends GameBaseSequenced {
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
                 const actionButtons = this.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons());
                 for (const button of actionButtons ?? []) {
-                    if (button.glyph?.startsWith(PIECE_BUTTON_GLYPH_PREFIX) && !(button.glyph in legend)) {
-                        legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice(PIECE_BUTTON_GLYPH_PREFIX.length)));
-                    } else if (button.glyph?.startsWith(SUIT_BUTTON_GLYPH_PREFIX) && !(button.glyph in legend)) {
-                        legend[button.glyph] = { name: suits.find(suit => suit.uid === button.glyph!.slice(SUIT_BUTTON_GLYPH_PREFIX.length))!.glyph! };
+                    if (button.glyph?.startsWith("buttonpiece_") && !(button.glyph in legend)) {
+                        legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice("buttonpiece_".length)));
+                    } else if (button.glyph?.startsWith("buttonsuit_") && !(button.glyph in legend)) {
+                        legend[button.glyph] = { name: suits.find(suit => suit.uid === button.glyph!.slice("buttonsuit_".length))!.glyph! };
                     }
                 }
                 if (actionButtons !== undefined) {
@@ -7411,7 +7377,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Summary code because draw/discard piles can be large. Minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are shown individually. `newUids` are shaded as just added.
     private buildAreaFromSummary(
-        summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: StructuredRenderLabel,
+        displays: string[], summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: StructuredRenderLabel,
         newUids: Set<string> = new Set(),
     ): AreaPieces | undefined {
         const newBuckets = new Set<string>();
@@ -7434,7 +7400,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const representative = new Card({ name: `${representativeRank.name} of ${suit.name}`, rank: representativeRank, suit, major: false });
                 const key = `${bucket}_${count}${newBuckets.has(bucket) ? "_shaded" : ""}`;
                 if (!(key in legend)) {
-                    legend[key] = this.buildCardFace(representative, false, 0, {
+                    legend[key] = this.buildCardFace(displays, representative, false, 0, {
                         borderless: true,
                         rankText: `${count}x`,
                         ...(newBuckets.has(bucket) ? { background: MUTED_FILL } : {}),
@@ -7446,7 +7412,7 @@ export class GnosticaGame extends GameBaseSequenced {
         for (const uid of summary.majorUids.sort()) {
             const isNew = newUids.has(uid);
             const key = GnosticaGame.cardKey(uid);
-            GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(allCards().find(c => c.uid === uid)!, false, 0, isNew ? { background: MUTED_FILL } : {}));
+            GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(displays, allCards().find(c => c.uid === uid)!, false, 0, isNew ? { background: MUTED_FILL } : {}));
             pieces.push(key);
         }
         if (pieces.length === 0) {
@@ -7467,7 +7433,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // The last match, since a piece that moved or changed hands is added to the end of its cell.
         const ring = (cell: string, kind: "minion" | "target", match: (p: Piece) => boolean) => {
             const i = (board.get(...xy(cell))?.pieces ?? []).map(match).lastIndexOf(true);
-            const key = `${canonicalCell(cell)},${i}`;
+            const key = `${cell},${i}`;
             if (i >= 0 && (kind === "target" || !rings.has(key))) {
                 rings.set(key, kind);
             }
@@ -7580,7 +7546,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // The board grid as two layers: a glyph marker for each card (and each wasteland), and in the pieces layer one legend entry per distinct set of pieces in a cell.
     // Cards are unique, so each card's legend entry is built for its one cell. Every other cell is the bare "-".
     private buildBoardLayers(
-        board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number }, largerCards: boolean,
+        board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number }, displays: string[],
         legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>,
         rings?: Map<string, "minion" | "target">,
         destroyed: Set<string> = new Set(),
@@ -7598,9 +7564,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     const key = GnosticaGame.cardKey(t.cardUid!);
                     const players = t.playersPresent();
                     const owner = players.size === 1 ? [...players][0] : 0;
-                    const dontSpace = largerCards && players.size === 0;
+                    const dontSpace = displays.includes("larger-cards") && players.size === 0;
                     if (t.cardUid !== UNREVEALED_UID) {
-                        GnosticaGame.setCardFace(legend, faces, key, `board|${!dontSpace}|${owner}`, () => GnosticaGame.markerStack(this.buildCardFace(t.card!, !dontSpace, owner)));
+                        GnosticaGame.setCardFace(legend, faces, key, `board|${!dontSpace}|${owner}`, () => GnosticaGame.markerStack(this.buildCardFace(displays, t.card!, !dontSpace, owner)));
                     }
                     markers.push({ type: "glyph", glyph: key, points: [point] });
                 } else if (cls === "wasteland") {
@@ -7638,7 +7604,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (destroyed.has(`${x},${y}`)) {
                     // The mark takes the slot an upright piece would get, so it sits at the centre of an empty cell and in a free slot otherwise.
                     const mark = this.pieceGridSlots([...pieces, new Piece(0, 1, "U")]).at(-1)!;
-                    const markKey = `${DESTROYED_KEY}_${Math.round(mark.dx)}_${Math.round(mark.dy)}_${Math.round(mark.scale * 100)}`;
+                    const markKey = `destroyed_${Math.round(mark.dx)}_${Math.round(mark.dy)}_${Math.round(mark.scale * 100)}`;
                     legend[markKey] ??= GnosticaGame.withBackdrop([{ text: "\u2718", scale: mark.scale, colour: "#d00", orientation: "vertical", nudge: { dx: mark.dx, dy: mark.dy } }], 1);
                     keys.push(markKey);
                 }
@@ -7674,11 +7640,11 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Gnostica's own card face, rebuilt.  Also handles summary tokens.
     // What a card prints for its powers, in slot order: icon names, or uids in the "letters" display. A minor's one power is its suit's.
-    private cardMarks(card: TarotCard): string[] {
+    private cardMarks(displays: string[], card: TarotCard): string[] {
         if (card.major) {
-            return MAJOR_ARCANA[card.uid].powers.map(power => this.markDisplay === "letters" ? power.uid : power.icon);
+            return MAJOR_ARCANA[card.uid].powers.map(power => displays.includes("letters") ? power.uid : power.icon);
         }
-        const mark = this.markDisplay === "letters" ? card.suit.uid : card.suit.glyph;
+        const mark = displays.includes("letters") ? card.suit.uid : card.suit.glyph;
         return mark === undefined ? [] : [mark];
     }
 
@@ -7690,7 +7656,7 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    private buildCardFace(card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: ColourResolvable } = {}): Glyph[] {
+    private buildCardFace(displays: string[], card: TarotCard, spaced: boolean, owner: number = 0, opts: { borderless?: boolean; rankText?: string; background?: ColourResolvable } = {}): Glyph[] {
         // `borderless` drops the card-square background for summary tokens.
         const BOARD_TILE_GRID_CORNER = 650;
         // Opacity 0 by default.
@@ -7734,7 +7700,7 @@ export class GnosticaGame extends GameBaseSequenced {
             orientation: "vertical",
         });
 
-        const marks = this.cardMarks(card);
+        const marks = this.cardMarks(displays, card);
         const circleScale = spaced ? 0.25 : 0.45;
         const iconScale = spaced ? 0.15 : 0.30;
         // `iconShift` compensates for nudging issues, so an
@@ -7742,16 +7708,19 @@ export class GnosticaGame extends GameBaseSequenced {
         const iconShift = spaced ? 1075 : 375;
         const pushCircle = (xdir: number, ydir: number, mark?: string) => {
             // Without circles an empty slot needs its own mark, and a glyph-relative nudge is scaled with the glyph, so the shift that centres one where the circle would be depends on its size.
-            if (this.markDisplay !== "circled") {
-                const bare = this.markDisplay === "icons" && mark !== undefined;
-                const markScale = bare ? BARE_ICON_FACTOR * iconScale : rankScale;
+            const letters = displays.includes("letters");
+            if (letters || displays.includes("icons")) {
+                const bare = !letters && mark !== undefined;
+                // A bare icon, with no circle around it, is drawn larger than one inside a circle.
+                const markScale = bare ? 1.25 * iconScale : rankScale;
                 const shift = corner * circleScale / markScale;
                 const nudge = { dx: xdir * shift, dy: ydir * shift };
                 if (bare) {
                     stack.push({ name: mark, scale: markScale, nudge, orientation: "vertical" });
                 } else {
                     // Uids are drawn at the ranks' size; a one-character uid gets a leading space, like a one-character rank's trailing one.
-                    const text = mark === undefined ? EMPTY_SLOT_MARK : mark.length === 1 ? `\u00A0${mark}` : mark;
+                    // The letters display prints a dash where a card has a slot but no power in it.
+                    const text = mark === undefined ? "\u2014" : mark.length === 1 ? `\u00A0${mark}` : mark;
                     stack.push(this.markText(text, markScale, nudge));
                 }
                 return;

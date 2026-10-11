@@ -206,13 +206,16 @@ describe("Gnostica parsing", () => {
         expect(g.pickleMove(g.parseMove("use 19/with m0.1 at l0 create U/with"))).to.equal("use 19/with m0.1 at l0 create U/");
     });
 
-    it("reads a direction in either case as upper case, and a cell in either case as lower case", () => {
-        const place = g.parseMove("place A0 w").steps[0];
+    it("reads a direction in either case as upper case, and accepts a cell only in lower case", () => {
+        const place = g.parseMove("place a0 w").steps[0];
         expect(place.targetCell).eq("a0");
         expect(place.direction).eq("W");
-        const create = g.parseMove("use AC/with m0.2 at N0 create s").steps[1];
+        const create = g.parseMove("use AC/with m0.2 at n0 create s").steps[1];
         expect(create.atCell).eq("n0");
         expect(create.direction).eq("S");
-        expect(g.parseMove("use 17/with m0.2 grow N0 orient e").steps[1].direction).eq("E");
+        expect(g.parseMove("use 17/with m0.2 grow n0 orient e").steps[1].direction).eq("E");
+        expect(g.parseMove("place A0 w")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use AC/with m0.2 at N0 create s")).to.have.deep.property("valid", false);
     });
+
 });

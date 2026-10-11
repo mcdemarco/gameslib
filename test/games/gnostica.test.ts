@@ -6783,7 +6783,7 @@ describe("Gnostica: Justice's trade and its continued attack", () => {
 
 
 describe("Gnostica: a move typed in mixed case", () => {
-    // What a person might type in capitals or lower case: cells and directions. A piece reference is stricter: its cell is lower case and its orientation upper case.
+    // What a person might type in capitals or lower case: directions. A cell, in a piece reference or on its own, must be lower case, and a piece reference's orientation upper case.
     const outcome = (setup: () => GnosticaGame, move: string) => {
         const g = setup();
         const verdict = g.validateMove(move);
@@ -6800,13 +6800,15 @@ describe("Gnostica: a move typed in mixed case", () => {
         hands: [filler, filler], stashes: { 1: [3, 3, 3], 2: [3, 3, 3] },
     });
 
-    it("places a first piece on a cell written in capitals, facing a direction written in lower case", () => {
+    it("places a first piece facing a direction written in lower case, and rejects a cell in capitals", () => {
         const empty = () => testGame({ board: [{ x: 0, y: 0, uid: "AC" }], hands: [filler, filler] });
-        same(empty, "place m0 U", "place M0 u");
+        same(empty, "place m0 U", "place m0 u");
+        expect(empty().validateMove("place M0 U").valid).to.be.false;
     });
 
-    it("creates and grows with a cell and a direction written in capitals or lower case", () => {
-        same(duel("AC"), "use AC/with m0.2 at n0 create W", "use AC/with m0.2 at N0 create w");
+    it("creates and grows with a direction written in capitals or lower case, and rejects a cell in capitals", () => {
+        same(duel("AC"), "use AC/with m0.2 at n0 create W", "use AC/with m0.2 at n0 create w");
+        expect(duel("AC")().validateMove("use AC/with m0.2 at N0 create W").valid).to.be.false;
         same(duel("17"), "use 17/with m0.2 grow n0.1 orient E", "use 17/with m0.2 grow n0.1 orient e");
     });
 
