@@ -1007,12 +1007,12 @@ function buildRandomStepForPowerStep(
 // common real-play pattern.
 //
 // Final correctness pass: truncates from the end while
-// validateMajorPower rejects the assembled chain, since
+// validatePowerStack rejects the assembled chain, since
 // computeShortcutOpts's totalSteps-dependent relaxations (e.g.
 // Chariot's "every step except the last") can invalidate an earlier
 // step once the chain's ACTUAL final length is known, which can differ
 // from the length assumed while speculatively building it. Always
-// terminates - validateMajorPower(def, eligible, []) is trivially
+// terminates - validatePowerStack on a fresh frame with no steps is trivially
 // legal (no steps to check).
 function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[]): IStep[] {
     if (!card.major) {
@@ -1091,7 +1091,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
         }
     }
     const isCleanSuccess = (steps: IStep[]): boolean => {
-        const result = game.validateMajorPower(def, eligible, steps);
+        const result = game.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, def.uid);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see
         // validateFrameStack's own docs) - .valid alone is what actually

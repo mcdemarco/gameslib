@@ -2601,7 +2601,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (cell === undefined) {
             return undefined;
         }
-        const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(cell));
+        const { ambiguous, candidates } = this.resolveStepMinion(undefined, this.piecesOwnedAt(cell));
         if (!ambiguous) {
             return undefined;
         }
@@ -4169,7 +4169,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return `orient ${prevRef} ${dir}${last}`;
             }
             // Fresh selection - routed through the same minion-selection primitive "use"/"play" use, since 2+ distinguishable pieces here need a real choice.
-            const pool = this.eligibleMinionsForOrient(cell);
+            const pool = this.piecesOwnedAt(cell);
             if (pool.length === 0) {
                 // A click on a cell with none of the player's pieces changes nothing: the selection stands and the message says what to click.
                 return { move, valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT") };
@@ -4524,7 +4524,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.addBufferIfWasteland(piece.cell);
         const orientation = orientationStr as Orientation;
         // Reorienting one of your own minions, with no adjacency restriction, is exactly what orientMinion already is - reuse it rather than mutating .orientation inline.
-        this.orientMinion(piece, orientation);
+        this.setPieceOrientation(piece, orientation);
         this.pushOrientResult(piece, ref, orientation);
     }
 
@@ -4594,7 +4594,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A bare cell with 2+ of the player's own pieces means the acting minion hasn't been picked yet - still building, not a hard error, same tolerance every minion-selection context gets.
         if (!ref.includes(".")) {
-            if (this.resolveStepMinion(undefined, this.eligibleMinionsForOrient(ref)).ambiguous) {
+            if (this.resolveStepMinion(undefined, this.piecesOwnedAt(ref)).ambiguous) {
                 return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON") };
             }
         }
@@ -4682,12 +4682,8 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.board.classify(...GnosticaBoard.algebraic2coords(cell));
     }
 
-    private getCellContents(cell: string): CellContents {
-        return this.cellContents(cell)!;
-    }
-
     private getPiece(ref: IPieceRef): Piece {
-        return this.getCellContents(ref.cell).pieces[ref.index];
+        return this.cellContents(ref.cell)!.pieces[ref.index];
     }
 
     // A cell "has an enemy" if any piece there belongs to someone other than `player`.
@@ -4840,7 +4836,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private createEnemy(targetRef: IPieceRef): void {
-        const t = this.getCellContents(targetRef.cell);
+        const t = this.cellContents(targetRef.cell)!;
         const victim = t.pieces[targetRef.index];
         this.takeFromStash(victim.owner, 1);
         t.add(new Piece(victim.owner, 1, victim.orientation));
@@ -4927,7 +4923,7 @@ export class GnosticaGame extends GameBaseSequenced {
     ): void {
         const minion = this.getPiece(minionRef);
         const dest = this.cellBeyond(targetRef.cell, minion.orientation, dist);
-        const srcT = this.getCellContents(targetRef.cell);
+        const srcT = this.cellContents(targetRef.cell)!;
         const moved = srcT.removeAt(targetRef.index);
         // The source cell never gets a piece back from this function (it
         // either lands elsewhere or is destroyed in the void below) - prune
@@ -5017,7 +5013,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private growPiece(targetRef: IPieceRef, newOrientation: Orientation | undefined,): void {
-        const t = this.getCellContents(targetRef.cell);
+        const t = this.cellContents(targetRef.cell)!;
         const target = t.pieces[targetRef.index];
         const grownSize = nextSize(target.size);
         this.takeFromStash(target.owner, grownSize);
@@ -5068,7 +5064,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private growTerritory(targetCell: string, newCardUid: string): void {
-        const t = this.getCellContents(targetCell);
+        const t = this.cellContents(targetCell)!;
         const newCard = takeFromPile(this.replacementPile(newCardUid), newCardUid);
         this.discardPile.push((t.card as TarotCard).uid);
         this.board.growTerritory(...GnosticaBoard.algebraic2coords(targetCell), newCard);
@@ -5107,7 +5103,7 @@ export class GnosticaGame extends GameBaseSequenced {
     targetRef: IPieceRef, pips: number,
         newOrientation: Orientation | undefined,
     ): void {
-        const t = this.getCellContents(targetRef.cell);
+        const t = this.cellContents(targetRef.cell)!;
         const victim = t.pieces[targetRef.index];
         const resultSize = victim.size - pips;
         if (resultSize === 0) {
@@ -5171,7 +5167,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private attackTerritory(targetCell: string, pips: number, newCardUid: string | undefined,): void {
-        const t = this.getCellContents(targetCell);
+        const t = this.cellContents(targetCell)!;
         const current = t.pointValue();
         const oldUid = (t.card as TarotCard).uid;
         const resultValue = current - pips;
@@ -5198,10 +5194,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.getPiece(ref).orientation = newOrientation;
     }
 
-    private orientMinion(ref: IPieceRef, newOrientation: Orientation,): void {
-        this.setPieceOrientation(ref, newOrientation);
-    }
-
     // Devil only: orient ANY piece, even an opponent's, still subject to the normal self/adjacent-cell targeting rule.
     private checkOrientAny(
     minionRef: IPieceRef,
@@ -5213,10 +5205,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return { key: "NO_PIECE_THERE" };
         }
         return undefined;
-    }
-
-    private orientAny(targetRef: IPieceRef, newOrientation: Orientation,): void {
-        this.setPieceOrientation(targetRef, newOrientation);
     }
 
     // Hierophant: replace the target piece with one of the acting player's own, same size; the displaced piece returns to its owner's stash.
@@ -5241,7 +5229,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private hierophantReplace(targetRef: IPieceRef, newOrientation: Orientation,): void {
-        const t = this.getCellContents(targetRef.cell);
+        const t = this.cellContents(targetRef.cell)!;
         const target = t.pieces[targetRef.index];
         this.takeFromStash(this.currplayer, target.size);
         this.returnToStash(target.owner, target.size);
@@ -5270,7 +5258,7 @@ export class GnosticaGame extends GameBaseSequenced {
     targetRef: IPieceRef,
         destCell: string, newOrientation: Orientation | undefined,
     ): void {
-        const srcT = this.getCellContents(targetRef.cell);
+        const srcT = this.cellContents(targetRef.cell)!;
         const moved = srcT.removeAt(targetRef.index);
         this.board.pruneIfEmpty(...xy(targetRef.cell));
         if (moved.owner === this.currplayer && newOrientation !== undefined) {
@@ -5475,11 +5463,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (t === undefined || t.card === undefined) {
             return [];
         }
-        return this.piecesOwnedAt(cell);
-    }
-
-    // For the standalone "orient" command - same shape as eligibleMinionsForActivate but without the card requirement; you can orient a minion on a bare wasteland cell.
-    private eligibleMinionsForOrient(cell: string): IPieceRef[] {
         return this.piecesOwnedAt(cell);
     }
 
@@ -6204,12 +6187,8 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    public validateMajorPower(def: MajorArcanaDef, eligible: IPieceRef[], steps: IStep[], asUid?: string, asSuit?: string): IValidationResult {
-        return this.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, def.uid, asUid, asSuit);
-    }
-
     // The shared start of validating a walk of a frame stack, fresh or resumed (#49: every frame owes one meaningful step; see validateFrameStack).
-    private validatePowerStack(stack: IPowerFrame[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string): IValidationResult {
+    public validatePowerStack(stack: IPowerFrame[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string): IValidationResult {
         // A World borrow with nothing else typed still has a real step to choose (falls through to the walk); a Magician borrow pushes no frame, so it wants the same fresh-step wording.
         const worldBorrow = asUid !== undefined;
         if (steps.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
@@ -6830,7 +6809,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const own = step.targetPiece === undefined || step.targetPiece.toLowerCase() === step.withPiece?.toLowerCase();
         const target = own ? minion() : this.resolvePieceRefTrusted(step.targetPiece!);
         const owner = this.cellContents(target.cell)!.pieces[target.index].owner;
-        this.orientAny(target, orientation);
+        this.setPieceOrientation(target, orientation);
         this.addBufferIfWasteland(target.cell);
         this.pushOrientResult(target, own ? this.pieceRefStr(target) : step.targetPiece!, orientation);
         return own || owner === this.currplayer ? { newMinion: target, replacesMinion: target } : {};
@@ -7574,7 +7553,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Orient can turn any of the player's pieces, wherever they stand.
         if (this.preview?.choosingOrientPiece === true) {
             for (const [x, y] of this.board.entries()) {
-                this.eligibleMinionsForOrient(GnosticaBoard.coords2algebraic(x, y)).forEach(m => rings.set(`${m.cell},${m.index}`, "minion"));
+                this.piecesOwnedAt(GnosticaBoard.coords2algebraic(x, y)).forEach(m => rings.set(`${m.cell},${m.index}`, "minion"));
             }
             return rings;
         }
