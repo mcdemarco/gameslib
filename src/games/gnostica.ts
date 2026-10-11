@@ -289,6 +289,8 @@ interface IPreview {
     pending: IPendingStep | undefined;
     // A finished power whose piece can still be turned, with the next power waiting: board clicks turn the piece until the buttons go on.
     facingOpen: boolean;
+    // The move the client sent was illegal and this previews the longest valid part of it: only Undo is offered.
+    rejected: boolean;
 }
 
 // A lossless-for-display abbreviation of a raw uid list - individual major uids, plus per-suit/per-(spot|royal) minor COUNTs (minors aren't shown individually).
@@ -425,7 +427,6 @@ export class GnosticaGame extends GameBaseSequenced {
     public drawPile: string[] = [];
     public discardPile: string[] = [];
     public stashes!: Map<playerid, Stash>;
-    private rejected = false;
     public eliminated: playerid[] = [];
     public lastTurner: playerid | undefined;
     public gameover = false;
@@ -626,15 +627,17 @@ export class GnosticaGame extends GameBaseSequenced {
     // Previews a move that fails validation as the longest valid part of it, flagged so render offers only Undo.
     private previewRejected(m: string): GnosticaGame {
         let parsed = this.parseMove(m);
+        let previewed = false;
         while (parsed.head !== undefined || parsed.announceLast) {
             parsed = this.retractedMove(parsed);
             const prefix = this.pickleMove(parsed);
             if (prefix !== "" && this.validateMove(prefix).valid) {
                 this.move(prefix, { partial: true });
+                previewed = true;
                 break;
             }
         }
-        this.rejected = true;
+        this.preview = { ...(previewed ? this.preview! : this.buildPreview(this.parseMove(""))), rejected: true };
         return this;
     }
 
@@ -796,7 +799,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
 
-        this.rejected = false;
         this.results = [];
         this.hidden = [];
         this.frames = [];
@@ -1982,6 +1984,7 @@ export class GnosticaGame extends GameBaseSequenced {
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             pending: advanced,
             facingOpen: this.facingOpen(current, advanced),
+            rejected: false,
         };
     }
 
@@ -6991,7 +6994,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Cards drawn at the end of their last turn, for highlighting by render() - only non-empty for the CURRENT player, and only until they've started building THIS turn's move.
     private newHandCardUids(player: playerid): Set<string> {
-        if (player !== this.currplayer || this.preview !== undefined) {
+        if (player !== this.currplayer || this.preview?.head !== undefined) {
             return new Set();
         }
         const drawn = this.cardsDrawn[player - 1] || 0;
@@ -7259,7 +7262,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
-                const actionButtons = this.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons());
+                const actionButtons = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons());
                 for (const button of actionButtons ?? []) {
                     if (button.glyph?.startsWith("buttonpiece_") && !(button.glyph in legend)) {
                         legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice("buttonpiece_".length)));
