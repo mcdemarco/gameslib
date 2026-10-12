@@ -52,11 +52,8 @@ const RDS_VERBS: Partial<Record<MinorSuitUid, string>> = { R: "move", D: "grow",
 // because this copy was missed the first time.
 function chainMinion(minions: IPieceRef[], outcome: IStepOutcome): IPieceRef[] {
     const stale = outcome.replacesMinion;
-    const base = stale === undefined
-        ? minions
-        : minions
-            .filter(m => !(m.cell === stale.cell && m.index === stale.index))
-            .map(m => (m.cell === stale.cell && m.index > stale.index) ? { ...m, index: m.index - 1 } : m);
+    const gone = stale === undefined ? -1 : minions.findIndex(m => m.cell === stale.cell && m.piece.id() === stale.piece.id());
+    const base = gone === -1 ? minions : minions.filter((_, i) => i !== gone);
     return outcome.newMinion === undefined ? base : [...base, outcome.newMinion];
 }
 
@@ -419,9 +416,9 @@ function randomDiscardMove(game: GnosticaGame): string {
 export function randomOrientMove(game: GnosticaGame): string | undefined {
     const ownPieces: IPieceRef[] = [];
     for (const [x, y, t] of game.board.entries()) {
-        t.pieces.forEach((p, index) => {
+        t.pieces.forEach(p => {
             if (p.owner === game.currplayer) {
-                ownPieces.push({ cell: GnosticaBoard.coords2algebraic(x, y), index });
+                ownPieces.push({ cell: GnosticaBoard.coords2algebraic(x, y), piece: p });
             }
         });
     }
@@ -431,7 +428,7 @@ export function randomOrientMove(game: GnosticaGame): string | undefined {
     const picked = ownPieces[Math.floor(Math.random() * ownPieces.length)];
     const [x, y] = GnosticaBoard.algebraic2coords(picked.cell);
     const ref = game.pieceRefStr(picked);
-    const current = game.cellContents(picked.cell)!.pieces[picked.index].orientation;
+    const current = picked.piece.orientation;
     const orientation = weightedRandomOrientation(game, x, y, current);
     return `orient ${ref} ${orientation}`;
 }
@@ -586,7 +583,7 @@ function pieceTargetRefs(game: GnosticaGame, minion: IPieceRef): string[] {
         return [selfRef];
     }
     const targetT = game.cellContents(faceCell);
-    const facingRefs = (targetT?.pieces ?? []).map((_, i) => game.pieceRefStr({ cell: faceCell, index: i }));
+    const facingRefs = (targetT?.pieces ?? []).map(p => game.pieceRefStr({ cell: faceCell, piece: p }));
     return [selfRef, ...facingRefs];
 }
 
@@ -600,7 +597,7 @@ function pieceTargetRefs(game: GnosticaGame, minion: IPieceRef): string[] {
 // type for them.
 function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IPieceRef): { ref: string; owner: number }[] {
     const faceCell = game.minorTargetCell(minion);
-    const selfOwner = (minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index]).owner;
+    const selfOwner = minion.piece.owner;
     // See pieceTargetRefs' own matching docs on why `minion` is passed as
     // a one-entry pool here.
     const selfRef = game.pieceRefStr(minion, [minion]);
@@ -608,7 +605,7 @@ function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IPieceRef): { ref:
         return [{ ref: selfRef, owner: selfOwner }];
     }
     const targetT = game.cellContents(faceCell);
-    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ cell: faceCell, index: i }), owner: p.owner }));
+    const facing = (targetT?.pieces ?? []).map(p => ({ ref: game.pieceRefStr({ cell: faceCell, piece: p }), owner: p.owner }));
     return [{ ref: selfRef, owner: selfOwner }, ...facing];
 }
 
@@ -618,13 +615,13 @@ function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IPieceRef): { ref:
 // own convention - see its docs).
 function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IPieceRef): { ref: string; orientation: Orientation }[] {
     const faceCell = game.minorTargetCell(minion);
-    const selfOrientation = (minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index]).orientation;
+    const selfOrientation = minion.piece.orientation;
     const selfRef = game.pieceRefStr(minion, [minion]);
     if (faceCell === minion.cell) {
         return [{ ref: selfRef, orientation: selfOrientation }];
     }
     const targetT = game.cellContents(faceCell);
-    const facing = (targetT?.pieces ?? []).map((p, i) => ({ ref: game.pieceRefStr({ cell: faceCell, index: i }), orientation: p.orientation }));
+    const facing = (targetT?.pieces ?? []).map(p => ({ ref: game.pieceRefStr({ cell: faceCell, piece: p }), orientation: p.orientation }));
     return [{ ref: selfRef, orientation: selfOrientation }, ...facing];
 }
 
@@ -658,7 +655,7 @@ function legalModesForMinion(game: GnosticaGame, minion: IPieceRef, suitUid: Min
 // C.new/R.tile, each always self-only, enemy-only, or plain territory)
 // get a flat weight of 1 throughout.
 function buildRandomModeArgCandidates(game: GnosticaGame, minion: IPieceRef, suitUid: MinorSuitUid, mode: MinorMode): { fields: Partial<IStep>; weight: number }[] {
-    const piece = minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index];
+    const piece = minion.piece;
     const faceCell = game.minorTargetCell(minion);
     const targetCell = faceCell;
     const targetT = game.cellContents(faceCell);
@@ -681,9 +678,8 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IPieceRef, sui
             return flat(allOrientations.map(o => ({ atCell: targetCell, direction: o })));
         case "C.enemy":
             return flat((targetT?.pieces ?? [])
-                .map((p, i) => ({ p, i }))
-                .filter(({ p }) => p.owner !== game.currplayer)
-                .map(({ i }) => ({ atCell: targetCell, targetPiece: game.pieceRefStr({ cell: faceCell, index: i }) })));
+                .filter(p => p.owner !== game.currplayer)
+                .map(p => ({ atCell: targetCell, targetPiece: game.pieceRefStr({ cell: faceCell, piece: p }) })));
         case "C.new":
             return flat(cardsWorth(1).map(uid => ({ atCell: targetCell, card: uid })));
         case "R.piece": {
@@ -942,7 +938,7 @@ function buildRandomJudgementDrawStep(game: GnosticaGame, minions: IPieceRef[]):
     const pool = shuffle([...minions]) as IPieceRef[];
     const hand = game.hands[game.currplayer - 1];
     for (const minion of pool) {
-        const piece = minion.piece ?? game.cellContents(minion.cell)!.pieces[minion.index];
+        const piece = minion.piece;
         const maxDraw = Math.min(piece.size, Math.max(0, 6 - hand.length));
         const count = Math.floor(Math.random() * (maxDraw + 1));
         const uids = (shuffle([...game.discardPile]) as string[]).slice(0, count);

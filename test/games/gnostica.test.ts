@@ -828,19 +828,25 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
     // ref (never left dangling as a second, still-live candidate), while a genuine creation is
     // purely additive (both the acting piece and the new one stay real, independent candidates).
     it("chainMinion: a relocation replaces its own pre-move ref; a creation is purely additive; no outcome leaves the pool unchanged", () => {
+        type Ref = { cell: string; piece: Piece };
         const chainMinion = (GnosticaGame as unknown as {
-            chainMinion: (minions: { cell: string; index: number }[], outcome: { newMinion?: { cell: string; index: number }; replacesMinion?: { cell: string; index: number } }) => { cell: string; index: number }[];
+            chainMinion: (minions: Ref[], outcome: { newMinion?: Ref; replacesMinion?: Ref }) => Ref[];
         }).chainMinion;
 
-        const original = [{ cell: "m0", index: 0 }];
+        const at = (cell: string, piece = new Piece(1, 2, "E")): Ref => ({ cell, piece });
+        const original = [at("m0")];
         // Relocation (Rods' move, Discs' grow, Swords' shrink, Hierophant's replace, Hermit's
         // teleport, orientMinion/orientAny's reorient all set replacesMinion) - the old ref is gone.
-        expect(chainMinion(original, { newMinion: { cell: "n0", index: 0 }, replacesMinion: { cell: "m0", index: 0 } }))
-            .to.deep.equal([{ cell: "n0", index: 0 }]);
+        expect(chainMinion(original, { newMinion: at("n0"), replacesMinion: at("m0") }))
+            .to.deep.equal([at("n0")]);
         // Creation (Cups' own "create" modes - the only newMinion producer that never sets
         // replacesMinion) - both the original piece and the new one remain independent candidates.
-        expect(chainMinion(original, { newMinion: { cell: "o0", index: 0 } }))
-            .to.deep.equal([{ cell: "m0", index: 0 }, { cell: "o0", index: 0 }]);
+        expect(chainMinion(original, { newMinion: at("o0") }))
+            .to.deep.equal([at("m0"), at("o0")]);
+        // Identical pieces in one cell are interchangeable, so a reorientation removes only one of them.
+        const twins = [at("m0"), at("m0")];
+        expect(chainMinion(twins, { newMinion: at("m0", new Piece(1, 2, "W")), replacesMinion: at("m0") }))
+            .to.deep.equal([at("m0"), at("m0", new Piece(1, 2, "W"))]);
         // No outcome at all (judgementDraw, a skipped step, etc.) - the pool is unchanged.
         expect(chainMinion(original, {})).to.deep.equal(original);
     });
@@ -1205,14 +1211,16 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         // After step 1 the moved piece A sits beside B (same size, different facing); the pool holds only A.
         const moved = setup();
         moved.board.get(1, 0)!.pieces.push(new Piece(1, 2, "E"));
-        expect(moved.pieceRefStr({ cell: "n0", index: 1 }, [{ cell: "n0", index: 1 }])).eq("n0.2.E");
+        const refAt = (game: GnosticaGame, x: number, y: number, index: number) => ({ cell: GnosticaBoard.coords2algebraic(x, y), piece: game.board.get(x, y)!.pieces[index].clone() });
+        expect(moved.pieceRefStr(refAt(moved, 1, 0, 1), [refAt(moved, 1, 0, 1)])).eq("n0.2.E");
         // Nothing else in the cell: the plain ref is still enough.
-        expect(g.pieceRefStr({ cell: "m0", index: 0 }, [{ cell: "m0", index: 0 }])).eq("m0.2");
+        expect(g.pieceRefStr(refAt(g, 0, 0, 0), [refAt(g, 0, 0, 0)])).eq("m0.2");
         // The ref resolves to A against every piece the player owns, not only the pool.
-        const resolve = (moved as unknown as { resolvePieceRef: (ref: string, pool: { cell: string; index: number }[]) => { kind: string; ref?: { index: number } } }).resolvePieceRef.bind(moved);
-        const resolved = resolve("n0.2.E", [{ cell: "m0", index: 0 }, { cell: "n0", index: 0 }, { cell: "n0", index: 1 }]);
+        const resolve = (moved as unknown as { resolvePieceRef: (ref: string, pool: { cell: string; piece: Piece }[]) => { kind: string; ref?: { cell: string; piece: Piece } } }).resolvePieceRef.bind(moved);
+        const resolved = resolve("n0.2.E", [refAt(moved, 0, 0, 0), refAt(moved, 1, 0, 0), refAt(moved, 1, 0, 1)]);
         expect(resolved.kind).eq("ok");
-        expect(resolved.ref!.index).eq(1);
+        expect(resolved.ref!.cell).eq("n0");
+        expect(resolved.ref!.piece.id()).eq("12E");
 
         const chain = `use 07/with m0.2 move m0.2 1/with n0.2.E move n0.2.E 1`;
         expect(g.validateMove(chain).valid).to.be.true;
@@ -1230,12 +1238,12 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             parseMove: (m: string) => unknown;
             parsePendingStep: (p: unknown) => { current?: PendingLike; advanced?: PendingLike };
         };
-        type PendingLike = { minions: { cell: string; index: number; piece?: Piece }[]; game: GnosticaGame };
+        type PendingLike = { minions: { cell: string; piece: Piece }[]; game: GnosticaGame };
         for (let k = 1; k <= 3; k++) {
             const views = internal.parsePendingStep(internal.parseMove(chain.split("/").slice(0, k).join("/")));
             for (const view of [views.current, views.advanced]) {
                 for (const m of view?.minions ?? []) {
-                    expect(m.piece?.id()).eq(view!.game.cellContents(m.cell)!.pieces[m.index].id());
+                    expect(view!.game.cellContents(m.cell)!.pieces.map(p => p.id())).to.include(m.piece.id());
                 }
             }
         }
