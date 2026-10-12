@@ -235,6 +235,7 @@
         "gnostica_deck": "{{player}} drew {{count}} card(s) from the deck.",
         "gnostica_discard": "{{player}} drew {{count}} card(s) from the discard pile.",
         "gnostica_fool": "{{player}} drew {{what}}.",
+        "gnostica_fool_fail": "{{player}} was unable to draw a card for The Fool (0).",
         "gnostica_hand": "{{player}} played {{what}}.",
         "gnostica_pool": "{{player}} drew card(s) {{what}} from the bidding pool."
     },

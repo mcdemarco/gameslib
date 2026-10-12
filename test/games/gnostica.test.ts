@@ -5963,6 +5963,27 @@ describe("Gnostica: Fool and World", () => {
     // subsequent flip finding nothing simply completes the whole Fool
     // activation there, gracefully - not an error, and not something
     // validation should reject in advance either.
+    it("Fool: a revealed Judgement drawing the only card left anywhere back into hand ends the Fool without a second flip", () => {
+        const g = setupFool();
+        pluckCard(g, "20");
+        g.drawPile.length = 0;
+        g.discardPile.length = 0;
+        g.drawPile.push("20"); // the only card anywhere, so the first flip reveals Judgement
+        g.hands[0] = g.hands[0].slice(0, 5); // room for one more card
+        g.move("use 00");
+        expect(g.continued).to.deep.equal(["00.1"]);
+        expect(g.discardPile).to.deep.equal(["20"]);
+
+        const move = "play 20 via 00/with m0.1 draw 20";
+        expect(g.validateMove(move).valid).to.be.true;
+        g.move(move);
+        expect(g.hands[0]).to.include("20");
+        expect(g.drawPile).to.be.empty;
+        expect(g.discardPile).to.be.empty;
+        expect(g.continued).to.be.empty; // nothing left to flip, so the second flip never comes
+        expect(g.results).to.deep.include({ type: "deckDraw", from: "fool" }); // and the log says so
+        expect(g.currplayer).eq(2);
+    });
 
     // The two cases that stay hard rejections: activating Fool with
     // NOTHING anywhere to flip, before any commitment has been made at

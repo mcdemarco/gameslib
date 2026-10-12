@@ -5121,8 +5121,9 @@ export class GnosticaGame extends GameBaseSequenced {
         const top = (): string | undefined => owed[owed.length - 1];
         const steps = allSteps[0]?.action === "decline" ? [] : allSteps.filter(step => step.action !== "skip");
         const chained = steps.length + (asUid !== undefined ? 1 : 0) > 1;
-        const flip = (): void => {
-            const result: APMoveResult = { type: "deckDraw", what: this.fool().uid, from: "fool" };
+        // A flip, or (with nothing to flip) the report that none could be made; either joins the last result group of a chain.
+        const flip = (canFlip: boolean): void => {
+            const result: APMoveResult = canFlip ? { type: "deckDraw", what: this.fool().uid, from: "fool" } : { type: "deckDraw", from: "fool" };
             const last = this.results[this.results.length - 1];
             if (!chained) {
                 this.results.push(result);
@@ -5132,10 +5133,13 @@ export class GnosticaGame extends GameBaseSequenced {
                 this.results.push({ type: "_group", who: this.currplayer, results: [result] });
             }
         };
-        if (outcome === "fool" && this.foolCanFlip()) {
-            flip();
-            owed.push("00.1");
-            return owed;
+        if (outcome === "fool") {
+            const canFlip = this.foolCanFlip();
+            flip(canFlip);
+            if (canFlip) {
+                owed.push("00.1");
+                return owed;
+            }
         }
         if (outcome === "trade") {
             // How the play was reached decides who may attack: used or played, through the World or not.
@@ -5155,10 +5159,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // A Fool exposed once its revealed card is used or declined flips again by itself; a High Priestess round needs its own submission.
         for (let token = top(); token?.startsWith("00."); token = top()) {
             const flips = Number(token.split(".")[1]);
-            if (flips < 2 && this.foolCanFlip()) {
-                flip();
-                owed[owed.length - 1] = `00.${flips + 1}`;
-                return owed;
+            if (flips < 2) {
+                const canFlip = this.foolCanFlip();
+                flip(canFlip);
+                if (canFlip) {
+                    owed[owed.length - 1] = `00.${flips + 1}`;
+                    return owed;
+                }
             }
             owed.pop();
         }
@@ -7664,7 +7671,11 @@ export class GnosticaGame extends GameBaseSequenced {
                                     say("apresults:DECKDRAW.gnostica_hand", { what: this.cardDisplayName(r.what) });
                                     break;
                                 case "fool": {
-                                    say("apresults:DECKDRAW.gnostica_fool", { what: this.cardDisplayName(r.what) });
+                                    if (r.what === undefined) {
+                                        say("apresults:DECKDRAW.gnostica_fool_fail");
+                                    } else {
+                                        say("apresults:DECKDRAW.gnostica_fool", { what: this.cardDisplayName(r.what) });
+                                    }
                                     break;
                                 }
                             }
