@@ -3,8 +3,7 @@
 // GnosticaGame.randomMove() itself stays a thin stub in gnostica.ts,
 // calling generateRandomMove(this) below.
 //
-// `custom-randomization` is declared precisely because full `moves()`
-// enumeration of every legal chained-power target combination is
+// `custom-randomization` is declared precisely because full // enumeration of every legal chained-power target combination is
 // combinatorially infeasible - randomMove() instead CONSTRUCTS a
 // candidate move (random targets/modes/cards at each decision point)
 // and leans on gnostica.ts's own existing validateX functions as the
@@ -98,13 +97,6 @@ function buildDeclineMove(game: GnosticaGame): string {
 export function generateRandomMove(game: GnosticaGame): string {
     if (game.gameover) {
         return ""; // matches magnate.ts's own precedent for this case
-    }
-    // An eliminated player has nothing left to do - matches moves()'s
-    // own contract (see its docs), and "pass" is now phase-independent
-    // for them (see validatePass()'s own docs). Checked before the
-    // phase dispatch below since it applies regardless of phase.
-    if (game.eliminated.includes(game.currplayer)) {
-        return "pass";
     }
     // A paused activation obligates this seat before anything else is
     // legal (matches getActionButtons()'s own "only one thing possible

@@ -68,7 +68,7 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("discard AC KS draw 2")).to.have.deep.property("valid", true);
         expect(g.parseMove("bid 2")).to.have.deep.property("valid", true);
         expect(g.parseMove("redraw AC KS 5D")).to.have.deep.property("valid", true);
-        expect(g.parseMove("pass")).to.have.deep.property("valid", true);
+        expect(g.parseMove("pass")).to.have.deep.property("valid", false);
         expect(g.parseMove("use AC")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AC/with m0.1 at n0 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use AC/with m0.1 at n0 create n0.1")).to.have.deep.property("valid", true);
@@ -216,6 +216,7 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("use 17/with m0.2 grow n0 orient e").steps[1].direction).eq("E");
         expect(g.parseMove("place A0 w")).to.have.deep.property("valid", false);
         expect(g.parseMove("use AC/with m0.2 at N0 create s")).to.have.deep.property("valid", false);
+        expect(g.parseMove("use 01 as c/with m0.2 at N0 create s")).to.have.deep.property("valid", false);
     });
 
 });

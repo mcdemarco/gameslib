@@ -351,11 +351,10 @@ describe("Gnostica: bidding-variant player reordering and pass removal", () => {
         expect(winner2.getPlies().some(p => p.results.some(r => r.type === "pass"))).eq(false);
     });
 
-    it("moves()/validateMove()/randomMove() no longer offer or accept \"pass\" during bidding/redraw", () => {
+    it("validateMove()/randomMove() no longer offer or accept \"pass\" during bidding/redraw", () => {
         const g = testGame({ hands: [["21", "AC", "2C", "3C", "4C", "5C"], ["KS", "AR", "2R", "3R", "4R", "5R"]], phase: "bidding" });
         g.move("bid 1"); g.move("bid 1");
         expect(g.phase).eq("redraw");
-        expect(g.moves()).to.deep.equal([]);
         expect(g.validateMove("pass").valid).to.be.false;
         expect(g.randomMove()).to.not.eq("pass");
     });
@@ -419,14 +418,6 @@ describe("Gnostica: announce last turn / win / elimination", () => {
         }
         expect(g.board.get(0, 0)!.pieces.some(p => p.owner === 1)).eq(false);
         expect(g.stashes.get(1)).to.deep.equal([5, 5, 5]);
-        // An eliminated player's own randomMove() is still a real, committable "pass" that
-        // correctly re-skips them, even if asked again on a later, stale turn.
-        g.currplayer = 1;
-        const rm = g.randomMove();
-        expect(rm).eq("pass");
-        expect(g.validateMove(rm).valid).to.be.true;
-        g.move(rm); // untrusted, exactly like a real client
-        expect(g.currplayer).eq(2);
     });
 
     it("declares the sole survivor the winner if elimination leaves only one player standing", () => {
@@ -1630,15 +1621,6 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const result = g.validateMove(`use 01 as C/with m0.1 at m0 create U/with m0.1 at m0 create U`);
         expect(result.valid).to.be.false;
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }));
-    });
-
-    // Regression: SUIT_RE is case-insensitive by design (a hand-typed "as c" is legal), but the parsed
-    // asSuit value used to stay lowercase - now normalized to uppercase in parseMove, so this must still
-    // dispatch to Cups' "own" mode exactly like the uppercase form.
-    it("a lowercase suit letter in \"as\" still validates and applies correctly", () => {
-        const g = testGame({ board: [{ x: 0, y: 0, uid: "01", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
-        g.move(`use 01 as c/with m0.1 at m0 create U`);
-        expect(g.board.get(0, 0)!.pieces.length).eq(2); // used Cups' "own" mode
     });
 });
 

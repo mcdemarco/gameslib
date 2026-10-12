@@ -184,7 +184,7 @@ type PieceRefResolution =
 export interface IParsedMove {
     announceLast: boolean;
     asUid?: string;  //for World
-    asSuit?: MinorSuitUid; //for Magician
+    asSuit?: string; //for Magician
     error?: string;
     head: string | undefined;  //Head may be absent.
     steps: IStep[];
@@ -390,7 +390,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         ],
         categories: ["goal>score>eog", "mechanic>area", "mechanic>capture", "mechanic>hand", "mechanic>hidden", "mechanic>random>play", "mechanic>place", "board>dynamic", "components>cards-tarot", "components>pyramids", "other>2+players"],
-        flags: ["experimental", "no-moves", "custom-randomization", "no-explore", "player-stashes", "autopass", "scores"],
+        flags: ["experimental", "no-moves", "custom-randomization", "no-explore", "player-stashes", "scores"],
         displays: [
             { uid: "larger-cards" },
             { uid: "#circles", group: "circles" },
@@ -633,30 +633,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return result;
         }
 
-        const isEliminated = this.eliminated.indexOf(this.currplayer) > -1;
-
-        // check for autopass first
-        if (m === "pass") {
-            if (isEliminated) {
-                result.valid = true;
-                result.complete = 1;
-                result.message = i18next.t("apgames:validation._general.VALID_MOVE");
-                return result;
-            } else {
-                //There may be other autopass circumstances.
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.gnostica.USE_PASS_BUTTON");
-                return result;
-            }
-        } else {
-            // (m !== "pass")
-            if (isEliminated) {
-                result.valid = false;
-                result.message = i18next.t("apgames:validation.gnostica.MUST_PASS");
-                return result;
-            }
-        }
-
         // Computed once and reused below rather than called twice - board presence can't change between the two reads within a single call.
         const hasPieces = this.hasPiecesOnBoard(this.currplayer);
 
@@ -702,13 +678,12 @@ export class GnosticaGame extends GameBaseSequenced {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOTHING_TO_DECLINE") };
         }
 
-        // Mirrors move()'s own bid/redraw/pass/phase gates - see their docs.
-        if (head === "bid" || head === "redraw" || head === "pass") {
+        // Mirrors move()'s own bid/redraw/phase gates - see their docs.
+        if (head === "bid" || head === "redraw") {
             if (head === "bid" && this.phase !== "bidding") {
                 return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }) };
             }
-            // An eliminated player's own "pass" is already fully handled above (before parseMove even runs), so this.eliminated can't be true for currplayer here.
-            if ((head === "redraw" || head === "pass") && this.phase !== "redraw") {
+            if (head === "redraw" && this.phase !== "redraw") {
                 return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }) };
             }
             if (parsed.steps.length > 1 || parsed.announceLast) {
@@ -716,15 +691,8 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             if (head === "bid")
                 return this.validateBid(parsed);
-            else if (head === "redraw")
+            else
                 return this.validateRedraw(parsed);
-            else {//head === "pass"
-                if (this.eliminated.includes(this.currplayer)) {
-                    return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
-                } else {
-                    return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.BAD_PASS") };
-                }
-            }
         } else if (this.phase !== "main") {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.WRONG_PHASE", { move: head }) };
         }
@@ -783,7 +751,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.hidden = [];
         this.frames = [];
         this.cardsDrawn[this.currplayer - 1] = 0;
-        let head;
         // A "last" already staged on an earlier sub-move of this same still-open turn rides at the front of this.continued.
         const hadDeclareMarker = this.continued.length > 0 && this.continued[0] === "last";
         let newLast = hadDeclareMarker ? this.currplayer : this.lastTurner;
@@ -794,81 +761,70 @@ export class GnosticaGame extends GameBaseSequenced {
         let powerAsUid: string | undefined;
         let powerHow = "";
         let outcome: PowerOutcome | undefined;
-        let preview: IPreview | undefined;
         let announceLast = false;
 
-        if (m.toLowerCase() === "pass") {
-            // validateMove() (above) is the actual gate on WHO may say "pass"; `head` deliberately stays undefined here (see the tail below).
-            const why = this.eliminated.includes(this.currplayer) ? "eliminated" : "bidding";
-            this.results = [{ type: "pass", who: this.currplayer, why }];
-        } else {
-            this.buffers = [];
-            this.discarded = [];
-            
-            // Parses and executes `m` against `this` - the one place move grammar is interpreted (validateMove mirrors this exact structure, read-only).
-            const parsed = this.parseMove(m);
-            head = parsed.head;
-            preview = partial ? this.buildPreview(parsed) : undefined;
-            this.addDistanceBuffer(preview?.pending);
-            this.addPendingFacingBuffer(parsed, preview?.pending);
+        this.buffers = [];
+        this.discarded = [];
+        
+        // Parses and executes `m` against `this` - the one place move grammar is interpreted (validateMove mirrors this exact structure, read-only).
+        const parsed = this.parseMove(m);
+        const head = parsed.head;
+        const preview = partial ? this.buildPreview(parsed) : undefined;
+        this.addDistanceBuffer(preview?.pending);
+        this.addPendingFacingBuffer(parsed, preview?.pending);
 
-            // A "discard" resume is a High Priestess round (not a card); a "play" resume names the revealed card as its front token, else the "via" root.
-            const resume = this.continued.length > 0;
-            if (resume || head === "use" || head === "play") {
-                powerCard = resume ? (head === "discard" ? parsed.viaUid : parsed.steps[0]?.card ?? parsed.viaUid) : parsed.steps[0]?.card;
-                // High Priestess resumes with its own content right after "discard", not a "/"-segment - resumeSteps folds it back.
-                powerSteps = resume ? this.resumeSteps(parsed) : parsed.steps.slice(1);
-                powerAsUid = parsed.asUid;
-                // A resumed Justice keeps the verb its first turn used, which decides who may attack; every other resume is a play. Through the World it is "21" too.
-                const verb = resume ? (powerCard === "11" && head === "use" ? "use" : "play") : head;
-                powerHow = `${verb}${parsed.asUid !== undefined && powerCard === "21" ? "21" : ""}`;
-            }
-            // A genuine cross-turn pause means every legal move right now has to be resuming it; legality of any kind is validateMove's job alone now.
-            if (resume) {
-                outcome = this.resumePowers(powerCard!, powerSteps, powerAsUid, partial);
-            } else if (head === "bid") {
-
-            // The "bidding" variant's own opening procedure - no power steps, no "last" announcement, own bespoke currplayer advancement.
-                this.cmdBid(parsed.steps[0], partial);
-
-            } else if (head === "redraw" || head === "pass") {
-                if (head === "redraw") {
-                    this.cmdRedraw(parsed.steps[0], partial);
-                } else {
-                    this.cmdPass(partial);
-                }
-            } else {
-                switch (head) {
-                    case "place":
-                        // A bare "place" has no cell to put a piece on yet.
-                        if (parsed.steps[0]?.targetCell !== undefined) {
-                            this.cmdPlace(parsed.steps[0]);
-                        }
-                        break;
-                    case "orient":
-                        this.cmdOrient(parsed.steps[0]);
-                        break;
-                    case "discard":
-                        this.cmdDiscard(parsed.steps[0]);
-                        break;
-                    // A bare "use" or "play" has nothing to play yet.
-                    case "use":
-                        outcome = powerCard === undefined ? undefined : this.cmdActivate(powerCard, powerSteps, powerAsUid, partial);
-                        break;
-                    case "play":
-                        outcome = powerCard === undefined ? undefined : this.cmdPlay(powerCard, powerSteps, powerAsUid, partial);
-                        break;
-                    // "decline" with nothing pending, or any other head with no business here, falls through with no case - a caller bug, not this dispatch's job.
-                }
-            }
-
-            // A "last" may be declared on any sub-move of a still-open chain, not just the first - validateMove's own ALREADY_ANNOUNCED guards (both the
-            // fresh-dispatch and continued-branch copies) are the only gate; bid/redraw/pass reject announceLast outright before ever reaching here.
-            announceLast = parsed.announceLast;
-            // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
-            this.preview = preview;
+        // A "discard" resume is a High Priestess round (not a card); a "play" resume names the revealed card as its front token, else the "via" root.
+        const resume = this.continued.length > 0;
+        if (resume || head === "use" || head === "play") {
+            powerCard = resume ? (head === "discard" ? parsed.viaUid : parsed.steps[0]?.card ?? parsed.viaUid) : parsed.steps[0]?.card;
+            // High Priestess resumes with its own content right after "discard", not a "/"-segment - resumeSteps folds it back.
+            powerSteps = resume ? this.resumeSteps(parsed) : parsed.steps.slice(1);
+            powerAsUid = parsed.asUid;
+            // A resumed Justice keeps the verb its first turn used, which decides who may attack; every other resume is a play. Through the World it is "21" too.
+            const verb = resume ? (powerCard === "11" && head === "use" ? "use" : "play") : head;
+            powerHow = `${verb}${parsed.asUid !== undefined && powerCard === "21" ? "21" : ""}`;
         }
- 
+        // A genuine cross-turn pause means every legal move right now has to be resuming it; legality of any kind is validateMove's job alone now.
+        if (resume) {
+            outcome = this.resumePowers(powerCard!, powerSteps, powerAsUid, partial);
+        } else if (head === "bid") {
+
+        // The "bidding" variant's own opening procedure - no power steps, no "last" announcement, own bespoke currplayer advancement.
+            this.cmdBid(parsed.steps[0], partial);
+
+        } else if (head === "redraw") {
+            this.cmdRedraw(parsed.steps[0], partial);
+        } else {
+            switch (head) {
+                case "place":
+                    // A bare "place" has no cell to put a piece on yet.
+                    if (parsed.steps[0]?.targetCell !== undefined) {
+                        this.cmdPlace(parsed.steps[0]);
+                    }
+                    break;
+                case "orient":
+                    this.cmdOrient(parsed.steps[0]);
+                    break;
+                case "discard":
+                    this.cmdDiscard(parsed.steps[0]);
+                    break;
+                // A bare "use" or "play" has nothing to play yet.
+                case "use":
+                    outcome = powerCard === undefined ? undefined : this.cmdActivate(powerCard, powerSteps, powerAsUid, partial);
+                    break;
+                case "play":
+                    outcome = powerCard === undefined ? undefined : this.cmdPlay(powerCard, powerSteps, powerAsUid, partial);
+                    break;
+                // "decline" with nothing pending, or any other head with no business here, falls through with no case - a caller bug, not this dispatch's job.
+            }
+        }
+
+        // A "last" may be declared on any sub-move of a still-open chain, not just the first - validateMove's own ALREADY_ANNOUNCED guards (both the
+        // fresh-dispatch and continued-branch copies) are the only gate; bid/redraw/pass reject announceLast outright before ever reaching here.
+        announceLast = parsed.announceLast;
+        // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
+        this.preview = preview;
+
         if (partial) {
             this.showUnrevealed();
             return this;
@@ -889,8 +845,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (owed !== undefined) {
             this.continued = owed;
         }
-        // `head` is only assigned inside the parsed-dispatch branch above, so a literal "pass" falls into `else` below and gets the same nextPlayer()/checkEOG().
-        if (head === "bid" || head === "redraw" || head === "pass") {
+        if (head === "bid" || head === "redraw") {
             //Need to rewrite these to remove this exception.
         } else if (this.continued.length > 0) {
             // Same seat still owes a follow-up submission - stay put; checkEOG() doesn't need to run either, since nothing it reads could have changed.
@@ -977,7 +932,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     public parseMove(m: string): IParsedMove {
-        const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw", "pass"];
+        const HEADWORDS = ["place", "orient", "discard", "use", "play", "decline", "bid", "redraw"];
         const STEPWORDS = ["discard", "draw", "orient", "skip", "with"];
         const OTHERWORDS = ["as", "at", "create", "draw", "fly", "grow", "last", "move", "orient", "replace", "shrink", "to", "trade", "via"];
 
@@ -987,7 +942,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const PIECE_REF_RE = /^[a-z]{1,2}(0|-?[1-9]\d*)(\.[1-3](\.[NESWU])?(\.[1-6])?)?$/;
         const MAJOR_ARCANA_RE = /^[0-1][0-9]|20|21$/i;
         const NUMBER_RE = /^[0-6]$/i; //Used for player Ids, card counts, bids, etc.
-        const SUIT_RE = /^[CDRS]$/i;
+        const SUIT_RE = /^[CDRS]$/;
         
         let trimmed = m.trim();
         const pm: IParsedMove = {
@@ -1031,13 +986,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     pm.error = "BAD_HEADWORD";
                 }
         
-                if (headTokens.length === 0) {
-                    //The only head that can have no arguments *and* no following steps is a "pass".
-                    if (! lastStep) {
-                        //"Pass" can't be followed by more steps, so whatever the head is, it's invalid.
-                        pm.error = "HEAD_STEP_NEEDS_CONTENT";
-                        break;
-                    }
+                if (headTokens.length === 0 && ! lastStep) {
+                    //All head tokens must have contents.
+                    pm.error = "HEAD_STEP_NEEDS_CONTENT";
+                    break;
                 }
                 
                 //Via and as are peculiar to the first step and need separate treatment.
@@ -1085,8 +1037,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         if (headTokens.length > asIdx + 1) {
                             const tempAs = headTokens[asIdx + 1];
                             if (tempAs.length === 1 && pm.asSuit === undefined)
-                                // Provisional - not yet known to be a real suit letter until the SUIT_RE check below passes (which also normalizes its case).
-                                pm.asSuit = tempAs as MinorSuitUid;
+                                pm.asSuit = tempAs;
                             else if (tempAs.length === 2 && pm.asUid === undefined)
                                 pm.asUid = tempAs;
                             else {
@@ -1117,10 +1068,6 @@ export class GnosticaGame extends GameBaseSequenced {
                         //Bad suit for the Magician.
                         pm.error = "JUSTICE_WRONG_SUIT";
                         break;
-                    }
-                    if (pm.asSuit !== undefined) {
-                        // SUIT_RE is case-insensitive, so "as c" parses as legal - normalize now, the one place a lowercase suit letter becomes the real MinorSuitUid.
-                        pm.asSuit = pm.asSuit.toUpperCase() as MinorSuitUid;
                     }
                 }
                 
@@ -4337,25 +4284,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
-    }
-
-    // "pass" is only used for an eliminated player sitting out the game, usually via the "autopass" flag; legality is validatePass's own job.
-    private cmdPass(partial = false): void {
-        if (partial) {
-            return;
-        }
-        this.results.push({ type: "pass", who: this.currplayer, why: "eliminated" });
-        this.nextPlayer();
-        this.checkEOG();
-    }
-
-    // The "autopass" flag's signal: a server auto-submits "pass" when this returns exactly ["pass"]; NOT a general move enumerator, every other case returns [].
-    public moves(player?: playerid): string[] {
-        const p = (player ?? this.currplayer) as playerid;
-        if (this.eliminated.indexOf(p) > -1) {
-            return ["pass"];
-        } else
-            return [];
     }
 
     // "place <cell> <orientation>" - only legal with zero pieces on board; a real facing is always required, same mandatory-facing shape Cups "own" uses.
@@ -7695,13 +7623,6 @@ export class GnosticaGame extends GameBaseSequenced {
                         }
                         case "use":
                             say(r.count === 21 ? "apresults:USE.gnostica_world" : "apresults:USE.gnostica", { what: this.cardDisplayName(r.what) });
-                            break;
-                        case "pass":
-                            if (r.why === "eliminated") {
-                                say("apresults:PASS.gnostica_eliminated");
-                            } else {
-                                say("apresults:PASS.gnostica_bids");
-                            }
                             break;
                         case "destroy":
                             if (r.who !== undefined) {

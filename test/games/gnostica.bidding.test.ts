@@ -378,7 +378,6 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.bidWinner).eq(2);
         expect(g.phase).eq("redraw");
         expect(g.currplayer).eq(1); // the loser, reached via nextPlayer(), never a direct jump
-        expect(g.moves()).to.deep.equal([]); // nothing forced - player 1 has a genuine redraw available
 
         g.move(`redraw ${g.biddingPool![0]}`); // P1 (loser) redraws first
         expect(g.currplayer).eq(2);
@@ -389,33 +388,7 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(g.hands[0].length).eq(6); // untouched - nothing to discard or draw at a full hand
     });
 
-    it("2-player only: if the winner is player 1, a real 'pass' move (the autopass flag's own target) lets the loser redraw first", () => {
-        /* failing for unknown reasons
-        const g = new GnosticaGame(2, ["bidding"]);
-        g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"]; // P1 wins with the King
-        g.hands[1] = ["QS", "AR", "2R", "3R", "4R", "5R"];
-        g.move("bid 1", { trusted: true }); // P1 bids - nextPlayer() -> P2
-        g.move("bid 1", { trusted: true }); // P2 bids - round resolves; ordinary rotation (2 -> 1) lands on the WINNER
-        expect(g.bidWinner).eq(1);
-        expect(g.phase).eq("redraw");
-        expect(g.currplayer).eq(1); // player 1 (the winner) - not allowed to redraw yet
-        expect(g.moves()).to.deep.equal(["pass"]); // the autopass flag's own signal: nothing else legal
-        expect(() => g.move(`redraw ${g.biddingPool![0]}`, { trusted: true })).to.throw(); // blocked - must pass first
-
-        g.move("pass", { trusted: true }); // a real move, exactly what a server's own autopass would submit
-        expect(g.results.some(r => r.type === "pass" && r.who === 1)).to.be.true;
-        expect(g.currplayer).eq(2);
-        expect(g.moves()).to.deep.equal([]); // player 2 (the loser) has a genuine redraw available now
-
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P2 (loser) redraws first
-        expect(g.currplayer).eq(1);
-        g.move(`redraw ${g.biddingPool![0]}`, { trusted: true }); // P1 (winner) redraws last - completes redraw
-        expect(g.phase).eq("main");
-        expect(g.currplayer).eq(1); // the actual bid winner starts
-        */
-    });
-
-    it("'pass' is illegal anywhere it isn't the only legal option", () => {
+    it("a typed 'pass' is never accepted in bidding or redraw", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         expect(() => g.move("pass", { trusted: false })).to.throw(); // bidding phase
         const g2 = new GnosticaGame(3, ["bidding"]);
@@ -424,9 +397,8 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         g2.hands[2] = ["PS", "AD", "2D", "3D", "4D", "5D"];
         g2.move("bid 1");
         g2.move("bid 1");
-        g2.move("bid 1"); // 3+ players: mustPassBeforeRedraw() never applies
+        g2.move("bid 1");
         expect(g2.phase).eq("redraw");
-        expect(g2.moves()).to.deep.equal([]);
         expect(() => g2.move("pass", { trusted: false })).to.throw();
     });
 
