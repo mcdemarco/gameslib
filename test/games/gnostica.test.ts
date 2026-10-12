@@ -275,7 +275,7 @@ describe("Gnostica: discard", () => {
         const notInHand = g.drawPile.find(uid => !g.hands[0].includes(uid))!;
         expect(g.validateMove(`discard ${notInHand}`).message).eq(i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid: notInHand }));
         expect(g.validateMove(`discard ${g.hands[0][0]} draw 2`).message).eq(i18next.t("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: "2", max: 1 })); // only 1 discarded
-        // A negative or non-numeric draw count isn't even grammatically a valid "draw <n>" token - rejected by parseMove itself, before checkDiscardDraw's own range check ever runs.
+        // A negative or non-numeric draw count isn't even grammatically a valid "draw <n>" token - rejected by parseMove itself, before validateDiscard's own range check ever runs.
         expect(g.validateMove("discard draw -1").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_DRAW_COUNT" }));
         expect(g.validateMove("discard draw abc").message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_DRAW_COUNT" }));
     });
@@ -752,7 +752,7 @@ describe("Gnostica: activate/play - minor arcana suit powers", () => {
             board: [{ x: 0, y: 0, uid: "21", pieces: [[1, 1, "U"]] }],
             hands: [filler, filler],
         });
-        // "C" isn't a valid token in this grammar slot at all - rejected by parseMove itself, before checkWorldChoosePower's own NO_SUCH_MAJOR_ON_BOARD check ever runs.
+        // "C" isn't a valid token in this grammar slot at all - rejected by parseMove itself, before validateWorldChoosePower's own NO_SUCH_MAJOR_ON_BOARD check ever runs.
         expect(g.validateMove(`use 21/with m0.1 C own m0 U`).message).eq(i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_OTHERWORD" }));
     });
 });
@@ -4938,7 +4938,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         expect(line).eq(i18next.t("apresults:PLACE.gnostica_enemy", { player: "Alice", where: "n0", target: "Bob" }));
     });
 
-    // Regression: neither checkCreateOwn nor checkCreateEnemy verified the
+    // Regression: neither the own nor the enemy case of validateCups verified the
     // relevant player's own stash had a small left before createOwn/
     // createEnemy's own takeFromStash call ran - an empty stash reached
     // validateMove() with no complaint at all, only to throw once a

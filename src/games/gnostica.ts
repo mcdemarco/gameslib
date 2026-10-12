@@ -4526,12 +4526,23 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Shared by the top-level discard and High Priestess's rounds: "discard [uid...] draw <n>", where the count is the player's explicit choice.
     private validateDiscard(step: IStep | undefined): IValidationResult {
-        const failure = this.checkDiscardDraw(step?.cardList ?? [], step?.amount?.toString());
-        if (failure) {
-            return { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) };
+        const discardUids = step?.cardList ?? [];
+        const seen = new Set<string>();
+        for (const uid of discardUids) {
+            if (seen.has(uid)) {
+                return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid }) };
+            }
+            seen.add(uid);
+            if (!this.hands[this.currplayer - 1].includes(uid)) {
+                return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
+            }
         }
         if (step?.amount === undefined) {
             return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED") };
+        }
+        const maxDraw = Math.max(0, 6 - (this.hands[this.currplayer - 1].length - discardUids.length));
+        if (!Number.isInteger(step.amount) || step.amount < 0 || step.amount > maxDraw) {
+            return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.BAD_DRAW_COUNT", { requested: step.amount, max: maxDraw }) };
         }
         return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
@@ -4665,39 +4676,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Cups - Create
 
-    // Add one of the acting player's own small pieces to the target cell.
-    private checkCreateOwn(
-    minionRef: IPieceRef,
-        targetCell: string, opts: PrimitiveOpts = {},
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
-        if (minionErr) return minionErr;
-        // A minion sitting on an isolated wasteland (not itself a territory)
-        // can face a cell that's genuinely void - unlike movePiece, which
-        // destroys a piece that lands in the void as a natural consequence of
-        // relocating an EXISTING piece, there's no equivalent cleanup for a
-        // brand-new piece, so it would otherwise just sit there forever,
-        // invisible to every void-eviction path. Reject outright instead,
-        // same as checkCreateTerritory's own wasteland-only restriction.
-        if (this.classifyCell(targetCell) === "void") {
-            return { key: "TARGET_IS_VOID" };
-        }
-        // The target cell may be a genuinely untouched wasteland (no stored
-        // CellContents object at all, since one is only ever created for a cell
-        // that already has a card or a piece) - that's zero pieces there, not
-        // an error. movePiece/hermitMovePiece already handle an
-        // absent destination the same way; this mirrors them.
-        const t = this.cellContents(targetCell);
-        const pieceCount = t?.pieces.length ?? 0;
-        if (!opts.ignoreCapacity && pieceCount >= 3) {
-            return { key: "CELL_FULL" };
-        }
-        if (!opts.skipStashCheck && !this.hasStashAvailable(this.currplayer, 1)) {
-            return { key: "STASH_EMPTY", params: { playerNum: this.currplayer, size: 1 } };
-        }
-        return undefined;
-    }
-
     private createOwn(targetCell: string, orientation: Orientation): void {
         this.takeFromStash(this.currplayer, 1);
         let t = this.cellContents(targetCell);
@@ -4708,75 +4686,11 @@ export class GnosticaGame extends GameBaseSequenced {
         t.add(new Piece(this.currplayer, 1, orientation));
     }
 
-    // Add one of the TARGETED enemy's own small pieces to the same cell, matching its orientation, drawn from the enemy's stash.
-    private checkCreateEnemy(
-    minionRef: IPieceRef,
-        targetRef: IPieceRef, opts: PrimitiveOpts = {},
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetRef.cell);
-        if (minionErr) return minionErr;
-        // A void cell can never legitimately have a victim, but check explicitly anyway - creation has no cleanup path for a stranded piece.
-        if (this.classifyCell(targetRef.cell) === "void") {
-            return { key: "TARGET_IS_VOID" };
-        }
-        const t = this.cellContents(targetRef.cell);
-        const victim = this.findPiece(targetRef);
-        if (victim === undefined) {
-            return { key: "INVALID_MOVE", params: { reason: "NO_VICTIM_THERE" } };
-        }
-        if (victim.owner === this.currplayer) {
-            return { key: "MUST_TARGET_ENEMY" };
-        }
-        if (!opts.ignoreCapacity && (t?.pieces.length ?? 0) >= 3) {
-            return { key: "CELL_FULL" };
-        }
-        if (!this.hasStashAvailable(victim.owner, 1)) {
-            return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: 1 } };
-        }
-        return undefined;
-    }
-
     private createEnemy(targetRef: IPieceRef): void {
         const t = this.cellContents(targetRef.cell)!;
         const victim = this.getPiece(targetRef);
         this.takeFromStash(victim.owner, 1);
         t.add(new Piece(victim.owner, 1, victim.orientation));
-    }
-
-    // Create a territory on a wasteland with a spot card from hand, or (Wheel of Fortune's allowRandomDraw) an unrestricted draw-pile card instead.
-    private checkCreateTerritory(
-    minionRef: IPieceRef,
-        targetCell: string, cardUid: string | undefined, opts: PrimitiveOpts & { allowRoyalty?: boolean } = {},
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
-        if (minionErr) return minionErr;
-        if (this.classifyCell(targetCell) !== "wasteland") {
-            return { key: "NOT_A_WASTELAND" };
-        }
-        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
-            return { key: "CELL_HAS_ENEMY" };
-        }
-        if (opts.allowRandomDraw && cardUid === undefined) {
-            if (this.drawPile.length === 0 && this.discardPile.length === 0) {
-                return { key: "DRAW_PILE_EMPTY" };
-            }
-            return undefined;
-        }
-        if (cardUid === undefined) {
-            return { key: "CARD_UID_REQUIRED" };
-        }
-        if (!this.hands[this.currplayer - 1].includes(cardUid)) {
-            return { key: "NOT_IN_HAND", params: { uid: cardUid } };
-        }
-        const card = allCards().find(c => c.uid === cardUid);
-        if (card === undefined) {
-            return { key: "UNKNOWN_CARD", params: { uid: cardUid } };
-        }
-        // opts.allowRoyalty (the Sun's shortcut): a royalty card may stand in for creating a spot card and then growing it.
-        if (cardPointValue(card) !== 1 && !(opts.allowRoyalty && cardPointValue(card) === 2)) {
-            return { key: "MUST_BE_SPOT_CARD" };
-        }
-        return undefined;
     }
 
     private createTerritory(targetCell: string, cardUid: string): void {
@@ -4894,28 +4808,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.returnEvictedPieces(evictions);
     }
 
-    // Replace the minion (or a targeted piece) with one exactly one size larger, same owner, drawn from that owner's own stash.
-    private checkGrowPiece(
-    minionRef: IPieceRef,
-        targetRef: IPieceRef,
-        opts: { skipStashCheck?: boolean } = {},
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
-        if (minionErr) return minionErr;
-        const target = this.findPiece(targetRef);
-        if (target === undefined) {
-            return { key: "NO_PIECE_THERE" };
-        }
-        if (target.size >= 3) {
-            return { key: "ALREADY_MAX_SIZE" };
-        }
-        const grownSize = (target.size + 1) as Pips;
-        if (!opts.skipStashCheck && !this.hasStashAvailable(target.owner, grownSize)) {
-            return { key: "STASH_EMPTY", params: { playerNum: target.owner, size: grownSize } };
-        }
-        return undefined;
-    }
-
     private growPiece(targetRef: IPieceRef, newOrientation: Orientation | undefined,): void {
         const t = this.cellContents(targetRef.cell)!;
         const target = this.getPiece(targetRef);
@@ -4925,38 +4817,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const orientation = target.owner === this.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
         t.removeAt(this.pieceIndex(targetRef));
         t.add(new Piece(target.owner, grownSize, orientation));
-    }
-
-    // Grow the targeted territory by one point of value (or two, opts.skipLadder), replacing its card from hand or discard (opts.replacementSource).
-    private checkGrowTerritory(
-    minionRef: IPieceRef,
-        targetCell: string, newCardUid: string, opts: PrimitiveOpts & { skipLadder?: boolean } = {},
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
-        if (minionErr) return minionErr;
-        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
-            return { key: "CELL_HAS_ENEMY" };
-        }
-        const t = this.cellContents(targetCell);
-        const current = t?.pointValue() ?? 0;
-        if (current === 0) {
-            return { key: "NOTHING_TO_GROW" };
-        }
-        if (!this.replacementCards(opts).includes(newCardUid)) {
-            return opts.replacementSource === "discard"
-                ? { key: "INVALID_MOVE", params: { reason: "NOT_IN_HAND_OR_DISCARD", uid: newCardUid } }
-                : { key: "NOT_IN_HAND", params: { uid: newCardUid } };
-        }
-        const newCard = allCards().find(c => c.uid === newCardUid);
-        if (newCard === undefined) {
-            return { key: "UNKNOWN_CARD", params: { uid: newCardUid } };
-        }
-        const newValue = cardPointValue(newCard);
-        const maxDelta = opts.skipLadder ? 2 : 1;
-        if (newValue <= current || newValue > current + maxDelta) {
-            return { key: "BAD_GROWTH_VALUE", params: { current, newValue } };
-        }
-        return undefined;
     }
 
     // The replacement card comes from wherever it is: the hand, or (Tower/Star) the discards.
@@ -4978,33 +4838,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Swords - Attack
 
-    // Shrink a targeted piece by up to `pips`, replacing it from the VICTIM's own stash - or destroying it outright if the result is 0 pips.
-    // opts.bothSwords (Death's shortcut) lets `pips` be the total of both of the card's attacks, i.e. up to twice the minion's size.
-    private checkAttackPiece(
-    minionRef: IPieceRef,
-        targetRef: IPieceRef, pips: number,
-        opts: { bothSwords?: boolean } = {},
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
-        if (minionErr) return minionErr;
-        const minion = this.getPiece(minionRef);
-        if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
-            return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
-        }
-        const victim = this.findPiece(targetRef);
-        if (victim === undefined) {
-            return { key: "NO_PIECE_THERE" };
-        }
-        const resultSize = victim.size - pips;
-        if (resultSize < 0) {
-            return { key: "TOO_FEW_PIPS", params: { size: victim.size, pips } };
-        }
-        if (resultSize > 0 && !this.hasStashAvailable(victim.owner, resultSize as Pips)) {
-            return { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: resultSize } };
-        }
-        return undefined;
-    }
-
     private attackPiece(
     targetRef: IPieceRef, pips: number,
         newOrientation: Orientation | undefined,
@@ -5025,55 +4858,6 @@ export class GnosticaGame extends GameBaseSequenced {
         t.add(new Piece(victim.owner, resultSize as Pips, orientation));
     }
 
-    // Shrink the targeted territory's value by up to `pips`, replacing its card, or destroying it outright if `newCardUid` is omitted.
-    private checkAttackTerritory(
-    minionRef: IPieceRef,
-        targetCell: string, pips: number, newCardUid: string | undefined,
-        opts: PrimitiveOpts & { bothSwords?: boolean } = {},
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
-        if (minionErr) return minionErr;
-        const minion = this.getPiece(minionRef);
-        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
-            return { key: "CELL_HAS_ENEMY" };
-        }
-        if (pips < 1 || pips > (opts.bothSwords ? minion.size * 2 : minion.size)) {
-            return { key: "BAD_DAMAGE", params: { size: minion.size, pips } };
-        }
-        const t = this.cellContents(targetCell);
-        const current = t?.pointValue() ?? 0;
-        if (current === 0) {
-            return { key: "NOTHING_TO_ATTACK" };
-        }
-        const resultValue = current - pips;
-        if (resultValue < 0) {
-            return { key: "TOO_FEW_PIPS_TERRITORY", params: { current, pips } };
-        }
-        if (resultValue === 0) {
-            if (newCardUid !== undefined) {
-                return { key: "DESTROYED_NEEDS_NO_CARD" };
-            }
-            return undefined;
-        }
-        if (newCardUid === undefined) {
-            return { key: "REPLACEMENT_CARD_REQUIRED" };
-        }
-        if (!this.replacementCards(opts).includes(newCardUid)) {
-            return opts.replacementSource === "discard"
-                ? { key: "INVALID_MOVE", params: { reason: "NOT_IN_HAND_OR_DISCARD", uid: newCardUid } }
-                : { key: "NOT_IN_HAND", params: { uid: newCardUid } };
-        }
-        const newCard = allCards().find(c => c.uid === newCardUid);
-        if (newCard === undefined) {
-            return { key: "UNKNOWN_CARD", params: { uid: newCardUid } };
-        }
-        const newValue = cardPointValue(newCard);
-        if (newValue !== resultValue) {
-            return { key: "BAD_SHRINK_VALUE", params: { current, newValue, pips } };
-        }
-        return undefined;
-    }
-
     private attackTerritory(targetCell: string, pips: number, newCardUid: string | undefined,): void {
         const t = this.cellContents(targetCell)!;
         const current = t.pointValue();
@@ -5092,48 +4876,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Special powers: the major arcana abilities that don't reduce to a suit primitive; chaining a card's own multi-step power list is gnostica.ts's job.
 
-    // Orient one of the acting player's own minions - unlike suit primitives, no adjacency/self targeting restriction here.
-    private checkOrientMinion(ref: IPieceRef): PowerFailure | undefined {
-        return checkOwnMinion(this.getPiece(ref), this.currplayer);
-    }
-
     // The one place any orientation actually gets written - orientMinion, orientAny, and the standalone "orient" command all funnel through here.
     private setPieceOrientation(ref: IPieceRef, newOrientation: Orientation,): void {
         this.getPiece(ref).orientation = newOrientation;
-    }
-
-    // Devil only: orient ANY piece, even an opponent's, still subject to the normal self/adjacent-cell targeting rule.
-    private checkOrientAny(
-    minionRef: IPieceRef,
-        targetRef: IPieceRef,
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
-        if (minionErr) return minionErr;
-        if (this.findPiece(targetRef) === undefined) {
-            return { key: "NO_PIECE_THERE" };
-        }
-        return undefined;
-    }
-
-    // Hierophant: replace the target piece with one of the acting player's own, same size; the displaced piece returns to its owner's stash.
-    private checkHierophantReplace(
-    minionRef: IPieceRef,
-        targetRef: IPieceRef,
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
-        if (minionErr) return minionErr;
-        const target = this.findPiece(targetRef);
-        if (target === undefined) {
-            return { key: "NO_PIECE_THERE" };
-        }
-        // Replacing your own piece with another of your own is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
-        if (target.owner === this.currplayer) {
-            return { key: "HIEROPHANT_MUST_TARGET_ENEMY" };
-        }
-        if (!this.hasStashAvailable(this.currplayer, target.size)) {
-            return { key: "STASH_EMPTY", params: { playerNum: this.currplayer, size: target.size } };
-        }
-        return undefined;
     }
 
     private hierophantReplace(targetRef: IPieceRef, newOrientation: Orientation,): void {
@@ -5143,23 +4888,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.returnToStash(target.owner, target.size);
         t.removeAt(this.pieceIndex(targetRef));
         t.add(new Piece(this.currplayer, target.size, newOrientation));
-    }
-
-    // Hermit, piece variant: move a targeted piece to ANY completely empty territory or wasteland, ignoring adjacency/distance limits.
-    private checkHermitMovePiece(
-    minionRef: IPieceRef,
-        targetRef: IPieceRef, destCell: string,
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
-        if (minionErr) return minionErr;
-        if (this.classifyCell(destCell) === "void") {
-            return { key: "CANT_END_IN_VOID" };
-        }
-        const destT = this.cellContents(destCell);
-        if (destT !== undefined && destT.pieces.length > 0) {
-            return { key: "HERMIT_NEEDS_EMPTY" };
-        }
-        return undefined;
     }
 
     private hermitMovePiece(
@@ -5180,46 +4908,9 @@ export class GnosticaGame extends GameBaseSequenced {
         dt.add(moved);
     }
 
-    // Hermit, territory variant: move a targeted territory to ANY non-enemy-occupied wasteland - a Rod's tile push without direction/distance limits.
-    private checkHermitMoveTerritory(
-    minionRef: IPieceRef,
-        targetCell: string, destCell: string,
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsCell(minionRef, targetCell);
-        if (minionErr) return minionErr;
-        if (this.hasEnemyPieces(targetCell, this.currplayer)) {
-            return { key: "CELL_HAS_ENEMY" };
-        }
-        if (this.classifyCell(destCell) !== "wasteland") {
-            return { key: "PUSH_NEEDS_WASTELAND" };
-        }
-        if (this.hasEnemyPieces(destCell, this.currplayer)) {
-            return { key: "DESTINATION_HAS_ENEMY" };
-        }
-        return undefined;
-    }
-
     private hermitMoveTerritory(targetCell: string, destCell: string,): void {
         const evictions = this.board.pushTerritory(...GnosticaBoard.algebraic2coords(targetCell), ...GnosticaBoard.algebraic2coords(destCell));
         this.returnEvictedPieces(evictions);
-    }
-
-    // Justice / Hanged Man: swap hands with the owner of the targeted piece; caller must pass the other player's live hand array by reference.
-    private checkTradeHands(
-    minionRef: IPieceRef,
-        targetRef: IPieceRef,
-    ): PowerFailure | undefined {
-        const minionErr = this.checkOwnMinionTargetsPiece(minionRef, targetRef);
-        if (minionErr) return minionErr;
-        const target = this.findPiece(targetRef);
-        if (target === undefined) {
-            return { key: "NO_PIECE_THERE" };
-        }
-        // Swapping hands with yourself is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
-        if (target.owner === this.currplayer) {
-            return { key: "TRADEHANDS_MUST_TARGET_ENEMY" };
-        }
-        return undefined;
     }
 
     // Returns the target's owner so the caller can double-check it passed the right array.
@@ -5233,56 +4924,12 @@ export class GnosticaGame extends GameBaseSequenced {
         return target.owner;
     }
 
-    // Judgement: draw chosen cards from the discard pile into hand, up to one per pip of the acting minion, capped by the 6-card hand limit.
-    private checkJudgementDraw(minionRef: IPieceRef, cardUids: string[],): PowerFailure | undefined {
-        const minion = this.getPiece(minionRef);
-        const ownErr = checkOwnMinion(minion, this.currplayer);
-        if (ownErr) return ownErr;
-        const maxDraw = judgementDrawRoom(minion.size, this.hands[this.currplayer - 1].length);
-        if (cardUids.length > maxDraw) {
-            return { key: "TOO_MANY_TO_DRAW", params: { maxDraw, requested: cardUids.length } };
-        }
-        const seen = new Set<string>();
-        for (const uid of cardUids) {
-            if (seen.has(uid)) {
-                return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
-            }
-            seen.add(uid);
-            if (!this.discardPile.includes(uid)) {
-                return { key: "INVALID_MOVE", params: { reason: "NOT_IN_DISCARD", uid } };
-            }
-        }
-        return undefined;
-    }
-
     private judgementDraw(cardUids: string[]): void {
         for (const uid of cardUids) {
             const idx = this.discardPile.indexOf(uid);
             this.discardPile.splice(idx, 1);
             this.hands[this.currplayer - 1].push(uid);
         }
-    }
-
-    // Shared "discard any or none, then draw" primitive - one round is the ordinary end-of-turn action; High Priestess calls this twice.
-    private checkDiscardDraw(discardUids: string[], drawCountStr?: string): PowerFailure | undefined {
-        const seen = new Set<string>();
-        for (const uid of discardUids) {
-            if (seen.has(uid)) {
-                return { key: "INVALID_MOVE", params: { reason: "DUPLICATE_CARD", uid } };
-            }
-            seen.add(uid);
-            if (!this.hands[this.currplayer - 1].includes(uid)) {
-                return { key: "NOT_IN_HAND", params: { uid } };
-            }
-        }
-        if (drawCountStr !== undefined) {
-            const maxDraw = Math.max(0, 6 - (this.hands[this.currplayer - 1].length - discardUids.length));
-            const count = Number(drawCountStr);
-            if (!Number.isInteger(count) || count < 0 || count > maxDraw) {
-                return { key: "BAD_DRAW_COUNT", params: { requested: drawCountStr, max: maxDraw } };
-            }
-        }
-        return undefined;
     }
 
     private discardCards(discardUids: string[]): void {
@@ -5318,21 +4965,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const flipped = cardByUid(uid);
         this.discardPile.push(uid);
         return flipped;
-    }
-
-    private checkWorldChoosePower(chosenUid: string): PowerFailure | undefined {
-        if (chosenUid === "21") {
-            return { key: "WORLD_SELF_REFERENCE" };
-        }
-        const present = [...this.board.entries()].some(([, , t]) =>
-            t.card !== undefined && t.card.major && t.card.uid === chosenUid);
-        if (!present) {
-            return { key: "NO_SUCH_MAJOR_ON_BOARD", params: { uid: chosenUid } };
-        }
-        if (MAJOR_ARCANA[chosenUid] === undefined) {
-            return { key: "UNKNOWN_CARD", params: { uid: chosenUid } };
-        }
-        return undefined;
     }
 
     // World: validates `chosenUid` names a major arcana card on the board (not World itself) and returns its MajorArcanaDef for the engine to dispatch.
@@ -6259,7 +5891,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: jResult };
                 }
                 const taken = istep!.cardList ?? [];
-                const room = judgementDrawRoom((minion.piece).size, this.hands[this.currplayer - 1].length) - taken.length;
+                const room = judgementDrawRoom(minion.piece.size, this.hands[this.currplayer - 1].length) - taken.length;
                 return { failed: false, mayAddMore: room > 0 && this.discardPile.some(uid => !taken.includes(uid)) ? room : undefined };
             }
             default:
@@ -6400,9 +6032,30 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.atCell!;
                 const targetCell = cellStr;
                 // parseMove already guarantees a valid N/E/S/W/U (with or without the "?" marking a seeded default), so there's nothing left to validate about the facing.
-                const failure = this.checkCreateOwn(minion, targetCell, opts);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsCell(minion, targetCell);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                // A minion sitting on an isolated wasteland (not itself a territory)
+                // can face a cell that's genuinely void - unlike movePiece, which
+                // destroys a piece that lands in the void as a natural consequence of
+                // relocating an EXISTING piece, there's no equivalent cleanup for a
+                // brand-new piece, so it would otherwise just sit there forever,
+                // invisible to every void-eviction path. Reject outright instead,
+                // same as the territory case's own wasteland-only restriction.
+                if (this.classifyCell(targetCell) === "void") {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.TARGET_IS_VOID") } };
+                }
+                // The target cell may be a genuinely untouched wasteland (no stored
+                // CellContents object at all, since one is only ever created for a cell
+                // that already has a card or a piece) - that's zero pieces there, not
+                // an error. movePiece/hermitMovePiece already handle an
+                // absent destination the same way; this mirrors them.
+                const t = this.cellContents(targetCell);
+                const pieceCount = t?.pieces.length ?? 0;
+                if (!opts.ignoreCapacity && pieceCount >= 3) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CELL_FULL") } };
+                }
+                if (!opts.skipStashCheck && !this.hasStashAvailable(this.currplayer, 1)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: this.currplayer, size: 1 }) } };
                 }
                 return { failed: false };
             }
@@ -6418,9 +6071,25 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (victimResult.ref.cell !== targetCell) {
                     return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_VICTIM_THERE") } };
                 }
-                const failure = this.checkCreateEnemy(minion, victimResult.ref, opts);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsCell(minion, victimResult.ref.cell);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                // A void cell can never legitimately have a victim, but check explicitly anyway - creation has no cleanup path for a stranded piece.
+                if (this.classifyCell(victimResult.ref.cell) === "void") {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.TARGET_IS_VOID") } };
+                }
+                const t = this.cellContents(victimResult.ref.cell);
+                const victim = this.findPiece(victimResult.ref);
+                if (victim === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NO_VICTIM_THERE" }) } };
+                }
+                if (victim.owner === this.currplayer) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.MUST_TARGET_ENEMY") } };
+                }
+                if (!opts.ignoreCapacity && (t?.pieces.length ?? 0) >= 3) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CELL_FULL") } };
+                }
+                if (!this.hasStashAvailable(victim.owner, 1)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: victim.owner, size: 1 }) } };
                 }
                 return { failed: false }; // the new piece belongs to the targeted enemy, not the acting player
             }
@@ -6429,11 +6098,34 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cardArg = step.card;
                 const targetCell = cellStr;
                 // Mirrors applyCups's own "new" case - "drawn" is parsed as step.amount === 1, and only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
-                const failure = step.amount === 1 && opts.allowRandomDraw
-                    ? this.checkCreateTerritory(minion, targetCell, undefined, opts)
-                    : this.checkCreateTerritory(minion, targetCell, cardArg, opts);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const cardUid = step.amount === 1 && opts.allowRandomDraw ? undefined : cardArg;
+                const minionErr = this.checkOwnMinionTargetsCell(minion, targetCell);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                if (this.classifyCell(targetCell) !== "wasteland") {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOT_A_WASTELAND") } };
+                }
+                if (this.hasEnemyPieces(targetCell, this.currplayer)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CELL_HAS_ENEMY") } };
+                }
+                if (opts.allowRandomDraw && cardUid === undefined) {
+                    if (this.drawPile.length === 0 && this.discardPile.length === 0) {
+                        return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY") } };
+                    }
+                    return { failed: false };
+                }
+                if (cardUid === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CARD_UID_REQUIRED") } };
+                }
+                if (!this.hands[this.currplayer - 1].includes(cardUid)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid: cardUid }) } };
+                }
+                const card = allCards().find(c => c.uid === cardUid);
+                if (card === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: cardUid }) } };
+                }
+                // opts.allowRoyalty (the Sun's shortcut): a royalty card may stand in for creating a spot card and then growing it.
+                if (cardPointValue(card) !== 1 && !(opts.allowRoyalty && cardPointValue(card) === 2)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.MUST_BE_SPOT_CARD") } };
                 }
                 return { failed: false };
             }
@@ -6563,9 +6255,18 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
                 }
                 const target = targetResult.ref;
-                const failure = this.checkGrowPiece(minion, target, opts);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsPiece(minion, target);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                const targetPiece = this.findPiece(target);
+                if (targetPiece === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE") } };
+                }
+                if (targetPiece.size >= 3) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.ALREADY_MAX_SIZE") } };
+                }
+                const grownSize = (targetPiece.size + 1) as Pips;
+                if (!opts.skipStashCheck && !this.hasStashAvailable(targetPiece.owner, grownSize)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: targetPiece.owner, size: grownSize }) } };
                 }
                 return { failed: false };
             }
@@ -6573,9 +6274,29 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.targetCell!;
                 const newCardUid = step.card!;
                 const targetCell = cellStr;
-                const failure = this.checkGrowTerritory(minion, targetCell, newCardUid, opts);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsCell(minion, targetCell);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                if (this.hasEnemyPieces(targetCell, this.currplayer)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CELL_HAS_ENEMY") } };
+                }
+                const t = this.cellContents(targetCell);
+                const current = t?.pointValue() ?? 0;
+                if (current === 0) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOTHING_TO_GROW") } };
+                }
+                if (!this.replacementCards(opts).includes(newCardUid)) {
+                    return opts.replacementSource === "discard"
+                        ? { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_HAND_OR_DISCARD", uid: newCardUid }) } }
+                        : { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid: newCardUid }) } };
+                }
+                const newCard = allCards().find(c => c.uid === newCardUid);
+                if (newCard === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: newCardUid }) } };
+                }
+                const newValue = cardPointValue(newCard);
+                const maxDelta = opts.skipLadder ? 2 : 1;
+                if (newValue <= current || newValue > current + maxDelta) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.BAD_GROWTH_VALUE", { current, newValue }) } };
                 }
                 return { failed: false };
             }
@@ -6584,7 +6305,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Swords - piece <targetRef> <pips> [orientation] | tile <cell> <pips> [newCardUid]
     private minionSize(minion: IPieceRef): number {
-        return (minion.piece).size;
+        return minion.piece.size;
     }
 
     // The value of a card by uid, for recognizing when a one-step shortcut was used.
@@ -6655,9 +6376,22 @@ export class GnosticaGame extends GameBaseSequenced {
                 const target = targetResult.ref;
                 const targetPiece = target.piece;
                 const pips = this.effectiveShrink(step.amount!, targetPiece.size, opts);
-                const failure = this.checkAttackPiece(minion, target, pips, opts);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsPiece(minion, target);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                const minionPiece = this.getPiece(minion);
+                if (pips < 1 || pips > (opts.bothSwords ? minionPiece.size * 2 : minionPiece.size)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.BAD_DAMAGE", { size: minionPiece.size, pips }) } };
+                }
+                const victim = this.findPiece(target);
+                if (victim === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE") } };
+                }
+                const resultSize = victim.size - pips;
+                if (resultSize < 0) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.TOO_FEW_PIPS", { size: victim.size, pips }) } };
+                }
+                if (resultSize > 0 && !this.hasStashAvailable(victim.owner, resultSize as Pips)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: victim.owner, size: resultSize }) } };
                 }
                 return { failed: false };
             }
@@ -6666,9 +6400,45 @@ export class GnosticaGame extends GameBaseSequenced {
                 const newCardUid = step.card;
                 const targetCell = cellStr;
                 const pips = this.effectiveShrink(step.amount!, this.cellContents(targetCell)?.pointValue() ?? 0, opts);
-                const failure = this.checkAttackTerritory(minion, targetCell, pips, newCardUid, opts);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsCell(minion, targetCell);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                const minionPiece = this.getPiece(minion);
+                if (this.hasEnemyPieces(targetCell, this.currplayer)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CELL_HAS_ENEMY") } };
+                }
+                if (pips < 1 || pips > (opts.bothSwords ? minionPiece.size * 2 : minionPiece.size)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.BAD_DAMAGE", { size: minionPiece.size, pips }) } };
+                }
+                const t = this.cellContents(targetCell);
+                const current = t?.pointValue() ?? 0;
+                if (current === 0) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOTHING_TO_ATTACK") } };
+                }
+                const resultValue = current - pips;
+                if (resultValue < 0) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.TOO_FEW_PIPS_TERRITORY", { current, pips }) } };
+                }
+                if (resultValue === 0) {
+                    if (newCardUid !== undefined) {
+                        return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.DESTROYED_NEEDS_NO_CARD") } };
+                    }
+                    return { failed: false };
+                }
+                if (newCardUid === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.REPLACEMENT_CARD_REQUIRED") } };
+                }
+                if (!this.replacementCards(opts).includes(newCardUid)) {
+                    return opts.replacementSource === "discard"
+                        ? { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_HAND_OR_DISCARD", uid: newCardUid }) } }
+                        : { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid: newCardUid }) } };
+                }
+                const newCard = allCards().find(c => c.uid === newCardUid);
+                if (newCard === undefined) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: newCardUid }) } };
+                }
+                const newValue = cardPointValue(newCard);
+                if (newValue !== resultValue) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.BAD_SHRINK_VALUE", { current, newValue, pips }) } };
                 }
                 return { failed: false };
             }
@@ -6692,10 +6462,8 @@ export class GnosticaGame extends GameBaseSequenced {
     public validateOrientMinion(minion: IPieceRef, step: IStep): StepValidation {
         // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
         const orientation = step.direction! as Orientation;
-        const failure = this.checkOrientMinion(minion);
-        if (failure) {
-            return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
-        }
+        const ownErr = checkOwnMinion(minion.piece, this.currplayer);
+        if (ownErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${ownErr.key}`, ownErr.params) } };
         // Same hard rejection as the standalone "orient" command's own ORIENT_NO_OP - reorienting IS the whole action here too, so a no-op achieves nothing.
         const currentPiece = minion.piece;
         
@@ -6715,9 +6483,10 @@ export class GnosticaGame extends GameBaseSequenced {
         const target = targetResult.ref;
         // parseMove already rejects a non-single-letter direction for the standalone "orient" action (AMBIGUOUS_DIRECTION), so this is always a real N/E/S/W/U by now.
         const orientation = orientationStr as Orientation;
-        const failure = this.checkOrientAny(minion, target);
-        if (failure) {
-            return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+        const minionErr = this.checkOwnMinionTargetsPiece(minion, target);
+        if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+        if (this.findPiece(target) === undefined) {
+            return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE") } };
         }
         // reorienting the target IS the whole action here too, so a no-op is hard-rejected.
         const currentPiece = target.piece;
@@ -6758,9 +6527,18 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.BAD_ORIENTATION", { orientation: orientationToken }) } };
         }
         // parseMove already guarantees a valid N/E/S/W/U (with or without a "?" marking the click handler's seeded default), so there's nothing left to validate about the facing.
-        const failure = this.checkHierophantReplace(minion, target);
-        if (failure) {
-            return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+        const minionErr = this.checkOwnMinionTargetsPiece(minion, target);
+        if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+        const targetPiece = this.findPiece(target);
+        if (targetPiece === undefined) {
+            return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE") } };
+        }
+        // Replacing your own piece with another of your own is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
+        if (targetPiece.owner === this.currplayer) {
+            return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.HIEROPHANT_MUST_TARGET_ENEMY") } };
+        }
+        if (!this.hasStashAvailable(this.currplayer, targetPiece.size)) {
+            return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.STASH_EMPTY", { playerNum: this.currplayer, size: targetPiece.size }) } };
         }
         return { failed: false };
     }
@@ -6808,9 +6586,14 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 const target = targetResult.ref;
                 // parseMove now rejects a non-single-letter direction here too (AMBIGUOUS_DIRECTION), so step.direction is always a real N/E/S/W/U (or absent) by now.
-                const failure = this.checkHermitMovePiece(minion, target, destCell);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsPiece(minion, target);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                if (this.classifyCell(destCell) === "void") {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CANT_END_IN_VOID") } };
+                }
+                const destT = this.cellContents(destCell);
+                if (destT !== undefined && destT.pieces.length > 0) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.HERMIT_NEEDS_EMPTY") } };
                 }
                 return { failed: false };
             }
@@ -6820,9 +6603,16 @@ export class GnosticaGame extends GameBaseSequenced {
                     return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_SUCH_TILE", { card: step.card }) } };
                 }
                 const targetCell = targetCoords;
-                const failure = this.checkHermitMoveTerritory(minion, targetCell, destCell);
-                if (failure) {
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+                const minionErr = this.checkOwnMinionTargetsCell(minion, targetCell);
+                if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+                if (this.hasEnemyPieces(targetCell, this.currplayer)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.CELL_HAS_ENEMY") } };
+                }
+                if (this.classifyCell(destCell) !== "wasteland") {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.PUSH_NEEDS_WASTELAND") } };
+                }
+                if (this.hasEnemyPieces(destCell, this.currplayer)) {
+                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.DESTINATION_HAS_ENEMY") } };
                 }
                 return { failed: false };
             }
@@ -6844,23 +6634,54 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: true, result: this.invalidPieceRef(targetResult.kind, targetRef) };
         }
         const target = targetResult.ref;
-        const failure = this.checkTradeHands(minion, target);
-        if (failure) {
-            return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
+        const minionErr = this.checkOwnMinionTargetsPiece(minion, target);
+        if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
+        const targetPiece = this.findPiece(target);
+        if (targetPiece === undefined) {
+            return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE") } };
+        }
+        // Swapping hands with yourself is a no-op forbidden by the "meaningful step" rule (#49); skipping the step stays legal.
+        if (targetPiece.owner === this.currplayer) {
+            return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY") } };
         }
         return { failed: false };
     }
 
     public validateJudgementDraw(minion: IPieceRef, step: IStep): IValidationResult {
         const uids = step.cardList ?? [];
-        const failure = this.checkJudgementDraw(minion, uids);
-        return failure ? { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        const ownErr = checkOwnMinion(minion.piece, this.currplayer);
+        if (ownErr) return { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${ownErr.key}`, ownErr.params) };
+        const maxDraw = judgementDrawRoom(minion.piece.size, this.hands[this.currplayer - 1].length);
+        if (uids.length > maxDraw) {
+            return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: uids.length }) };
+        }
+        const seen = new Set<string>();
+        for (const uid of uids) {
+            if (seen.has(uid)) {
+                return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid }) };
+            }
+            seen.add(uid);
+            if (!this.discardPile.includes(uid)) {
+                return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD", uid }) };
+            }
+        }
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // World: <chosenUid> - the minionRef itself is already stripped/resolved by applyPowerStep's own pre-switch logic, same as every other special.
     private validateWorldChoosePower(chosenUid: string): IValidationResult {
-        const failure = this.checkWorldChoosePower(chosenUid);
-        return failure ? { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } : { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        if (chosenUid === "21") {
+            return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.WORLD_SELF_REFERENCE") };
+        }
+        const present = [...this.board.entries()].some(([, , t]) =>
+            t.card !== undefined && t.card.major && t.card.uid === chosenUid);
+        if (!present) {
+            return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NO_SUCH_MAJOR_ON_BOARD", { uid: chosenUid }) };
+        }
+        if (MAJOR_ARCANA[chosenUid] === undefined) {
+            return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.UNKNOWN_CARD", { uid: chosenUid }) };
+        }
+        return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
     }
 
     // Turn order / scoring / win-elimination.  Player always rotates, even on the move that just ended the game.

@@ -498,7 +498,7 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
 }
 
 // A random legal major arcana uid for World to borrow (excluding itself) -
-// the "as <uid>" head annotation checkWorldChoosePower requires is the
+// the "as <uid>" head annotation validateWorldChoosePower requires is the
 // ONLY legality rule ("present on the board, not World itself" - see its
 // own docs), so any random pick from the board's own majors is legal by
 // construction. undefined when nothing else is on the board yet - World
