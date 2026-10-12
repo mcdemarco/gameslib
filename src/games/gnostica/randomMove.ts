@@ -1066,7 +1066,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
     // (called below) never mutates anything, so without this, a LATER
     // step's own random-token generation would try to read a real
     // piece off `game`'s own board at a cell nothing was ever placed
-    // on. Mirrors validateFrameStack's own identical clone-replay
+    // on. Mirrors validatePowerSteps's own identical clone-replay
     // pattern (see its own docs) - `ctx` (not always `game`) is why
     // both the token-generation AND validation calls below use it,
     // once a prior step has forced this chain onto a clone.
@@ -1094,7 +1094,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
         const result = game.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, def.uid);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see
-        // validateFrameStack's own docs) - .valid alone is what actually
+        // validatePowerSteps's own docs) - .valid alone is what actually
         // means "no complaint," complete distinguishes "final" from "more
         // could still be added," which isn't this check's own concern.
         return result.valid;

@@ -4625,7 +4625,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(picked.move).eq("discard draw 0 via 02");
         expect(g.validateMove(picked.move).valid).to.be.true;
 
-        // Same message, computed directly by validateFrameStack itself now -
+        // Same message, computed directly by validatePowerSteps itself now -
         // a hand-typed round 2 submission gets it without ever going
         // through the click handler above.
         expect(g.validateMove(round2Draw.move).message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
@@ -5504,7 +5504,7 @@ describe("Gnostica: Fool and World", () => {
         expect(cellClick.valid).to.be.true;
         // The flip is mandatory and one-shot - nothing to reconsider via
         // a further click, so genuinely complete:1 (forcePauseReadyMessage's
-        // own "ready" state - see validateFrameStack's own docs).
+        // own "ready" state - see validatePowerSteps's own docs).
         expect(cellClick.complete).to.eq(1);
         expect(cellClick.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP_READY"));
 
@@ -5594,7 +5594,7 @@ describe("Gnostica: Fool and World", () => {
         expect(isGrey(declineBtn)).to.be.true;
     });
 
-    // Same message, computed directly by validateFrameStack itself now -
+    // Same message, computed directly by validatePowerSteps itself now -
     // a hand-typed "decline AC via 00" gets DECLINE_THEN_AUTO_DRAW
     // without ever going through the click handler above.
     it("a hand-typed decline of a revealed card also names the automatic second flip", () => {
@@ -5645,7 +5645,7 @@ describe("Gnostica: Fool and World", () => {
         expect(bare.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(1).name }));
     });
 
-    // Same, one click later - validateFrameStack's own "given segment is
+    // Same, one click later - validatePowerSteps's own "given segment is
     // still incomplete" fallback must not fall back to the root-only
     // wording either, e.g. once Fool reveals the Magician, Cups is chosen
     // (via "as"), and its own "own" mode is picked but not yet complete.
@@ -5743,7 +5743,7 @@ describe("Gnostica: Fool and World", () => {
     // mandatory second flip reveals World, ALL in one submission (the
     // cascade this session's own earlier fixes made possible). World's
     // own frame inherits its "acting minion" from Fool's own buried frame
-    // (see popFrame's own docs) - before that fix, it inherited Fool's
+    // (see popPower's own docs) - before that fix, it inherited Fool's
     // own ORIGINAL, pre-move position, which the relocated piece no
     // longer occupies at all; the first thing that tried to read a piece
     // there (a board click on World's own target) crashed outright
