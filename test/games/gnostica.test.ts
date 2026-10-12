@@ -157,7 +157,7 @@ describe("Gnostica: hand sort order", () => {
         g.move("bid 2"); // position 2 (still hand-order) is the major
         expect(g.hands[0]).to.deep.equal(beforeBid); // not pulled from hand until the round resolves
         g.move("bid 1"); // resolves - player 1's major wins
-        expect(g.bidWinner).eq(1);
+        expect(g.turnOrder![0]).eq(1);
         expect(inSortOrder(renderedHandUids(g, 1))).to.be.true;
 
         const g2 = testGame({
@@ -310,7 +310,7 @@ describe("Gnostica: turn order / legend", () => {
             phase: "bidding",
         });
         g.move("bid 1"); g.move("bid 1"); g.move("bid 1"); // player 2's World (unbeatable) wins
-        expect(g.bidWinner).eq(2);
+        expect(g.turnOrder[0]).eq(2);
         // Winner first, then King (player 1) over Queen (player 3) among the minors - not seating order.
         expect(keyArea(g)!.list!.map(e => e.piece)).to.deep.equal(["turnorder_p2", "turnorder_p1", "turnorder_p3"]);
     });
@@ -337,16 +337,16 @@ describe("Gnostica: turn order / legend", () => {
 });
 
 describe("Gnostica: bidding-variant player reordering and pass removal", () => {
-    it("beginRedraw() lands directly on the bid's loser, whichever player wins, with no forced pass in between", () => {
+    it("the bid resolution lands directly on the bid's loser, whichever player wins, with no forced pass in between", () => {
         const winner1 = testGame({ hands: [["21", "AC", "2C", "3C", "4C", "5C"], ["KS", "AR", "2R", "3R", "4R", "5R"]], phase: "bidding" });
         winner1.move("bid 1"); winner1.move("bid 1"); // player 1's World wins
-        expect(winner1.bidWinner).eq(1);
+        expect(winner1.turnOrder![0]).eq(1);
         expect(winner1.currplayer).eq(2); // loser redraws first
         expect(winner1.getPlies().some(p => p.results.some(r => r.type === "pass"))).eq(false);
 
         const winner2 = testGame({ hands: [["KS", "AC", "2C", "3C", "4C", "5C"], ["21", "AR", "2R", "3R", "4R", "5R"]], phase: "bidding" });
         winner2.move("bid 1"); winner2.move("bid 1"); // player 2's World wins
-        expect(winner2.bidWinner).eq(2);
+        expect(winner2.turnOrder![0]).eq(2);
         expect(winner2.currplayer).eq(1);
         expect(winner2.getPlies().some(p => p.results.some(r => r.type === "pass"))).eq(false);
     });
@@ -367,7 +367,7 @@ describe("Gnostica: bidding-variant player reordering and pass removal", () => {
             for (let i = 0; i < numplayers; i++) {
                 g.move("bid 1");
             }
-            expect(g.bidWinner).eq(2);
+            expect(g.turnOrder![0]).eq(2);
             for (let i = 0; i < numplayers; i++) {
                 const needed = 6 - g.hands[g.currplayer - 1].length;
                 g.move(`redraw ${g.biddingPool!.slice(0, needed).join(" ")}`);

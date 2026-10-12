@@ -335,10 +335,10 @@ interface IMoveState extends IIndividualState {
     phase: "bidding" | "redraw" | "main";
     // Per-player 1-based bid position in their own hand, or null if not yet bid (null not undefined, since JSON round-tripping turns undefined into null).
     bidPositions?: (number | null)[];
-    // Every card revealed by a bid across every round played - the shared pool players draw back up to 6 from during "redraw"; bidWinner/redrawOrder derive from this.
+    // Every card revealed by a bid across every round played - the shared pool players draw back up to 6 from during "redraw"; the winner (turnOrder[0]) derives from this.
     biddingPool?: string[];
-    // "Tournament rules": play order is exactly the rank order of the cards everyone bid (majors always outrank minors); only ever set for the "bidding" variant.
-    turnOrder?: playerid[];
+    // "Tournament rules": in the "bidding" variant, play order is the rank order of the cards everyone bid (majors always outrank minors); seating order until the bids resolve, and always empty otherwise.
+    turnOrder: playerid[];
 }
 
 export interface IGnosticaState extends IAPGameState {
@@ -422,21 +422,11 @@ export class GnosticaGame extends GameBaseSequenced {
     public phase!: "bidding" | "redraw" | "main";
     public bidPositions: (number | null)[] | undefined;
     public biddingPool: string[] | undefined;
-    public turnOrder: playerid[] | undefined;
+    public turnOrder!: playerid[];
 
     // How many tied rounds have happened so far (0-indexed) - biddingPool grows by `numplayers` cards every round, so this is exact mid-"bidding".
     public get bidRound(): number {
         return Math.floor((this.biddingPool?.length ?? 0) / this.numplayers);
-    }
-
-    // turnOrder[0] is the bid winner by construction (sorted by rank); undefined until a bid has actually resolved.
-    public get bidWinner(): playerid | undefined {
-        return this.phase === "bidding" ? undefined : this.turnOrder?.[0];
-    }
-
-    // Exact reverse of turnOrder - worst bidder redraws first, winner last; only read during "redraw", by which point turnOrder is finalized.
-    public get redrawOrder(): playerid[] {
-        return [...this.turnOrder!].reverse();
     }
 
     // How many players have already redrawn - reads the last REAL commit's hands (this.stack's top), immune to a live preview's own in-progress mutation.
@@ -502,7 +492,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 phase: this.variants.includes("bidding") ? "bidding" : "main",
                 bidPositions: this.variants.includes("bidding") ? new Array(this.numplayers).fill(null) as (number | null)[] : undefined,
                 biddingPool: this.variants.includes("bidding") ? [] : undefined,
-                turnOrder: this.variants.includes("bidding") ? [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid) : undefined,
+                turnOrder: this.variants.includes("bidding") ? [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid) : [],
                 buffer: undefined
             };
             this.stack = [fresh];
@@ -551,7 +541,7 @@ export class GnosticaGame extends GameBaseSequenced {
         this.phase = state.phase;
         this.bidPositions = state.bidPositions !== undefined ? [...state.bidPositions] : undefined;
         this.biddingPool = state.biddingPool !== undefined ? [...state.biddingPool] : undefined;
-        this.turnOrder = state.turnOrder !== undefined ? [...state.turnOrder] : undefined;
+        this.turnOrder = [...state.turnOrder];
         this.frames = state.frames ? [...state.frames] : [];
         this.continued = state.continued ? [...state.continued] : [];
         // Like the other Decktet games, the deck is reset every time you load: whatever isn't on the board, in a hand, discarded or in the pool, shuffled.
@@ -576,7 +566,7 @@ export class GnosticaGame extends GameBaseSequenced {
             phase: this.phase,
             bidPositions: this.bidPositions !== undefined ? [...this.bidPositions] : undefined,
             biddingPool: this.biddingPool !== undefined ? [...this.biddingPool] : undefined,
-            turnOrder: this.turnOrder !== undefined ? [...this.turnOrder] : undefined,
+            turnOrder: [...this.turnOrder],
             frames: this.frames.length > 0 ? [...this.frames] : [],
             continued: this.continued.length > 0 ? [...this.continued] : undefined,
         };
@@ -2810,7 +2800,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // asUid (World's borrow) and asSuit (Magician's suit) are separate fields throughout; a World-pushed Magician can have both set at once.
         return {
-            head, headArg, card, resume, eligible, steps, asUid: parsed.asUid, asSuit: parsed.asSuit,
+            head, headArg, card, resume, eligible, steps, asUid: parsed.asUid, asSuit: parsed.asSuit as MinorSuitUid | undefined,
             stack: resume ? this.resumeQueue()! : [{ cardUid: headArg, nextStepIndex: 0, minions: [...eligible] }],
             rootUid: resume ? this.getContinuedUid()! : headArg,
         };
@@ -4207,8 +4197,12 @@ export class GnosticaGame extends GameBaseSequenced {
         };
 
         if (winners.length === 1) {
-            setTurnOrder(); // turnOrder[0] === winners[0] by construction - see bidWinner's own getter
-            this.beginRedraw();
+            setTurnOrder(); // turnOrder[0] === winners[0] by construction
+            // Announce the now-finalized order once. Under "tournament rules" there's no physical seating, so "clockwise" is reinterpreted as turnOrder itself,
+            // "counterclockwise" as its exact reverse; the worst bidder (last in turnOrder) redraws first, so jump there directly instead of routing through nextPlayer().
+            this.results.push({ type: "announce", payload: [...this.turnOrder] });
+            this.phase = "redraw";
+            this.currplayer = this.turnOrder[this.numplayers - 1];
             return;
         }
 
@@ -4220,15 +4214,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return;
         }
         this.currplayer = 1;
-    }
-
-    // Under "tournament rules" there's no physical seating, so "clockwise" is reinterpreted as turnOrder itself, "counterclockwise" as its exact reverse.
-    private beginRedraw(): void {
-        // Announce the now-finalized order once, regardless of which of resolveBidRound()'s two call sites got us here.
-        this.results.push({ type: "announce", payload: [...this.turnOrder!] });
-        // redrawOrder[0] is always the worst bidder, for every player count - jump there directly instead of routing through nextPlayer().
-        this.phase = "redraw";
-        this.currplayer = this.redrawOrder[0];
     }
 
     // "redraw <uid...>" - free choice from the shared, fully public biddingPool, drawing back up to 6. `partial` mirrors cmdDiscard's split; legality is validateRedraw's job.
@@ -4252,16 +4237,16 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Ordinary rotation, not a direct jump - with exactly two players "whoever's next" is unconditionally "the other one."
                 this.nextPlayer();
             } else {
-                this.currplayer = this.redrawOrder[donePos];
+                this.currplayer = this.turnOrder[this.numplayers - 1 - donePos];
             }
         } else {
-            // Everyone has redrawn - redrawOrder always ends with the bid winner, so whoever just submitted this final redraw already IS the winner.
+            // Everyone has redrawn - redraw order (turnOrder reversed) always ends with the bid winner, so whoever just submitted this final redraw already IS the winner.
             this.phase = "main";
             // Nothing left to hide or replay once "bidding" is over for good - clear both so they stop appearing in every subsequent turn's state.
             this.bidPositions = undefined;
             this.biddingPool = undefined;
             if (this.numplayers !== 2) {
-                this.currplayer = this.bidWinner!;
+                this.currplayer = this.turnOrder[0];
             }
         }
     }
@@ -6617,8 +6602,9 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Turn order / scoring / win-elimination.  Player always rotates, even on the move that just ended the game.
     private nextPlayer(): void {
-        // Step forward through turnOrder under in bidding variant ("tournament rules"), otherwise fall back to plain ascending.
-        const order = this.turnOrder ?? [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid);
+        const order = this.variants.includes("bidding")
+            ? this.turnOrder
+            : [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid);
         const pos = order.indexOf(this.currplayer);
         let next = pos;
         do {
@@ -6887,7 +6873,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // card is actively mid-build this turn, bidding or not.
                 const list: AreaKey["list"] = [];
                 if (this.variants.includes("bidding")) {
-                    this.turnOrder!.forEach((p, place) => {
+                    this.turnOrder.forEach((p, place) => {
                         const key = `turnorder_p${p}`;
                         if (!(key in legend)) {
                             legend[key] = { name: "pyramid-up-small", colour: p };

@@ -89,7 +89,7 @@ export function testGame(opts: TestGameOpts): GnosticaGame {
             phase,
             bidPositions: bidding ? new Array(numplayers).fill(null) : undefined,
             biddingPool: bidding ? [] : undefined,
-            turnOrder: bidding ? Array.from({ length: numplayers }, (_, i) => i + 1) : undefined,
+            turnOrder: bidding ? Array.from({ length: numplayers }, (_, i) => i + 1) : [],
             continued: opts.continued,
         }],
     } as unknown as IGnosticaState;

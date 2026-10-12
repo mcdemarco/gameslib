@@ -38,7 +38,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.phase).eq("bidding"); // still waiting on player 2
         g.move("bid 1"); // player 2 bids the Queen
         expect(g.phase).eq("redraw");
-        expect(g.bidWinner).eq(1); // King beats Queen
+        expect(g.turnOrder[0]).eq(1); // King beats Queen
         expect(g.biddingPool!).to.have.members(["KS", "QS"]);
         expect(g.hands[0]).to.not.include("KS"); // spent
         expect(g.hands[1]).to.not.include("QS");
@@ -50,7 +50,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[1] = ["2S", "2R", "3R", "4R", "5R", "6R"]; // 2 of Swords
         g.move("bid 1");
         g.move("bid 1");
-        expect(g.bidWinner).eq(2); // 2 beats Ace
+        expect(g.turnOrder[0]).eq(2); // 2 beats Ace
     });
 
     it("any major arcana bid beats every minor arcana bid, regardless of the major's own number", () => {
@@ -59,7 +59,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.hands[1] = ["KS", "AR", "2R", "3R", "4R", "5R"]; // King of Swords - highest minor
         g.move("bid 1");
         g.move("bid 1");
-        expect(g.bidWinner).eq(1); // Fool still beats King
+        expect(g.turnOrder[0]).eq(1); // Fool still beats King
     });
 
     it("among multiple major-arcana bids, the highest-numbered major wins", () => {
@@ -70,7 +70,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1");
         g.move("bid 1");
         g.move("bid 1");
-        expect(g.bidWinner).eq(2); // The Devil (15) beats The Hierophant (5) and any minor
+        expect(g.turnOrder[0]).eq(2); // The Devil (15) beats The Hierophant (5) and any minor
     });
 
     it("a tie forces every player (not just the tied ones) to bid again, accumulating both rounds into the pool", () => {
@@ -99,7 +99,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1"); // P2: 2R
         g.move("bid 1"); // P3: 3D
         expect(g.phase).eq("redraw"); // no more ties possible - 2 vs 2 vs 3
-        expect(g.bidWinner).eq(3);
+        expect(g.turnOrder[0]).eq(3);
         expect(g.biddingPool!.length).eq(9);
     });
 
@@ -181,7 +181,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(g.winner).to.deep.equal([]);
     });
 
-    it("computes turnOrder as tournament rules require - the rank order of the last cards bid - and redrawOrder as its exact reverse", () => {
+    it("computes turnOrder as tournament rules require - the rank order of the last cards bid -", () => {
         const g = new GnosticaGame(4, ["bidding"]);
         g.hands[0] = ["KS", "AC", "2C", "3C", "4C", "5C"];
         g.hands[1] = ["2S", "AR", "2R", "3R", "4R", "5R"];
@@ -191,18 +191,17 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1");
         g.move("bid 1");
         g.move("bid 1");
-        expect(g.bidWinner).eq(1); // King is the highest bid
+        expect(g.turnOrder[0]).eq(1); // King is the highest bid
         // Rank order of what was actually bid (King > 4S > 3S > 2S), NOT
         // seating order from the winner (which would be [1,2,3,4]).
         expect(g.turnOrder).to.deep.equal([1, 4, 3, 2]);
-        expect(g.redrawOrder).to.deep.equal([2, 3, 4, 1]); // exact reverse, winner last
         expect(g.currplayer).eq(2);
         expect(g.redrawPos).eq(0);
     });
 
     // Both the turn order and the redraw order are known the instant
-    // bidding resolves (redrawOrder is always turnOrder's own exact
-    // reverse - see beginRedraw's own docs), so both get reported
+    // bidding resolves (the redraw order is always turnOrder's own exact
+    // reverse - see resolveBidRound), so both get reported
     // together in one chat line rather than split across bid-resolution
     // and redraw-completion.
     it("reports the finalized turn order and redraw order in the chat log once bidding resolves", () => {
@@ -241,7 +240,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         expect(reloaded.phase).eq("bidding"); // still waiting on player 3
         expect(() => reloaded.move("bid 1")).to.not.throw();
         expect(reloaded.phase).eq("redraw");
-        expect(reloaded.bidWinner).eq(1); // King beats both 2 and 3 of Swords
+        expect(reloaded.turnOrder[0]).eq(1); // King beats both 2 and 3 of Swords
     });
 
     it("the non-bidding game is entirely unaffected: phase stays main, place is legal from turn one", () => {
@@ -301,7 +300,6 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
 
     it("walks the full redraw order and hands off to main phase with the bid winner as currplayer", () => {
         const g = setupRedraw();
-        expect(g.redrawOrder).to.deep.equal([3, 2, 1]); // winner is 1, so right-neighbour (3) first
         expect(g.currplayer).eq(3);
         const poolStart = [...g.biddingPool!];
 
@@ -344,13 +342,12 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         g.move("bid 1"); // P1
         g.move("bid 1"); // P2 - major arcana, wins outright over P1/P3's minors
         g.move("bid 1"); // P3
-        expect(g.bidWinner).eq(2);
+        expect(g.turnOrder[0]).eq(2);
         // Tournament rules: turnOrder is the rank order of what was bid -
         // major (player 2) outranks every minor, then King (player 1)
-        // outranks Queen (player 3) among the minors. redrawOrder is the
-        // exact reverse, winner last.
+        // outranks Queen (player 3) among the minors.
         expect(g.turnOrder).to.deep.equal([2, 1, 3]);
-        expect(g.redrawOrder).to.deep.equal([3, 1, 2]);
+        expect(g.currplayer).eq(3); // redraw runs worst bidder first
 
         g.move(`redraw ${g.biddingPool![0]}`);
         g.move(`redraw ${g.biddingPool![0]}`);
@@ -375,7 +372,7 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         g.hands[1] = ["KS", "AR", "2R", "3R", "4R", "5R"]; // P2 wins with the King
         g.move("bid 1"); // P1 bids - nextPlayer() -> P2
         g.move("bid 1"); // P2 bids - round resolves; ordinary rotation (2 -> 1) lands on the loser
-        expect(g.bidWinner).eq(2);
+        expect(g.turnOrder[0]).eq(2);
         expect(g.phase).eq("redraw");
         expect(g.currplayer).eq(1); // the loser, reached via nextPlayer(), never a direct jump
 
@@ -408,7 +405,6 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         const reloaded = new GnosticaGame(g.serialize());
         expect(reloaded.phase).eq("redraw");
         expect(reloaded.currplayer).eq(2);
-        expect(reloaded.redrawOrder).to.deep.equal([3, 2, 1]);
         expect(() => reloaded.move(`redraw ${reloaded.biddingPool![0]}`)).to.not.throw();
         expect(() => reloaded.move(`redraw ${reloaded.biddingPool![0]}`)).to.not.throw();
         expect(reloaded.phase).eq("main");
@@ -482,9 +478,9 @@ describe("Gnostica: bidding variant, stage 3 (click support)", () => {
         const bid3 = g.handleClick("", -1, -1, `cPS`);
         g.move(bid3.move);
         expect(g.phase).eq("redraw");
-        expect(g.bidWinner).eq(1);
+        expect(g.turnOrder[0]).eq(1);
 
-        // Redraw: each player in redrawOrder clicks their one needed pool card.
+        // Redraw: each player in reverse turnOrder clicks their one needed pool card.
         for (let i = 0; i < 3; i++) {
             const click = g.handleClick("", -1, -1, `c${g.biddingPool![0]}`);
             g.move(click.move);
