@@ -243,11 +243,10 @@ interface IPendingStep {
     game: GnosticaGame;
 }
 
-// An unfinished Fool flip, High Priestess round or Justice attack, bottom to top - the same tokens as this.continued: "00.<flips done>", "02", and "11.<how it was reached>".
-type Owed = { uid: string; done: number; how?: string };
+// What applying a card's powers did: ran to the end, stopped on an unfinished step, or left something for move() to continue - the Fool used, a High Priestess round, or Justice's trade.
+type PowerOutcome = "done" | "stopped" | "fool" | "hp" | "trade";
 
 type IHiddenEffect = (
-    | { type: "flip" }
     | { type: "territory"; cell: string }
     | { type: "draw"; count: number }
     // Justice or the Hanged Man: the acting player swaps hands with the owner of this piece.
@@ -255,8 +254,6 @@ type IHiddenEffect = (
 ) & {
     // Set by the chain walker: the effect's results belong in the submission's per-step _group entries.
     grouped?: boolean;
-    // Its step already logged a visible result, so in a chained submission it already has a group to join.
-    joinsGroup?: boolean;
 };
 
 // What the click UI needs to know about an in-progress (partial) move, computed once inside move(..., {partial: true}) from the pre-move state.
@@ -311,8 +308,6 @@ interface IPowerPlay {
     frames: IPowerFrame[];
     // The card whose obligation the walk is rooted in.
     rootUid: string;
-    // What is already owed below this play (nothing, for a use or play).
-    owed: Owed[];
 }
 
 // A same-seat obligation left over from a High Priestess/Fool/World activation that paused mid-chain; rootCardUid is fixed at the original use/play call.
@@ -793,8 +788,13 @@ export class GnosticaGame extends GameBaseSequenced {
         // A "last" already staged on an earlier sub-move of this same still-open turn rides at the front of this.continued.
         const hadDeclareMarker = this.continued.length > 0 && this.continued[0] === "last";
         let newLast = hadDeclareMarker ? this.currplayer : this.lastTurner;
-        // What this submission left owed (a Fool flip, a High Priestess round), serialized into this.continued once past the partial boundary below.
-        let owed: Owed[] | undefined;
+        // The card a use, play or resume applies, the steps typed for it, and how it was reached (for Justice's token), with what applying it did, from which
+        // the tokens in this.continued are settled once past the partial boundary below.
+        let powerCard: string | undefined;
+        let powerSteps: IStep[] = [];
+        let powerAsUid: string | undefined;
+        let powerHow = "";
+        let outcome: PowerOutcome | undefined;
         let preview: IPreview | undefined;
         let announceLast = false;
 
@@ -813,9 +813,20 @@ export class GnosticaGame extends GameBaseSequenced {
             this.addDistanceBuffer(preview?.pending);
             this.addPendingFacingBuffer(parsed, preview?.pending);
 
+            // A "discard" resume is a High Priestess round (not a card); a "play" resume names the revealed card as its front token, else the "via" root.
+            const resume = this.continued.length > 0;
+            if (resume || head === "use" || head === "play") {
+                powerCard = resume ? (head === "discard" ? parsed.viaUid : parsed.steps[0]?.card ?? parsed.viaUid) : parsed.steps[0]?.card;
+                // High Priestess resumes with its own content right after "discard", not a "/"-segment - resumeSteps folds it back.
+                powerSteps = resume ? this.resumeSteps(parsed) : parsed.steps.slice(1);
+                powerAsUid = parsed.asUid;
+                // A resumed Justice keeps the verb its first turn used, which decides who may attack; every other resume is a play. Through the World it is "21" too.
+                const verb = resume ? (powerCard === "11" && head === "use" ? "use" : "play") : head;
+                powerHow = `${verb}${parsed.asUid !== undefined && powerCard === "21" ? "21" : ""}`;
+            }
             // A genuine cross-turn pause means every legal move right now has to be resuming it; legality of any kind is validateMove's job alone now.
-            if (this.continued.length > 0) {
-                owed = this.resumePowers(this.resolvePowerPlay(parsed)!, partial);
+            if (resume) {
+                outcome = this.resumePowers(powerCard!, powerSteps, powerAsUid, partial);
             } else if (head === "bid") {
 
             // The "bidding" variant's own opening procedure - no power steps, no "last" announcement, own bespoke currplayer advancement.
@@ -841,17 +852,13 @@ export class GnosticaGame extends GameBaseSequenced {
                     case "discard":
                         this.cmdDiscard(parsed.steps[0]);
                         break;
-                    // A bare "use" or "play" has nothing to play yet, which resolvePowerPlay reports as undefined.
-                    case "use": {
-                        const play = this.resolvePowerPlay(parsed);
-                        owed = play === undefined ? undefined : this.cmdActivate(play, partial);
+                    // A bare "use" or "play" has nothing to play yet.
+                    case "use":
+                        outcome = powerCard === undefined ? undefined : this.cmdActivate(powerCard, powerSteps, powerAsUid, partial);
                         break;
-                    }
-                    case "play": {
-                        const play = this.resolvePowerPlay(parsed);
-                        owed = play === undefined ? undefined : this.cmdPlay(play, partial);
+                    case "play":
+                        outcome = powerCard === undefined ? undefined : this.cmdPlay(powerCard, powerSteps, powerAsUid, partial);
                         break;
-                    }
                     // "decline" with nothing pending, or any other head with no business here, falls through with no case - a caller bug, not this dispatch's job.
                 }
             }
@@ -868,6 +875,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return this;
         }
         this.resolveHiddenEffects();
+        // undefined means no power ran or it stopped on an incomplete step.
+        const owed = powerCard !== undefined && outcome !== undefined && outcome !== "stopped" ? this.continueTurn(powerCard, powerSteps, powerAsUid, powerHow, outcome) : undefined;
         if (announceLast) {
             newLast = this.currplayer;
             this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
@@ -878,9 +887,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
         // "?" marks a "place"-only click-preview facing as still merely prepopulated, dropped the instant a turn is actually committed.
         this.lastmove = m.replace(/\?/g, "");
-        // undefined means no power ran or it stopped on an incomplete step.
         if (owed !== undefined) {
-            this.continued = owed.map(o => GnosticaGame.owedToken(o));
+            this.continued = owed;
         }
         // `head` is only assigned inside the parsed-dispatch branch above, so a literal "pass" falls into `else` below and gets the same nextPlayer()/checkEOG().
         if (head === "bid" || head === "redraw" || head === "pass") {
@@ -934,9 +942,6 @@ export class GnosticaGame extends GameBaseSequenced {
         for (const effect of this.hidden) {
             let result: APMoveResult;
             switch (effect.type) {
-                case "flip":
-                    result = { type: "deckDraw", what: this.fool().uid, from: "fool" };
-                    break;
                 case "territory": {
                     const card = this.createTerritoryFromDeck(effect.cell);
                     result = { type: "place", where: effect.cell, how: "territory", what: card.uid };
@@ -955,11 +960,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     break;
                 }
             }
-            const last = this.results[this.results.length - 1];
             if (effect.grouped !== true) {
                 this.results.push(result);
-            } else if (effect.joinsGroup === true && last?.type === "_group") {
-                last.results.push(result);
             } else {
                 this.results.push({ type: "_group", who: this.currplayer, results: [result] });
             }
@@ -2850,7 +2852,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // A card revealed by Fool (headArg names it directly for a resume) is always play-pool eligible regardless.
         if (resume) {
             card = allCards().find(c => c.uid === headArg);
-            eligible = this.eligibleMinionsForOwed(GnosticaGame.owedFromToken(this.continued.filter(t => t !== "last").pop()!));
+            eligible = this.eligibleMinionsForOwed(this.continued.filter(t => t !== "last").pop()!);
         } else if (head === "use") {
             const loc = this.findCardCell(headArg);
             if (loc === undefined) {
@@ -2867,7 +2869,6 @@ export class GnosticaGame extends GameBaseSequenced {
             head, headArg, card, resume, eligible, steps, asUid: parsed.asUid, asSuit: parsed.asSuit,
             frames: resume ? this.resumeQueue()! : [{ cardUid: headArg, nextStepIndex: 0, minions: [...eligible] }],
             rootUid: resume ? this.getContinuedUid()! : headArg,
-            owed: resume ? this.owedFromContinued() : [],
         };
     }
 
@@ -5386,52 +5387,24 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Only ever reached for a FRESH activation - move() resumes this.continued directly instead, before this switch is reached. Legality is validateActivate's own job.
-    private cmdActivate(play: IPowerPlay, partial: boolean): Owed[] | undefined {
-        this.results.push({ type: "use", what: play.headArg });
-        return this.applyPlay(play, partial);
-    }
-
-    // Walks a play's powers, whichever way it was reached.
-    private applyPlay(play: IPowerPlay, partial: boolean): Owed[] | undefined {
-        // How the play was reached, for a Justice that pauses after its trade: used or played, through the World or not.
-        const how = `${play.head}${play.asUid !== undefined && play.headArg === "21" ? "21" : ""}`;
-        return this.applyPowers(play.headArg, play.owed, play.steps, play.asUid, partial, how);
-    }
-
-    // The Fool's token counts its flips, Justice's says how it was reached ("use", "use21", "play", "play21"), and High Priestess's needs nothing more.
-    private static owedToken(owed: Owed): string {
-        switch (owed.uid) {
-            case "00": return `00.${owed.done}`;
-            case "11": return `11.${owed.how}`;
-            default: return owed.uid;
-        }
-    }
-
-    private static owedFromToken(token: string): Owed {
-        const [uid, detail] = token.split(".");
-        switch (uid) {
-            case "00": return { uid, done: Number(detail) };
-            case "11": return { uid, done: 1, how: detail };
-            default: return { uid, done: 1 };
-        }
-    }
-
-    private owedFromContinued(): Owed[] {
-        return this.continued.filter(t => t !== "last").map(t => GnosticaGame.owedFromToken(t));
+    private cmdActivate(card: string, steps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome {
+        this.results.push({ type: "use", what: card });
+        return this.applyPowers(card, steps, asUid, partial);
     }
 
     // Who may act on a resumed obligation: for a Justice reached by a use, the minions in the territory it was used from (the World's, if it borrowed Justice); otherwise any of the player's.
-    private eligibleMinionsForOwed(owed: Owed): IPieceRef[] {
-        if (owed.uid !== "11" || owed.how === "play" || owed.how === "play21") {
+    private eligibleMinionsForOwed(token: string): IPieceRef[] {
+        const [uid, how] = token.split(".");
+        if (uid !== "11" || how === "play" || how === "play21") {
             return this.eligibleMinionsForPlay();
         }
-        const loc = this.findCardCell(owed.how === "use21" ? "21" : "11");
+        const loc = this.findCardCell(how === "use21" ? "21" : "11");
         return loc === undefined ? [] : this.eligibleMinionsForActivate(loc);
     }
 
-    // Applies a submission's power segments card by card (the head card, a World's borrowed card, a Fool's revealed card) straight off the string, then settles whatever
-    // that leaves owed. `uid` undefined means the revealed card was declined. Returns what is still owed, or undefined if it stopped early (a preview's unfinished step or Fool flip).
-    private applyPowers(uid: string | undefined, owed: Owed[], allSteps: IStep[], asUid: string | undefined, partial: boolean, how?: string): Owed[] | undefined {
+    // Applies a submission's power segments card by card (the head card, a World's borrowed card) straight off the string. `uid` undefined means the revealed card was declined.
+    // What it leaves for move() to continue - the Fool used, a High Priestess round, Justice's trade - comes back as the outcome; "stopped" is a preview's unfinished step.
+    private applyPowers(uid: string | undefined, allSteps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome {
         // A skip only names the power left unused; the step that follows it says everything that happens.
         const steps = allSteps.filter(step => step.action !== "skip");
         const chained = steps.length + (asUid !== undefined ? 1 : 0) > 1;
@@ -5461,11 +5434,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             return true;
         };
-        // The Fool's flip isn't one of the move's steps: it takes no segment, so it gets no frame and joins the last step's group.
-        const flip = (): void => {
-            this.hidden.push({ type: "flip", grouped: chained, joinsGroup: true });
-        };
-        const run = (card: string): "done" | "paused" | "stopped" => {
+        const run = (card: string): PowerOutcome => {
             if (card === "21") {
                 // The World's own step takes no segment: the borrowed card is named in the head.
                 if (asUid === undefined) {
@@ -5476,39 +5445,18 @@ export class GnosticaGame extends GameBaseSequenced {
                 return run(asUid);
             }
             if (card === "00") {
-                if (partial) {
-                    return "stopped";
-                }
-                if (this.checkFool() !== undefined) {
-                    // Nothing left to flip: both flips are spent.
-                    return "done";
-                }
-                flip();
-                owed.push({ uid: "00", done: 1 });
-                return "paused";
+                return "fool";
             }
             if (card === "02") {
-                const round2 = owed[owed.length - 1]?.uid === "02";
+                // No segment: the round is skipped.
                 if (at >= steps.length) {
-                    // No segment: the round is skipped.
-                    if (round2) {
-                        owed.pop();
-                    }
                     return "done";
                 }
                 const step = steps[at++];
-                if (!count(() => {
+                return count(() => {
                     this.cmdDiscard(step);
                     return true;
-                })) {
-                    return "stopped";
-                }
-                if (round2) {
-                    owed.pop();
-                    return "done";
-                }
-                owed.push({ uid: "02", done: 1 });
-                return "paused";
+                }) ? "hp" : "stopped";
             }
             const sameTarget = MAJOR_ARCANA[card]?.sameTargetShortcut === true;
             for (let idx = 0; at < steps.length; idx++) {
@@ -5519,43 +5467,68 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 // Justice's trade happens on commit, so its attack waits for the next submission.
                 if (card === "11" && step.action === "trade") {
-                    owed.push({ uid: "11", done: 1, how });
-                    return "paused";
+                    return "trade";
                 }
-            }
-            // A resumed Justice attack is the last of what was owed.
-            if (card === "11" && owed[owed.length - 1]?.uid === "11") {
-                owed.pop();
             }
             return "done";
         };
-        // A Fool exposed once its revealed card is used or declined flips again by itself; a High Priestess round needs its own submission.
-        const settle = (): Owed[] | undefined => {
-            for (let top = owed[owed.length - 1]; top !== undefined && top.uid === "00"; top = owed[owed.length - 1]) {
-                if (top.done >= 2) {
-                    owed.pop();
-                    continue;
-                }
-                if (partial) {
-                    return undefined;
-                }
-                if (this.checkFool() !== undefined) {
-                    owed.pop();
-                    continue;
-                }
-                flip();
-                top.done++;
-                return owed;
-            }
-            return owed;
-        };
         const outcome = uid === undefined ? "done" : run(uid);
-        const stillOwed = outcome === "stopped" ? undefined : outcome === "paused" ? owed : settle();
         // Frames only matter to a move of 2+ steps; one step's frame is just the current state.
         if (counted < 2) {
             this.frames = [];
         }
-        return stillOwed;
+        return outcome;
+    }
+
+    // Once a committed submission's powers are applied, settles what the turn still owes (Fool flips, a High Priestess round, Justice's attack) from the tokens in this.continued
+    // and returns the tokens it leaves. A flip is made here, after the card's own effects, and joins the last result group when the submission was a chain.
+    private continueTurn(card: string, allSteps: IStep[], asUid: string | undefined, how: string, outcome: PowerOutcome): string[] {
+        const owed = this.continued.filter(t => t !== "last");
+        const top = (): string | undefined => owed[owed.length - 1];
+        const steps = allSteps[0]?.action === "decline" ? [] : allSteps.filter(step => step.action !== "skip");
+        const chained = steps.length + (asUid !== undefined ? 1 : 0) > 1;
+        const flip = (): void => {
+            const result: APMoveResult = { type: "deckDraw", what: this.fool().uid, from: "fool" };
+            const last = this.results[this.results.length - 1];
+            if (!chained) {
+                this.results.push(result);
+            } else if (last?.type === "_group") {
+                last.results.push(result);
+            } else {
+                this.results.push({ type: "_group", who: this.currplayer, results: [result] });
+            }
+        };
+        if (outcome === "fool" && this.checkFool() === undefined) {
+            flip();
+            owed.push("00.1");
+            return owed;
+        }
+        if (outcome === "trade") {
+            // How the play was reached decides who may attack: used or played, through the World or not.
+            owed.push(`11.${how}`);
+            return owed;
+        }
+        if (outcome === "hp") {
+            if (top() !== "02") {
+                owed.push("02");
+                return owed;
+            }
+            owed.pop();
+        } else if ((card === "02" || card === "11") && top()?.split(".")[0] === card) {
+            // A skipped second round, a made Justice attack, or a declined Justice attack.
+            owed.pop();
+        }
+        // A Fool exposed once its revealed card is used or declined flips again by itself; a High Priestess round needs its own submission.
+        for (let token = top(); token?.startsWith("00."); token = top()) {
+            const flips = Number(token.split(".")[1]);
+            if (flips < 2 && this.checkFool() === undefined) {
+                flip();
+                owed[owed.length - 1] = `00.${flips + 1}`;
+                return owed;
+            }
+            owed.pop();
+        }
+        return owed;
     }
 
     // One ordinary power segment: false while a preview's step is still unfinished (its arguments, or the minion it needs, aren't chosen yet).
@@ -5575,20 +5548,16 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // What resumes a persisted Fool or High Priestess obligation: the revealed card used or declined, or the second round.
-    private resumePowers(play: IPowerPlay, partial: boolean): Owed[] | undefined {
-        const pending = play.headArg;
+    private resumePowers(card: string, steps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome | undefined {
         // A bare resume seed, nothing typed yet, has nothing to apply - except a revealed Fool's flip or a known World borrow, which resolve on their own.
-        if (play.steps.length === 0 && pending !== "00" && !(play.asUid !== undefined && pending === "21")) {
+        if (steps.length === 0 && card !== "00" && !(asUid !== undefined && card === "21")) {
             return undefined;
         }
-        if (play.steps[0]?.action === "decline") {
-            this.results.push({ type: "announce", payload: ["decline", pending] });
-            if (pending === "11") {
-                play.owed.pop();
-            }
-            return this.applyPowers(undefined, play.owed, [], play.asUid, partial);
+        if (steps[0]?.action === "decline") {
+            this.results.push({ type: "announce", payload: ["decline", card] });
+            return this.applyPowers(undefined, [], asUid, partial);
         }
-        return this.applyPlay(play, partial);
+        return this.applyPowers(card, steps, asUid, partial);
     }
 
     private validateActivate(parsed: IParsedMove): IValidationResult {
@@ -5610,10 +5579,10 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // "Play a card from your hand to the discard pile" - same fresh-activation-only note as cmdActivate; legality is validatePlay's own job.
-    private cmdPlay(play: IPowerPlay, partial: boolean): Owed[] | undefined {
-        this.discardPlayedCard(play.headArg);
-        this.results.push({ type: "deckDraw", what: play.headArg, from: "hand" });
-        return this.applyPlay(play, partial);
+    private cmdPlay(card: string, steps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome {
+        this.discardPlayedCard(card);
+        this.results.push({ type: "deckDraw", what: card, from: "hand" });
+        return this.applyPowers(card, steps, asUid, partial);
     }
 
     // The card leaves the hand for the discards before its power runs, so the power sees a hand without it.
@@ -5814,9 +5783,10 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         const pool = this.eligibleMinionsForPlay();
+        // The Fool's token counts its flips done, which is the power the walk resumes at; the others have one power left.
         const stack = tokens.map(token => {
-            const owed = GnosticaGame.owedFromToken(token);
-            return { cardUid: owed.uid, nextStepIndex: owed.done, minions: [...this.eligibleMinionsForOwed(owed)] } as IPowerFrame;
+            const [uid, detail] = token.split(".");
+            return { cardUid: uid, nextStepIndex: uid === "00" ? Number(detail) : 1, minions: [...this.eligibleMinionsForOwed(token)] } as IPowerFrame;
         });
         if (stack[stack.length - 1].cardUid === "00") {
             const revealed = this.discardPile[this.discardPile.length - 1];
@@ -6144,7 +6114,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 return {};
             }
             // The flip itself happens once the move is committed; unlike High Priestess, EVERY flip forces a pause, regardless of whether Fool has another one left.
-            this.hidden.push({ type: "flip" });
             return { forcePause: true };
         }
         const minionRef = istep!.withPiece!;
