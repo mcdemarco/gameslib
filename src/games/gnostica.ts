@@ -4954,8 +4954,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return drawn;
     }
 
-    private checkFool(): PowerFailure | undefined {
-        return (this.drawPile.length === 0 && this.discardPile.length === 0) ? { key: "DRAW_PILE_EMPTY" } : undefined;
+    // The Fool reshuffles the discards into an empty deck, so it can flip as long as either pile holds a card.
+    private foolCanFlip(): boolean {
+        return this.drawPile.length > 0 || this.discardPile.length > 0;
     }
 
     // Fool: flip the top draw-pile card straight to discard; dispatching its power is the caller's job (the engine's full per-card dispatcher).
@@ -5131,7 +5132,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 this.results.push({ type: "_group", who: this.currplayer, results: [result] });
             }
         };
-        if (outcome === "fool" && this.checkFool() === undefined) {
+        if (outcome === "fool" && this.foolCanFlip()) {
             flip();
             owed.push("00.1");
             return owed;
@@ -5154,7 +5155,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // A Fool exposed once its revealed card is used or declined flips again by itself; a High Priestess round needs its own submission.
         for (let token = top(); token?.startsWith("00."); token = top()) {
             const flips = Number(token.split(".")[1]);
-            if (flips < 2 && this.checkFool() === undefined) {
+            if (flips < 2 && this.foolCanFlip()) {
                 flip();
                 owed[owed.length - 1] = `00.${flips + 1}`;
                 return owed;
@@ -5741,8 +5742,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { forcePause: stepIndex + 1 < totalSteps };
         }
         if ("special" in step && step.special === "fool") {
-            const failure = this.checkFool();
-            if (failure) {
+            if (!this.foolCanFlip()) {
                 // Nothing to flip: complete.  Validation already rejected the root Fool's own untouched first flip.
                 return {};
             }
@@ -5823,13 +5823,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return { failed: false };
         }
         if ("special" in step && step.special === "fool") {
-            const failure = this.checkFool();
-            if (failure) {
-                if (isFreshRootFool) {
-                    // The ROOT Fool card's own untouched first flip stays a hard rejection.
-                    return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${failure.key}`, failure.params) } };
-                }
-                // Anywhere else, gracefully complete instead - there's nothing left to reveal.
+            // The ROOT Fool card's own untouched first flip with nothing to flip stays a hard rejection; anywhere else it completes gracefully, as there is nothing left to reveal.
+            if (!this.foolCanFlip() && isFreshRootFool) {
+                return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY") } };
             }
             return { failed: false };
         }
