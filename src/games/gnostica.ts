@@ -2269,7 +2269,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Pick one value from a small labeled set: available is plain, unavailable (a `disabledReason`, shared with minorModeAvailability) is crossed out, the `current` one is greyed.
     private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
         return options.map(({ value, label, glyph, glyphPosition, disabledReason }) => {
-            const button: ButtonBarButton = { value: `${prefix}_${value}` };
+            const button: ButtonBarButton = { value: `${disabledReason === undefined ? "" : "_disabled_"}${prefix}_${value}` };
             if (label !== undefined) {
                 button.label = label;
             }
@@ -3654,18 +3654,13 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // "minion_<ref>" - offered whenever 2+ of the acting player's pieces are eligible and none has been picked yet; types just the ref.
     private clickMinionButton(parsed: IParsedMove, ref: string): string | IClickResult {
-        const { current, advanced: pending } = this.parsePendingStep(parsed);
-        if (pending === undefined || !pending.minionAmbiguous || this.facingOpen(current, pending)) {
+        const pending = this.parsePendingStep(parsed).advanced;
+        if (pending === undefined) {
             return this.noop(parsed);
         }
         // Resolved against minionCandidates (currently shown), not the full minions pool - a stale move string shouldn't resolve against pieces no longer on offer.
         const resolved = pending.game.resolvePieceRef(ref, pending.minionCandidates);
         if (resolved.kind !== "ok") {
-            return this.noop(parsed);
-        }
-        const clickedPiece = pending.game.getPiece(resolved.ref);
-        const rodReason = this.rodNeedsFacingReason(pending.suitUid, clickedPiece);
-        if (rodReason !== undefined) {
             return this.noop(parsed);
         }
         const minionRef = pending.game.pieceRefStr(resolved.ref, pending.minions);
@@ -3674,11 +3669,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // "orientpick_<ref>" - orient's own minion-picker (orient has no IPendingStep to resolve against, so it can't reuse "minion_"); facing is a separate click.
     private clickOrientPickButton(parsed: IParsedMove, ref: string): string | IClickResult {
-        if (parsed.head?.toLowerCase() !== "orient") {
-            return this.noop(parsed);
-        }
         const resolved = this.resolvePieceRef(ref);
-        if (resolved.kind !== "ok" || this.getPiece(resolved.ref).owner !== this.currplayer) {
+        if (resolved.kind !== "ok") {
             return this.noop(parsed);
         }
         return `orient ${this.pieceRefStr(resolved.ref)}${(parsed.announceLast ? " last" : "")}`;
@@ -3691,27 +3683,10 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.noop(parsed);
         }
         if (pending.special === "hermitTeleport") {
-            if (stepHermitMode(pending.istep) !== undefined) {
-                return this.noop(parsed);
-            }
             return pending.game.buildTargetedHermitMove(pending, ref);
         }
         if (pending.special === "orientAny" || pending.special === "tradeHands" || pending.special === "hierophantReplace") {
-            if (pending.istep.targetPiece !== undefined) {
-                return this.noop(parsed);
-            }
             return pending.game.buildSpecialTargetMove(pending, ref) ?? this.noop(parsed);
-        }
-        if (pending.suitUid === undefined || this.pendingMode(pending) !== undefined) {
-            return this.noop(parsed);
-        }
-        // Same per-mode availability check the old mode_ buttons used - a struck-through candidate must still reject the click, not build a doomed move.
-        const clickedMode = pending.suitUid === "C"
-            ? (ref === "own" || ref === "new" ? ref : "enemy")
-            : (ref.includes(".") ? "piece" : "tile");
-        const reason = pending.game.minorModeAvailability(pending).get(clickedMode);
-        if (reason !== undefined) {
-            return this.noop(parsed);
         }
         return pending.game.buildTargetedStepMove(pending, ref);
     }
@@ -3719,12 +3694,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Swords "piece" (attack) pips - a button set rather than a click-cycled arg, always rebuilt against the CURRENT target.
     private clickPipsButton(parsed: IParsedMove, n: string): string | IClickResult {
         const pending = this.parsePendingStep(parsed).advanced;
-        if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "piece") {
-            return this.noop(parsed);
-        }
-        // An amount that isn't offered, is crossed out, or is already the chosen one does nothing.
-        const option = this.swordsPipsOptions(pending).find(o => o.value === n);
-        if (option === undefined || option.disabledReason !== undefined || pending.istep.amount === parseInt(n, 10)) {
+        if (pending === undefined) {
             return this.noop(parsed);
         }
         return pending.game.stepMove(pending, { targetPiece: pending.istep.targetPiece!, amount: parseInt(n, 10) });
@@ -3732,19 +3702,12 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Stage 1 of magicianChoice - picks the suit letter, landing in the head as "as <suit>"; every following click then uses ordinary suit-mode machinery.
     private clickMagicianButton(parsed: IParsedMove, suit: string): string | IClickResult {
-        const pending = this.parsePendingStep(parsed).advanced;
-        if (pending === undefined || pending.special !== "magicianChoice") {
-            return this.noop(parsed);
-        }
         // The button's own suffix always comes from ALL_SUITS, so it's a real MinorSuitUid even though this parse can't prove it.
         return this.pickleMove({ ...parsed, asSuit: suit as MinorSuitUid });
     }
 
     // The count-picker buttons offered once "discard" is the live head and no "draw <n>" suffix has been chosen yet; always rebuilt from the current discard uids.
     private clickDrawCountButton(parsed: IParsedMove, n: string): string | IClickResult {
-        if (parsed.head !== "discard") {
-            return this.noop(parsed);
-        }
         const via = parsed.viaUid !== undefined ? ` via ${parsed.viaUid}` : "";
         return ["discard", ...(parsed.steps[0]?.cardList ?? []), "draw", n].join(" ") + via + (parsed.announceLast ? " last" : "");
     }
@@ -3752,7 +3715,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // High Priestess's count-picker - mirrors drawcount_ but appends onto the CURRENT power step's own istep, not the top-level move's args.
     private clickHpDrawButton(parsed: IParsedMove, n: string): string | IClickResult {
         const pending = this.parsePendingStep(parsed).advanced;
-        if (pending === undefined || pending.special !== "highPriestess") {
+        if (pending === undefined) {
             return this.noop(parsed);
         }
         // Picking a count always completes this step - whatever's already been discarded is sitting in the step's own cardList.

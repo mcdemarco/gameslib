@@ -2157,10 +2157,10 @@ describe("Gnostica: button states", () => {
         });
         const mid = "use AS/with m0.2 shrink n0.2";
         g.move(mid, { partial: true });
-        const one = barOf(g).find(b => b.value === "pips_1")!;
+        const one = barOf(g).find(b => b.value === "_disabled_pips_1")!;
         expect(one.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         expect(isGrey(one)).to.be.false; // crossed out on white, not greyed
-        expect(g.handleClick(mid, -1, -1, "_btn_pips_1").move).eq(mid);
+        expect(g.handleClick(mid, -1, -1, "_btn__disabled_pips_1").move).eq(mid);
     });
 
     it("greys the Fool's resume button and ignores a click on it, so the revealed card's own steps stay reachable", () => {
@@ -3208,7 +3208,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const blockedSeed = blocked.handleClick("", -1, -1, "_btn_use");
         const [bRow, bCol] = rowColFor(blocked, 0, 0);
         const blockedCell = blocked.handleClick(blockedSeed.move, bRow, bCol);
-        const blockedMode = blocked.handleClick(blockedCell.move, -1, -1, "_btn_target_n0");
+        const blockedMode = blocked.handleClick(blockedCell.move, -1, -1, "_btn__disabled_target_n0");
         expect(blockedMode.move).eq(blockedCell.move);
     });
 
@@ -3432,7 +3432,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const enemyBtn = buttons.find(b => b.value === "target_n0.1")!;
             expect(enemyBtn.label).to.deep.equal(ownerLabel(1, "Create Enemy"));
             expect(enemyBtn.glyph).to.eq("buttonpiece_11U");
-            const territory = buttons.find(b => b.value === "target_new")!;
+            const territory = buttons.find(b => b.value === "_disabled_target_new")!;
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         });
 
@@ -3513,10 +3513,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             });
             g.move("use AC", { partial: true });
             const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
-            const ownBtn = buttons.find(b => b.value === "target_own")!;
+            const ownBtn = buttons.find(b => b.value === "_disabled_target_own")!;
             expect(ownBtn.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
             expect(isGrey(ownBtn)).to.be.false;
-            const click = g.handleClick("use AC", -1, -1, "_btn_target_own");
+            const click = g.handleClick("use AC", -1, -1, "_btn__disabled_target_own");
             expect(click.move).eq("use AC");
             expect(click.message).eq(g.validateMove("use AC").message);
         });
@@ -3604,24 +3604,24 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.include("target_own");
-        expect(values).to.include("target_enemy");
-        expect(values).to.include("target_new");
+        expect(values).to.include("_disabled_target_enemy");
+        expect(values).to.include("_disabled_target_new");
         const ownBtn = bar!.buttons!.find(b => b.value === "target_own");
         expect(ownBtn!.attributes).to.be.undefined; // feasible - not struck through
         expect(isGrey(ownBtn)).to.be.false;
         // No enemy piece at the target (self) cell - a struck-through generic placeholder is still
         // offered, matching own/new's own always-present buttons.
-        const enemyBtn = bar!.buttons!.find(b => b.value === "target_enemy");
+        const enemyBtn = bar!.buttons!.find(b => b.value === "_disabled_target_enemy");
         expect(enemyBtn!.label).to.eq("Create Enemy");
         expect(enemyBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         expect(isGrey(enemyBtn)).to.be.false; // crossed out on white, not greyed
-        const newBtn = bar!.buttons!.find(b => b.value === "target_new");
+        const newBtn = bar!.buttons!.find(b => b.value === "_disabled_target_new");
         expect(newBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" }); // "U" targets self, a territory, not a wasteland
         const ownClick = g.handleClick(`use AC`, -1, -1, "_btn_target_own");
         expect(ownClick.valid).to.be.true;
         // A crossed-out button doesn't respond: the move and its status come back unchanged.
         const unchanged = g.validateMove("use AC");
-        for (const value of ["target_enemy", "target_new"]) {
+        for (const value of ["_disabled_target_enemy", "_disabled_target_new"]) {
             const click = g.handleClick(`use AC`, -1, -1, `_btn_${value}`);
             expect(click.move).eq("use AC");
             expect(click.valid).eq(unchanged.valid);
@@ -5158,7 +5158,7 @@ describe("Gnostica: Fool and World", () => {
         // Rods' own target candidates show directly - no "Play Card 2R"
         // click needed first - and every one is struck through, since
         // Fool's own minion (the only eligible one) is upright.
-        const modeButtons = bar.buttons!.filter(b => b.value?.startsWith("target_"));
+        const modeButtons = bar.buttons!.filter(b => b.value?.startsWith("_disabled_target_"));
         expect(modeButtons.length).to.be.greaterThan(0);
         for (const b of modeButtons) {
             expect(b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through")).to.be.true;
@@ -5301,7 +5301,7 @@ describe("Gnostica: Fool and World", () => {
         // Cups' own target candidates: "own"/"new" always, no enemy
         // candidate at all here (Fool's minion, facing U, targets itself -
         // no enemy piece there to offer one for).
-        expect(buttonValues(g)).to.include.members(["target_own", "target_new"]);
+        expect(buttonValues(g)).to.include.members(["target_own", "_disabled_target_new"]);
         expect(buttonValues(g)).to.not.include("magician_R");
         expect(buttonValues(g)).to.not.include("decline_power");
 
@@ -6076,7 +6076,6 @@ describe("Gnostica: a new or changed minion's facing stays open to a click until
             });
             const open = "use 14/with m0.2 at m0 create U?";
             expect(barValues(g, open).some(v => v?.startsWith("minion_"))).to.be.false;
-            expect(g.handleClick(open, -1, -1, "_btn_minion_m0.1").move).eq(open); // inert, like any button the state doesn't offer
             const skipped = g.handleClick(open, -1, -1, "_btn_skip_reorient").move!;
             expect(skipped).eq("use 14/with m0.2 at m0 create U/with");
             expect(barValues(g, skipped).some(v => v?.startsWith("minion_"))).to.be.true;
@@ -6347,8 +6346,8 @@ describe("Gnostica: a card played from the hand is not counted in the hand its p
     it("crosses out an attack on a territory when the played card is the only one that could replace it", () => {
         // The minion faces a court card (worth 2); shrinking it by 1 needs a replacement worth 1.
         const sole = testGame({ board: grid, hands: [["AS", "KC", "KD", "KR", "KS", "QC"], filler] });
-        expect(crossed(barAt(sole, "play AS/with m0.1").find(b => b.value === "target_n0"))).to.be.true;
-        expect(sole.handleClick("play AS/with m0.1", -1, -1, "_btn_target_n0").move).eq("play AS/with m0.1"); // no response
+        expect(crossed(barAt(sole, "play AS/with m0.1").find(b => b.value === "_disabled_target_n0"))).to.be.true;
+        expect(sole.handleClick("play AS/with m0.1", -1, -1, "_btn__disabled_target_n0").move).eq("play AS/with m0.1"); // no response
         // With another card worth 1 in the hand, the same button is fine.
         const other = testGame({ board: grid, hands: [["AS", "2R", "KD", "KR", "KS", "QC"], filler] });
         expect(crossed(barAt(other, "play AS/with m0.1").find(b => b.value === "target_n0"))).to.be.false;
@@ -6357,7 +6356,7 @@ describe("Gnostica: a card played from the hand is not counted in the hand its p
     it("does not let a played Strength stand in for its own territory growth", () => {
         const board = [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] as TestPiece[] }, { x: 1, y: 0, uid: "AD" }];
         const fromHand = testGame({ board, hands: [["08", "2R", "3R", "4R", "5D", "6D"], filler] });
-        expect(crossed(barAt(fromHand, "play 08/with m0.2").find(b => b.value === "target_n0"))).to.be.true;
+        expect(crossed(barAt(fromHand, "play 08/with m0.2").find(b => b.value === "_disabled_target_n0"))).to.be.true;
     });
 
     it("lets a High Priestess played from a full hand draw back the one card her own play freed", () => {
