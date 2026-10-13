@@ -3658,22 +3658,12 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pending === undefined) {
             return this.noop(parsed);
         }
-        // Resolved against minionCandidates (currently shown), not the full minions pool - a stale move string shouldn't resolve against pieces no longer on offer.
-        const resolved = pending.game.resolvePieceRef(ref, pending.minionCandidates);
-        if (resolved.kind !== "ok") {
-            return this.noop(parsed);
-        }
-        const minionRef = pending.game.pieceRefStr(resolved.ref, pending.minions);
-        return pending.game.buildAnchorMove(pending, minionRef);
+        return pending.game.buildAnchorMove(pending, ref);
     }
 
     // "orientpick_<ref>" - orient's own minion-picker (orient has no IPendingStep to resolve against, so it can't reuse "minion_"); facing is a separate click.
     private clickOrientPickButton(parsed: IParsedMove, ref: string): string | IClickResult {
-        const resolved = this.resolvePieceRef(ref);
-        if (resolved.kind !== "ok") {
-            return this.noop(parsed);
-        }
-        return `orient ${this.pieceRefStr(resolved.ref)}${(parsed.announceLast ? " last" : "")}`;
+        return `orient ${ref}${parsed.announceLast ? " last" : ""}`;
     }
 
     // The unified candidate list for a fresh suit-power step, hermitTeleport, or an ambiguous orientAny/tradeHands/hierophantReplace target - one click supplies it directly.
