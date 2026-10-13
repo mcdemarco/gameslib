@@ -424,11 +424,6 @@ export class GnosticaGame extends GameBaseSequenced {
     public biddingPool: string[] | undefined;
     public turnOrder!: playerid[];
 
-    // How many tied rounds have happened so far (0-indexed) - biddingPool grows by `numplayers` cards every round, so this is exact mid-"bidding".
-    public get bidRound(): number {
-        return Math.floor((this.biddingPool?.length ?? 0) / this.numplayers);
-    }
-
     // How many players have already redrawn - reads the last REAL commit's hands (this.stack's top), immune to a live preview's own in-progress mutation.
     public get redrawPos(): number {
         return this.stack[this.stack.length - 1].hands.filter(h => h.length === 6).length;
@@ -5262,20 +5257,6 @@ export class GnosticaGame extends GameBaseSequenced {
         }
     }
 
-    // Top step classification for validatePowerSteps
-    private static classifyStep(step: PowerStep, steps: IStep[], i: number): "decline" | "world" | "fool" | "step" {
-        if (steps[i]?.action === "decline") {
-            return "decline";
-        }
-        if ("special" in step && step.special === "worldUseAny") {
-            return "world";
-        }
-        if ("special" in step && step.special === "fool") {
-            return "fool";
-        }
-        return "step";
-    }
-
     // The action a plain power's step is spelled with (create/move/grow, an attack is "shrink", or a special's own verb); undefined for Fool/World/High Priestess/Magician.
     private static powerAction(power: PowerStep): string | undefined {
         if ("primitive" in power) {
@@ -5412,7 +5393,10 @@ export class GnosticaGame extends GameBaseSequenced {
             const cardDef = this.resolveCardDef(top.cardUid);
             const stepIndex = top.nextStepIndex;
             const step = cardDef.powers[stepIndex];
-            const kind = GnosticaGame.classifyStep(step, steps, i);
+            const kind = steps[i]?.action === "decline" ? "decline"
+                : "special" in step && step.special === "worldUseAny" ? "world"
+                : "special" in step && step.special === "fool" ? "fool"
+                : "step";
             // The ROOT's own untouched first flip is the one case that stays a hard rejection.
             const isFreshRootFool = kind === "fool" && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
             if (kind === "decline") {

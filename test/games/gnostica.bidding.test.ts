@@ -83,7 +83,6 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1"); // P3 bids 2 of Discs
         // Round 1 ties between P1/P2 (both Kings) - resets everyone, round 2 begins.
         expect(g.phase).eq("bidding");
-        expect(g.bidRound).eq(1);
         expect(g.currplayer).eq(1);
         expect(g.bidPositions).to.deep.equal([null, null, null]);
         expect(g.biddingPool!).to.have.members(["KS", "KR", "2D"]);
@@ -92,7 +91,6 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1"); // P2 bids Ace of Rods
         g.move("bid 1"); // P3 bids Ace of Discs - now everyone tied on Ace!
         expect(g.phase).eq("bidding");
-        expect(g.bidRound).eq(2);
         expect(g.biddingPool!.length).eq(6);
 
         g.move("bid 1"); // P1: 2C
@@ -141,7 +139,7 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1"); // P1: King of Swords
         g.move("bid 1"); // P2: King of Rods - ties
         expect(g.phase).eq("bidding"); // round 1 tie, hands still have 1 card each - re-bid, not exhaustion
-        expect(g.bidRound).eq(1);
+        expect(g.biddingPool!.length).eq(2);
         expect(g.hands[0].length).eq(1);
         expect(g.hands[1].length).eq(1);
         expect(g.gameover).eq(false);
@@ -150,7 +148,6 @@ describe("Gnostica: bidding variant, stage 1 (opening bid)", () => {
         g.move("bid 1"); // P2: Ace of Rods - ties again, and now both hands are empty
         expect(g.gameover).eq(true); // exhaustion fired on round 2, not a stalled round 3
         expect(g.winner).to.deep.equal([]);
-        expect(g.bidRound).eq(2);
         expect(g.hands[0]).to.be.empty;
         expect(g.hands[1]).to.be.empty;
         expect(g.biddingPool!).to.have.members(["KS", "KR", "AC", "AR"]);
