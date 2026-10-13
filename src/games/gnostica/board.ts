@@ -29,12 +29,16 @@ export class GnosticaBoard {
         return this.cells;
     }
 
-    public get(x: number, y: number): CellContents | undefined {
-        return this.cells.get(x, y);
+    public get(cell: string): CellContents | undefined {
+        return this.cells.get(...GnosticaBoard.algebraic2coords(cell));
     }
 
-    public has(x: number, y: number): boolean {
-        return this.cells.has(x, y);
+    public has(cell: string): boolean {
+        return this.cells.has(...GnosticaBoard.algebraic2coords(cell));
+    }
+
+    public set(cell: string, contents: CellContents): void {
+        this.cells.set(...GnosticaBoard.algebraic2coords(cell), contents);
     }
 
     public get size(): number {
@@ -62,7 +66,11 @@ export class GnosticaBoard {
     }
 
     // Derived from live board contents every time, never stored; adjacency does NOT chain through neighbouring wastelands.
-    public classify(x: number, y: number): CellClass {
+    public classify(cell: string): CellClass {
+        return this.classifyAt(...GnosticaBoard.algebraic2coords(cell));
+    }
+
+    private classifyAt(x: number, y: number): CellClass {
         const here = this.cells.get(x, y);
         if (here !== undefined && here.card !== undefined) {
             return "territory";
@@ -76,8 +84,12 @@ export class GnosticaBoard {
         return "void";
     }
 
-    // Deletes {x,y}'s stored CellContents once empty - a lingering wasteland cell would never reclassify to void and inflate the bounding box forever.
-    public pruneIfEmpty(x: number, y: number): void {
+    // Deletes the cell's stored CellContents once empty - a lingering wasteland cell would never reclassify to void and inflate the bounding box forever.
+    public pruneIfEmpty(cell: string): void {
+        this.pruneAt(...GnosticaBoard.algebraic2coords(cell));
+    }
+
+    private pruneAt(x: number, y: number): void {
         const t = this.cells.get(x, y);
         if (t !== undefined && t.card === undefined && t.pieces.length === 0) {
             this.cells.delete(x, y);
@@ -88,18 +100,19 @@ export class GnosticaBoard {
     private voidCellsWithPieces(x: number, y: number): string[] {
         const stranded: string[] = [];
         for (const [cx, cy] of [[x, y] as [number, number], ...this.neighbors(x, y)]) {
-            if (this.classify(cx, cy) === "void") {
+            if (this.classifyAt(cx, cy) === "void") {
                 if ((this.cells.get(cx, cy)?.pieces.length ?? 0) > 0) {
                     stranded.push(GnosticaBoard.coords2algebraic(cx, cy));
                 }
-                this.pruneIfEmpty(cx, cy);
+                this.pruneAt(cx, cy);
             }
         }
         return stranded;
     }
 
     // Only legal on a wasteland. Never strands anyone - adding a card only ever promotes void neighbours.
-    public createTerritory(x: number, y: number, card: TarotCard): void {
+    public createTerritory(cell: string, card: TarotCard): void {
+        const [x, y] = GnosticaBoard.algebraic2coords(cell);
         const existing = this.cells.get(x, y);
         if (existing !== undefined) {
             existing.card = card;
@@ -109,7 +122,8 @@ export class GnosticaBoard {
     }
 
     // Removes the card; returns every cell that consequently collapsed into the void while still holding pieces, which the game must remove and stash.
-    public destroyTerritory(x: number, y: number): string[] {
+    public destroyTerritory(cell: string): string[] {
+        const [x, y] = GnosticaBoard.algebraic2coords(cell);
         const t = this.cells.get(x, y)!;
         t.card = undefined;
         if (t.pieces.length === 0) {
@@ -118,18 +132,15 @@ export class GnosticaBoard {
         return this.voidCellsWithPieces(x, y);
     }
 
-    // In-place value change; the cell still has a card throughout, so this never changes classification.
-    public growTerritory(x: number, y: number, newCard: TarotCard): void {
-        this.cells.get(x, y)!.card = newCard;
-    }
-
-    // Same in-place swap as growTerritory; shrinking all the way to nothing is destroyTerritory, not this method.
-    public shrinkTerritory(x: number, y: number, newCard: TarotCard): void {
-        this.growTerritory(x, y, newCard);
+    // In-place value change (grow or shrink); the cell still has a card throughout, so this never changes classification. Shrinking to nothing is destroyTerritory.
+    public updateTerritory(cell: string, newCard: TarotCard): void {
+        this.get(cell)!.card = newCard;
     }
 
     // Moves only the CARD; pieces stay put. Destination is always wasteland, possibly already holding pieces of its own.
-    public pushTerritory(fromX: number, fromY: number, toX: number, toY: number): string[] {
+    public pushTerritory(from: string, to: string): string[] {
+        const [fromX, fromY] = GnosticaBoard.algebraic2coords(from);
+        const [toX, toY] = GnosticaBoard.algebraic2coords(to);
         const src = this.cells.get(fromX, fromY)!;
         const card = src.card!;
 

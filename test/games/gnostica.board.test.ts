@@ -76,21 +76,21 @@ describe("Gnostica: GnosticaBoard classification", () => {
     it("classifies a lone territory's neighbours as wasteland, everything further out as void", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups()));
-        expect(b.classify(0, 0)).eq("territory");
-        expect(b.classify(1, 0)).eq("wasteland");
-        expect(b.classify(-1, 0)).eq("wasteland");
-        expect(b.classify(0, 1)).eq("wasteland");
-        expect(b.classify(0, -1)).eq("wasteland");
-        expect(b.classify(1, 1)).eq("void"); // diagonal - not orthogonally adjacent
-        expect(b.classify(2, 0)).eq("void");
+        expect(b.classify("m0")).eq("territory");
+        expect(b.classify("n0")).eq("wasteland");
+        expect(b.classify("l0")).eq("wasteland");
+        expect(b.classify("m-1")).eq("wasteland");
+        expect(b.classify("m1")).eq("wasteland");
+        expect(b.classify("n-1")).eq("void"); // diagonal - not orthogonally adjacent
+        expect(b.classify("o0")).eq("void");
     });
 
     it("does not chain wasteland-adjacency transitively", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups()));
         // (2,0) is a neighbour of the wasteland (1,0), not of the territory itself
-        expect(b.classify(1, 0)).eq("wasteland");
-        expect(b.classify(2, 0)).eq("void");
+        expect(b.classify("n0")).eq("wasteland");
+        expect(b.classify("o0")).eq("void");
     });
 
     it("builds the standard 3x3 opening layout correctly", () => {
@@ -102,13 +102,13 @@ describe("Gnostica: GnosticaBoard classification", () => {
         }
         for (let x = -1; x <= 1; x++) {
             for (let y = -1; y <= 1; y++) {
-                expect(b.classify(x, y)).eq("territory");
+                expect(b.classify(GnosticaBoard.coords2algebraic(x, y))).eq("territory");
             }
         }
-        expect(b.classify(-2, 0)).eq("wasteland");
-        expect(b.classify(0, -2)).eq("wasteland");
-        expect(b.classify(-2, -2)).eq("void"); // corner-diagonal from the grid
-        expect(b.classify(-2, -1)).eq("wasteland"); // orthogonally touches (-1,-1)
+        expect(b.classify("k0")).eq("wasteland");
+        expect(b.classify("m2")).eq("wasteland");
+        expect(b.classify("k2")).eq("void"); // corner-diagonal from the grid
+        expect(b.classify("k1")).eq("wasteland"); // orthogonally touches (-1,-1)
     });
 });
 
@@ -118,8 +118,8 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         b.store.set(0, 0, new CellContents(aceOfCups()));
         b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "W")]));
 
-        b.createTerritory(1, 0, twoOfCups());
-        const t = b.get(1, 0)!;
+        b.createTerritory("n0", twoOfCups());
+        const t = b.get("n0")!;
         expect(t.card?.uid).eq("2C");
         expect(t.pieces.length).eq(1);
         expect(t.pieces[0].orientation).eq("W");
@@ -128,11 +128,11 @@ describe("Gnostica: GnosticaBoard mutations", () => {
     it("grows/shrinks a territory's card in place without touching its pieces", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
-        b.growTerritory(0, 0, kingOfSwords());
-        expect(b.get(0, 0)!.card?.uid).eq("KS");
-        expect(b.get(0, 0)!.pieces.length).eq(1);
-        b.shrinkTerritory(0, 0, aceOfCups());
-        expect(b.get(0, 0)!.card?.uid).eq("AC");
+        b.updateTerritory("m0", kingOfSwords());
+        expect(b.get("m0")!.card?.uid).eq("KS");
+        expect(b.get("m0")!.pieces.length).eq(1);
+        b.updateTerritory("m0", aceOfCups());
+        expect(b.get("m0")!.card?.uid).eq("AC");
     });
 
     it("destroys a territory and reports the cells that collapse into the void still holding pieces", () => {
@@ -141,11 +141,11 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         b.store.set(0, 0, new CellContents(aceOfCups()));
         b.store.set(1, 0, new CellContents(undefined, [new Piece(2, 1, "U")]));
 
-        const stranded = b.destroyTerritory(0, 0);
+        const stranded = b.destroyTerritory("m0");
         // (1,0) had no other territory neighbour, so it collapses to void with its piece still there.
         expect(stranded).to.deep.equal(["n0"]);
-        expect(b.get(1, 0)!.pieces.length).eq(1);
-        expect(b.has(0, 0)).eq(false);
+        expect(b.get("n0")!.pieces.length).eq(1);
+        expect(b.has("m0")).eq(false);
     });
 
     it("does not evict a wasteland piece if another territory still keeps it adjacent", () => {
@@ -154,9 +154,9 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         b.store.set(2, 0, new CellContents(aceOfCups()));
         b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "U")]));
 
-        expect(b.destroyTerritory(0, 0)).to.deep.equal([]);
-        expect(b.classify(1, 0)).eq("wasteland"); // still adjacent to (2,0)
-        expect(b.get(1, 0)!.pieces.length).eq(1);
+        expect(b.destroyTerritory("m0")).to.deep.equal([]);
+        expect(b.classify("n0")).eq("wasteland"); // still adjacent to (2,0)
+        expect(b.get("n0")!.pieces.length).eq(1);
     });
 
     it("pushes only the card, leaving pieces behind at the departure cell", () => {
@@ -165,10 +165,10 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         // A second territory keeps (0,0) from collapsing to void after the card leaves.
         b.store.set(-1, 0, new CellContents(twoOfCups()));
 
-        b.pushTerritory(0, 0, 1, 0);
-        expect(b.get(0, 0)!.card).to.be.undefined;
-        expect(b.get(0, 0)!.pieces.length).eq(1); // piece stayed behind
-        expect(b.get(1, 0)!.card?.uid).eq("AC");
+        b.pushTerritory("m0", "n0");
+        expect(b.get("m0")!.card).to.be.undefined;
+        expect(b.get("m0")!.pieces.length).eq(1); // piece stayed behind
+        expect(b.get("n0")!.card?.uid).eq("AC");
     });
 
     it("slides a pushed card in under pieces already at the destination", () => {
@@ -177,8 +177,8 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         b.store.set(-1, 0, new CellContents(twoOfCups())); // keeps (0,0) alive after push
         b.store.set(1, 0, new CellContents(undefined, [new Piece(2, 1, "U")]));
 
-        b.pushTerritory(0, 0, 1, 0);
-        const dest = b.get(1, 0)!;
+        b.pushTerritory("m0", "n0");
+        const dest = b.get("n0")!;
         expect(dest.card?.uid).eq("AC");
         expect(dest.pieces.length).eq(1);
         expect(dest.pieces[0].owner).eq(2);
@@ -191,8 +191,8 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         // departure cell has no card next door to keep it a wasteland.
         b.store.set(5, 0, new CellContents(twoOfCups())); // far enough not to help (0,0)
 
-        expect(b.pushTerritory(0, 0, 2, 0)).to.deep.equal(["m0"]);
-        expect(b.get(0, 0)!.pieces.length).eq(1);
+        expect(b.pushTerritory("m0", "o0")).to.deep.equal(["m0"]);
+        expect(b.get("m0")!.pieces.length).eq(1);
     });
 
     // Every existing pushTerritory test above lands the card next to
@@ -212,31 +212,31 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         // cluster rather than a single isolated landing cell.
         b.store.set(5, 0, new CellContents(twoOfCups()));
 
-        b.pushTerritory(1, 0, 4, 0); // King of Swords pushed 3 cells east
+        b.pushTerritory("n0", "q0"); // King of Swords pushed 3 cells east
 
         // Cluster A survives, unaffected by the push.
-        expect(b.classify(-1, 0)).eq("territory");
-        expect(b.classify(0, 0)).eq("territory");
+        expect(b.classify("l0")).eq("territory");
+        expect(b.classify("m0")).eq("territory");
 
         // The departure cell had no piece of its own, so nothing is stored
         // there any more (see CellContents's own docs on what actually
         // gets stored) - it still classifies as wasteland, still adjacent
         // to (0,0)'s card.
-        expect(b.has(1, 0)).eq(false);
-        expect(b.classify(1, 0)).eq("wasteland");
+        expect(b.has("n0")).eq(false);
+        expect(b.classify("n0")).eq("wasteland");
 
         // Genuinely disconnected: (2,0) is adjacent to neither cluster's
         // cards (it's two cells from cluster A's nearest card and two from
         // cluster B's) - (1,0) and (3,0), one cell closer on either side,
         // are each their own cluster's wasteland instead.
-        expect(b.classify(2, 0)).eq("void");
-        expect(b.classify(3, 0)).eq("wasteland");
+        expect(b.classify("o0")).eq("void");
+        expect(b.classify("p0")).eq("wasteland");
 
         // Cluster B: the pushed card landed right beside the pre-existing
         // territory, forming its own genuine 2-cell cluster.
-        expect(b.classify(4, 0)).eq("territory");
-        expect(b.get(4, 0)!.card?.uid).eq("KS");
-        expect(b.classify(5, 0)).eq("territory");
+        expect(b.classify("q0")).eq("territory");
+        expect(b.get("q0")!.card?.uid).eq("KS");
+        expect(b.classify("r0")).eq("territory");
 
         // Both clusters coexist in a single scan of the board, not just
         // whichever one happens to include the first stored entry.
@@ -266,12 +266,12 @@ describe("Gnostica: GnosticaBoard rehydration", () => {
         const fixed = GnosticaBoard.rehydrate(raw.board);
         const revived = new GnosticaBoard(fixed);
 
-        expect(revived.get(0, 0)?.card?.uid).eq("AC");
-        expect(revived.get(0, 0)?.pieces[0].orientation).eq("N");
-        expect(revived.get(1, 0)?.card?.uid).eq("00");
+        expect(revived.get("m0")?.card?.uid).eq("AC");
+        expect(revived.get("m0")?.pieces[0].orientation).eq("N");
+        expect(revived.get("n0")?.card?.uid).eq("00");
         // and the rehydrated instance is a real CellContents with working methods, not a plain object
-        expect(revived.get(0, 0)?.pointValue()).eq(1);
-        expect(revived.get(1, 0)?.pointValue()).eq(3);
+        expect(revived.get("m0")?.pointValue()).eq(1);
+        expect(revived.get("n0")?.pointValue()).eq(3);
     });
 });
 

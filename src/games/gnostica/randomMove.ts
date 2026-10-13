@@ -281,10 +281,10 @@ function emptyNonVoidCells(game: GnosticaGame): [number, number][] {
     const cells: [number, number][] = [];
     for (let x = minX; x <= maxX; x++) {
         for (let y = minY; y <= maxY; y++) {
-            if (game.board.classify(x, y) === "void") {
+            if (game.board.classify(GnosticaBoard.coords2algebraic(x, y)) === "void") {
                 continue;
             }
-            const t = game.board.get(x, y);
+            const t = game.board.get(GnosticaBoard.coords2algebraic(x, y));
             if (t !== undefined && t.pieces.length > 0) {
                 continue;
             }
@@ -332,7 +332,7 @@ function emptyNonVoidCells(game: GnosticaGame): [number, number][] {
 // there.
 export function weightedRandomOrientation(game: GnosticaGame, x: number, y: number, exclude?: Orientation): Orientation {
     const candidates = exclude === undefined ? allOrientations : allOrientations.filter(o => o !== exclude);
-    if (game.board.classify(x, y) !== "wasteland") {
+    if (game.board.classify(GnosticaBoard.coords2algebraic(x, y)) !== "wasteland") {
         return candidates[Math.floor(Math.random() * candidates.length)];
     }
     return weightedPick(candidates, (o) => {
@@ -340,7 +340,7 @@ export function weightedRandomOrientation(game: GnosticaGame, x: number, y: numb
             return 2;
         }
         const [dx, dy] = game.board.delta(o);
-        return game.board.classify(x + dx, y + dy) === "territory" ? 3 : 1;
+        return game.board.classify(GnosticaBoard.coords2algebraic(x + dx, y + dy)) === "territory" ? 3 : 1;
     });
 }
 
@@ -385,7 +385,7 @@ function randomPlaceMove(game: GnosticaGame): string {
         return "";
     }
     // Landing on an existing card is weighted 8x over a bare wasteland cell.
-    const [x, y] = weightedPick(candidates, ([cx, cy]) => game.board.classify(cx, cy) === "territory" ? 8 : 1);
+    const [x, y] = weightedPick(candidates, ([cx, cy]) => game.board.classify(GnosticaBoard.coords2algebraic(cx, cy)) === "territory" ? 8 : 1);
     const orientation = weightedRandomOrientation(game, x, y);
     return `place ${GnosticaBoard.coords2algebraic(x, y)} ${orientation}`;
 }
@@ -693,7 +693,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IPieceRef, sui
                 return pips.map(dist => {
                     const ownWeight = owner === game.currplayer ? 2 : 1;
                     const landsOnTerritory = owner === game.currplayer
-                        && game.board.classify(bx + dx * dist, by + dy * dist) === "territory";
+                        && game.board.classify(GnosticaBoard.coords2algebraic(bx + dx * dist, by + dy * dist)) === "territory";
                     return { fields: { targetPiece: ref, amount: dist }, weight: ownWeight * (landsOnTerritory ? 2 : 1) };
                 });
             });

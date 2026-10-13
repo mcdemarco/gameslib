@@ -870,7 +870,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private showUnrevealed(): void {
         for (const effect of this.hidden) {
             if (effect.type === "territory") {
-                this.board.createTerritory(...xy(effect.cell), UNREVEALED_CARD);
+                this.board.createTerritory(effect.cell, UNREVEALED_CARD);
             } else if (effect.type === "trade") {
                 // The player sees their old cards in the other hand, and none of the ones they get.
                 const owner = effect.target.piece.owner;
@@ -4061,7 +4061,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // "play" has no cell of its own to re-pick the way "use" does - a board click here only ever means pending-step cycling (handled above), so the move's own prompt stands.
                 return this.ignoredClick(parsed);
             }
-            const t = this.board.get(x, y);
+            const t = this.board.get(cell);
             if (t?.card === undefined) {
                 return this.ignoredClick(parsed, i18next.t("apgames:validation.gnostica.NO_CARD_THERE", { cell }));
             }
@@ -4267,11 +4267,10 @@ export class GnosticaGame extends GameBaseSequenced {
         // A trailing "?" (still-prepopulated, not yet deliberate) makes no difference to the actual piece created; strip it the same way here.
         const orientationStr = orientationToken.endsWith("?") ? orientationToken.slice(0, -1) : orientationToken;
         const orientation = orientationStr as Orientation;
-        const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
-        let territory = this.board.get(x, y);
+        let territory = this.board.get(cellStr);
         if (territory === undefined) {
             territory = new CellContents(undefined);
-            this.board.store.set(x, y, territory);
+            this.board.set(cellStr, territory);
         }
         // Your very first piece comes from your own stash, same as every other piece that ever enters play - it isn't manufactured out of nothing.
         this.takeFromStash(this.currplayer, 1);
@@ -4287,11 +4286,10 @@ export class GnosticaGame extends GameBaseSequenced {
         if (cellStr === undefined) {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_CELL_REQUIRED") };
         }
-        const [x, y] = GnosticaBoard.algebraic2coords(cellStr);
-        if (this.board.classify(x, y) === "void") {
+        if (this.board.classify(cellStr) === "void") {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_VOID", { cell: cellStr }) };
         }
-        const contents = this.board.get(x, y);
+        const contents = this.board.get(cellStr);
         if (contents !== undefined && contents.pieces.length > 0) {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.PLACE_OCCUPIED", { cell: cellStr }) };
         }
@@ -4480,11 +4478,11 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     public cellContents(cell: string): CellContents | undefined {
-        return this.board.get(...GnosticaBoard.algebraic2coords(cell));
+        return this.board.get(cell);
     }
 
     public classifyCell(cell: string): CellClass {
-        return this.board.classify(...GnosticaBoard.algebraic2coords(cell));
+        return this.board.classify(cell);
     }
 
     // Where a ref's piece stands in its cell: the first piece that looks the same, since pieces that look the same are interchangeable.
@@ -4516,7 +4514,7 @@ export class GnosticaGame extends GameBaseSequenced {
             for (const piece of [...this.cellContents(cell)!.pieces]) {
                 this.returnToStash({ cell, piece });
             }
-            this.board.pruneIfEmpty(...xy(cell));
+            this.board.pruneIfEmpty(cell);
         }
     }
 
@@ -4585,7 +4583,7 @@ export class GnosticaGame extends GameBaseSequenced {
         let t = this.cellContents(targetCell);
         if (t === undefined) {
             t = new CellContents(undefined);
-            this.board.store.set(...GnosticaBoard.algebraic2coords(targetCell), t);
+            this.board.set(targetCell, t);
         }
         t.add(new Piece(this.currplayer, 1, orientation));
     }
@@ -4598,14 +4596,14 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private createTerritory(targetCell: string, cardUid: string): void {
-        this.board.createTerritory(...GnosticaBoard.algebraic2coords(targetCell), takeFromPile(this.hands[this.currplayer - 1], cardUid));
+        this.board.createTerritory(targetCell, takeFromPile(this.hands[this.currplayer - 1], cardUid));
     }
 
     // Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
     private createTerritoryFromDeck(targetCell: string): TarotCard {
         this.reshuffle();
         const card = cardByUid(this.drawPile.shift() as string);
-        this.board.createTerritory(...GnosticaBoard.algebraic2coords(targetCell), card);
+        this.board.createTerritory(targetCell, card);
         return card;
     }
 
@@ -4652,7 +4650,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const moved = destroyed ? undefined : this.cellContents(targetRef.cell)!.removeAt(this.pieceIndex(targetRef));
         // The source never gets a piece back, so an emptied wasteland must not linger in the board's stored map.
-        this.board.pruneIfEmpty(...xy(targetRef.cell));
+        this.board.pruneIfEmpty(targetRef.cell);
         if (moved === undefined) {
             return;
         }
@@ -4662,7 +4660,7 @@ export class GnosticaGame extends GameBaseSequenced {
         let destT = this.cellContents(dest);
         if (destT === undefined) {
             destT = new CellContents(undefined);
-            this.board.store.set(...xy(dest), destT);
+            this.board.set(dest, destT);
         }
         destT.add(moved);
     }
@@ -4706,7 +4704,7 @@ export class GnosticaGame extends GameBaseSequenced {
     ): void {
         const minion = this.getPiece(minionRef);
         // Pushing the card out can strand pieces left at the departure cell if nothing else keeps it adjacent to a territory.
-        const evictions = this.board.pushTerritory(...xy(srcCell), ...xy(this.cellBeyond(srcCell, minion.orientation, dist)));
+        const evictions = this.board.pushTerritory(srcCell, this.cellBeyond(srcCell, minion.orientation, dist));
         this.returnEvictedPieces(evictions);
     }
 
@@ -4734,7 +4732,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const t = this.cellContents(targetCell)!;
         const newCard = takeFromPile(this.replacementPile(newCardUid), newCardUid);
         this.discardPile.push((t.card as TarotCard).uid);
-        this.board.growTerritory(...GnosticaBoard.algebraic2coords(targetCell), newCard);
+        this.board.updateTerritory(targetCell, newCard);
     }
 
     // Swords - Attack
@@ -4748,7 +4746,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const resultSize = victim.size - pips;
         if (resultSize === 0) {
             this.returnToStash(targetRef);
-            this.board.pruneIfEmpty(...xy(targetRef.cell));
+            this.board.pruneIfEmpty(targetRef.cell);
             return;
         }
         this.stashOf(victim.owner)[resultSize - 1] -= 1;
@@ -4763,14 +4761,14 @@ export class GnosticaGame extends GameBaseSequenced {
         const oldUid = (t.card as TarotCard).uid;
         const resultValue = current - pips;
         if (resultValue === 0) {
-            const evictions = this.board.destroyTerritory(...GnosticaBoard.algebraic2coords(targetCell));
+            const evictions = this.board.destroyTerritory(targetCell);
             this.discardPile.push(oldUid);
             this.returnEvictedPieces(evictions);
             return;
         }
         const newCard = takeFromPile(this.replacementPile(newCardUid as string), newCardUid as string);
         this.discardPile.push(oldUid);
-        this.board.shrinkTerritory(...GnosticaBoard.algebraic2coords(targetCell), newCard);
+        this.board.updateTerritory(targetCell, newCard);
     }
 
     // Special powers: the major arcana abilities that don't reduce to a suit primitive; chaining a card's own multi-step power list is gnostica.ts's job.
@@ -4794,20 +4792,20 @@ export class GnosticaGame extends GameBaseSequenced {
     ): void {
         const srcT = this.cellContents(targetRef.cell)!;
         const moved = srcT.removeAt(this.pieceIndex(targetRef));
-        this.board.pruneIfEmpty(...xy(targetRef.cell));
+        this.board.pruneIfEmpty(targetRef.cell);
         if (moved.owner === this.currplayer && newOrientation !== undefined) {
             moved.orientation = newOrientation;
         }
         let dt = this.cellContents(destCell);
         if (dt === undefined) {
             dt = new CellContents(undefined);
-            this.board.store.set(...GnosticaBoard.algebraic2coords(destCell), dt);
+            this.board.set(destCell, dt);
         }
         dt.add(moved);
     }
 
     private hermitMoveTerritory(targetCell: string, destCell: string,): void {
-        const evictions = this.board.pushTerritory(...GnosticaBoard.algebraic2coords(targetCell), ...GnosticaBoard.algebraic2coords(destCell));
+        const evictions = this.board.pushTerritory(targetCell, destCell);
         this.returnEvictedPieces(evictions);
     }
 
@@ -6659,10 +6657,11 @@ export class GnosticaGame extends GameBaseSequenced {
     // The rule is that an eliminated player discards their hand.  A decision: Pieces are returned to stash.
     private eliminatePlayer(player: playerid): void {
         for (const [x, y, t] of this.board.entries()) {
+            const cell = GnosticaBoard.coords2algebraic(x, y);
             for (const piece of t.pieces.filter(p => p.owner === player)) {
-                this.returnToStash({ cell: GnosticaBoard.coords2algebraic(x, y), piece });
+                this.returnToStash({ cell, piece });
             }
-            this.board.pruneIfEmpty(x, y);
+            this.board.pruneIfEmpty(cell);
         }
         this.discardPile.push(...this.hands[player - 1]);
         this.discarded.push(...this.hands[player - 1]);
@@ -7061,7 +7060,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const rings = new Map<string, "minion" | "target">();
         // The last match, since a piece that moved or changed hands is added to the end of its cell.
         const ring = (cell: string, kind: "minion" | "target", match: (p: Piece) => boolean) => {
-            const i = (board.get(...xy(cell))?.pieces ?? []).map(match).lastIndexOf(true);
+            const i = (board.get(cell)?.pieces ?? []).map(match).lastIndexOf(true);
             const key = `${cell},${i}`;
             if (i >= 0 && (kind === "target" || !rings.has(key))) {
                 rings.set(key, kind);
@@ -7186,8 +7185,9 @@ export class GnosticaGame extends GameBaseSequenced {
         for (let y = win.minY; y <= win.maxY; y++) {
             const rowCells: string[][] = [];
             for (let x = win.minX; x <= win.maxX; x++) {
-                const cls = board.classify(x, y);
-                const t = board.get(x, y);
+                const cell = GnosticaBoard.coords2algebraic(x, y);
+                const cls = board.classify(cell);
+                const t = board.get(cell);
                 const point = { row: y - win.minY, col: x - win.minX };
                 if (t?.card !== undefined) {
                     const key = GnosticaGame.cardKey(t.cardUid!);

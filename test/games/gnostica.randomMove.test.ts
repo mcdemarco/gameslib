@@ -4,6 +4,7 @@ import { expect } from "chai";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/piece";
 import { CellContents } from "../../src/games/gnostica/cell";
+import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { weightedRandomOrientation, randomOrientMove } from "../../src/games/gnostica/randomMove";
 import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 
@@ -20,7 +21,7 @@ const forceCardAt = (g: GnosticaGame, x: number, y: number, cardFn: () => TarotC
             t.card = undefined;
         }
     }
-    g.board.get(x, y)!.card = target;
+    g.board.get(GnosticaBoard.coords2algebraic(x, y))!.card = target;
 };
 
 // A fixture built via direct board.get(x,y)!.pieces/.card or hands[n]
@@ -92,11 +93,11 @@ function richGame(): GnosticaGame {
     forceCardAt(g, -1, 0, () => major(15)); // The Devil - orientAny x3
     forceCardAt(g, 0, 1, () => major(9));  // The Hermit - hermitTeleport
     forceCardAt(g, 0, -1, () => major(11)); // Justice - tradeHands, attack
-    g.board.get(0, 0)!.pieces = [new Piece(1, 2, "E"), new Piece(2, 1, "U")];
-    g.board.get(1, 0)!.pieces = [new Piece(1, 3, "N")];
-    g.board.get(-1, 0)!.pieces = [new Piece(1, 1, "W"), new Piece(3, 2, "S")];
-    g.board.get(0, 1)!.pieces = [new Piece(1, 2, "U")];
-    g.board.get(0, -1)!.pieces = [new Piece(1, 1, "N"), new Piece(2, 2, "S")];
+    g.board.get("m0")!.pieces = [new Piece(1, 2, "E"), new Piece(2, 1, "U")];
+    g.board.get("n0")!.pieces = [new Piece(1, 3, "N")];
+    g.board.get("l0")!.pieces = [new Piece(1, 1, "W"), new Piece(3, 2, "S")];
+    g.board.get("m-1")!.pieces = [new Piece(1, 2, "U")];
+    g.board.get("m1")!.pieces = [new Piece(1, 1, "N"), new Piece(2, 2, "S")];
     g.hands[0] = ["AC", "5D", "KS", "20", "2R", "9C"];
     g.discardPile = ["3C", "4D", "7S", "AR"];
     return commitFixture(g);
@@ -208,7 +209,7 @@ describe("Gnostica: randomMove()", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(21)); // The World
         forceCardAt(g, 1, 0, () => major(6));  // The Lovers - a real borrow target
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        g.board.get("m0")!.pieces = [new Piece(1, 1, "U")];
         return commitFixture(g);
     }
 
@@ -286,7 +287,7 @@ describe("Gnostica: randomMove()", () => {
         // existing CellContents way out here, so unlike forceCardAt this
         // creates one directly.
         g.board.store.set(11, 10, new CellContents(minor("AC"))); // east of (10,10)
-        expect(g.board.classify(10, 10)).eq("wasteland");
+        expect(g.board.classify("w-10")).eq("wasteland");
         const counts: Record<string, number> = { N: 0, S: 0, E: 0, W: 0, U: 0 };
         for (let i = 0; i < 400; i++) {
             counts[weightedRandomOrientation(g, 10, 10)]++;
@@ -302,7 +303,7 @@ describe("Gnostica: randomMove()", () => {
     // downgrade it after the fact.
     it("randomOrientMove() never generates a no-op (the same facing the piece already has)", () => {
         const g = new GnosticaGame(2);
-        g.board.get(0, 0)!.pieces = [new Piece(1, 1, "U")];
+        g.board.get("m0")!.pieces = [new Piece(1, 1, "U")];
         for (let i = 0; i < 200; i++) {
             const move = randomOrientMove(g);
             expect(move).to.not.eq(undefined);
