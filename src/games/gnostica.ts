@@ -2160,12 +2160,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return { key: "apgames:validation.gnostica.FOOL_FLIP_READY" };
     }
 
-    // The six top-level turn choices, as buttons - a bare click on an already-occupied cell/piece is ambiguous between "orient" and "use", with no way to disambiguate.
-    private isPendingFirstPlacement(): boolean {
-        // validateMove unconditionally rejects "place" once the acting player has ANY board presence, so a live "place" preview can only be their first piece.
-        return this.preview?.head?.toLowerCase() === "place";
-    }
-
     // Which top-level button(s) the partial move (or an owed resume) already reflects; "Declare" is a modifier so it is reported alongside whatever the base action is, not instead of it.
     private highlightedButtonValues(parsed: IParsedMove | undefined): Set<string> {
         const found = new Set<string>();
@@ -2330,10 +2324,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.phase !== "main") {
             return undefined;
         }
-        if (this.isPlaceOnlyState()) {
-            // Only one action is legal here regardless of which case this is - a single bold button, mirroring Magnate's own single-button "Choose" state.
-            return [{ label: "Place", value: "place", attributes: [{ name: "font-weight", value: "bold" }] }];
-        }
         const topLevel = this.buildTopLevelBar();
         const discardCount = this.discardCountBar();
         if (discardCount !== undefined) {
@@ -2367,7 +2357,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // A finished step whose piece can still be turned: board clicks set its facing, so the next step's buttons wait (getActionButtons adds Skip Reorient).
         if (this.preview?.facingOpen === true) {
             const waiting = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
-            return (waiting.length > 0 ? waiting : topLevel) as [ButtonBarButton, ...ButtonBarButton[]];
+            return waiting as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
         // pendingMinor.special === "fool" means Fool flipped and revealed ANOTHER Fool; only the ROOT card's untouched first flip is mandatory, so this nested one is declinable.
@@ -2413,7 +2403,7 @@ export class GnosticaGame extends GameBaseSequenced {
             // A click-only special power whose play has begun (fresh, or a resume once Play is clicked): just the action chosen, since the board or hand click that continues it is no button.
             if (phase !== "owed") {
                 const only: ButtonBarButton[] = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
-                return (only.length > 0 ? only : topLevel) as [ButtonBarButton, ...ButtonBarButton[]];
+                return only as [ButtonBarButton, ...ButtonBarButton[]];
             }
             // A resume not yet begun: none of the ordinary 6 buttons are legal - offer the same self-contained Play/Decline pair the Fool-special branch above does.
             return this.pausedPowerButtons();
@@ -2422,12 +2412,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return pendingMinor.game.stepModeBar(pendingMinor, selected, declareBtn);
     }
 
-    // A live "use"/"play" preview or genuine pendingPower obligation can never collapse to "Place" - a transient zero-piece moment shouldn't misread as a fresh start.
-    private isPlaceOnlyState(): boolean {
-        return (!this.inPowerPlay(this.preview?.head) && !this.hasPiecesOnBoard(this.currplayer)) || this.isPendingFirstPlacement();
-    }
-
-    // Once an action is chosen the bar keeps just it (greyed) and Declare; with no live preview, or nothing chosen, it is the whole ordinary set.
+    // Once an action is chosen the bar keeps just it (greyed) and Declare; the whole ordinary set is only for an empty move or a bare "last".
     private chosenActionBar(topLevel: ButtonBarButton[]): [ButtonBarButton, ...ButtonBarButton[]] {
         const chosen = this.preview === undefined ? [] : topLevel.filter(b => b.value !== undefined && b.value !== "declare" && this.preview!.highlighted.has(b.value));
         if (chosen.length === 0) {
@@ -2437,18 +2422,22 @@ export class GnosticaGame extends GameBaseSequenced {
         return (declare === undefined ? chosen : [...chosen, declare]) as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
-    // The ordinary 6-button top-level choice, with the action already taken greyed per highlightedButtonValues - the fallback bar, and the seed every pendingMinor state further trims.
+    // The ordinary top-level choice (just Place before a player has any piece), with the action already taken greyed per highlightedButtonValues - the fallback bar, and the seed every pendingMinor state further trims.
     private buildTopLevelBar(): ButtonBarButton[] {
-        const topLevel: ButtonBarButton[] = [
-            { label: "Use Territory", value: "use" },
-            { label: "Play Card", value: "play" },
-            { label: "Orient", value: "orient" },
-            { label: "Discard/Draw", value: "discard" },
-            { label: "Pass", value: "pass" },
-        ];
         const highlighted = this.preview?.highlighted ?? this.highlightedButtonValues(undefined);
+        // A live "place" preview is applied to the board, so hasPiecesOnBoard() already looks true; a live "use"/"play" is never a fresh start, however briefly it leaves the player with no pieces.
+        const placeOnly = highlighted.has("place") || (!this.inPowerPlay(this.preview?.head) && !this.hasPiecesOnBoard(this.currplayer));
+        const topLevel: ButtonBarButton[] = placeOnly
+            ? [{ label: "Place", value: "place" }]
+            : [
+                { label: "Use Territory", value: "use" },
+                { label: "Play Card", value: "play" },
+                { label: "Orient", value: "orient" },
+                { label: "Discard/Draw", value: "discard" },
+                { label: "Pass", value: "pass" },
+            ];
         // Declare is offered until someone has declared (committed, or staged in an open turn), and is a toggle, so once on it offers to undo itself rather than sit greyed.
-        if (this.lastTurner === undefined && !this.continued.includes("last")) {
+        if (!placeOnly && this.lastTurner === undefined && !this.continued.includes("last")) {
             topLevel.push({ label: highlighted.has("declare") ? "(Undeclare)" : "(Declare)", value: "declare" });
         }
         // A button the move already reflects is greyed; clicking it would do nothing (see clickActionButton).
@@ -4313,7 +4302,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // A trailing "?" marks the click flow's own seeded default as not yet deliberate - complete:0; a hand-typed "place l0 U" is complete:1.
         // parseMove already guarantees a valid N/E/S/W/U (with or without "?"), so there's nothing left to validate here.
         const prepopulated = orientationToken.endsWith("?");
-        return { valid: true, complete: prepopulated ? 0 : 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+        return { valid: true, complete: prepopulated ? 0 : 1, message: i18next.t(prepopulated ? "apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT" : "apgames:validation._general.VALID_MOVE") };
     }
 
     // "orient <pieceRef> <facing>" - only your own piece; legality is validateOrient's own job.

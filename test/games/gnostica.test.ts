@@ -2579,12 +2579,6 @@ describe("Gnostica: handleClick", () => {
         expect(bar!.buttons![0].value).eq("place");
     });
 
-    // The playground's live-preview mechanism applies a not-yet-submitted
-    // "place" click to this.board for rendering (see move()'s own docs on
-    // `partial`), which would otherwise make hasPiecesOnBoard() look true
-    // before the move is actually committed - isPendingFirstPlacement()
-    // exists specifically to keep the button bar showing only "Place"
-    // through that window, not the full action set.
     it("still shows only Place while a first placement is previewed but not yet submitted", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U", { partial: true });
@@ -3980,21 +3974,14 @@ describe("Gnostica: click-to-orient messaging", () => {
         return [y - minY, x - minX];
     };
 
-    // Place's own facing is now the same mandatory-plus-optional-trailing-
-    // correction shape Cups "own" uses (see resolveTrailingOrientation's
-    // own docs), with one addition: a freshly-seeded "U" carries a
-    // trailing "?" (still merely prepopulated, not a deliberate choice -
-    // see validatePlace's own docs), so there's no separate "still
-    // adjustable" MESSAGE to soft-pedal here anymore - the generic
-    // VALID_MOVE is the whole story regardless of complete's own value.
-    it("place: the very first click is already valid, generically-worded, and genuinely marked provisional", () => {
+    it("place: the very first click is already valid, says the facing can still be changed, and is genuinely marked provisional", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("", row, col);
         expect(result.valid).to.be.true;
         expect(result.move).eq("place m0 U?");
         expect(result.complete).eq(0);
-        expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
     });
 
     it("place: clicking a neighbour replaces the facing with the correction, same generic message", () => {
