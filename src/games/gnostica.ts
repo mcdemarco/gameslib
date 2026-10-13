@@ -8,7 +8,7 @@ import { APMoveResult } from "../schemas/moveresults.js";
 import { Direction, DirectionCardinal, replacer, reviver, shuffle, UserFacingError } from "../common/index.js";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board.js";
 import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot/index.js";
-import { CellClass, GnosticaBoard, IEvicted } from "./gnostica/board.js";
+import { CellClass, GnosticaBoard } from "./gnostica/board.js";
 import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell.js";
 import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece.js";
 import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive } from "./gnostica/majorArcana.js";
@@ -4468,8 +4468,9 @@ export class GnosticaGame extends GameBaseSequenced {
         this.stashOf(player)[size - 1] -= 1;
     }
 
-    private returnToStash(player: number, size: Pips): void {
-        this.stashOf(player)[size - 1] += 1;
+    private returnToStash(ref: IPieceRef): void {
+        this.cellContents(ref.cell)!.removeAt(this.pieceIndex(ref));
+        this.stashOf(ref.piece.owner)[ref.piece.size - 1] += 1;
     }
 
     // Non-mutating check used by checkX functions and validatePlace; the mutators just do the arithmetic.
@@ -4510,11 +4511,12 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Pieces stranded in the void by destroyTerritory/pushTerritory return to their owner's stash; shared by Rods' push and Swords' attack-territory.
-    private returnEvictedPieces(evictions: IEvicted[]): void {
-        for (const ev of evictions) {
-            for (const p of ev.pieces) {
-                this.returnToStash(p.owner, p.size);
+    private returnEvictedPieces(voidCells: string[]): void {
+        for (const cell of voidCells) {
+            for (const piece of [...this.cellContents(cell)!.pieces]) {
+                this.returnToStash({ cell, piece });
             }
+            this.board.pruneIfEmpty(...xy(cell));
         }
     }
 
@@ -4641,19 +4643,17 @@ export class GnosticaGame extends GameBaseSequenced {
     ): void {
         const minion = this.getPiece(minionRef);
         const dest = this.cellBeyond(targetRef.cell, minion.orientation, dist);
-        const srcT = this.cellContents(targetRef.cell)!;
-        const moved = srcT.removeAt(this.pieceIndex(targetRef));
-        // The source cell never gets a piece back from this function (it
-        // either lands elsewhere or is destroyed in the void below) - prune
-        // it now if that was its last occupant, so an empty wasteland
-        // doesn't linger in the board's own stored map (see
-        // GnosticaBoard.pruneIfEmpty's own docs).
-        this.board.pruneIfEmpty(...xy(targetRef.cell));
         // A genuine final landing in the void destroys the piece. A mid-chain
         // waypoint (Chariot) must NOT - the piece still needs to be sitting
         // there for the chain's next step to act on.
-        if (!waypoint && this.classifyCell(dest) === "void") {
-            this.returnToStash(moved.owner, moved.size);
+        const destroyed = !waypoint && this.classifyCell(dest) === "void";
+        if (destroyed) {
+            this.returnToStash(targetRef);
+        }
+        const moved = destroyed ? undefined : this.cellContents(targetRef.cell)!.removeAt(this.pieceIndex(targetRef));
+        // The source never gets a piece back, so an emptied wasteland must not linger in the board's stored map.
+        this.board.pruneIfEmpty(...xy(targetRef.cell));
+        if (moved === undefined) {
             return;
         }
         if (moved.owner === this.currplayer && newOrientation !== undefined) {
@@ -4715,9 +4715,8 @@ export class GnosticaGame extends GameBaseSequenced {
         const target = this.getPiece(targetRef);
         const grownSize = (target.size + 1) as Pips;
         this.takeFromStash(target.owner, grownSize);
-        this.returnToStash(target.owner, target.size);
         const orientation = target.owner === this.currplayer && newOrientation !== undefined ? newOrientation : target.orientation;
-        t.removeAt(this.pieceIndex(targetRef));
+        this.returnToStash(targetRef);
         t.add(new Piece(target.owner, grownSize, orientation));
     }
 
@@ -4748,15 +4747,13 @@ export class GnosticaGame extends GameBaseSequenced {
         const victim = this.getPiece(targetRef);
         const resultSize = victim.size - pips;
         if (resultSize === 0) {
-            this.returnToStash(victim.owner, victim.size);
-            t.removeAt(this.pieceIndex(targetRef));
+            this.returnToStash(targetRef);
             this.board.pruneIfEmpty(...xy(targetRef.cell));
             return;
         }
         this.stashOf(victim.owner)[resultSize - 1] -= 1;
-        this.returnToStash(victim.owner, victim.size);
         const orientation = victim.owner === this.currplayer && newOrientation !== undefined ? newOrientation : victim.orientation;
-        t.removeAt(this.pieceIndex(targetRef));
+        this.returnToStash(targetRef);
         t.add(new Piece(victim.owner, resultSize as Pips, orientation));
     }
 
@@ -4787,8 +4784,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const t = this.cellContents(targetRef.cell)!;
         const target = this.getPiece(targetRef);
         this.takeFromStash(this.currplayer, target.size);
-        this.returnToStash(target.owner, target.size);
-        t.removeAt(this.pieceIndex(targetRef));
+        this.returnToStash(targetRef);
         t.add(new Piece(this.currplayer, target.size, newOrientation));
     }
 
@@ -6663,12 +6659,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // The rule is that an eliminated player discards their hand.  A decision: Pieces are returned to stash.
     private eliminatePlayer(player: playerid): void {
         for (const [x, y, t] of this.board.entries()) {
-            for (const p of t.pieces) {
-                if (p.owner === player) {
-                    this.returnToStash(p.owner, p.size);
-                }
+            for (const piece of t.pieces.filter(p => p.owner === player)) {
+                this.returnToStash({ cell: GnosticaBoard.coords2algebraic(x, y), piece });
             }
-            t.pieces = t.pieces.filter(p => p.owner !== player);
             this.board.pruneIfEmpty(x, y);
         }
         this.discardPile.push(...this.hands[player - 1]);

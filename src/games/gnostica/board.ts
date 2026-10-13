@@ -2,15 +2,8 @@ import { UnboundedSquareBoard } from "../../common/unbounded-square-board.js";
 import { DirectionCardinal, orthDirections } from "../../common/index.js";
 import { TarotCard } from "../../common/tarot/index.js";
 import { CellContents, ICellContents } from "./cell.js";
-import { Piece } from "./piece.js";
 
 export type CellClass = "territory" | "wasteland" | "void";
-
-export interface IEvicted {
-    x: number;
-    y: number;
-    pieces: Piece[];
-}
 
 // Internal absolute coordinates: y increases downward, matching UnboundedSquareBoard's own convention.
 const DELTAS: Record<DirectionCardinal, [number, number]> = {
@@ -92,19 +85,17 @@ export class GnosticaBoard {
     }
 
     // Only {x,y} and its four neighbours can possibly change classification, since classify() only looks one step away.
-    private evictVoidPieces(x: number, y: number): IEvicted[] {
-        const evicted: IEvicted[] = [];
+    private voidCellsWithPieces(x: number, y: number): string[] {
+        const stranded: string[] = [];
         for (const [cx, cy] of [[x, y] as [number, number], ...this.neighbors(x, y)]) {
             if (this.classify(cx, cy) === "void") {
-                const t = this.cells.get(cx, cy);
-                if (t !== undefined && t.pieces.length > 0) {
-                    evicted.push({ x: cx, y: cy, pieces: [...t.pieces] });
-                    t.pieces = [];
+                if ((this.cells.get(cx, cy)?.pieces.length ?? 0) > 0) {
+                    stranded.push(GnosticaBoard.coords2algebraic(cx, cy));
                 }
                 this.pruneIfEmpty(cx, cy);
             }
         }
-        return evicted;
+        return stranded;
     }
 
     // Only legal on a wasteland. Never strands anyone - adding a card only ever promotes void neighbours.
@@ -117,14 +108,14 @@ export class GnosticaBoard {
         }
     }
 
-    // Removes the card; returns every cell that consequently collapsed into the void, with its evicted pieces (crediting the stash is powers.ts's job).
-    public destroyTerritory(x: number, y: number): IEvicted[] {
+    // Removes the card; returns every cell that consequently collapsed into the void while still holding pieces, which the game must remove and stash.
+    public destroyTerritory(x: number, y: number): string[] {
         const t = this.cells.get(x, y)!;
         t.card = undefined;
         if (t.pieces.length === 0) {
             this.cells.delete(x, y);
         }
-        return this.evictVoidPieces(x, y);
+        return this.voidCellsWithPieces(x, y);
     }
 
     // In-place value change; the cell still has a card throughout, so this never changes classification.
@@ -138,7 +129,7 @@ export class GnosticaBoard {
     }
 
     // Moves only the CARD; pieces stay put. Destination is always wasteland, possibly already holding pieces of its own.
-    public pushTerritory(fromX: number, fromY: number, toX: number, toY: number): IEvicted[] {
+    public pushTerritory(fromX: number, fromY: number, toX: number, toY: number): string[] {
         const src = this.cells.get(fromX, fromY)!;
         const card = src.card!;
 
@@ -155,7 +146,7 @@ export class GnosticaBoard {
         if (src.pieces.length === 0) {
             this.cells.delete(fromX, fromY);
         }
-        return this.evictVoidPieces(fromX, fromY);
+        return this.voidCellsWithPieces(fromX, fromY);
     }
 
     public clone(): GnosticaBoard {

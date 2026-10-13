@@ -135,19 +135,17 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         expect(b.get(0, 0)!.card?.uid).eq("AC");
     });
 
-    it("destroys a territory and returns evicted pieces from cells that collapse into the void", () => {
+    it("destroys a territory and reports the cells that collapse into the void still holding pieces", () => {
         const b = new GnosticaBoard();
         // A single isolated territory with a piece sitting on its wasteland neighbour.
         b.store.set(0, 0, new CellContents(aceOfCups()));
         b.store.set(1, 0, new CellContents(undefined, [new Piece(2, 1, "U")]));
 
-        const evicted = b.destroyTerritory(0, 0);
-        // (1,0) had no other territory neighbour, so it collapses to void and evicts.
-        expect(evicted.length).eq(1);
-        expect(evicted[0]).to.deep.include({ x: 1, y: 0 });
-        expect(evicted[0].pieces.length).eq(1);
+        const stranded = b.destroyTerritory(0, 0);
+        // (1,0) had no other territory neighbour, so it collapses to void with its piece still there.
+        expect(stranded).to.deep.equal(["n0"]);
+        expect(b.get(1, 0)!.pieces.length).eq(1);
         expect(b.has(0, 0)).eq(false);
-        expect(b.has(1, 0)).eq(false);
     });
 
     it("does not evict a wasteland piece if another territory still keeps it adjacent", () => {
@@ -156,8 +154,7 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         b.store.set(2, 0, new CellContents(aceOfCups()));
         b.store.set(1, 0, new CellContents(undefined, [new Piece(1, 1, "U")]));
 
-        const evicted = b.destroyTerritory(0, 0);
-        expect(evicted.length).eq(0);
+        expect(b.destroyTerritory(0, 0)).to.deep.equal([]);
         expect(b.classify(1, 0)).eq("wasteland"); // still adjacent to (2,0)
         expect(b.get(1, 0)!.pieces.length).eq(1);
     });
@@ -187,17 +184,15 @@ describe("Gnostica: GnosticaBoard mutations", () => {
         expect(dest.pieces[0].owner).eq(2);
     });
 
-    it("evicts pieces stranded at the departure side of a push", () => {
+    it("reports pieces stranded at the departure side of a push", () => {
         const b = new GnosticaBoard();
         b.store.set(0, 0, new CellContents(aceOfCups(), [new Piece(1, 1, "U")]));
         // Pushed two spaces away (not adjacent to the source), so the
         // departure cell has no card next door to keep it a wasteland.
         b.store.set(5, 0, new CellContents(twoOfCups())); // far enough not to help (0,0)
 
-        const evicted = b.pushTerritory(0, 0, 2, 0);
-        expect(evicted.length).eq(1);
-        expect(evicted[0]).to.deep.include({ x: 0, y: 0 });
-        expect(b.has(0, 0)).eq(false);
+        expect(b.pushTerritory(0, 0, 2, 0)).to.deep.equal(["m0"]);
+        expect(b.get(0, 0)!.pieces.length).eq(1);
     });
 
     // Every existing pushTerritory test above lands the card next to
