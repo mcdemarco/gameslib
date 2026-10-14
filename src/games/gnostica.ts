@@ -30,11 +30,6 @@ interface PowerFailure {
 
 const cardByUid = (uid: string): TarotCard => allCards().find(c => c.uid === uid)!;
 
-const takeFromPile = (pile: string[], uid: string): TarotCard => {
-    pile.splice(pile.indexOf(uid), 1);
-    return cardByUid(uid);
-};
-
 const checkOwnMinion = (minion: Piece, player: number): PowerFailure | undefined => {
     if (minion.owner !== player) {
         return { key: "NOT_YOUR_MINION" };
@@ -810,7 +805,10 @@ export class GnosticaGame extends GameBaseSequenced {
                     break;
                 // A bare "use" or "play" has nothing to play yet.
                 case "use":
-                    outcome = powerCard === undefined ? undefined : this.cmdActivate(powerCard, powerSteps, powerAsUid, partial);
+                    if (powerCard !== undefined) {
+                        this.results.push({ type: "use", what: powerCard });
+                        outcome = this.applyPowers(powerCard, powerSteps, powerAsUid, partial);
+                    }
                     break;
                 case "play":
                     outcome = powerCard === undefined ? undefined : this.cmdPlay(powerCard, powerSteps, powerAsUid, partial);
@@ -830,7 +828,18 @@ export class GnosticaGame extends GameBaseSequenced {
         }
 
         if (partial) {
-            this.showUnrevealed();
+            // A previewed move must not reveal the deck, so each territory it would draw a card for is shown face-down.
+            for (const effect of this.hidden) {
+                if (effect.type === "territory") {
+                    this.board.createTerritory(effect.cell, UNREVEALED_CARD);
+                } else if (effect.type === "trade") {
+                    // The player sees their old cards in the other hand, and none of the ones they get.
+                    const owner = effect.target.piece.owner;
+                    const mine = this.hands[this.currplayer - 1];
+                    this.hands[this.currplayer - 1] = this.hands[owner - 1].map(() => UNREVEALED_UID);
+                    this.hands[owner - 1] = mine;
+                }
+            }
             return this;
         }
         this.resolveHiddenEffects();
@@ -881,21 +890,6 @@ export class GnosticaGame extends GameBaseSequenced {
         this.traded = Object.fromEntries(Object.entries(this.traded).filter(([uid]) => inHand(uid)));
         this.saveState();
         return this;
-    }
-
-    // A previewed move must not reveal the deck, so each territory it would draw a card for is shown face-down.
-    private showUnrevealed(): void {
-        for (const effect of this.hidden) {
-            if (effect.type === "territory") {
-                this.board.createTerritory(effect.cell, UNREVEALED_CARD);
-            } else if (effect.type === "trade") {
-                // The player sees their old cards in the other hand, and none of the ones they get.
-                const owner = effect.target.piece.owner;
-                const mine = this.hands[this.currplayer - 1];
-                this.hands[this.currplayer - 1] = this.hands[owner - 1].map(() => UNREVEALED_UID);
-                this.hands[owner - 1] = mine;
-            }
-        }
     }
 
     // Performs what move() recorded but a preview must not: every deck draw, in the order the steps recorded them, logging each into the step's own result group.
@@ -4475,7 +4469,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private createTerritory(targetCell: string, cardUid: string): void {
-        this.board.createTerritory(targetCell, takeFromPile(this.hands[this.currplayer - 1], cardUid));
+        this.board.createTerritory(targetCell, this.takeFromPile(cardUid, this.hands[this.currplayer - 1]));
     }
 
     // Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
@@ -4593,9 +4587,12 @@ export class GnosticaGame extends GameBaseSequenced {
         this.returnEvictedPieces(evictions);
     }
 
-    // The replacement card comes from wherever it is: the hand, or (Tower/Star) the discards.
-    private replacementPile(uid: string): string[] {
-        return this.hands[this.currplayer - 1].includes(uid) ? this.hands[this.currplayer - 1] : this.discardPile;
+    // Removes the card from the pile it comes out of and returns it: `pile` if given, else a replacement card from the player's hand if it is there, otherwise from the discards.
+    private takeFromPile(uid: string, pile?: string[]): TarotCard {
+        const hand = this.hands[this.currplayer - 1];
+        const from = pile ?? (hand.includes(uid) ? hand : this.discardPile);
+        from.splice(from.indexOf(uid), 1);
+        return cardByUid(uid);
     }
 
     // Tower/Star may take the replacement from the discards as well as the hand; every other card, from the hand alone.
@@ -4634,7 +4631,7 @@ export class GnosticaGame extends GameBaseSequenced {
             this.returnEvictedPieces(evictions);
             return;
         }
-        const newCard = takeFromPile(this.replacementPile(newCardUid as string), newCardUid as string);
+        const newCard = this.takeFromPile(newCardUid as string);
         this.discardPile.push(oldUid);
         this.board.updateTerritory(targetCell, newCard);
     }
@@ -4787,12 +4784,6 @@ export class GnosticaGame extends GameBaseSequenced {
             });
         }
         return eligible;
-    }
-
-    // Only ever reached for a FRESH activation - move() resumes this.continued directly instead, before this switch is reached. Legality is validateActivate's own job.
-    private cmdActivate(card: string, steps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome {
-        this.results.push({ type: "use", what: card });
-        return this.applyPowers(card, steps, asUid, partial);
     }
 
     // Who may act on a resumed obligation: for a Justice reached by a use, the minions in the territory it was used from (the World's, if it borrowed Justice); otherwise any of the player's.
@@ -4988,7 +4979,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.validatePlayedPower(this.resolvePowerPlay(parsed)!);
     }
 
-    // "Play a card from your hand to the discard pile" - same fresh-activation-only note as cmdActivate; legality is validatePlay's own job.
+    // "Play a card from your hand to the discard pile" - only ever reached for a FRESH play, since move() resumes this.continued directly; legality is validatePlay's own job.
     private cmdPlay(card: string, steps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome {
         this.discardPlayedCard(card);
         this.results.push({ type: "deckDraw", what: card, from: "hand" });
@@ -5908,7 +5899,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const actorPiece = actor.piece;
                 const facing = actorPiece.orientation;
                 // Named only when it stays put, so the render can ring it; a minion that moves itself is the moved piece.
-                const by = GnosticaGame.samePiece(actor, target) ? undefined : this.pieceIdAt(actor.cell, actorPiece);
+                const by = GnosticaGame.samePiece(actor, target) ? undefined : `${actor.cell}.${actorPiece.id()}`;
                 const destCell = this.cellBeyond(target.cell, facing, dist);
                 // A genuine final landing (not a Chariot-relaxed waypoint) in the void destroys the piece instead of moving it.
                 const destroyedInVoid = !waypoint && this.classifyCell(destCell) === "void";
@@ -5937,7 +5928,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const actorPiece = actor.piece;
                 this.moveTerritory(actor, srcCell, dist);
                 const to = this.cellBeyond(srcCell, actorPiece.orientation, dist);
-                this.results.push({ type: "move", by: this.pieceIdAt(actor.cell, actorPiece), from: cellStr, to, how: "rod-tile" });
+                this.results.push({ type: "move", by: `${actor.cell}.${actorPiece.id()}`, from: cellStr, to, how: "rod-tile" });
                 return {};
             }
         }
@@ -6005,7 +5996,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const targetCell = cellStr;
                 const beforeUid = this.cellContents(targetCell)!.card!.uid;
                 const jumpsTwo = this.cardValueByUid(newCardUid) - this.cellContents(targetCell)!.pointValue() === 2;
-                const newCard = takeFromPile(this.replacementPile(newCardUid), newCardUid);
+                const newCard = this.takeFromPile(newCardUid);
                 this.discardPile.push(beforeUid);
                 this.board.updateTerritory(targetCell, newCard);
                 this.results.push({ type: "convert", what: beforeUid, into: newCardUid, where: cellStr });
@@ -6921,11 +6912,6 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // Tighter and wider than the default auto-wrap; there's no more than ~30 distinct tokens (8 buckets + 22 majors) to display.
         return { type: "pieces", pieces: pieces as [string, ...string[]], label, spacing: 0.25, width: 10 };
-    }
-
-    // "<cell>.<piece id>": names a piece in a result well enough to find it again on the finished board.
-    private pieceIdAt(cell: string, piece: Piece): string {
-        return `${cell}.${piece.id()}`;
     }
 
     // The pieces a move's results name, ringed like the live preview does: each target solid, and a Rods move's own minion dashed.
