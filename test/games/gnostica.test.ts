@@ -6599,6 +6599,24 @@ describe("Gnostica: hidden information", () => {
         expect(top(game(), { strip: true, player: 2 }).hands[0]).to.deep.equal(["", "", "", "", "", ""]);
     });
 
+    it("keeps face-up the hand cards that came from the discards, for every other viewer and spectators, until they leave the hand", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "20", pieces: [[1, 2, "U"]] }],
+            hands: [["2R", "3R", "4R", "5D"], ["AC", "KS", "9S", "8S", "QD", "PD"]],
+            discardPile: ["10C", "ND", "3S"],
+        });
+        g.move("use 20/with m0.2 draw 10C ND");
+        expect(g.drawn).to.have.members(["10C", "ND"]);
+        const hand = (opts: { strip?: boolean; player?: number }) => top(g, opts).hands[0];
+        expect(hand({ strip: true, player: 2 })).to.deep.equal(["", "", "", "", "10C", "ND"]);
+        expect(hand({ strip: true })).to.deep.equal(["", "", "", "", "10C", "ND"]);
+        expect(hand({ strip: true, player: 1 })).to.deep.equal(["2R", "3R", "4R", "5D", "10C", "ND"]);
+
+        g.hands[0] = g.hands[0].filter(uid => uid !== "ND");
+        g.move("place l0 U");
+        expect(g.drawn).to.deep.equal(["10C"]);
+    });
+
     it("shows a spectator no hand at all", () => {
         const stripped = top(game(), { strip: true });
         expect(stripped.hands.flat().every(uid => uid === "")).to.be.true;
@@ -6678,6 +6696,58 @@ describe("Gnostica: Justice's trade and its continued attack", () => {
         expect(g.currplayer).eq(1);
         expect(g.continued).to.deep.equal(["11.use"]);
         expect(g.results.some(r => r.type === "swap")).to.be.true;
+    });
+
+    it("shows each player, and nobody else, the cards they handed over, in the other player's hand", () => {
+        const g = justice();
+        g.move(trade);
+        const hands = (player?: number) => g.state({ strip: true, player }).stack.at(-1)!.hands;
+        expect(hands(1)).to.deep.equal([theirs, filler]); // player 1 holds player 2's old hand, and remembers handing over their own
+        expect(hands(2)).to.deep.equal([theirs, filler]);
+        expect(hands().flat().every(uid => uid === "")).to.be.true;
+    });
+
+    it("keeps a third player from seeing the traded cards", () => {
+        const third = ["10C", "ND", "3S", "2S", "3D", "4C"];
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "11", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "W"]] }],
+            hands: [filler, theirs, third], stashes: { 1: [3, 3, 3], 2: [3, 3, 3], 3: [3, 3, 3] },
+        });
+        g.move(trade);
+        const hands = (player: number) => g.state({ strip: true, player }).stack.at(-1)!.hands;
+        expect(hands(1)).to.deep.equal([theirs, filler, Array(6).fill("")]);
+        expect(hands(2)).to.deep.equal([theirs, filler, Array(6).fill("")]);
+        expect(hands(3)).to.deep.equal([Array(6).fill(""), Array(6).fill(""), third]);
+    });
+
+    it("lets the first holder follow a traded card through a second trade, and forgets it once it leaves every hand", () => {
+        const third = ["10C", "ND", "3S", "2S", "3D", "4C"];
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"], [3, 1, "U"]] }],
+            hands: [filler, theirs, third], stashes: { 1: [3, 3, 3], 2: [3, 3, 3], 3: [3, 3, 3] },
+        });
+        const trade = (player: number, owner: number) => {
+            g.currplayer = player;
+            (g as unknown as { tradeHands: (ref: unknown, hand: string[]) => number }).tradeHands({ cell: "n0", piece: new Piece(owner, 1, "U") }, g.hands[owner - 1]);
+        };
+        trade(1, 2); // player 1 holds `theirs`, player 2 holds `filler`
+        trade(2, 3); // player 2 holds `third`, player 3 holds `filler`
+        const hands = (player: number) => g.state({ strip: true, player }).stack.at(-1)!.hands;
+        g.saveState();
+        const blank = Array(6).fill("");
+        expect(hands(1)).to.deep.equal([theirs, blank, filler]); // player 1 still sees the cards they gave away, now in player 3's hand
+        expect(hands(2)).to.deep.equal([theirs, third, filler]); // player 2 held both lots of cards
+        expect(hands(3)).to.deep.equal([blank, third, filler]); // player 3 only knows what they gave away
+    });
+
+    it("clears a traded card from the record once it leaves every hand", () => {
+        const g = justice();
+        g.move(trade);
+        expect(Object.keys(g.traded)).to.have.members([...filler, ...theirs]);
+        g.hands[0] = g.hands[0].filter(uid => uid !== "PD");
+        g.hands[1] = g.hands[1].filter(uid => uid !== "2R");
+        g.move("use 11 as S/with m0.2 shrink n0.1 1");
+        expect(Object.keys(g.traded)).to.not.include.members(["PD", "2R"]);
     });
 
     it("remembers how it was reached: used, played, or used through the World", () => {

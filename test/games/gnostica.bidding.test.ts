@@ -295,6 +295,19 @@ describe("Gnostica: bidding variant, stage 2 (redraw)", () => {
         expect(line).eq(i18next.t("apresults:DECKDRAW.gnostica_pool", { player: "Carol", what: `the ${minor(uid).name}` }));
     });
 
+    it("shows the other players the card a redraw took from the public pool", () => {
+        const g = setupRedraw();
+        const redrawer = g.currplayer;
+        const uid = g.biddingPool![0];
+        g.move(`redraw ${uid}`);
+        expect(g.drawn).to.deep.equal([uid]);
+        const viewer = redrawer === 1 ? 2 : 1;
+        const stack = g.state({ strip: true, player: viewer }).stack;
+        const hand = stack[stack.length - 1].hands[redrawer - 1];
+        expect(hand.filter(c => c !== "")).to.deep.equal([uid]);
+        expect(hand).to.have.length(6);
+    });
+
     it("walks the full redraw order and hands off to main phase with the bid winner as currplayer", () => {
         const g = setupRedraw();
         expect(g.currplayer).eq(3);

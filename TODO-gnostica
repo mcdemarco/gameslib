@@ -20,6 +20,7 @@ Miscellany:
 	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
 	- #115 - The question of case-sensitivity of directions.
 	- #131 - More analysis of this.preview.
+	- #144 - Manual testing of special card unhiding (trade, bid, judgement)
 
 UX:
 	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves. @done(2026-10-04)

@@ -337,6 +337,10 @@ interface IMoveState extends IIndividualState {
     bidPositions?: (number | null)[];
     // Every card revealed by a bid across every round played - the shared pool players draw back up to 6 from during "redraw"; the winner (turnOrder[0]) derives from this.
     biddingPool?: string[];
+    // Hand cards every player has seen, because they came from a public pile (the bidding pool or the discards); only they stay face-up in other players' views of a hand.
+    drawn: string[];
+    // Hand cards that only some players have seen, because a hand trade moved them: uid -> the players who held them before the trade.
+    traded: Record<string, number[]>;
     // "Tournament rules": in the "bidding" variant, play order is the rank order of the cards everyone bid (majors always outrank minors); seating order until the bids resolve, and always empty otherwise.
     turnOrder: playerid[];
 }
@@ -422,6 +426,8 @@ export class GnosticaGame extends GameBaseSequenced {
     public phase!: "bidding" | "redraw" | "main";
     public bidPositions: (number | null)[] | undefined;
     public biddingPool: string[] | undefined;
+    public drawn: string[] = [];
+    public traded: Record<string, number[]> = {};
     public turnOrder!: playerid[];
 
     // How many players have already redrawn - reads the last REAL commit's hands (this.stack's top), immune to a live preview's own in-progress mutation.
@@ -489,6 +495,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 phase: this.variants.includes("bidding") ? "bidding" : "main",
                 bidPositions: this.variants.includes("bidding") ? new Array(this.numplayers).fill(null) as (number | null)[] : undefined,
                 biddingPool: this.variants.includes("bidding") ? [] : undefined,
+                drawn: [],
+                traded: {},
                 turnOrder: this.variants.includes("bidding") ? [...Array(this.numplayers)].map((_, i) => (i + 1) as playerid) : [],
                 buffer: undefined
             };
@@ -538,6 +546,8 @@ export class GnosticaGame extends GameBaseSequenced {
         this.phase = state.phase;
         this.bidPositions = state.bidPositions !== undefined ? [...state.bidPositions] : undefined;
         this.biddingPool = state.biddingPool !== undefined ? [...state.biddingPool] : undefined;
+        this.drawn = [...state.drawn];
+        this.traded = Object.fromEntries(Object.entries(state.traded).map(([uid, players]) => [uid, [...players]]));
         this.turnOrder = [...state.turnOrder];
         this.frames = state.frames ? [...state.frames] : [];
         this.continued = state.continued ? [...state.continued] : [];
@@ -563,6 +573,8 @@ export class GnosticaGame extends GameBaseSequenced {
             phase: this.phase,
             bidPositions: this.bidPositions !== undefined ? [...this.bidPositions] : undefined,
             biddingPool: this.biddingPool !== undefined ? [...this.biddingPool] : undefined,
+            drawn: [...this.drawn],
+            traded: Object.fromEntries(Object.entries(this.traded).map(([uid, players]) => [uid, [...players]])),
             turnOrder: [...this.turnOrder],
             frames: this.frames.length > 0 ? [...this.frames] : [],
             continued: this.continued.length > 0 ? [...this.continued] : undefined,
@@ -583,7 +595,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const entry = {...mstate, hands: mstate.hands.map(h => [...h])};
                 for (let p = 1; p <= this.numplayers; p++) {
                     if (p === opts.player) { continue; }
-                    entry.hands[p - 1] = entry.hands[p - 1].map(() => UNREVEALED_UID);
+                    entry.hands[p - 1] = entry.hands[p - 1].map(uid => entry.drawn.includes(uid) || (opts.player !== undefined && entry.traded[uid]?.includes(opts.player)) ? uid : UNREVEALED_UID);
                 }
                 return entry;
             });
@@ -860,6 +872,9 @@ export class GnosticaGame extends GameBaseSequenced {
             this.nextPlayer();
             this.checkEOG();
         }
+        const inHand = (uid: string): boolean => this.hands.some(hand => hand.includes(uid));
+        this.drawn = this.drawn.filter(inHand);
+        this.traded = Object.fromEntries(Object.entries(this.traded).filter(([uid]) => inHand(uid)));
         this.saveState();
         return this;
     }
@@ -4087,6 +4102,7 @@ export class GnosticaGame extends GameBaseSequenced {
         for (const uid of args) {
             this.biddingPool!.splice(this.biddingPool!.indexOf(uid), 1);
             hand.push(uid);
+            this.drawn.push(uid);
         }
         if (partial) {
             return;
@@ -4694,6 +4710,10 @@ export class GnosticaGame extends GameBaseSequenced {
     private tradeHands(targetRef: IPieceRef, otherHand: string[],): number {
         const target = this.getPiece(targetRef);
         const mine = [...this.hands[this.currplayer - 1]];
+        // Each side remembers the cards it handed over, though nobody else saw them.
+        for (const [uid, from] of [...mine.map(uid => [uid, this.currplayer] as const), ...otherHand.map(uid => [uid, target.owner] as const)]) {
+            this.traded[uid] = [...new Set([...(this.traded[uid] ?? []), from])];
+        }
         this.hands[this.currplayer - 1].length = 0;
         this.hands[this.currplayer - 1].push(...otherHand);
         otherHand.length = 0;
@@ -4706,6 +4726,7 @@ export class GnosticaGame extends GameBaseSequenced {
             const idx = this.discardPile.indexOf(uid);
             this.discardPile.splice(idx, 1);
             this.hands[this.currplayer - 1].push(uid);
+            this.drawn.push(uid);
         }
     }
 

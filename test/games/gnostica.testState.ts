@@ -38,6 +38,7 @@ export interface TestGameOpts {
     eliminated?: number[];
     continued?: string[];
     variants?: string[];
+    drawn?: string[];
 }
 
 // Builds a fully-specified GnosticaGame from data, via the same load() path a saved game reload uses.
@@ -90,6 +91,8 @@ export function testGame(opts: TestGameOpts): GnosticaGame {
             bidPositions: bidding ? new Array(numplayers).fill(null) : undefined,
             biddingPool: bidding ? [] : undefined,
             turnOrder: bidding ? Array.from({ length: numplayers }, (_, i) => i + 1) : [],
+            drawn: opts.drawn ?? [],
+            traded: {},
             continued: opts.continued,
         }],
     } as unknown as IGnosticaState;
