@@ -6632,7 +6632,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
             // Every void cell is the bare "-" with no legend entry or clickable region - a wasteland piece facing into one gets a `buffer` area instead, not a click target baked into the grid.
             const rings = this.ringsFromResults(results, board);
-            const { pieceRows, markers } = this.buildBoardLayers(board, { minX, maxX, minY, maxY }, displays, legend, faces, last ? new Map([...rings, ...this.pieceRings()]) : rings, this.destroyedCells(results));
+            const pieceRows = this.buildPieceRows(board, { minX, maxX, minY, maxY }, legend, last ? new Map([...rings, ...this.pieceRings()]) : rings, this.destroyedCells(results));
+            const markers = this.buildTerritoryMarkers(board, { minX, minY }, displays, legend, faces);
 
             const columnLabels: string[] = [];
             for (let x = minX; x <= maxX; x++) {
@@ -7062,31 +7063,52 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The board grid as two layers: a glyph marker for each card (and each wasteland), and in the pieces layer one legend entry per distinct set of pieces in a cell.
     // Cards are unique, so each card's legend entry is built for its one cell. Every other cell is the bare "-".
-    private buildBoardLayers(
-        board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number }, displays: string[],
+    private buildTerritoryMarkers(
+        board: GnosticaBoard, win: { minX: number; minY: number }, displays: string[],
         legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>,
-        rings?: Map<string, "minion" | "target">,
-        destroyed: Set<string> = new Set(),
-    ): { pieceRows: string[][][]; markers: (MarkerOutline | MarkerGlyph)[] } {
-        const pieceRows: string[][][] = Array.from({ length: win.maxY - win.minY + 1 }, () => Array.from({ length: win.maxX - win.minX + 1 }, () => []));
+    ): (MarkerOutline | MarkerGlyph)[] {
         const pointAt = (x: number, y: number) => ({ row: y - win.minY, col: x - win.minX });
         const markers: (MarkerOutline | MarkerGlyph)[] = [];
-        const cardCells: [number, number][] = [];
         const wastelands = new Map<string, { row: number; col: number }>();
         for (const [x, y, t] of board.entries()) {
-            if (t.card !== undefined) {
-                cardCells.push([x, y]);
-                const key = GnosticaGame.cardKey(t.cardUid!);
-                const players = t.playersPresent();
-                const owner = players.size === 1 ? [...players][0] : 0;
-                const dontSpace = displays.includes("larger-cards") && players.size === 0;
-                if (t.cardUid !== UNREVEALED_UID) {
-                    GnosticaGame.setCardFace(legend, faces, key, `board|${!dontSpace}|${owner}`, () => GnosticaGame.markerStack(this.buildCardFace(displays, t.card!, !dontSpace, owner)));
-                }
-                markers.push({ type: "glyph", glyph: key, points: [pointAt(x, y)] });
+            if (t.card === undefined) {
+                continue;
             }
+            const key = GnosticaGame.cardKey(t.cardUid!);
+            const players = t.playersPresent();
+            const owner = players.size === 1 ? [...players][0] : 0;
+            const dontSpace = displays.includes("larger-cards") && players.size === 0;
+            if (t.cardUid !== UNREVEALED_UID) {
+                GnosticaGame.setCardFace(legend, faces, key, `board|${!dontSpace}|${owner}`, () => GnosticaGame.markerStack(this.buildCardFace(displays, t.card!, !dontSpace, owner)));
+            }
+            markers.push({ type: "glyph", glyph: key, points: [pointAt(x, y)] });
+            // A wasteland is any card-free cell beside a card.
+            for (const [nx, ny] of board.neighbors(x, y)) {
+                if (board.get(GnosticaBoard.coords2algebraic(nx, ny))?.card === undefined) {
+                    wastelands.set(`${nx},${ny}`, pointAt(nx, ny));
+                }
+            }
+        }
+        if (wastelands.size > 0) {
+            // Same transparent-by-default convention as buildCardFace's own backdrop, so the theme's board colour shows through here too.
+            legend.waste = GnosticaGame.markerStack([{ name: "piece-square-dashed", scale: 1, opacity: 0 }]);
+            markers.push({ type: "glyph", glyph: "waste", points: [...wastelands.values()] as [{ row: number; col: number }, ...{ row: number; col: number }[]] });
+        }
+        return markers;
+    }
+
+    private buildPieceRows(
+        board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number },
+        legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] },
+        rings?: Map<string, "minion" | "target">,
+        destroyed: Set<string> = new Set(),
+    ): string[][][] {
+        const pieceRows: string[][][] = Array.from({ length: win.maxY - win.minY + 1 }, () => Array.from({ length: win.maxX - win.minX + 1 }, () => []));
+        // Only cells that hold pieces matter here, and all of those are stored.
+        for (const [x, y, t] of board.entries()) {
             const slots = this.pieceGridSlots(t.pieces);
             const cell = GnosticaBoard.coords2algebraic(x, y);
+            const keys = pieceRows[y - win.minY][x - win.minX];
             t.pieces.forEach((piece, i) => {
                 // Keys end up as literal DOM ids in the renderer, so no "." (a rounded slot can't carry one).
                 const slot = slots[i];
@@ -7098,7 +7120,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     // Slots lie out to the edges of the cell, so the symbol has to be cell-sized (backdrop scale 1) or the outer pyramids are cropped.
                     legend[key] = GnosticaGame.withBackdrop([g], 1);
                 }
-                const point = pointAt(x, y);
                 const ring = rings?.get(`${cell},${i}`);
                 if (ring !== undefined) {
                     const ringKey = `ring_${ring}_${key}`;
@@ -7111,9 +7132,9 @@ export class GnosticaGame extends GameBaseSequenced {
                             nudge: { dx: slot.dx, dy: slot.dy + drop },
                         }], 1);
                     }
-                    pieceRows[point.row][point.col].push(ringKey);
+                    keys.push(ringKey);
                 }
-                pieceRows[point.row][point.col].push(key);
+                keys.push(key);
             });
         }
         for (const cell of destroyed) {
@@ -7125,23 +7146,9 @@ export class GnosticaGame extends GameBaseSequenced {
             const mark = this.pieceGridSlots([...(board.get(GnosticaBoard.coords2algebraic(x, y))?.pieces ?? []), new Piece(0, 1, "U")]).at(-1)!;
             const markKey = `destroyed_${Math.round(mark.dx)}_${Math.round(mark.dy)}_${Math.round(mark.scale * 100)}`;
             legend[markKey] ??= GnosticaGame.withBackdrop([{ text: "\u2718", scale: mark.scale, colour: "#d00", orientation: "vertical", nudge: { dx: mark.dx, dy: mark.dy } }], 1);
-            const point = pointAt(x, y);
-            pieceRows[point.row][point.col].push(markKey);
+            pieceRows[y - win.minY][x - win.minX].push(markKey);
         }
-        // A wasteland is any card-free cell beside a card.
-        for (const [x, y] of cardCells) {
-            for (const [nx, ny] of board.neighbors(x, y)) {
-                if (board.get(GnosticaBoard.coords2algebraic(nx, ny))?.card === undefined) {
-                    wastelands.set(`${nx},${ny}`, pointAt(nx, ny));
-                }
-            }
-        }
-        if (wastelands.size > 0) {
-            // Same transparent-by-default convention as buildCardFace's own backdrop, so the theme's board colour shows through here too.
-            legend.waste = GnosticaGame.markerStack([{ name: "piece-square-dashed", scale: 1, opacity: 0 }]);
-            markers.push({ type: "glyph", glyph: "waste", points: [...wastelands.values()] as [{ row: number; col: number }, ...{ row: number; col: number }[]] });
-        }
-        return { pieceRows, markers };
+        return pieceRows;
     }
 
     // Puts a card's face in the legend unless its key already holds this variant of it: a card's face depends on where it is, so a later frame rebuilds only the cards that moved or changed.
