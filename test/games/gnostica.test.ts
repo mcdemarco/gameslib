@@ -6883,3 +6883,24 @@ describe("Gnostica: the declaration warning banner", () => {
         expect(hasBanner(g, 2)).to.be.false;
     });
 });
+
+describe("Gnostica: the Magician's messages", () => {
+    it("asks for the suit before asking for a minion, even with minions on several cells", () => {
+        addResource("en");
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AC", pieces: [[1, 2, "N"]] }],
+            hands: [["01", ...filler.slice(0, 5)], filler],
+        });
+        expect(g.validateMove("play 01").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: "The Magician" }));
+        expect(g.validateMove("play 01 as C").message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_CELL"));
+    });
+
+    it("prefixes the Special Power divider with the power's icon", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }], hands: [["01", ...filler.slice(0, 5)], filler] });
+        g.move("play 01", { partial: true });
+        const rep = g.render().at(-1) as unknown as { legend: Record<string, { name?: string }[] | { name?: string }>; areas: { type: string; buttons?: { value?: string; glyph?: string }[] }[] };
+        const spacer = rep.areas.find(a => a.type === "buttonBar")!.buttons!.find(b => b.value === "_spacer")!;
+        expect(spacer.glyph).eq("buttonpower_magicianChoice");
+        expect(rep.legend["buttonpower_magicianChoice"]).to.deep.include({ name: "gnostica-allSuits" });
+    });
+});

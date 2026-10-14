@@ -2138,8 +2138,11 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // A fresh step's own message: PICK_MINION_CELL when the eligible pool spans more than one cell, otherwise powerStepMessageKey's own step-0 wording.
-    private freshStepMessage(cardUid: string, priorStepsCount: number, minions: IPieceRef[]): { key: string; params?: Record<string, unknown> } {
-        if (priorStepsCount === 0 && new Set(minions.map(m => m.cell)).size > 1) {
+    private freshStepMessage(cardUid: string, priorStepsCount: number, minions: IPieceRef[], asSuit?: string): { key: string; params?: Record<string, unknown> } {
+        // The Magician picks its suit before any minion, so the buttons are what the player is waiting on.
+        const step = this.resolveCardDef(cardUid).powers[priorStepsCount];
+        const awaitingSuit = asSuit === undefined && step !== undefined && "special" in step && step.special === "magicianChoice";
+        if (priorStepsCount === 0 && !awaitingSuit && new Set(minions.map(m => m.cell)).size > 1) {
             return { key: "apgames:validation.gnostica.PICK_MINION_CELL" };
         }
         return this.powerStepMessageKey(cardUid, priorStepsCount, minions);
@@ -2400,12 +2403,12 @@ export class GnosticaGame extends GameBaseSequenced {
         if (hpCount !== undefined) {
             return hpCount;
         }
-        const specialTargetPicker = pendingMinor.game.specialTargetPickerBar(pendingMinor, selected, declareBtn);
-        if (specialTargetPicker !== undefined) {
-            return specialTargetPicker;
-        }
-        // orientMinion/judgementDraw/worldUseAny are pure click-driven; tradeHands/orientAny/hierophantReplace fall back to click-driven only when unambiguous (see specialTargetPickerBar above).
-        if (pendingMinor.special !== undefined && pendingMinor.special !== "hermitTeleport" && pendingMinor.special !== "magicianChoice") {
+        // orientMinion/judgementDraw/worldUseAny are pure click-driven; tradeHands/orientAny/hierophantReplace are too unless the facing cell holds several candidates for a click to pick between.
+        // Self is always its own unambiguous click target for orientAny, so it doesn't count.
+        const pickingSpecialTarget = (pendingMinor.special === "orientAny" || pendingMinor.special === "tradeHands" || pendingMinor.special === "hierophantReplace")
+            && pendingMinor.istep.targetPiece === undefined
+            && pendingMinor.game.targetCandidates(pendingMinor).length - (pendingMinor.special === "orientAny" ? 1 : 0) > 1;
+        if (pendingMinor.special !== undefined && pendingMinor.special !== "hermitTeleport" && pendingMinor.special !== "magicianChoice" && !pickingSpecialTarget) {
             // A click-only special power whose play has begun (fresh, or a resume once Play is clicked): just the action chosen, since the board or hand click that continues it is no button.
             if (phase !== "owed") {
                 const only: ButtonBarButton[] = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
@@ -2538,31 +2541,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return buttons as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
-    // Button-based target picking for orientAny/tradeHands/hierophantReplace, offered only when 2+ candidates make a click genuinely ambiguous - a single candidate keeps working via click, unchanged.
-    private specialTargetPickerBar(
-        pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
-    ): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (pendingMinor.special !== "orientAny" && pendingMinor.special !== "tradeHands" && pendingMinor.special !== "hierophantReplace") {
-            return undefined;
-        }
-        if (pendingMinor.istep.targetPiece !== undefined) {
-            return undefined;
-        }
-        const options = this.specialTargetCandidates(pendingMinor);
-        // Ambiguity is judged on the FACING CELL alone - self is always its own separate, already-unambiguous click target (see pickPieceTargetClick).
-        const facingCandidateCount = pendingMinor.special === "orientAny" ? options.length - 1 : options.length;
-        if (facingCandidateCount <= 1) {
-            return undefined;
-        }
-        const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-        buttons.push({ label: "Special Power", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
-        buttons.push(...this.buildChoiceButtons("target", options, undefined));
-        if (declareBtn !== undefined) {
-            buttons.push(declareBtn);
-        }
-        return buttons as [ButtonBarButton, ...ButtonBarButton[]];
-    }
-
     // High Priestess: the discard list is built via hand-card clicks, but the draw count is the player's own choice, same shape as the ordinary discard/draw count-picker.
     private highPriestessCountBar(pendingMinor: IPendingStep): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         if (pendingMinor.special !== "highPriestess" || pendingMinor.istep.amount !== undefined) {
@@ -2621,6 +2599,14 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy, matching pickPieceTargetClick's own rule.
+    // The target buttons for whichever power the pending step is: Hermit's teleport, one of the three special target powers, or a suit power.
+    private targetCandidates(pending: IPendingStep): ChoiceOption[] {
+        if (pending.special === "hermitTeleport") {
+            return this.hermitTargetCandidates(pending);
+        }
+        return pending.suitUid === undefined ? this.specialTargetCandidates(pending) : this.suitTargetCandidates(pending, pending.suitUid);
+    }
+
     private specialTargetCandidates(pending: IPendingStep): ChoiceOption[] {
         if (pending.special === "orientAny") {
             return this.pieceCandidateOptions(pending, "Orient");
@@ -2680,20 +2666,20 @@ export class GnosticaGame extends GameBaseSequenced {
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
 
         const spacerLabel = pendingMinor.suitUid ? ALL_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
-        buttons.push({ label: spacerLabel, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], ...(pendingMinor.suitUid ? { glyph: GnosticaGame.suitButtonGlyph(pendingMinor.suitUid) } : {}) });
+        const glyph = pendingMinor.suitUid ? GnosticaGame.suitButtonGlyph(pendingMinor.suitUid) : `buttonpower_${pendingMinor.special}`;
+        buttons.push({ label: spacerLabel, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], glyph });
 
-        if (pendingMinor.special === "hermitTeleport") {
-            if (stepHermitMode(pendingMinor.istep) === undefined) {
-                buttons.push(...this.buildChoiceButtons("target", this.hermitTargetCandidates(pendingMinor), undefined));
-            }
-        } else if (pendingMinor.special === "magicianChoice") {
+        if (pendingMinor.special === "magicianChoice") {
             const options = ALL_SUITS.map(suit => ({ value: suit.uid, label: suit.label, glyph: GnosticaGame.suitButtonGlyph(suit.uid) }));
             buttons.push(...this.buildChoiceButtons("magician", options, undefined));
         } else {
-            const suitUid = pendingMinor.suitUid!;
-            if (stepMinorMode(suitUid, pendingMinor.istep) === undefined) {
-                buttons.push(...this.buildChoiceButtons("target", this.suitTargetCandidates(pendingMinor, suitUid), undefined));
+            const targeted = pendingMinor.special === "hermitTeleport" ? stepHermitMode(pendingMinor.istep) !== undefined
+                : pendingMinor.suitUid !== undefined ? stepMinorMode(pendingMinor.suitUid, pendingMinor.istep) !== undefined
+                    : pendingMinor.istep.targetPiece !== undefined;
+            if (!targeted) {
+                buttons.push(...this.buildChoiceButtons("target", this.targetCandidates(pendingMinor), undefined));
             }
+            const suitUid = pendingMinor.suitUid;
             // "new" mode's required card arg is otherwise only suppliable by clicking a hand card; Wheel of Fortune (allowRandomDraw) has none, so it gets a button.
             if (suitUid === "C" && stepMinorMode("C", pendingMinor.istep) === "new" && pendingMinor.opts.allowRandomDraw === true) {
                 buttons.push({ label: "Draw a card", value: "drawn" });
@@ -5348,7 +5334,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     // An entry's OWN first step (nextStepIndex 0) arriving with nothing supplied is reachable ONLY via World's push (Fool's own push always forcePauses) - #49 forbids a no-op completion here.
                     if (stack.length > 1 && top.nextStepIndex === 0) {
-                        const msg = this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions);
+                        const msg = this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions, asSuit);
                         return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                     }
                     // Moon's own move step genuinely pushed a territory over capacity - its own attack step is no longer optional, since skipping it would leave that territory illegally over-full.
@@ -5419,7 +5405,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     const override = "primitive" in step && istep !== undefined ? this.primitiveIncompleteMessage(this.primitiveToSuit(step.primitive), istep) : undefined;
                     // A bare "/" has begun the step with nothing chosen for it.
                     const msg = override ?? (istep?.action === "with" && istep.withPiece === undefined
-                        ? this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions)
+                        ? this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions, asSuit)
                         : this.powerStepMessageKey(top.cardUid, top.nextStepIndex, top.minions, istep?.withPiece));
                     return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
                 }
@@ -5490,7 +5476,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const worldBorrow = asUid !== undefined;
         if (steps.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
             const top = stack[stack.length - 1];
-            const msg = this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions);
+            const msg = this.freshStepMessage(top.cardUid, top.nextStepIndex, top.minions, asSuit);
             return { valid: true, complete: -1, message: i18next.t(msg.key, msg.params) };
         }
         return this.validatePowerSteps(stack, steps, rootCardUid, asUid, asSuit);
@@ -6773,7 +6759,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 if (list.length > 0) {
                     // "left", not "right" - the action button bar already owns the right side, and the two don't stack cleanly on the same side.
-                    areas.push({ type: "key", list, position: "left", height: 0.7, clickable: false });
+                    areas.push({ type: "key", list, position: "left", height: 0.4, clickable: false });
                 }
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
@@ -6783,6 +6769,8 @@ export class GnosticaGame extends GameBaseSequenced {
                         legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice("buttonpiece_".length)));
                     } else if (button.glyph?.startsWith("buttonsuit_") && !(button.glyph in legend)) {
                         legend[button.glyph] = { name: suits.find(suit => suit.uid === button.glyph!.slice("buttonsuit_".length))!.glyph! };
+                    } else if (button.glyph?.startsWith("buttonpower_") && !(button.glyph in legend)) {
+                        legend[button.glyph] = { name: POWERS[button.glyph.slice("buttonpower_".length) as SpecialPower].icon };
                     }
                 }
                 if (actionButtons !== undefined) {
