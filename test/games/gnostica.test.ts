@@ -1527,7 +1527,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(bar.map(b => b.label ?? b.value)).to.deep.equal(["Orient", "Choose Minion", "1-pip", "2-pip", "(Declare)", "Undo"]);
     });
 
-    it("Orient: until a piece is chosen, every one of the player's pieces is ringed", () => {
+    it("Orient: until a piece is chosen, every one of the player's pieces is ringed, and then only the chosen one is", () => {
         const ringed = (partial: string): string[] => {
             const g = testGame({
                 board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "E"], [1, 2, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
@@ -1537,7 +1537,9 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             return (g.render().at(-1) as unknown as { pieces: string[][][] }).pieces.flat(2).filter(k => k.startsWith("ring_")).sort();
         };
         expect(ringed("orient")).to.have.length(2); // both of the player's pieces, not the enemy's
-        expect(ringed("orient m0.1.E")).to.have.length(0);
+        const chosen = ringed("orient m0.1.E");
+        expect(chosen).to.have.length(1);
+        expect(chosen[0].startsWith("ring_target_")).to.be.true;
     });
 
     it("World: borrowing a power takes no frame of its own, and its result joins the first borrowed step's group", () => {
