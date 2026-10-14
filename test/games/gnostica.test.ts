@@ -2058,8 +2058,8 @@ describe("Gnostica: Judgement's draw from the discards", () => {
             return ((shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
                 .filter(a => a.type === "buttonBar").flatMap(a => (a.buttons ?? []).map(b => b.value));
         };
-        expect(values("use 20/with m0.2 draw AC")).to.deep.equal(["use", "declare", "undo"]); // one taken, room for another
-        expect(values("use 20/with m0.2 draw AC 2C")).to.deep.equal(["use", "declare", "undo"]);
+        expect(values("use 20/with m0.2 draw AC")).to.deep.equal(["_disabled_use", "declare", "undo"]); // one taken, room for another
+        expect(values("use 20/with m0.2 draw AC 2C")).to.deep.equal(["_disabled_use", "declare", "undo"]);
     });
 
     it("completes at once when nothing more can be drawn: the hand is full, or the discard pile has no other card", () => {
@@ -2118,13 +2118,11 @@ describe("Gnostica: button states", () => {
         const g = swords();
         const mid = "use AS/with m0.2 shrink n0.2";
         g.move(mid, { partial: true });
-        const use = barOf(g).find(b => b.value === "use")!;
+        const use = barOf(g).find(b => b.value === "_disabled_use")!;
         expect(isGrey(use)).to.be.true;
-        const click = g.handleClick(mid, -1, -1, "_btn_use");
+        const click = g.handleClick(mid, -1, -1, "_btn__disabled_use");
         expect(click.move).eq(mid);
-        expect(g.handleClick("discard 2R", -1, -1, "_btn_discard").move).eq("discard 2R"); // same for Discard/Draw
-        // Choosing a different action is still a deliberate switch.
-        expect(g.handleClick(mid, -1, -1, "_btn_orient").move).eq("orient");
+        expect(g.handleClick("discard 2R", -1, -1, "_btn__disabled_discard").move).eq("discard 2R"); // same for Discard/Draw
     });
 
     it("offers to undo a declaration rather than silently toggling it", () => {
@@ -2143,9 +2141,9 @@ describe("Gnostica: button states", () => {
         const g = swords();
         const chosen = "use AS/with m0.2 shrink n0.2 2";
         g.move(chosen, { partial: true });
-        const pips = barOf(g).filter(b => b.value?.startsWith("pips_"));
-        expect(pips.map(b => [b.value, isGrey(b)])).to.deep.equal([["pips_2", true], ["pips_1", false]]);
-        expect(g.handleClick(chosen, -1, -1, "_btn_pips_2").move).eq(chosen);
+        const pips = barOf(g).filter(b => b.value?.includes("pips_"));
+        expect(pips.map(b => [b.value, isGrey(b)])).to.deep.equal([["_disabled_pips_2", true], ["pips_1", false]]);
+        expect(g.handleClick(chosen, -1, -1, "_btn__disabled_pips_2").move).eq(chosen);
         expect(g.handleClick(chosen, -1, -1, "_btn_pips_1").move).eq("use AS/with m0.2 shrink n0.2 1");
     });
 
@@ -2167,9 +2165,9 @@ describe("Gnostica: button states", () => {
         const g = testGame({ board: [{ x: 0, y: 0, uid: "00", pieces: [[1, 1, "U"]] }], hands: [filler, filler], drawPile: ["AC", "2C", "3C"] });
         g.move("use 00");
         expect(g.continued).to.not.be.empty;
-        const play = barOf(g).find(b => b.value === "play")!;
+        const play = barOf(g).find(b => b.value === "_disabled_play")!;
         expect(isGrey(play)).to.be.true;
-        const click = g.handleClick("", -1, -1, "_btn_play");
+        const click = g.handleClick("", -1, -1, "_btn__disabled_play");
         expect(click.move).eq("play AC via 00"); // unchanged: still the resume, not a bare "play"
         expect(g.handleClick(click.move!, -1, -1, "_btn_target_own").valid).to.be.true;
     });
@@ -2571,12 +2569,12 @@ describe("Gnostica: handleClick", () => {
         expect(check.message).eq(i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
     });
 
-    it("shows only a single, bold Place button with no pieces on the board yet", () => {
+    it("shows only a single Place button with no pieces on the board yet", () => {
         const g = new GnosticaGame(2);
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         expect(bar, "expected a button bar").to.not.be.undefined;
-        expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["place", "undo"]);
+        expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["place", "_disabled_undo"]);
         expect(bar!.buttons![0].value).eq("place");
     });
 
@@ -2585,8 +2583,8 @@ describe("Gnostica: handleClick", () => {
         g.move("place m0 U", { partial: true });
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
-        expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["place", "undo"]);
-        expect(bar!.buttons![0].value).eq("place");
+        expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["_disabled_place", "undo"]);
+        expect(bar!.buttons![0].value).eq("_disabled_place");
     });
 
     it("shows the full action set once a placement is genuinely committed", () => {
@@ -2614,7 +2612,7 @@ describe("Gnostica: handleClick", () => {
         // a live action of player 2's.
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
-        for (const b of bar!.buttons!.filter(b => b.value !== "undo")) {
+        for (const b of bar!.buttons!.filter(b => !b.value?.endsWith("undo"))) {
             expect(b.attributes, `button "${b.value}" should not be highlighted yet`).to.be.undefined;
         }
     });
@@ -2630,10 +2628,10 @@ describe("Gnostica: handleClick", () => {
         g.move(clicked.move, { partial: true }); // sync engine state, same as the playground's own preview flow
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const orientBtn = bar!.buttons!.find(b => b.value === "orient");
+        const orientBtn = bar!.buttons!.find(b => b.value === "_disabled_orient");
         expect(isGrey(orientBtn)).to.be.true; // already chosen
         // The other actions are not offered once one is chosen and built.
-        expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["orient", "declare", "undo"]);
+        expect(bar!.buttons!.map(b => b.value)).to.deep.equal(["_disabled_orient", "declare", "undo"]);
     });
 
     it("greys Pass, not Discard/Draw, when the live move is Pass's own bare seed - whether built by the Pass button or by hand", () => {
@@ -2644,7 +2642,7 @@ describe("Gnostica: handleClick", () => {
             g.move(liveMove, { partial: true });
             const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
             const bar = rep.areas?.find(a => a.type === "buttonBar");
-            const passBtn = bar!.buttons!.find(b => b.value === "pass");
+            const passBtn = bar!.buttons!.find(b => b.value === "_disabled_pass");
             const discardBtn = bar!.buttons!.find(b => b.value === "discard");
             expect(isGrey(passBtn), "Pass should be greyed").to.be.true;
             expect(isGrey(discardBtn), "Discard/Draw should not be greyed").to.be.false;
@@ -2659,7 +2657,7 @@ describe("Gnostica: handleClick", () => {
         g.move("discard draw 1", { partial: true });
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const discardBtn = bar!.buttons!.find(b => b.value === "discard");
+        const discardBtn = bar!.buttons!.find(b => b.value === "_disabled_discard");
         const passBtn = bar!.buttons!.find(b => b.value === "pass");
         expect(isGrey(discardBtn)).to.be.true;
         expect(isGrey(passBtn)).to.be.false;
@@ -2715,7 +2713,7 @@ describe("Gnostica: handleClick", () => {
         g.move(clicked.move, { partial: true }); // live preview, power still skipped - pushes zero results
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
-        const activateBtn = bar!.buttons!.find(b => b.value === "use");
+        const activateBtn = bar!.buttons!.find(b => b.value === "_disabled_use");
         // lastmove-based detection still catches this case, since lastmove is
         // set unconditionally regardless of pushed results
         expect(isGrey(activateBtn)).to.be.true;
@@ -3378,7 +3376,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const g2 = setup(true);
             g2.move("play 03", { partial: true });
             // Empress has a different second power, so the minion pick is joined by Skip Power.
-            expect(barValues(g2).map(b => b.value)).to.deep.equal(["play", "_spacer", "skip", "declare", "undo"]);
+            expect(barValues(g2).map(b => b.value)).to.deep.equal(["_disabled_play", "_spacer", "skip", "declare", "undo"]);
         });
     });
 
@@ -3590,7 +3588,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(values).to.not.include("orient");
         expect(values).to.not.include("discard");
         expect(values).to.not.include("pass");
-        expect(values[0]).eq("use");
+        expect(values[0]).eq("_disabled_use");
         expect(isGrey(bar!.buttons![0])).to.be.true;
         expect(values[1]).eq("_spacer"); // divider - the schema has no dedicated type for one
         expect(values.slice(2)).to.include("target_own");
@@ -3645,7 +3643,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
         expect(values).to.not.deep.equal(["place"]);
-        expect(values).to.include("use");
+        expect(values).to.include("_disabled_use");
     });
 
     it("Swords (piece): pips is offered as a button set, not click-cycled, unbolded until one is chosen; clicking one sets it directly", () => {
@@ -5185,7 +5183,7 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift("10D");
         g.move(`use 00`);
         expect(g.continued).to.deep.equal(["00.1"]);
-        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power", "undo"]);
+        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power", "_disabled_undo"]);
     });
 
     it("World rejects a self-reference and an off-board target", () => {
@@ -5507,7 +5505,7 @@ describe("Gnostica: Fool and World", () => {
         expect(buttonValues(preview)).to.not.include("decline_power");
         const rep = preview.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
-        const useBtn = bar.buttons!.find(b => b.value === "use")!;
+        const useBtn = bar.buttons!.find(b => b.value === "_disabled_use")!;
         expect(isGrey(useBtn)).to.be.true;
 
         // The real commit is what actually flips and pauses.
@@ -5529,7 +5527,7 @@ describe("Gnostica: Fool and World", () => {
         expect(buttonValues(g)).to.not.include("decline_power");
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
-        const playBtn = bar.buttons!.find(b => b.value === "play")!;
+        const playBtn = bar.buttons!.find(b => b.value === "_disabled_play")!;
         expect(isGrey(playBtn)).to.be.true;
     });
 
@@ -5564,10 +5562,10 @@ describe("Gnostica: Fool and World", () => {
         // and the decline of AC (the card that WAS actually drawn), which
         // stays, greyed, as the choice already made.
         expect(buttonValues(preview)).to.not.include("power_fool");
-        expect(buttonValues(preview)).to.deep.equal(["declare", "decline_power", "undo"]);
+        expect(buttonValues(preview)).to.deep.equal(["declare", "_disabled_decline_power", "undo"]);
         const rep = preview.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
-        const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
+        const declineBtn = bar.buttons!.find(b => b.value === "_disabled_decline_power")!;
         expect(declineBtn.label).eq("Decline AC");
         expect(isGrey(declineBtn)).to.be.true;
     });
@@ -5661,7 +5659,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.continued).to.deep.equal(["00.1"]);
 
         expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
-        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power", "undo"]);
+        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power", "_disabled_undo"]);
         expect(g.handleClick("", -1, -1, "_btn_resume_power").message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
 
         // A direct board click on the target still works too.
@@ -5704,7 +5702,7 @@ describe("Gnostica: Fool and World", () => {
         g.drawPile.unshift("00"); // Fool's own first flip reveals another Fool
         g.move(`use 00`);
         expect(g.continued).to.deep.equal(["00.1"]);
-        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power", "undo"]);
+        expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power", "_disabled_undo"]);
 
         pluckCard(g, "AC");
         g.drawPile.unshift("AC"); // the outer's own mandatory second flip, once it fires
@@ -6224,12 +6222,11 @@ describe("Gnostica: skipping a card's first power", () => {
         expect(fool.validateMove("play 18 via 00/skip/with m0.2 shrink n0.2 1").complete).eq(1);
     });
 
-    it("is rejected where there is nothing to skip to, and ignored where the button isn't offered", () => {
+    it("is rejected where there is nothing to skip to", () => {
         const chariot = duel("07");
         const bad = chariot.validateMove("use 07/skip/with m0.2 move m0.2 1");
         expect(bad.valid).to.be.false;
         expect(bad.message).eq(i18next.t("apgames:validation.gnostica.SKIP_NOT_ALLOWED"));
-        expect(chariot.handleClick("use 07", -1, -1, "_btn_skip").move).eq("use 07");
         const minor = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands: [filler, filler] });
         expect(minor.validateMove("use AC/skip").valid).to.be.false;
         // The High Priestess: both rounds are the same power, in a move with no minion, so a skip is refused in a fresh use and a play, and in the round-2 resume.
@@ -6277,13 +6274,13 @@ describe("Gnostica: the Fool's Decline button", () => {
             drawPile: ["18", "3C", "4C"], // the Moon
         });
         g.move("use 00");
-        expect(valuesWhile(g)).to.deep.equal(["resume_power", "decline_power", "undo"]);
+        expect(valuesWhile(g)).to.deep.equal(["resume_power", "decline_power", "_disabled_undo"]);
         const click = g.handleClick("", -1, -1, "_btn_resume_power");
         expect(click.move).eq("play 18 via 00");
         const shown = g.clone();
         shown.move(click.move!, { partial: true });
         const buttons = (shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; fill?: unknown }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
-        expect(buttons.map(b => b.value)).to.deep.equal(["play", "_spacer", "skip", "declare", "undo"]);
+        expect(buttons.map(b => b.value)).to.deep.equal(["_disabled_play", "_spacer", "skip", "declare", "undo"]);
         expect(isGrey(buttons[0])).to.be.true; // the chosen Play
     });
 
@@ -6293,7 +6290,7 @@ describe("Gnostica: the Fool's Decline button", () => {
         shown.move("decline AC via 00", { partial: true });
         const values = ((shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string }[] }[] }).areas ?? [])
             .filter(a => a.type === "buttonBar").flatMap(a => (a.buttons ?? []).map(b => b.value));
-        expect(values).to.deep.equal(["declare", "decline_power", "undo"]);
+        expect(values).to.deep.equal(["declare", "_disabled_decline_power", "undo"]);
     });
 
     it("stays, greyed, once it has been chosen", () => {
@@ -6301,7 +6298,7 @@ describe("Gnostica: the Fool's Decline button", () => {
         const shown = g.clone();
         shown.move("decline AC via 00", { partial: true });
         const buttons = (shown.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; fill?: unknown }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
-        const decline = buttons.find(b => b.value === "decline_power")!;
+        const decline = buttons.find(b => b.value === "_disabled_decline_power")!;
         expect(decline).to.not.be.undefined;
         expect(isGrey(decline)).to.be.true;
     });
@@ -6375,7 +6372,7 @@ describe("Gnostica: a Fool's revealed card plays down the same path as one playe
         shown.move(move, { partial: true });
         const out = shown.render();
         const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: Btn[] }[] };
-        return rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => `${b.value}${b.fill !== undefined ? "*" : ""}`).filter(v => v !== "decline_power");
+        return rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => `${b.value!.replace(/^_disabled_/, "")}${b.fill !== undefined ? "*" : ""}`).filter(v => v !== "decline_power");
     };
     const board = [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] as TestPiece[] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 2, "W"]] as TestPiece[] }, { x: -1, y: 0, uid: "2D" }];
     const pair = (revealed: string) => {
@@ -6447,7 +6444,7 @@ describe("Gnostica: the Undo button", () => {
         }
         const out = shown.render();
         const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: Btn[] }[] };
-        return rep.areas?.find(a => a.type === "buttonBar")?.buttons?.find(b => b.value === "undo");
+        return rep.areas?.find(a => a.type === "buttonBar")?.buttons?.find(b => b.value?.endsWith("undo"));
     };
     const undoAll = (g: GnosticaGame, move: string): string[] => {
         const chain = [move];
@@ -6514,7 +6511,7 @@ describe("Gnostica: the Undo button", () => {
         const out = g.render();
         const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: (Btn & { fill?: unknown })[] }[] };
         const buttons = rep.areas!.find(a => a.type === "buttonBar")!.buttons!;
-        expect(buttons.map(b => b.value)).to.deep.equal(["use", "declare", "undo"]);
+        expect(buttons.map(b => b.value)).to.deep.equal(["_disabled_use", "declare", "undo"]);
         expect(isGrey(buttons[0])).to.be.true;
         expect(buttons[2].attributes).to.be.undefined; // Undo is live
     });

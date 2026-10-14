@@ -2213,6 +2213,14 @@ export class GnosticaGame extends GameBaseSequenced {
         return (at < 0 ? [...open, skip] : [...open.slice(0, at), skip, ...open.slice(at)]) as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
+    // A greyed or crossed-out button must not act when clicked, so it gets a value no handler recognizes.
+    private withInertUnavailable(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
+        return bar?.map(b => b.value !== undefined && !b.value.startsWith("_")
+            && (b.fill === GREYED_BUTTON_FILL || b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through"))
+            ? { ...b, value: `_disabled_${b.value}` }
+            : b) as [ButtonBarButton, ...ButtonBarButton[]] | undefined;
+    }
+
     // Undo ends every main-phase bar; crossed out, like any unavailable action, when the move has nothing to take back.
     private withUndo(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         if (bar === undefined || this.phase !== "main") {
@@ -2269,7 +2277,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Pick one value from a small labeled set: available is plain, unavailable is crossed out, the `current` one is greyed.
     private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
         return options.map(({ value, label, glyph, glyphPosition, disabled }) => {
-            const button: ButtonBarButton = { value: `${disabled ? "_disabled_" : ""}${prefix}_${value}` };
+            const button: ButtonBarButton = { value: `${prefix}_${value}` };
             if (label !== undefined) {
                 button.label = label;
             }
@@ -3662,10 +3670,6 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private clickActionButton(parsed: IParsedMove, value: string): string | IClickResult {
         const last = parsed.announceLast ? " last" : "";
-        // A button the move already reflects is greyed, so a click on it does nothing - never a silent restart of the move.
-        if (this.highlightedButtonValues(parsed).has(value) || (value === "decline_power" && parsed.head === "decline")) {
-            return this.noop(parsed);
-        }
         switch (value) {
             case "pass":
                 // A genuine pass - explicitly zero discards AND zero draw; a bare "discard" seed defaults its omitted "draw <n>" to the max, so it isn't equivalent.
@@ -3677,46 +3681,29 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Place isn't strictly necessary (an empty move already builds "place <cell>" from a bare board click), but is offered for consistency with every other action.
                 return `${value}${last}`;
             case "resume_power":
-                if (this.continued.length === 0) {
-                    return this.noop(parsed);
-                }
                 // Seeds the resume submission's head + already-known card uid directly - pendingPower already names the exact card, no board click needed.
                 // Returned as a candidate string, not a hardcoded complete:-1, since a resumed Fool flip is ALREADY complete and needs Submit enabled.
                 return this.pickleMove(this.freshResumeMove(false, parsed.announceLast));
             case "decline_power":
-                if (this.continued.length === 0) {
-                    return this.noop(parsed);
-                }
                 // Declining pops the CURRENT top of the stack; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
                 return this.pickleMove(this.freshResumeMove(true, parsed.announceLast));
             case "undo":
                 return this.pickleMove(this.retractedMove(parsed));
-            case "skip_reorient": {
-                const { current, advanced } = this.parsePendingStep(parsed);
-                if (current === undefined || !this.facingOpen(current, advanced)) {
-                    return this.noop(parsed);
-                }
+            case "skip_reorient":
                 return this.settleFacing(parsed);
-            }
-            case "skip": {
-                const pending = this.parsePendingStep(parsed).advanced;
-                const card = parsed.steps[0]?.card;
-                if (!this.canSkipPending(pending) || card === undefined) {
-                    return this.noop(parsed);
-                }
+            case "skip":
                 return this.pickleMove({ ...parsed, steps: [parsed.steps[0], { action: "skip", complete: -1 }] });
-            }
             case "drawn": {
                 // Only ever offered for Wheel of Fortune's special option.
                 const pending = this.parsePendingStep(parsed).advanced;
-                if (pending === undefined || pending.suitUid !== "C" || this.pendingMode(pending) !== "new" || pending.opts.allowRandomDraw !== true) {
+                if (pending === undefined) {
                     return this.noop(parsed);
                 }
                 return pending.game.supplyStepCardUid(pending, "drawn") ?? this.noop(parsed);
             }
             case "destroy": {
                 const pending = this.parsePendingStep(parsed).advanced;
-                if (pending === undefined || pending.suitUid !== "S" || this.pendingMode(pending) !== "tile" || pending.istep.targetCell === undefined) {
+                if (pending === undefined || pending.istep.targetCell === undefined) {
                     return this.noop(parsed);
                 }
                 const faceCell = pending.istep.targetCell;
@@ -6771,7 +6758,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
-                const actionButtons = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons());
+                const actionButtons = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withInertUnavailable(this.withUndo(this.getActionButtons()));
                 for (const button of actionButtons ?? []) {
                     if (button.glyph?.startsWith("buttonpiece_") && !(button.glyph in legend)) {
                         legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice("buttonpiece_".length)));
