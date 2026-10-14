@@ -3567,17 +3567,20 @@ export class GnosticaGame extends GameBaseSequenced {
         if (parsed.head === undefined) {
             parsed = this.resumeMove(parsed) ?? parsed;
         }
-        if (piece !== undefined && piece.startsWith("_btn_")) {
-            return this.clickButton(parsed, piece.slice("_btn_".length));
-        }
-        // A card is in one place at a time, so a card key is a hand card unless it is in the discard pile; board cards are never clicked through the legend.
-        const cardUid = GnosticaGame.cardKeyUid(piece);
-        if (cardUid !== undefined) {
-            return this.discardPile.includes(cardUid) ? this.clickDiscardPile(parsed, cardUid) : this.clickHandCard(parsed, cardUid);
-        }
-        // Discard-pile clicks drive judgementDraw only; a minor-arcana bucket has no individual identity, so clicking one draws a uniformly-random not-yet-selected uid from it.
-        if (piece !== undefined && /^[A-Z]_(spot|royal)_/.test(piece)) {
-            return this.clickDiscardPile(parsed, piece);
+        // A click outside the board grid (both coordinates negative) names what was clicked in `piece`; a buffer segment only has one coordinate out of range, and goes to clickBoard.
+        if (row < 0 && col < 0 && piece !== undefined) {
+            if (piece.startsWith("_btn_")) {
+                return this.clickButton(parsed, piece.slice("_btn_".length));
+            }
+            // Discard-pile clicks drive judgementDraw only; a minor-arcana bucket has no individual identity, so clicking one draws a uniformly-random not-yet-selected uid from it.
+            if (/^[A-Z]_(spot|royal)_/.test(piece)) {
+                return this.clickDiscardPile(parsed, piece);
+            }
+            // A card is in one place at a time, so a card key is a hand card unless it is in the discard pile; board cards are never clicked through the legend.
+            const cardUid = GnosticaGame.cardKeyUid(piece);
+            if (cardUid !== undefined) {
+                return this.discardPile.includes(cardUid) ? this.clickDiscardPile(parsed, cardUid) : this.clickHandCard(parsed, cardUid);
+            }
         }
         return this.clickBoard(parsed, row, col, piece);
     }
@@ -3957,7 +3960,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private handleBiddingClick(parsed: IParsedMove, piece?: string): string | IClickResult {
         const move = this.pickleMove(parsed);
         // A bid is always exactly one card - unlike discard's toggle-list, each click REPLACES any earlier pick rather than accumulating.
-        const cardUid = GnosticaGame.cardKeyUid(piece);
+        const cardUid = piece === undefined ? undefined : GnosticaGame.cardKeyUid(piece);
         if (this.phase === "bidding" && cardUid !== undefined) {
             const uid = cardUid;
             const hand = this.hands[this.currplayer - 1] ?? [];
@@ -6471,8 +6474,8 @@ export class GnosticaGame extends GameBaseSequenced {
         return uid === UNREVEALED_UID ? "cUNKNOWN" : `c${uid}`;
     }
 
-    private static cardKeyUid(piece: string | undefined): string | undefined {
-        return piece !== undefined && /^c[^_]+$/.test(piece) ? piece.slice(1) : undefined;
+    private static cardKeyUid(piece: string): string | undefined {
+        return /^c[^_]+$/.test(piece) ? piece.slice(1) : undefined;
     }
 
     // Sort cards by their index in allCards.
