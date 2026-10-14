@@ -1275,6 +1275,15 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(lovers.board.get("j0")?.pieces.length ?? 0).eq(0); // a final landing in the void destroys it
     });
 
+    it("renders a Chariot's waypoint in the void, inside the window", () => {
+        const waypoint = testGame({ board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 3, "W"]] }], hands: [filler, filler] });
+        waypoint.move(`use 07/with m0.3 move m0.3 3 orient E`, { partial: true });
+        const rep = waypoint.render().at(-1) as unknown as { pieces: string[][][] };
+        const { minX, minY } = waypoint.renderWindow();
+        expect(minX).eq(-3);
+        expect(rep.pieces[0 - minY][-3 - minX].some(k => k.startsWith("p_13E"))).to.be.true;
+    });
+
     it("a Rods push into the void is a rod-void move: a destroyed mark where the piece was, a shortened arrow, and a ring on the pusher; a Swords destroy keeps its cell", () => {
         const pushed = testGame({
             board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
@@ -2928,14 +2937,10 @@ describe("Gnostica: render - draw/discard pile summaries", () => {
     // This is the direct behavioural proof: a real card moves from
     // "not counted" to "counted as unknown" the moment it's redacted.
     it("counts a card hidden in another player's redacted hand as part of the draw-pile pool", () => {
-        const g = new GnosticaGame(2);
-        for (const [, , t] of g.board.entries()) {
-            t.card = undefined;
-        }
-        g.discardPile = [];
-        g.hands[0] = [];
-        g.hands[1] = ["AC"]; // a real, visible Ace of Cups in player 2's hand
-        g.drawPile = []; // deliberately empty/stale - must not affect the summary
+        const g = testGame({
+            hands: [[], ["AC"]], // a real, visible Ace of Cups in player 2's hand
+            drawPile: [], // deliberately empty/stale - must not affect the summary
+        });
 
         // 10 spot cups exist in total; with AC visible in hand, the other
         // 9 are unaccounted for anywhere and should show as unknown.
@@ -4836,6 +4841,18 @@ describe("Gnostica: chatLog() other-player naming", () => {
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("grew"));
         expect(line).eq(i18next.t("apresults:CONVERT.gnostica_piece_own", { player: "Alice", into: "size 2", where: "m0" }));
+    });
+
+    it("ends the game with no winners when the last card on the board is destroyed", () => {
+        const g = testGame({
+            board: [{ x: -1, y: 0, pieces: [[1, 1, "E"]] }, { x: 0, y: 0, uid: "AD" }, { x: 1, y: 0, pieces: [[2, 1, "U"]] }],
+            hands: [["AS", ...filler.slice(0, 5)], filler],
+        });
+        g.move("play AS/with l0.1 shrink m0 1");
+        expect(g.board.get("m0")?.card).eq(undefined);
+        expect(g.gameover).eq(true);
+        expect(g.winner).to.deep.equal([]);
+        expect(() => g.render()).to.not.throw();
     });
 
     it("destroy (Swords tile): names the destroyed card, not a raw uid", () => {
