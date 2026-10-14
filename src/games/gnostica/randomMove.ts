@@ -617,17 +617,16 @@ function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IPieceRef): 
     return [{ ref: selfRef, orientation: selfOrientation }, ...facing];
 }
 
-// Adapts minorModeAvailability's own switch to a raw minion rather
+// Adapts unavailableModes's own switch to a raw minion rather
 // than an IPendingStep (reconstructed from a move string, not
 // convenient here) - a thin, deliberately-looser wrapper over the
 // exact same per-mode legality rules, not a second copy of them.
-// Best-effort pre-filter only, same as minorModeAvailability itself -
+// Best-effort pre-filter only, same as unavailableModes itself -
 // buildRandomModeArgCandidates + validateSuitPrimitive remain the real
 // gate.
 function legalModesForMinion(game: GnosticaGame, minion: IPieceRef, suitUid: MinorSuitUid, opts: Record<string, unknown>): MinorMode[] {
-    return [...game.minorModeAvailability({ suitUid, minion, opts }).entries()]
-        .filter(([, reason]) => reason === undefined)
-        .map(([mode]) => mode);
+    const unavailable = game.unavailableModes({ suitUid, minion, opts });
+    return (suitUid === "C" ? ["own", "enemy", "new"] as const : ["piece", "tile"] as const).filter(mode => !unavailable.has(mode));
 }
 
 // Every plausible full set of trailing args (after "<minionRef>

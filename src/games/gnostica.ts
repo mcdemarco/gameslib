@@ -134,7 +134,7 @@ interface ChoiceOption {
     label?: string | StructuredRenderLabel;
     glyph?: string; // A legend key; the render adds the entry for a piece's or a suit's.
     glyphPosition?: "prefix" | "suffix"; // Defaults to suffix.
-    disabledReason?: { key: string; params?: Record<string, unknown> };
+    disabled?: boolean; // Crossed out, and inert when clicked.
 }
 
 // A minion's board location; `piece` carries owner/size/orientation for a newMinion predicted by validate* before the board is actually mutated.
@@ -230,7 +230,7 @@ interface IPendingStep {
     minionCandidates: IPieceRef[];
     // Earlier complete power-step segments of the same activation, as typed IStep objects; always [] for a minor card.
     priorSteps: IStep[];
-    // computeShortcutOpts's result for the CURRENT step - lets minorModeAvailability's button pre-filter account for a same-target-shortcut/Moon card.
+    // computeShortcutOpts's result for the CURRENT step - lets unavailableModes's button pre-filter account for a same-target-shortcut/Moon card.
     opts: Record<string, unknown>;
     // The current step's own content as typed so far, already resolved into an IStep - completeness gates and click handlers read it directly.
     istep: IStep;
@@ -2008,7 +2008,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // A Rod can't act while upright, so while choosing, only a facing minion is a candidate - unless none is, when the error should still show.
     private actingCandidates(candidates: IPieceRef[], suitUid: MinorSuitUid | undefined): IPieceRef[] {
-        const facing = suitUid === "R" ? candidates.filter(m => this.rodNeedsFacingReason("R", m.piece) === undefined) : candidates;
+        const facing = suitUid === "R" ? candidates.filter(m => !this.rodNeedsFacing("R", m.piece)) : candidates;
         return facing.length > 0 ? facing : candidates;
     }
 
@@ -2266,10 +2266,10 @@ export class GnosticaGame extends GameBaseSequenced {
         return [...bar, declineBtn] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
-    // Pick one value from a small labeled set: available is plain, unavailable (a `disabledReason`, shared with minorModeAvailability) is crossed out, the `current` one is greyed.
+    // Pick one value from a small labeled set: available is plain, unavailable is crossed out, the `current` one is greyed.
     private buildChoiceButtons(prefix: string, options: ChoiceOption[], current: string | undefined): ButtonBarButton[] {
-        return options.map(({ value, label, glyph, glyphPosition, disabledReason }) => {
-            const button: ButtonBarButton = { value: `${disabledReason === undefined ? "" : "_disabled_"}${prefix}_${value}` };
+        return options.map(({ value, label, glyph, glyphPosition, disabled }) => {
+            const button: ButtonBarButton = { value: `${disabled ? "_disabled_" : ""}${prefix}_${value}` };
             if (label !== undefined) {
                 button.label = label;
             }
@@ -2277,7 +2277,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 button.glyph = glyph;
                 button.glyphPosition = glyphPosition ?? "suffix";
             }
-            if (disabledReason !== undefined) {
+            if (disabled) {
                 button.attributes = [{ name: "text-decoration", value: "line-through" }];
             } else if (value === current) {
                 button.fill = GREYED_BUTTON_FILL;
@@ -2287,8 +2287,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Rod can never act while upright, so doom an upright candidate.
-    private rodNeedsFacingReason(suitUid: MinorSuitUid | undefined, piece: Piece): { key: string } | undefined {
-        return suitUid === "R" && piece.orientation === "U" ? { key: "ROD_NEEDS_FACING" } : undefined;
+    private rodNeedsFacing(suitUid: MinorSuitUid | undefined, piece: Piece): boolean {
+        return suitUid === "R" && piece.orientation === "U";
     }
 
     // The self-contained Play/Decline pair offered whenever a paused power has no button set of its own; reads the active card off the resume stack's top entry.
@@ -2518,7 +2518,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             seenRefs.add(ref);
             const piece = this.getPiece(m);
-            options.push({ value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason: this.rodNeedsFacingReason(pendingMinor.suitUid, piece) });
+            options.push({ value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabled: this.rodNeedsFacing(pendingMinor.suitUid, piece) });
         }
         buttons.push(...this.buildChoiceButtons("minion", options, undefined));
         if (declareBtn !== undefined) {
@@ -2564,9 +2564,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // `ownLast` moves the acting player's own pieces after everyone else's (Swords: destroying your own minion is the least likely pick).
     private pieceCandidateOptions(
         pending: IPendingStep, verb: string,
-        opts: { disabledReason?: { key: string; params?: Record<string, unknown> }; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean; selfVerb?: string } = {},
+        opts: { disabled?: boolean; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean; selfVerb?: string } = {},
     ): ChoiceOption[] {
-        const { disabledReason, includeSelf = true, filter, ownLast = false, selfVerb = verb } = opts;
+        const { disabled, includeSelf = true, filter, ownLast = false, selfVerb = verb } = opts;
         const faceCell = this.minorTargetCell(pending.minion);
         const cellPieces = this.cellContents(faceCell)?.pieces ?? [];
         const options: ChoiceOption[] = [];
@@ -2579,7 +2579,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
             seen.add(ref);
             const piece = this.getPiece(candidate);
-            const option = { value: ref, label: this.ownerButtonLabel(selfAction ? selfVerb : verb, piece.owner), glyph: GnosticaGame.pieceButtonGlyph(piece), disabledReason };
+            const option = { value: ref, label: this.ownerButtonLabel(selfAction ? selfVerb : verb, piece.owner), glyph: GnosticaGame.pieceButtonGlyph(piece), disabled };
             (ownLast && piece.owner === this.currplayer ? own : options).push(option);
         };
         // Self is always a candidate unless explicitly excluded (tradeHands/hierophantReplace, which require an enemy) - uniquified against the facing cell's own pieces below.
@@ -2620,26 +2620,26 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // One candidate per real target for a fresh suit-power step - the tile at minorTargetCell plus every piece there, or Cups' "own"/every enemy piece/"new"; one click supplies mode + target.
     private suitTargetCandidates(pending: IPendingStep, suitUid: MinorSuitUid): ChoiceOption[] {
-        const availability = this.minorModeAvailability(pending);
+        const unavailable = this.unavailableModes(pending);
         const faceCell = this.minorTargetCell(pending.minion);
         const targetCell = faceCell;
         if (suitUid === "C") {
             const cellPieces = this.cellContents(faceCell)?.pieces ?? [];
-            const options: ChoiceOption[] = [{ value: "own", label: "Create Minion", disabledReason: availability.get("own") }];
+            const options: ChoiceOption[] = [{ value: "own", label: "Create Minion", disabled: unavailable.has("own") }];
             // The new piece is a gift added to the referenced enemy's own side, not a capture of anything - see applyCups' "enemy" case.
             const enemyEntries: ChoiceOption[] = [];
             cellPieces.forEach(p => {
                 if (p.owner !== this.currplayer) {
-                    enemyEntries.push({ value: this.pieceRefStr({ cell: faceCell, piece: p }), label: this.ownerButtonLabel("Create Enemy", p.owner), glyph: GnosticaGame.pieceButtonGlyph(p), disabledReason: availability.get("enemy") });
+                    enemyEntries.push({ value: this.pieceRefStr({ cell: faceCell, piece: p }), label: this.ownerButtonLabel("Create Enemy", p.owner), glyph: GnosticaGame.pieceButtonGlyph(p), disabled: unavailable.has("enemy") });
                 }
             });
             if (enemyEntries.length > 0) {
                 options.push(...enemyEntries);
             } else {
                 // No enemy piece to reference right now - still show the option, struck through, matching "own"/"new"'s own always-present buttons.
-                options.push({ value: "enemy", label: "Create Enemy", disabledReason: availability.get("enemy") });
+                options.push({ value: "enemy", label: "Create Enemy", disabled: unavailable.has("enemy") });
             }
-            options.push({ value: "new", label: "Create Territory", disabledReason: availability.get("new") });
+            options.push({ value: "new", label: "Create Territory", disabled: unavailable.has("new") });
             return options;
         }
         // The verb prefixes each piece candidate. A Rod moves its own minion but pushes any other piece or territory, so only Rods have a separate selfVerb.
@@ -2647,8 +2647,8 @@ export class GnosticaGame extends GameBaseSequenced {
         const selfVerb = suitUid === "R" ? "Move" : undefined;
         const tile = `${verb} Territory`;
         return [
-            { value: targetCell, label: tile, disabledReason: availability.get("tile") },
-            ...this.pieceCandidateOptions(pending, verb, { disabledReason: availability.get("piece"), ownLast: suitUid === "S", selfVerb }),
+            { value: targetCell, label: tile, disabled: unavailable.has("tile") },
+            ...this.pieceCandidateOptions(pending, verb, { disabled: unavailable.has("piece"), ownLast: suitUid === "S", selfVerb }),
         ];
     }
 
@@ -2717,7 +2717,7 @@ export class GnosticaGame extends GameBaseSequenced {
         for (let n = maxPips; n >= 1; n--) {
             const left = victim === undefined ? 0 : victim.size - n;
             const stashEmpty = victim !== undefined && left > 0 && !pending.game.hasStashAvailable(victim.owner, left as Pips);
-            options.push({ value: String(n), label: `Attack for ${n}`, disabledReason: stashEmpty ? { key: "STASH_EMPTY", params: { playerNum: victim.owner, size: left } } : undefined });
+            options.push({ value: String(n), label: `Attack for ${n}`, disabled: stashEmpty });
         }
         return options;
     }
@@ -3085,112 +3085,59 @@ export class GnosticaGame extends GameBaseSequenced {
         return legal;
     }
 
-    // The nearest legal distance for a Rod's territory push, or the first distance's failure when none is.
-    private rodPushDistance(minion: IPieceRef): { dist?: number; failure?: PowerFailure } {
-        const piece = minion.piece;
+    // The nearest legal distance for a Rod's territory push, or undefined when none is.
+    private rodPushDistance(minion: IPieceRef): number | undefined {
         const faceCell = this.minorTargetCell(minion);
-        let first: PowerFailure | undefined;
-        for (let dist = 1; dist <= piece.size; dist++) {
-            const failure = this.checkMoveTerritory(minion, faceCell, dist);
-            if (failure === undefined) {
-                return { dist };
+        for (let dist = 1; dist <= minion.piece.size; dist++) {
+            if (this.checkMoveTerritory(minion, faceCell, dist) === undefined) {
+                return dist;
             }
-            first ??= failure;
         }
-        return { failure: first };
+        return undefined;
     }
 
-    // Best-effort feasibility check for which modes are worth offering as buttons - not a full legality check; a struck-through mode still gets a button, rejected on click.
-    public minorModeAvailability(pending: { suitUid?: MinorSuitUid; minion: IPieceRef; opts: Record<string, unknown> }): Map<MinorMode, { key: string; params?: Record<string, unknown> } | undefined> {
+    // Best-effort feasibility check for which modes are worth offering as buttons - not a full legality check; an unusable mode's button is crossed out and inert.
+    public unavailableModes(pending: { suitUid?: MinorSuitUid; minion: IPieceRef; opts: Record<string, unknown> }): Set<MinorMode> {
         // Only ever called for a suit-shaped pending - suitUid is guaranteed set here.
         const suitUid = pending.suitUid!;
         const minion = pending.minion.piece;
         const faceCell = this.minorTargetCell(pending.minion);
         const targetT = this.cellContents(faceCell);
-        const cell = faceCell;
         const hand = this.hands[this.currplayer - 1];
-        const result = new Map<MinorMode, { key: string; params?: Record<string, unknown> } | undefined>();
-        const minorModeNames: MinorMode[] = suitUid === "C" ? ["own", "enemy", "new"] : ["piece", "tile"];
-        for (const mode of minorModeNames) {
+        const pile = pending.opts.replacementSource === "discard" ? [...hand, ...this.discardPile] : hand;
+        const current = targetT?.pointValue() ?? 0;
+        const handHasCardOfValue = (cards: string[], value: number): boolean => cards.some(uid => {
+            const c = allCards().find(cc => cc.uid === uid);
+            return c !== undefined && cardPointValue(c) === value;
+        });
+        const isUnavailable = (mode: MinorMode): boolean => {
             switch (`${suitUid}.${mode}`) {
-                case "C.own": {
-                    if (!(targetT === undefined || targetT.canAdd(pending.opts.ignoreCapacity === true))) {
-                        result.set(mode, { key: "CELL_FULL" });
-                        break;
-                    }
-                    const stashOk = pending.opts.skipStashCheck === true || this.hasStashAvailable(this.currplayer, 1);
-                    result.set(mode, stashOk ? undefined : { key: "STASH_EMPTY", params: { playerNum: this.currplayer, size: 1 } });
-                    break;
-                }
+                case "C.own":
+                    return !(targetT === undefined || targetT.canAdd(pending.opts.ignoreCapacity === true))
+                        || !(pending.opts.skipStashCheck === true || this.hasStashAvailable(this.currplayer, 1));
                 case "C.enemy":
-                    result.set(mode, (targetT?.pieces ?? []).some(p => p.owner !== this.currplayer)
-                        ? undefined : { key: "NO_ENEMY_THERE", params: { cell } });
-                    break;
+                    return !(targetT?.pieces ?? []).some(p => p.owner !== this.currplayer);
                 case "C.new":
-                    if (this.classifyCell(faceCell) !== "wasteland") {
-                        result.set(mode, { key: "NOT_A_WASTELAND" });
-                    } else if (pending.opts.allowRandomDraw === true || handHasCardOfValue(hand, 1) || (pending.opts.allowRoyalty === true && handHasCardOfValue(hand, 2))) {
-                        result.set(mode, undefined);
-                    } else {
-                        result.set(mode, { key: "NO_CARD_FOR_TERRITORY" });
-                    }
-                    break;
+                    return this.classifyCell(faceCell) !== "wasteland"
+                        || !(pending.opts.allowRandomDraw === true || handHasCardOfValue(hand, 1) || (pending.opts.allowRoyalty === true && handHasCardOfValue(hand, 2)));
                 case "R.piece":
-                    result.set(mode, this.rodNeedsFacingReason("R", minion));
-                    break;
+                    return this.rodNeedsFacing("R", minion);
                 case "R.tile":
-                    result.set(mode, this.rodNeedsFacingReason("R", minion) ?? this.rodPushDistance(pending.minion).failure);
-                    break;
+                    return this.rodNeedsFacing("R", minion) || this.rodPushDistance(pending.minion) === undefined;
                 case "D.tile": {
-                    const current = targetT?.pointValue() ?? 0;
-                    if (current === 0) {
-                        result.set(mode, { key: "NOTHING_TO_GROW" });
-                        break;
-                    }
-                    const pile = pending.opts.replacementSource === "discard" ? [...hand, ...this.discardPile] : hand;
                     const maxDelta = pending.opts.skipLadder === true ? 2 : 1;
-                    let ok = false;
-                    for (let d = 1; d <= maxDelta; d++) {
-                        if (handHasCardOfValue(pile, current + d)) {
-                            ok = true;
-                        }
-                    }
-                    result.set(mode, ok ? undefined : { key: "NO_CARD_TO_GROW" });
-                    break;
+                    return current === 0 || ![...Array(maxDelta)].some((_, i) => handHasCardOfValue(pile, current + i + 1));
                 }
                 case "S.tile": {
-                    const current = targetT?.pointValue() ?? 0;
-                    if (current === 0) {
-                        result.set(mode, { key: "NOTHING_TO_ATTACK" });
-                        break;
-                    }
-                    const pile = pending.opts.replacementSource === "discard" ? [...hand, ...this.discardPile] : hand;
-                    let ok = false;
-                    for (let p = 1; p <= minion.size * (pending.opts.bothSwords === true ? 2 : 1); p++) {
-                        const resultValue = current - p;
-                        if (resultValue < 0) {
-                            continue;
-                        }
-                        if (resultValue === 0 || handHasCardOfValue(pile, resultValue)) {
-                            ok = true;
-                            break;
-                        }
-                    }
-                    result.set(mode, ok ? undefined : { key: "NO_CARD_TO_ATTACK" });
-                    break;
+                    const maxPips = minion.size * (pending.opts.bothSwords === true ? 2 : 1);
+                    return current === 0 || ![...Array(maxPips)].some((_, i) => current - (i + 1) >= 0 && (current - (i + 1) === 0 || handHasCardOfValue(pile, current - (i + 1))));
                 }
                 default:
-                    result.set(mode, undefined);
+                    return false;
             }
-        }
-        return result;
-
-        function handHasCardOfValue(pile: string[], value: number): boolean {
-            return pile.some(uid => {
-                const c = allCards().find(cc => cc.uid === uid);
-                return c !== undefined && cardPointValue(c) === value;
-            });
-        }
+        };
+        const modes: MinorMode[] = suitUid === "C" ? ["own", "enemy", "new"] : ["piece", "tile"];
+        return new Set(modes.filter(isUnavailable));
     }
 
 
@@ -3291,7 +3238,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         } else if (suitUid === "R") {
             // Rods' "tile" mode seeds the nearest distance that is legal (1 unless that space is occupied) - a destination-cell click reaches any other.
-            step = { targetCell, amount: this.rodPushDistance(pending.minion).dist ?? 1 };
+            step = { targetCell, amount: this.rodPushDistance(pending.minion) ?? 1 };
         } else {
             // A territory's shrink is set by the replacement card (or the Destroy button), not chosen up front.
             step = { targetCell };
