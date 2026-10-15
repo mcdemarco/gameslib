@@ -464,7 +464,7 @@ export function randomUseOrPlayMove(game: GnosticaGame, head: "use" | "play"): s
     }
     const uid = weightedPick(hand, u => cardPointValue(allCards().find(c => c.uid === u)));
     const eligible = game.eligibleMinionsForPlay();
-    // cmdPlay removes the played card from hand before resolving its
+    // Playing a card removes it from hand before resolving its
     // power (it's spent to fund the ability, same as a discard) - true
     // for World exactly like any other card - so a chain step that spends
     // a hand card (Cups "new", Discs/Swords "tile") can't legally reuse

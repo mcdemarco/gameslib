@@ -811,7 +811,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     break;
                 case "play":
-                    outcome = powerCard === undefined ? undefined : this.cmdPlay(powerCard, powerSteps, powerAsUid, partial);
+                    if (powerCard !== undefined) {
+                        this.discardPlayedCard(powerCard);
+                        this.results.push({ type: "deckDraw", what: powerCard, from: "hand" });
+                        outcome = this.applyPowers(powerCard, powerSteps, powerAsUid, partial);
+                    }
                     break;
                 // "decline" with nothing pending, or any other head with no business here, falls through with no case - a caller bug, not this dispatch's job.
             }
@@ -898,7 +902,10 @@ export class GnosticaGame extends GameBaseSequenced {
             let result: APMoveResult;
             switch (effect.type) {
                 case "territory": {
-                    const card = this.createTerritoryFromDeck(effect.cell);
+                    // Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
+                    this.reshuffle();
+                    const card = cardByUid(this.drawPile.shift() as string);
+                    this.board.createTerritory(effect.cell, card);
                     result = { type: "place", where: effect.cell, how: "territory", what: card.uid };
                     break;
                 }
@@ -2195,18 +2202,16 @@ export class GnosticaGame extends GameBaseSequenced {
         return found;
     }
 
-    // Whether the power just started could be given up for the card's second one: a major card's first power still pending, whether the card was used, played, borrowed by the World or revealed by the Fool.
-    private canSkipPending(pending: IPendingStep | undefined): boolean {
-        // A Justice resumed for its attack has already taken its first power.
-        const resumedJustice = pending?.activeCardUid === "11" && this.getContinuedUid() === "11";
-        return pending !== undefined && !resumedJustice && pending.priorSteps.length === 0 && MAJOR_ARCANA[pending.activeCardUid] !== undefined
-            && GnosticaGame.canSkipFirstPower(MAJOR_ARCANA[pending.activeCardUid]);
-    }
-
     // Slots a "Skip Power" button in just before Declare whenever the first power of a card with a different second one is pending; a bar without Declare (the bare Play/Decline pair) is left alone.
     private withSkipPower(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
         const at = bar?.findIndex(b => b.value === "declare") ?? -1;
-        if (bar === undefined || at < 0 || !this.canSkipPending(this.computePendingMinor())) {
+        if (bar === undefined || at < 0) {
+            return bar;
+        }
+        const pending = this.computePendingMinor();
+        // A Justice resumed for its attack has already taken its first power; otherwise the first power of a major card has to be pending, whether the card was used, played, borrowed by the World or revealed by the Fool.
+        const resumedJustice = pending?.activeCardUid === "11" && this.getContinuedUid() === "11";
+        if (pending === undefined || resumedJustice || pending.priorSteps.length > 0 || MAJOR_ARCANA[pending.activeCardUid] === undefined || !GnosticaGame.canSkipFirstPower(MAJOR_ARCANA[pending.activeCardUid])) {
             return bar;
         }
         return [...bar.slice(0, at), { label: "Skip Power", value: "skip" }, ...bar.slice(at)] as [ButtonBarButton, ...ButtonBarButton[]];
@@ -2230,14 +2235,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const at = open.findIndex(b => b.value === "declare");
         const skip: ButtonBarButton = { label: "Skip Reorient", value: "skip_reorient" };
         return (at < 0 ? [...open, skip] : [...open.slice(0, at), skip, ...open.slice(at)]) as [ButtonBarButton, ...ButtonBarButton[]];
-    }
-
-    // A greyed or crossed-out button must not act when clicked, so it gets a value no handler recognizes.
-    private withInertUnavailable(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        return bar?.map(b => b.value !== undefined && !b.value.startsWith("_")
-            && (b.fill === GREYED_BUTTON_FILL || b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through"))
-            ? { ...b, value: `_disabled_${b.value}` }
-            : b) as [ButtonBarButton, ...ButtonBarButton[]] | undefined;
     }
 
     // Undo ends every main-phase bar; crossed out, like any unavailable action, when the move has nothing to take back.
@@ -2347,9 +2344,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return undefined;
         }
         const topLevel = this.buildTopLevelBar();
-        const discardCount = this.discardCountBar();
-        if (discardCount !== undefined) {
-            return discardCount;
+        // Discard's own count is optional, but the bar still actively solicits it once "discard" is the live head and no count has been chosen yet.
+        if (this.preview?.discardNeedsCount === true) {
+            return this.drawCountBar("drawcount");
         }
         const orientPicker = this.orientAmbiguityBar(topLevel);
         if (orientPicker !== undefined) {
@@ -2412,9 +2409,9 @@ export class GnosticaGame extends GameBaseSequenced {
             return collapsed as [ButtonBarButton, ...ButtonBarButton[]];
         }
 
-        const hpCount = pendingMinor.game.highPriestessCountBar(pendingMinor);
-        if (hpCount !== undefined) {
-            return hpCount;
+        // High Priestess: the discard list is built via hand-card clicks, but the draw count is the player's own choice, same shape as the ordinary discard/draw count-picker.
+        if (pendingMinor.special === "highPriestess" && pendingMinor.istep.amount === undefined) {
+            return pendingMinor.game.drawCountBar("hpdraw", pendingMinor.istep.cardList?.length ?? 0);
         }
         // orientMinion/judgementDraw/worldUseAny are pure click-driven; tradeHands/orientAny/hierophantReplace are too unless the facing cell holds several candidates for a click to pick between.
         // Self is always its own unambiguous click target for orientAny, so it doesn't count.
@@ -2476,14 +2473,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const hand = this.hands[this.currplayer - 1] ?? [];
         const maxDraw = Math.max(0, 6 - (hand.length - discarding));
         return this.buildChoiceButtons(prefix, this.drawCountOptions(maxDraw), undefined) as [ButtonBarButton, ...ButtonBarButton[]];
-    }
-
-    // Discard's own count is optional, but the bar still actively solicits it once "discard" is the live head and no count has been chosen yet.
-    private discardCountBar(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (this.preview?.discardNeedsCount !== true) {
-            return undefined;
-        }
-        return this.drawCountBar("drawcount");
     }
 
     // Orient: a bare cell means 2+ of the player's own pieces share it and none has been picked yet - same shape "use"/"play" get via minionPickerBar.
@@ -2552,14 +2541,6 @@ export class GnosticaGame extends GameBaseSequenced {
             buttons.push(declareBtn);
         }
         return buttons as [ButtonBarButton, ...ButtonBarButton[]];
-    }
-
-    // High Priestess: the discard list is built via hand-card clicks, but the draw count is the player's own choice, same shape as the ordinary discard/draw count-picker.
-    private highPriestessCountBar(pendingMinor: IPendingStep): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (pendingMinor.special !== "highPriestess" || pendingMinor.istep.amount !== undefined) {
-            return undefined;
-        }
-        return this.drawCountBar("hpdraw", pendingMinor.istep.cardList?.length ?? 0);
     }
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
@@ -3582,11 +3563,14 @@ export class GnosticaGame extends GameBaseSequenced {
     private clickButton(parsed: IParsedMove, value: string): string | IClickResult {
         const prefixed: [string, (parsed: IParsedMove, arg: string) => string | IClickResult][] = [
             ["minion_", (p, a) => this.clickMinionButton(p, a)],
-            ["orientpick_", (p, a) => this.clickOrientPickButton(p, a)],
+            // Orient's own minion-picker: it has no IPendingStep to resolve against, so it can't reuse "minion_"; facing is a separate click.
+            ["orientpick_", (p, a) => `orient ${a}${p.announceLast ? " last" : ""}`],
             ["target_", (p, a) => this.clickTargetButton(p, a)],
             ["pips_", (p, a) => this.clickPipsButton(p, a)],
-            ["magician_", (p, a) => this.clickMagicianButton(p, a)],
-            ["drawcount_", (p, a) => this.clickDrawCountButton(p, a)],
+            // Stage 1 of magicianChoice: the suit lands in the head as "as <suit>", and every following click uses ordinary suit-mode machinery. The suffix always comes from ALL_SUITS.
+            ["magician_", (p, a) => this.pickleMove({ ...p, asSuit: a as MinorSuitUid })],
+            // The count-picker buttons offered once "discard" is the live head and no "draw <n>" suffix has been chosen yet; always rebuilt from the current discard uids.
+            ["drawcount_", (p, a) => ["discard", ...(p.steps[0]?.cardList ?? []), "draw", a].join(" ") + (p.viaUid !== undefined ? ` via ${p.viaUid}` : "") + (p.announceLast ? " last" : "")],
             ["hpdraw_", (p, a) => this.clickHpDrawButton(p, a)],
         ];
         for (const [prefix, handler] of prefixed) {
@@ -3604,11 +3588,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.noop(parsed);
         }
         return pending.game.buildAnchorMove(pending, ref);
-    }
-
-    // "orientpick_<ref>" - orient's own minion-picker (orient has no IPendingStep to resolve against, so it can't reuse "minion_"); facing is a separate click.
-    private clickOrientPickButton(parsed: IParsedMove, ref: string): string | IClickResult {
-        return `orient ${ref}${parsed.announceLast ? " last" : ""}`;
     }
 
     // The unified candidate list for a fresh suit-power step, hermitTeleport, or an ambiguous orientAny/tradeHands/hierophantReplace target - one click supplies it directly.
@@ -3633,18 +3612,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.noop(parsed);
         }
         return pending.game.stepMove(pending, { targetPiece: pending.istep.targetPiece!, amount: parseInt(n, 10) });
-    }
-
-    // Stage 1 of magicianChoice - picks the suit letter, landing in the head as "as <suit>"; every following click then uses ordinary suit-mode machinery.
-    private clickMagicianButton(parsed: IParsedMove, suit: string): string | IClickResult {
-        // The button's own suffix always comes from ALL_SUITS, so it's a real MinorSuitUid even though this parse can't prove it.
-        return this.pickleMove({ ...parsed, asSuit: suit as MinorSuitUid });
-    }
-
-    // The count-picker buttons offered once "discard" is the live head and no "draw <n>" suffix has been chosen yet; always rebuilt from the current discard uids.
-    private clickDrawCountButton(parsed: IParsedMove, n: string): string | IClickResult {
-        const via = parsed.viaUid !== undefined ? ` via ${parsed.viaUid}` : "";
-        return ["discard", ...(parsed.steps[0]?.cardList ?? []), "draw", n].join(" ") + via + (parsed.announceLast ? " last" : "");
     }
 
     // High Priestess's count-picker - mirrors drawcount_ but appends onto the CURRENT power step's own istep, not the top-level move's args.
@@ -4461,23 +4428,8 @@ export class GnosticaGame extends GameBaseSequenced {
         t.add(new Piece(this.currplayer, 1, orientation));
     }
 
-    private createEnemy(targetRef: IPieceRef): void {
-        const t = this.cellContents(targetRef.cell)!;
-        const victim = this.getPiece(targetRef);
-        this.takeFromStash(victim.owner, 1);
-        t.add(new Piece(victim.owner, 1, victim.orientation));
-    }
-
     private createTerritory(targetCell: string, cardUid: string): void {
         this.board.createTerritory(targetCell, this.takeFromPile(cardUid, this.hands[this.currplayer - 1]));
-    }
-
-    // Wheel of Fortune's drawn territory: the deck's top card, which nobody may see before the move is committed.
-    private createTerritoryFromDeck(targetCell: string): TarotCard {
-        this.reshuffle();
-        const card = cardByUid(this.drawPile.shift() as string);
-        this.board.createTerritory(targetCell, card);
-        return card;
     }
 
     // Move the minion itself, or push a targeted piece, `dist` spaces in the minion's own direction.
@@ -4669,11 +4621,6 @@ export class GnosticaGame extends GameBaseSequenced {
         dt.add(moved);
     }
 
-    private hermitMoveTerritory(targetCell: string, destCell: string,): void {
-        const evictions = this.board.pushTerritory(targetCell, destCell);
-        this.returnEvictedPieces(evictions);
-    }
-
     // Returns the target's owner so the caller can double-check it passed the right array.
     private tradeHands(targetRef: IPieceRef, otherHand: string[],): number {
         const target = this.getPiece(targetRef);
@@ -4732,11 +4679,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const flipped = cardByUid(uid);
         this.discardPile.push(uid);
         return flipped;
-    }
-
-    // World: validates `chosenUid` names a major arcana card on the board (not World itself) and returns its MajorArcanaDef for the engine to dispatch.
-    private worldChoosePower(chosenUid: string): MajorArcanaDef {
-        return MAJOR_ARCANA[chosenUid];
     }
 
     // "use <cardUid>" targets a card by its own identity, not a cell.  Cards are unique, so we can derive the cell.
@@ -4979,13 +4921,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.validatePlayedPower(this.resolvePowerPlay(parsed)!);
     }
 
-    // "Play a card from your hand to the discard pile" - only ever reached for a FRESH play, since move() resumes this.continued directly; legality is validatePlay's own job.
-    private cmdPlay(card: string, steps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome {
-        this.discardPlayedCard(card);
-        this.results.push({ type: "deckDraw", what: card, from: "hand" });
-        return this.applyPowers(card, steps, asUid, partial);
-    }
-
     // The card leaves the hand for the discards before its power runs, so the power sees a hand without it.
     private discardPlayedCard(uid: string): void {
         const hand = this.hands[this.currplayer - 1];
@@ -5021,7 +4956,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY") };
         }
         const play = this.resolvePowerPlay(parsed)!;
-        // Validated on a copy that has already played the card, as cmdPlay will leave it.
+        // Validated on a copy that has already played the card, as move() will leave it.
         return this.scratchForPlay(play).validatePlayedPower(play);
     }
 
@@ -5489,7 +5424,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (borrowedPower === undefined) {
                 return undefined;
             }
-            const borrowedDef = this.worldChoosePower(borrowedPower);
+            const borrowedDef = MAJOR_ARCANA[borrowedPower];
             this.results.push({ type: "use", what: borrowedPower, count: 21 });
             return { pushPower: { cardUid: borrowedDef.uid, minions } };
         }
@@ -5541,8 +5476,9 @@ export class GnosticaGame extends GameBaseSequenced {
                 return this.applyHierophantReplace(istep);
             case "fly":
                 return this.applyHermitStep(istep);
-            case "trade":
-                return this.applyTradeHands(istep);
+            case "trade": // Justice / Hanged Man: swaps hands, but only once the move is committed: the other player's hand is hidden from a preview.
+                this.hidden.push({ type: "trade", target: this.resolvePieceRefTrusted(istep.targetPiece!) });
+                return {};
             default: { // draw (Judgement): <minionRef> draw <discardUid...>
                 const uids = istep.cardList ?? [];
                 this.judgementDraw(uids);
@@ -5757,7 +5693,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 // victimRef is a full piece ref (#106) - validateCups already confirmed it names a piece at this cell, so it is trusted directly.
                 const victim = this.resolvePieceRefTrusted(victimRef);
                 const victimOwner = victim.piece.owner;
-                this.createEnemy(victim);
+                this.takeFromStash(victimOwner, 1);
+                this.cellContents(victim.cell)!.add(new Piece(victimOwner, 1, this.getPiece(victim).orientation));
                 this.results.push({ type: "place", where: cellStr, how: "cups-enemy", who: victimOwner });
                 return {}; // the new piece belongs to the targeted enemy, not the acting player
             }
@@ -6321,7 +6258,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tile": {
                 const targetCell = this.resolveTileCard(step.card)!;
                 const destCell = destCellStr;
-                this.hermitMoveTerritory(targetCell, destCell);
+                this.returnEvictedPieces(this.board.pushTerritory(targetCell, destCell));
                 this.results.push({ type: "move", from: targetCell, to: destCellStr, how: "hermit-tile" });
                 return {};
             }
@@ -6372,14 +6309,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 return { failed: false };
             }
         }
-    }
-
-    // Justice / Hanged Man: <minionRef> <targetPieceRef> - swaps hands, but only once the move is committed: the other player's hand is hidden from a preview.
-    private applyTradeHands(step: IStep): IStepOutcome {
-        const targetRef = step.targetPiece!;
-        const target = this.resolvePieceRefTrusted(targetRef);
-        this.hidden.push({ type: "trade", target });
-        return {};
     }
 
     public validateTradeHands(minion: IPieceRef, step: IStep): StepValidation {
@@ -6749,7 +6678,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
-                const actionButtons = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withInertUnavailable(this.withUndo(this.getActionButtons()));
+                // A greyed or crossed-out button must not act when clicked, so it gets a value no handler recognizes.
+                const actionButtons = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons())?.map(b => b.value !== undefined && !b.value.startsWith("_")
+                    && (b.fill === GREYED_BUTTON_FILL || b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through"))
+                    ? { ...b, value: `_disabled_${b.value}` }
+                    : b) as [ButtonBarButton, ...ButtonBarButton[]] | undefined;
                 for (const button of actionButtons ?? []) {
                     if (button.glyph?.startsWith("buttonpiece_") && !(button.glyph in legend)) {
                         legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice("buttonpiece_".length)));

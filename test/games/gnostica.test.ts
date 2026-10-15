@@ -4666,7 +4666,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
 
     // Playing High Priestess (as opposed to using it already on the
     // board) removes the card from hand BEFORE its own power resolves
-    // (cmdPlay's own docs), so the max-draw bound must account for that
+    // (move()'s own play handling), so the max-draw bound must account for that
     // extra card leaving too: a 6-card hand, played + 2 discards, is
     // genuinely down to 3 - the true max draw is 3, not 2.
     it("highPriestess (played from hand): the draw-count max accounts for the played card itself leaving the hand", () => {
@@ -4927,7 +4927,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
 
     // Regression: neither the own nor the enemy case of validateCups verified the
     // relevant player's own stash had a small left before createOwn/
-    // createEnemy's own takeFromStash call ran - an empty stash reached
+    // the Cups "enemy" case's own takeFromStash call ran - an empty stash reached
     // validateMove() with no complaint at all, only to throw once a
     // commit actually tried to apply it.
     it("Cups (own): validateMove() itself rejects when the acting player's own stash is empty", () => {
@@ -5918,7 +5918,7 @@ describe("Gnostica: Fool and World", () => {
         expect(g.currplayer).eq(2);
     });
 
-    // validatePlay must simulate cmdPlay's own discard-pile push, not just
+    // validatePlay must simulate move()'s own discard-pile push, not just
     // its hand removal, so a power that reads discard pile CONTENTS (not
     // just count) - Judgement drawing the very card that was just played,
     // itself included - validates against the same discard pile a real
@@ -6001,7 +6001,7 @@ describe("Gnostica: Fool and World", () => {
         expect(playValidated.message).to.eq(i18next.t("apgames:validation.gnostica.DRAW_PILE_EMPTY"));
         // A {trusted: true} caller is expected to have already validated,
         // same as every other legality check in this file - this guard
-        // is validate-only by design, not mirrored in cmdPlay itself.
+        // is validate-only by design, not mirrored in the play handling itself.
     });
 });
 
