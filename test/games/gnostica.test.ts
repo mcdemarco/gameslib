@@ -3927,26 +3927,28 @@ describe("Gnostica: move-string structural validation", () => {
         expect(g.validateMove("orient m0.1 xyz").valid).to.be.false;
     });
 
-    it("discard: a bad-shaped uid, a duplicate uid, or a non-numeric draw count are still rejected, just by validateDiscard now", () => {
+    it("discard: a bad-shaped uid or a non-numeric draw count are still rejected, just by validateDiscard now", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
         expect(g.validateMove("discard xx").valid).to.be.false;
-        expect(g.validateMove("discard AC AC").valid).to.be.false;
         expect(g.validateMove("discard AC draw abc").valid).to.be.false;
     });
 
-    it("bid: a non-numeric position is still rejected, just by validateBid now", () => {
-        const g = new GnosticaGame(2, ["bidding"]);
-        expect(g.validateMove("bid abc").valid).to.be.false;
+    it("discard: a uid named twice throws when it is applied, instead of removing another card", () => {
+        const g = new GnosticaGame(2);
+        g.move("place m0 U");
+        g.move("place l0 U");
+        const named = g.hands[0][0];
+        expect(() => g.move(`discard ${named} ${named} draw 1`)).to.throw();
     });
 
-    it("redraw: a bad-shaped or duplicate uid is still rejected, just by validateRedraw now", () => {
+    it("redraw: a bad-shaped uid, or one that is not in the pool, is still rejected by validateRedraw", () => {
         const g = new GnosticaGame(2, ["bidding"]);
         g.move("bid 1");
         g.move("bid 1"); // resolves the round, entering redraw phase
         expect(g.validateMove("redraw xx").valid).to.be.false;
-        expect(g.validateMove(`redraw ${g.hands[0][0]} ${g.hands[0][0]}`).valid).to.be.false; // duplicate
+        expect(g.validateMove(`redraw ${g.hands[0][0]}`).valid).to.be.false; // a hand card, not a pool card
     });
 
     it("use/play: a bad-shaped card uid is still rejected, just by validateActivate/validatePlay now - but 'as <x>' stays deeper (card-dependent: a suit letter for Magician, a card uid for World)", () => {

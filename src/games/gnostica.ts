@@ -30,6 +30,15 @@ interface PowerFailure {
 
 const cardByUid = (uid: string): TarotCard => allCards().find(c => c.uid === uid)!;
 
+// Takes the card out of the pile, which must hold it: a card named twice has already left by the second time.
+const removeCard = (pile: string[], uid: string): void => {
+    const at = pile.indexOf(uid);
+    if (at < 0) {
+        throw new Error(`The card ${uid} is not where it was expected to be`);
+    }
+    pile.splice(at, 1);
+};
+
 const checkOwnMinion = (minion: Piece, player: number): PowerFailure | undefined => {
     if (minion.owner !== player) {
         return { key: "NOT_YOUR_MINION" };
@@ -259,7 +268,7 @@ interface IPreview {
     // Pieces to ring on the board: the ones a click can pick, or the ones the step has picked.
     rings: Map<string, "minion" | "target">;
     // The territories to mark as choices ("x,y"): a "use" with no territory chosen yet marks the ones the player has a minion on.
-    pickCells: Set<string>;
+    pickCells: string[];
     // A bare orient cell whose piece is still ambiguous.
     orientPickCell: string | undefined;
     // The resume seed move string, including whatever was typed against the pending obligation.
@@ -1922,7 +1931,7 @@ export class GnosticaGame extends GameBaseSequenced {
             highlighted: this.highlightedButtonValues(parsed),
             discardNeedsCount: head === "discard" && step0?.amount === undefined,
             rings: new Map(),
-            pickCells: new Set(),
+            pickCells: [],
             orientPickCell: head === "orient" && step0?.targetPiece !== undefined && step0.direction === undefined && !step0.targetPiece.includes(".") ? step0.targetPiece : undefined,
             pending: advanced,
             facingOpen: this.facingOpen(current, advanced),
@@ -1991,7 +2000,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (matches.length === 0) {
             return { kind: "not_found" };
         }
-        if (matches.length > 1 && new Set(matches.map(({ piece }) => piece.id())).size > 1) {
+        if (matches.some(({ piece }) => piece.id() !== matches[0].piece.id())) {
             return { kind: "ambiguous" };
         }
         const { r, piece } = matches[0];
@@ -2162,7 +2171,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // The Magician picks its suit before any minion, so the buttons are what the player is waiting on.
         const step = this.resolveCardDef(cardUid).powers[priorStepsCount];
         const awaitingSuit = asSuit === undefined && step !== undefined && "special" in step && step.special === "magicianChoice";
-        if (priorStepsCount === 0 && !awaitingSuit && new Set(minions.map(m => m.cell)).size > 1) {
+        if (priorStepsCount === 0 && !awaitingSuit && minions.some(m => m.cell !== minions[0].cell)) {
             return { key: "apgames:validation.gnostica.PICK_MINION_CELL" };
         }
         return this.powerStepMessageKey(cardUid, priorStepsCount, minions);
@@ -2518,8 +2527,8 @@ export class GnosticaGame extends GameBaseSequenced {
     private minionPickerBar(
         pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
     ): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const candidateCells = new Set(pendingMinor.minionCandidates.map(m => m.cell));
-        if (!pendingMinor.minionAmbiguous || candidateCells.size !== 1) {
+        const candidateCells = pendingMinor.minionCandidates.map(m => m.cell);
+        if (!pendingMinor.minionAmbiguous || candidateCells.length === 0 || candidateCells.some(cell => cell !== candidateCells[0])) {
             return undefined;
         }
         const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
@@ -4049,7 +4058,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const args = step.cardList ?? [];
         const hand = this.hands[this.currplayer - 1];
         for (const uid of args) {
-            this.biddingPool!.splice(this.biddingPool!.indexOf(uid), 1);
+            removeCard(this.biddingPool!, uid);
             hand.push(uid);
             this.drawn.push(uid);
         }
@@ -4087,12 +4096,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (uids.length !== needed) {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.REDRAW_COUNT_MISMATCH", { requested: uids.length, needed }) };
         }
-        const seen = new Set<string>();
         for (const uid of uids) {
-            if (seen.has(uid)) {
-                return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD" }) };
-            }
-            seen.add(uid);
             if (!this.biddingPool!.includes(uid)) {
                 return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.REDRAW_UID_NOT_IN_POOL", { uid }) };
             }
@@ -4267,12 +4271,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Shared by the top-level discard and High Priestess's rounds: "discard [uid...] draw <n>", where the count is the player's explicit choice.
     private validateDiscard(step: IStep | undefined): IValidationResult {
         const discardUids = step?.cardList ?? [];
-        const seen = new Set<string>();
         for (const uid of discardUids) {
-            if (seen.has(uid)) {
-                return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid }) };
-            }
-            seen.add(uid);
             if (!this.hands[this.currplayer - 1].includes(uid)) {
                 return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }) };
             }
@@ -4543,7 +4542,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private takeFromPile(uid: string, pile?: string[]): TarotCard {
         const hand = this.hands[this.currplayer - 1];
         const from = pile ?? (hand.includes(uid) ? hand : this.discardPile);
-        from.splice(from.indexOf(uid), 1);
+        removeCard(from, uid);
         return cardByUid(uid);
     }
 
@@ -4638,8 +4637,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private judgementDraw(cardUids: string[]): void {
         for (const uid of cardUids) {
-            const idx = this.discardPile.indexOf(uid);
-            this.discardPile.splice(idx, 1);
+            removeCard(this.discardPile, uid);
             this.hands[this.currplayer - 1].push(uid);
             this.drawn.push(uid);
         }
@@ -4647,8 +4645,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private discardCards(discardUids: string[]): void {
         for (const uid of discardUids) {
-            const idx = this.hands[this.currplayer - 1].indexOf(uid);
-            this.hands[this.currplayer - 1].splice(idx, 1);
+            removeCard(this.hands[this.currplayer - 1], uid);
             this.discardPile.push(uid);
         }
     }
@@ -4923,8 +4920,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // The card leaves the hand for the discards before its power runs, so the power sees a hand without it.
     private discardPlayedCard(uid: string): void {
-        const hand = this.hands[this.currplayer - 1];
-        hand.splice(hand.indexOf(uid), 1);
+        removeCard(this.hands[this.currplayer - 1], uid);
         this.discardPile.push(uid);
         this.discarded.push(uid);
     }
@@ -6339,12 +6335,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (uids.length > maxDraw) {
             return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.TOO_MANY_TO_DRAW", { maxDraw, requested: uids.length }) };
         }
-        const seen = new Set<string>();
         for (const uid of uids) {
-            if (seen.has(uid)) {
-                return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "DUPLICATE_CARD", uid }) };
-            }
-            seen.add(uid);
             if (!this.discardPile.includes(uid)) {
                 return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "NOT_IN_DISCARD", uid }) };
             }
@@ -6405,14 +6396,12 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Cards drawn at the end of their last turn, for highlighting by render() - only non-empty for the CURRENT player, and only until they've started building THIS turn's move.
-    private newHandCardUids(player: playerid): Set<string> {
-        if (player !== this.currplayer || this.preview?.head !== undefined) {
-            return new Set();
-        }
+    private newHandCardUids(player: playerid): string[] {
         const drawn = this.cardsDrawn[player - 1] || 0;
-        if (drawn === 0)
-            return new Set();
-        return new Set(this.hands[player - 1].slice(-drawn));
+        if (player !== this.currplayer || this.preview?.head !== undefined || drawn === 0) {
+            return [];
+        }
+        return this.hands[player - 1].slice(-drawn);
     }
 
     public scoreFor(player: playerid): number {
@@ -6575,7 +6564,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             continue;
                         }
                         // A card just added to hand gets its face tinted so it's easy to spot regardless of sort order.
-                        const isNew = newUids.has(uid);
+                        const isNew = newUids.includes(uid);
                         const key = GnosticaGame.cardKey(uid);
                         GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(displays, card, false, 0, isNew ? { background: MUTED_FILL } : {}));
                         handKeys.push(key);
@@ -6634,7 +6623,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // The discard pile is always face-up/public, unlike hands or the draw pile, so its contents are read directly.
                 const discardArea = this.buildAreaFromSummary(
                     displays,
-                    this.summarizeDiscardPile(this.discardPile), legend, faces, discardLabel, new Set(this.discarded)
+                    this.summarizeDiscardPile(this.discardPile), legend, faces, discardLabel, this.discarded
                 );
                 if (discardArea !== undefined) {
                     areas.push(discardArea);
@@ -6751,34 +6740,16 @@ export class GnosticaGame extends GameBaseSequenced {
         return renders;
     }
 
-    // Every card whose identity is definitively known to the viewer: the board, discards, and known hands, used to compute the draw-pile summary by elimination.
-    private visibleCardUids(): Set<string> {
-        const visible = new Set<string>();
-        for (const [, , t] of this.board.entries()) {
-            if (t.card !== undefined) {
-                visible.add(t.card.uid);
-            }
-        }
-        for (const uid of this.discardPile) {
-            visible.add(uid);
-        }
-        for (const uid of this.biddingPool ?? []) {
-            visible.add(uid);
-        }
-        for (const hand of this.hands) {
-            for (const uid of hand) {
-                if (uid !== "") {
-                    visible.add(uid);
-                }
-            }
-        }
-        return visible;
-    }
-
     // The cards nobody can see, which is to say the draw pile.
     private unseenCardUids(): string[] {
-        const visible = this.visibleCardUids();
-        return allCards().filter(c => !visible.has(c.uid)).map(c => c.uid);
+        // Every card whose identity is definitively known to the viewer: the board, discards, the bidding pool, and known hands.
+        const visible = [
+            ...[...this.board.entries()].flatMap(([, , t]) => t.card === undefined ? [] : [t.card.uid]),
+            ...this.discardPile,
+            ...(this.biddingPool ?? []),
+            ...this.hands.flat().filter(uid => uid !== ""),
+        ];
+        return allCards().filter(c => !visible.includes(c.uid)).map(c => c.uid);
     }
 
     // The abbreviation FrameState.discardSummary itself stores: majors by uid, minors by suit and spot/royal count.
@@ -6803,7 +6774,7 @@ export class GnosticaGame extends GameBaseSequenced {
     // Summary code because draw/discard piles can be large. Minors summarize as one token per (suit, spot-or-royalty) bucket with a count; majors are shown individually. `newUids` are shaded as just added.
     private buildAreaFromSummary(
         displays: string[], summary: DiscardSummary, legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] }, faces: Map<string, string>, label: StructuredRenderLabel,
-        newUids: Set<string> = new Set(),
+        newUids: string[] = [],
     ): AreaPieces | undefined {
         const newBuckets = new Set<string>();
         for (const uid of newUids) {
@@ -6835,7 +6806,7 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         for (const uid of summary.majorUids.sort()) {
-            const isNew = newUids.has(uid);
+            const isNew = newUids.includes(uid);
             const key = GnosticaGame.cardKey(uid);
             GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(displays, allCards().find(c => c.uid === uid)!, false, 0, isNew ? { background: MUTED_FILL } : {}));
             pieces.push(key);
@@ -6892,42 +6863,42 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The cells a move destroyed a piece in: a Swords destroy names the cell, and a Rods push into the void the cell the piece left.
-    private destroyedCells(results: APMoveResult[]): Set<string> {
-        const cells = new Set<string>();
+    private destroyedCells(results: APMoveResult[]): string[] {
+        const cells: string[] = [];
         for (const r of results) {
             const cell = r.type === "destroy" && r.who !== undefined ? r.where : r.type === "move" && r.how === "rod-void" ? r.from : undefined;
             if (cell !== undefined) {
                 const [x, y] = GnosticaBoard.algebraic2coords(cell);
-                cells.add(`${x},${y}`);
+                cells.push(`${x},${y}`);
             }
         }
         return cells;
     }
 
     // After "Use Territory" and before one is chosen, the territories the player has a minion on.
-    private usePickCells(parsed: IParsedMove): Set<string> {
-        const cells = new Set<string>();
+    private usePickCells(parsed: IParsedMove): string[] {
+        const cells: string[] = [];
         if (parsed.head?.toLowerCase() !== "use" || parsed.steps[0]?.card !== undefined) {
             return cells;
         }
         for (const [x, y] of this.board.entries()) {
             if (this.eligibleMinionsForActivate(GnosticaBoard.coords2algebraic(x, y)).length > 0) {
-                cells.add(`${x},${y}`);
+                cells.push(`${x},${y}`);
             }
         }
         return cells;
     }
 
     // While the World's borrowed card is still to be picked, the major arcana territories it may borrow from (every one on the board but the World itself).
-    private worldPickCells(): Set<string> {
+    private worldPickCells(): string[] {
         const pending = this.computePendingMinor();
-        const cells = new Set<string>();
+        const cells: string[] = [];
         if (pending?.special !== "worldUseAny" || pending.asUid !== undefined) {
             return cells;
         }
         for (const [x, y, t] of this.board.entries()) {
             if (t.card?.major === true && t.card.uid !== "21") {
-                cells.add(`${x},${y}`);
+                cells.push(`${x},${y}`);
             }
         }
         return cells;
@@ -7012,7 +6983,7 @@ export class GnosticaGame extends GameBaseSequenced {
         board: GnosticaBoard, win: { minX: number; maxX: number; minY: number; maxY: number },
         legend: { [k: string]: Glyph | [Glyph, ...Glyph[]] },
         rings?: Map<string, "minion" | "target">,
-        destroyed: Set<string> = new Set(),
+        destroyed: string[] = [],
     ): string[][][] {
         const pieceRows: string[][][] = Array.from({ length: win.maxY - win.minY + 1 }, () => Array.from({ length: win.maxX - win.minX + 1 }, () => []));
         // Only cells that hold pieces matter here, and all of those are stored.
