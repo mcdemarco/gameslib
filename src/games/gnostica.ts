@@ -224,9 +224,7 @@ interface IPendingStep {
     suitUid?: MinorSuitUid;
     // Set instead of suitUid for a major card's `special` power, dispatched to handlePendingSpecialBoardClick rather than the suit-mode machinery above.
     special?: SpecialPower;
-    // Every one of the acting player's own eligible pieces, kept in full so a minion-selector ref can still disambiguate against the OTHER candidates.
-    eligible: IPieceRef[];
-    // eligible plus any newMinion chained in from earlier COMPLETE steps of the same activation; identical to eligible for a minor card or the first step.
+    // The acting player's eligible pieces plus any newMinion chained in from earlier complete steps of the same activation.
     minions: IPieceRef[];
     // Resolved from this step's typed minionRef, or minions[0] as a preview default; minionAmbiguous gates whether that default is trustworthy.
     minion: IPieceRef;
@@ -290,6 +288,25 @@ interface IPowerProgress {
     cardUid: string;
     nextStepIndex: number;
     minions: IPieceRef[];
+}
+
+// A step the validation walk reached, for the click code: the card and power, its minions, what was typed for it, and the game as it stood before it.
+interface IWalkPoint {
+    cardUid: string;
+    def: MajorArcanaDef;
+    step: PowerStep;
+    stepIndex: number;
+    minions: IPieceRef[];
+    istep: IStep | undefined;
+    priorSteps: IStep[];
+    game: GnosticaGame;
+    softComplete?: boolean;
+}
+
+// Where validatePowerSteps stopped (the step still to be built), and the last step the move completed.
+interface IWalkRecord {
+    stop?: IWalkPoint;
+    held?: IWalkPoint;
 }
 
 // What a use, play or resume move is playing (see resolvePowerPlay).
@@ -2772,9 +2789,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return {};
         }
         const { head, headArg, card, eligible, steps, asUid, asSuit } = play;
-        const worldBorrow = asUid !== undefined;
-        // The Fool, the High Priestess and the World act without a minion of their own; every other step needs one still on the board.
-        const actsWithoutMinion = (step: PowerStep): boolean => "special" in step && (step.special === "fool" || step.special === "highPriestess" || step.special === "worldUseAny");
         // Everything the walk reads about the hand and discards is from a copy that has already played the card.
         holder.clone ??= this.scratchForPlay(play);
         if (!card.major) {
@@ -2784,144 +2798,39 @@ export class GnosticaGame extends GameBaseSequenced {
             const suitUid = suitUidOf(card);
             const istep: IStep = steps[0] ?? { action: "with" };
             const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, eligible, suitUid);
-            return { advanced: { head, headArg, activeCardUid: headArg, suitUid, eligible, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, istep, announceLast: parsed.announceLast } };
+            return { advanced: { head, headArg, activeCardUid: headArg, suitUid, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, istep, announceLast: parsed.announceLast } };
         }
 
-        // A resolution stack local to this UI-only walk - `eligible` (frozen at push time) stays tracked separately from `minions` (which keeps accreting).
-        const stack: { cardUid: string; nextStepIndex: number; eligible: IPieceRef[]; minions: IPieceRef[] }[] =
-            play.stack.map(f => ({ cardUid: f.cardUid, nextStepIndex: f.nextStepIndex, eligible: [...f.minions], minions: [...f.minions] }));
-
-        // The World's sole step (worldUseAny) takes no segment - the borrowed card is "as <uid>" in the head. Splice its entry on now, as validatePowerSteps does.
-        if (worldBorrow) {
-            const wt = stack[stack.length - 1];
-            const wStep = this.resolveCardDef(wt.cardUid).powers[wt.nextStepIndex];
-            if (wStep !== undefined && "special" in wStep && wStep.special === "worldUseAny") {
-                wt.nextStepIndex++;
-                stack.push({ cardUid: asUid!, nextStepIndex: 0, eligible: [...wt.minions], minions: [...wt.minions] });
+        // The validation walk records where it stopped; the click code builds on that step, and on the move's last completed one.
+        const record: IWalkRecord = {};
+        holder.clone.validatePowerSteps(play.stack.map(f => ({ ...f, minions: [...f.minions] })), steps, play.rootUid, asUid, asSuit, record);
+        const pendingAt = (p: IWalkPoint | undefined): Omit<IPendingStep, "game"> | undefined => {
+            // Every step but the Fool's, the High Priestess's and the World's needs a minion still on the board.
+            if (p === undefined || (p.minions.length === 0 && !("special" in p.step && (p.step.special === "fool" || p.step.special === "highPriestess" || p.step.special === "worldUseAny")))) {
+                return undefined;
             }
-        }
-
-        const priorSteps: IStep[] = [];
-        // False right after a power was skipped (a later power of the card used alone); true once a step has been walked past.
-        let priorTaken = true;
-        let held: { pending: Omit<IPendingStep, "game">; game: GnosticaGame } | undefined;
-        for (let segIdx = 0; segIdx < steps.length; segIdx++) {
-            const top = stack[stack.length - 1];
-            if (top === undefined) {
-                return { held }; // too many steps already typed - validateMove/move report this properly on submit
+            const istep = p.istep ?? { action: "with" };
+            if ("primitive" in p.step) {
+                const suitUid = this.primitiveToSuit(p.step.primitive);
+                const opts = this.computeShortcutOpts(p.def, p.step.primitive, p.stepIndex, p.def.powers.length, p.step.opts);
+                const { minion, ambiguous, candidates } = p.game.resolveStepMinion(istep.withPiece, p.minions, suitUid);
+                return { head, headArg, activeCardUid: p.cardUid, asUid, asSuit, suitUid, minions: p.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: p.priorSteps, opts, istep, softComplete: p.softComplete, announceLast: parsed.announceLast };
             }
-            const cardDef = this.resolveCardDef(top.cardUid);
-            if (top.nextStepIndex >= cardDef.powers.length) {
-                return { held }; // defensive - popExhaustedPowers keeps this in sync below
-            }
-            if (steps[segIdx].action === "skip") {
-                if (top.nextStepIndex !== 0 || !GnosticaGame.canSkipFirstPower(cardDef)) {
-                    return { held }; // validateMove reports it
-                }
-                priorSteps.push(steps[segIdx]);
-                top.nextStepIndex++;
-                priorTaken = false;
-                continue;
-            }
-            // A typed step spelled as a later power of the card skips the powers before it (see skipAheadTarget).
-            const skipTarget = GnosticaGame.skipAheadTarget(cardDef, top.nextStepIndex, steps[segIdx]);
-            if (skipTarget !== top.nextStepIndex) {
-                top.nextStepIndex = skipTarget;
-                priorTaken = false;
-            }
-            const stepIndex = top.nextStepIndex;
-            const step = cardDef.powers[stepIndex];
-            if (!actsWithoutMinion(step) && top.minions.length === 0) {
-                return { held };
-            }
-            if ("special" in step && step.special === "fool") {
-                // Fool's own step always auto-resolves the instant it's next in line on a real commit - nothing here for a click to build.
-                return { held };
-            }
-            const isLastSegment = segIdx === steps.length - 1;
-            // Set in whichever branch below falls through (step complete) - the IStep this segment becomes.
-            let completedStep: IStep | undefined;
-            if ("primitive" in step) {
-                const suitUidForStep = this.primitiveToSuit(step.primitive);
-                const opts = this.computeShortcutOpts(cardDef, step.primitive, stepIndex, cardDef.powers.length, step.opts);
-                const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
-                const stepHere = (): Omit<IPendingStep, "game"> => {
-                    const { minion, ambiguous, candidates } = (holder.clone ?? this).resolveStepMinion(istepSoFar.withPiece, top.minions, suitUidForStep);
-                    return { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid: suitUidForStep, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [...priorSteps], opts, istep: istepSoFar, announceLast: parsed.announceLast };
-                };
-                if ((istepSoFar.complete ?? -1) < 0) {
-                    return { advanced: stepHere() };
-                }
-                if (isLastSegment) {
-                    held = { pending: stepHere(), game: (holder.clone ?? this).scratchClone() };
-                }
-                completedStep = istepSoFar;
-            } else {
-                // A Magician's suit choice lives in asSuit, unless worldBorrow lets a chained card supply it.
-                const magicianNeedsAs = step.special === "magicianChoice" && asSuit === undefined && !worldBorrow;
-                // A Magician borrow's step needs no splicing once the suit is known: "at m0 create U" parses the same regardless of suit.
-                const istepSoFar: IStep = steps[segIdx] ?? { action: "with" };
-                // A High Priestess discard list stays editable right up until Submit, so it is never "complete" here.
-                const complete = magicianNeedsAs || step.special === "highPriestess" ? false : (istepSoFar.complete ?? -1) >= 0;
-                const stepHere = (): Omit<IPendingStep, "game"> =>
-                    this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, [...priorSteps], istepSoFar, asUid, asSuit, parsed.announceLast);
-                if (!complete) {
-                    return { advanced: stepHere() };
-                }
-                if (isLastSegment) {
-                    held = { pending: stepHere(), game: (holder.clone ?? this).scratchClone() };
-                }
-                completedStep = istepSoFar;
-            }
-            // Walking past this segment lets a LATER step of the SAME card become click-driven, via a clone.
-            priorSteps.push(completedStep!);
-            holder.clone ??= this.scratchClone();
-            const clone = holder.clone;
-            // A magicianChoice step needs its suit passed as `borrowedPower` here.
-            const magicianAs = "special" in step && step.special === "magicianChoice" && asSuit !== undefined;
-            const outcome = clone.applyPowerStep(step, top.minions, completedStep, cardDef, stepIndex, cardDef.powers.length, true, magicianAs ? asSuit : undefined, true, priorTaken);
-            priorTaken = true;
-            if (isLastSegment && held !== undefined) {
-                held.pending.softComplete = outcome?.softComplete === true;
-            }
-            // A minion the step destroyed can't act in the next one.
-            top.minions = GnosticaGame.chainMinion(top.minions, outcome ?? {}).filter(m => clone.findPiece(m) !== undefined);
-            top.nextStepIndex = outcome?.consumesRest ? cardDef.powers.length : top.nextStepIndex + 1;
-            if (outcome?.pushPower !== undefined) {
-                stack.push({ cardUid: outcome.pushPower.cardUid, nextStepIndex: 0, eligible: [...outcome.pushPower.minions], minions: [...outcome.pushPower.minions] });
-            }
-            GnosticaGame.popExhaustedPowers(clone, stack);
-        }
-        const top = stack[stack.length - 1];
-        if (top === undefined) {
-            return { held }; // every step already complete - nothing left to click for
-        }
-        const cardDef = this.resolveCardDef(top.cardUid);
-        const stepIndex = top.nextStepIndex;
-        if (stepIndex >= cardDef.powers.length) {
-            return { held };
-        }
-        const step = cardDef.powers[stepIndex];
-        if (!actsWithoutMinion(step) && top.minions.length === 0) {
-            return { held };
-        }
-        if ("primitive" in step) {
-            const suitUid = this.primitiveToSuit(step.primitive);
-            const opts = this.computeShortcutOpts(cardDef, step.primitive, stepIndex, cardDef.powers.length, step.opts);
-            const { minion, ambiguous, candidates } = (holder.clone ?? this).resolveStepMinion(undefined, top.minions, suitUid);
-            return { held, advanced: { head, headArg, activeCardUid: top.cardUid, asUid, asSuit, suitUid, eligible: top.eligible, minions: top.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts, istep: { action: "with" }, announceLast: parsed.announceLast } };
-        }
-        return { held, advanced: this.buildSpecialPending(holder.clone ?? this, step.special, head, headArg, top.cardUid, top.eligible, top.minions, priorSteps, { action: "with" }, asUid, asSuit, parsed.announceLast) };
+            return { ...this.buildSpecialPending(p.game, p.step.special, head, headArg, p.cardUid, p.minions, p.priorSteps, istep, asUid, asSuit, parsed.announceLast), softComplete: p.softComplete };
+        };
+        holder.clone = record.stop?.game ?? holder.clone;
+        const held = pendingAt(record.held);
+        return { held: held === undefined ? undefined : { pending: held, game: record.held!.game }, advanced: pendingAt(record.stop) };
     }
 
     // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice once its suit is chosen, which is treated as a plain suit step.
     private buildSpecialPending(
         ctx: GnosticaGame, special: SpecialPower, head: "use" | "play", headArg: string, activeCardUid: string,
-        eligible: IPieceRef[], minions: IPieceRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: MinorSuitUid, announceLast = false,
+        minions: IPieceRef[], priorSteps: IStep[], istep: IStep, asUid?: string, asSuit?: MinorSuitUid, announceLast = false,
     ): Omit<IPendingStep, "game"> {
         if (special === "magicianChoice" && asSuit !== undefined) {
             const { minion, ambiguous, candidates } = ctx.resolveStepMinion(istep.withPiece, minions, asSuit);
-            return { head, headArg, activeCardUid, asUid, asSuit, suitUid: asSuit, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep, announceLast };
+            return { head, headArg, activeCardUid, asUid, asSuit, suitUid: asSuit, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep, announceLast };
         }
         // Fool/High Priestess/worldUseAny have no minionRef here; an unchosen magicianChoice also defers its minion choice until after the suit is picked (its
         // own button set needs to show before any ambiguous-minion picker would - see the "2+ minions... suit buttons first" regression test).
@@ -2929,7 +2838,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const { minion, ambiguous, candidates } = noMinionRef
             ? { minion: minions[0], ambiguous: false, candidates: minions }
             : ctx.resolveStepMinion(istep.withPiece, minions);
-        return { head, headArg, activeCardUid, asUid, asSuit, special, eligible, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep, announceLast };
+        return { head, headArg, activeCardUid, asUid, asSuit, special, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep, announceLast };
     }
 
     // The single valid cell a minor suit-power step may affect: the minion's own cell if facing "U", otherwise the one cell it's pointing at.
@@ -5102,7 +5011,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Validation walks a power stack where applyPowers walks the string, so the two must agree by hand; Fool's step is checked regardless of the segment cursor `i`, and validation always stops right at a forced-pause step, exactly once.
-    private validatePowerSteps(stack: IPowerProgress[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string): IValidationResult {
+    private validatePowerSteps(stack: IPowerProgress[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string, record: IWalkRecord = {}): IValidationResult {
         let clone: GnosticaGame | undefined;
         let i = 0;
         // True exactly when the entry just popped to expose the current top was a real Decline, not a silently-skipped one; set before "decline" continue, read at the top of the next iteration.
@@ -5175,6 +5084,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 priorTaken = false;
                 // A skip is only ever legal with the power it skips to following it.
                 if (i >= steps.length) {
+                    record.stop = { cardUid: top.cardUid, def: cardDef, step: cardDef.powers[top.nextStepIndex], stepIndex: top.nextStepIndex, minions: top.minions, istep: undefined, priorSteps: steps.slice(0, i), game: clone ?? this };
                     return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.CLICK_BUTTON", { card: this.cardNameOrUid(top.cardUid) }) };
                 }
                 continue;
@@ -5195,6 +5105,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // the flip consumes no segment
             } else {
                 if (i >= steps.length) {
+                    record.stop = { cardUid: top.cardUid, def: cardDef, step, stepIndex, minions: top.minions, istep: undefined, priorSteps: steps.slice(0, i), game: clone ?? this };
                     // Nothing more given - a step past the card's own first stays optional and is silently skipped, UNLESS provably impossible right now (no legal target at all).
                     if (this.specialStepHasNoLegalTarget(clone ?? this, step, top.minions)) {
                         const cardName = this.cardNameOrUid(top.cardUid);
@@ -5228,11 +5139,17 @@ export class GnosticaGame extends GameBaseSequenced {
                 if ("special" in step && step.special === "magicianChoice") {
                     borrowedForStep = asSuit;
                     if (borrowedForStep === undefined) {
+                        record.stop = { cardUid: top.cardUid, def: cardDef, step, stepIndex, minions: top.minions, istep: steps[i], priorSteps: steps.slice(0, i), game: clone ?? this };
                         return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.MAGICIAN_NEEDS_AS") };
                     }
                 }
                 istep = steps[i];
                 i++;
+            }
+            const here: IWalkPoint = { cardUid: top.cardUid, def: cardDef, step, stepIndex, minions: top.minions, istep, priorSteps: steps.slice(0, istep === undefined ? i : i - 1), game: clone ?? this };
+            // A flip owed with nothing typed after it is where the move stands: its Play/Decline pair is the next choice.
+            if (kind === "fool" && i >= steps.length) {
+                record.stop = here;
             }
             if (sameTargetWanted !== undefined && "primitive" in step && istep !== undefined && (istep.complete ?? -1) >= 0) {
                 const target = istep.targetPiece === undefined ? undefined : (clone ?? this).resolvePieceRef(istep.targetPiece);
@@ -5257,6 +5174,9 @@ export class GnosticaGame extends GameBaseSequenced {
                     paired = true;
                     stepResult = optimistic;
                 }
+            }
+            if (stepResult.failed || stepResult.complete === false) {
+                record.stop = here;
             }
             if (stepResult.failed) {
                 return stepResult.result;
@@ -5284,9 +5204,19 @@ export class GnosticaGame extends GameBaseSequenced {
                 // An earlier segment being incomplete means a later one couldn't legitimately exist - defensive, shouldn't fire.
                 return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "BAD_STEP" }) };
             }
+            // The click code builds on the move's last step as it stood before it took effect; a High Priestess round stays open until it is submitted.
+            if ("special" in step && step.special === "highPriestess") {
+                record.stop = { ...here, game: here.game.scratchClone() };
+            } else if (istep !== undefined && i === steps.length) {
+                record.held = { ...here, game: here.game.scratchClone() };
+            }
             // The step's real effect, applied to a throwaway copy that later steps then validate against.
             clone ??= this.scratchClone();
             const outcome = clone.applyPowerStep(step, top.minions, istep, cardDef, stepIndex, cardDef.powers.length, true, borrowedForStep, paired, takenBefore) ?? {};
+            const held = record.held;
+            if (held !== undefined && held.istep === istep) {
+                held.softComplete = outcome.softComplete === true;
+            }
             if (outcome.forcePause === true) {
                 // A forced-pause step can never legally be followed by more segments - the player couldn't have known what to put there (Fool's flip is hidden).
                 if (i < steps.length) {
@@ -5326,7 +5256,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 const produced = outcome.producedPiece ?? outcome.newMinion;
                 sameTargetWanted = produced;
             }
-            top.minions = GnosticaGame.chainMinion(top.minions, outcome);
+            // A minion the step destroyed can't act in the next one.
+            top.minions = GnosticaGame.chainMinion(top.minions, outcome).filter(m => clone!.findPiece(m) !== undefined);
             top.nextStepIndex = outcome.consumesRest ? cardDef.powers.length : top.nextStepIndex + 1;
             priorTaken = true;
             if ("special" in step && step.special === "highPriestess" && top.nextStepIndex >= cardDef.powers.length) {
