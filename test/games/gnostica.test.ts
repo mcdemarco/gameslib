@@ -1502,7 +1502,6 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         const clicked = g.handleClick("play 6R", 0 - minY, 0 - minX);
         expect(clicked.move).eq("play 6R/with m0.2");
-        expect(clicked.message).to.not.eq(i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON"));
     });
 
     it("Orient: a click on a cell with none of the player's pieces leaves the move as it was and says what to click", () => {
@@ -1513,7 +1512,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         const picked = g.handleClick("orient m0", 0 - minY, 1 - minX); // the enemy's cell
         expect(picked).to.deep.include({ move: "orient m0", valid: true });
-        expect(picked.message).eq(i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT"));
+        expect(picked.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
         expect(g.handleClick("orient", 0 - minY, 1 - minX)).to.deep.include({ move: "orient", valid: true });
     });
 
@@ -2328,9 +2327,9 @@ describe("Gnostica: handleClick", () => {
         expect(result.move).eq("orient m0.1");
         // The minion is chosen; its facing is a separate decision only a
         // further click may make - never auto-assigned (see
-        // validateOrient's own PICK_DIRECTION_TO_ORIENT docs).
+        // validateOrient's own CLICK_FACING docs).
         expect(result.complete).eq(-1);
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_FACING"));
     });
 
     it("orient: clicking the piece's own cell again is a rejected no-op (reorienting IS the whole action); clicking a neighbour sets that facing directly", () => {
@@ -2387,7 +2386,7 @@ describe("Gnostica: handleClick", () => {
         const [rowFar, colFar] = rowColFor(g, 2, 0); // "o0", not adjacent to m0, no piece there either
         const far = g.handleClick(first.move, rowFar, colFar);
         expect(far.move).eq(first.move); // no piece of the acting player's there to (re-)select, so the selection stands
-        expect(far.message).eq(i18next.t("apgames:validation.gnostica.PICK_PIECE_TO_ORIENT"));
+        expect(far.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
     });
 
     // Regression: orient's own first click used to grab whichever of the
@@ -2405,7 +2404,7 @@ describe("Gnostica: handleClick", () => {
         expect(clicked.valid).to.be.true;
         expect(clicked.complete).eq(-1);
         expect(clicked.move).eq("orient m0");
-        expect(clicked.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_BUTTON"));
+        expect(clicked.message).eq(i18next.t("apgames:validation.gnostica.CLICK_BUTTON"));
         g.move(clicked.move!, { partial: true });
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
@@ -2433,7 +2432,7 @@ describe("Gnostica: handleClick", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("", row, col);
         expect(result.move).eq("");
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
     });
 
     it("Use Territory (activate) via the button bar, then a board click, builds a use move", () => {
@@ -2489,7 +2488,7 @@ describe("Gnostica: handleClick", () => {
         const result = g.handleClick("", -1, -1, "_btn_discard");
         expect(result.valid).to.be.true;
         expect(result.move).eq("discard");
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.DISCARD_DRAW_REQUIRED"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.DISCARD_AND_DRAW"));
         // No "draw <n>" yet - never complete without one (0 included),
         // regardless of hand contents (see validateDiscard's own docs).
         expect(result.complete).eq(-1);
@@ -2761,7 +2760,7 @@ describe("Gnostica: handleClick", () => {
         const [row, col] = rowColFor(g, -1, 0); // "l0", player 2's piece
         const result = g.handleClick("", row, col);
         expect(result.move).eq("");
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
     });
 
     it("World: a pick that isn't a borrowable major arcana leaves the move as it was, previewable, with its message", () => {
@@ -2772,7 +2771,7 @@ describe("Gnostica: handleClick", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         const minor = g.handleClick("use 21", 0 - minY, 1 - minX);
         expect(minor).to.deep.include({ move: "use 21", valid: true });
-        expect(minor.message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
+        expect(minor.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
         const self = g.handleClick("use 21", 0 - minY, 0 - minX);
         expect(self).to.deep.include({ move: "use 21", valid: true });
         expect(self.message).eq(i18next.t("apgames:validation.gnostica.WORLD_SELF_REFERENCE"));
@@ -2786,7 +2785,7 @@ describe("Gnostica: handleClick", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         const enemy = g.handleClick("play 3C", 0 - minY, 1 - minX);
         expect(enemy).to.deep.include({ move: "play 3C", valid: true });
-        expect(enemy.message).to.not.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+        expect(enemy.message).to.not.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
         const use = g.handleClick("use", 0 - minY, 1 - minX);
         expect(use).to.deep.include({ move: "use", valid: true });
         expect(use.message).eq(i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell: "n0" }));
@@ -2814,11 +2813,11 @@ describe("Gnostica: handleClick", () => {
         const uid = g.hands[0][0];
         const result = g.handleClick("", -1, -1, `c${uid}`);
         expect(result.move).eq("");
-        expect(result.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+        expect(result.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
         // With an action already chosen, the move's own prompt stands instead.
         const orient = g.handleClick("orient", -1, -1, `c${uid}`);
         expect(orient).to.deep.include({ move: "orient", valid: true });
-        expect(orient.message).to.not.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION_FIRST"));
+        expect(orient.message).to.not.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
     });
 
     it("discard: ignores a hand-card click for a card not in the acting player's hand, leaving the move as it was", () => {
@@ -3049,7 +3048,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(modeClick.valid).to.be.true;
         expect(modeClick.complete).eq(0);
         // Soft-complete says WHY it's holding open, not the bare generic "looks like a valid move".
-        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.MAY_ORIENT"));
         // n0 itself is already "U", the creation's own still-soft default - confirms it (drops "?",
         // no duplicate token) rather than erroring as a no-op, same as "place"'s own click-to-orient collapse.
         const [row2, col2] = rowColFor(g, 1, 0);
@@ -3144,7 +3143,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const targeted = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.1");
         expect(targeted.move).eq(`use AR/with m0.2 move n0.1`); // no default - a real distance choice exists
         expect(targeted.complete).eq(-1);
-        expect(targeted.message).eq(i18next.t("apgames:validation.gnostica.PICK_DESTINATION_TO_SET_DISTANCE"));
+        expect(targeted.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
         const [row2, col2] = rowColFor(g, 3, 0); // p0, distance 2 from n0
         const distClick2 = g.handleClick(targeted.move, row2, col2);
         expect(distClick2.move).eq(`use AR/with m0.2 move n0.1 2`);
@@ -3378,7 +3377,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 const result = g.handleClick(move, row, col);
                 expect(result.move).eq(move);
                 expect(result.valid).to.be.true;
-                expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_CELL"));
+                expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
             }
             const g2 = setup(true);
             g2.move("play 03", { partial: true });
@@ -3447,13 +3446,13 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }],
                 hands: [["03", "2S"], filler],
             });
-            expect(cups.handleClick("use AC", -1, -1, "_btn_target_new").message).eq(i18next.t("apgames:validation.gnostica.PICK_CARD_FOR_NEW_TERRITORY"));
+            expect(cups.handleClick("use AC", -1, -1, "_btn_target_new").message).eq(i18next.t("apgames:validation.gnostica.CLICK_HAND"));
 
             const discs = testGame({
                 board: [{ x: 1, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "2R", pieces: [] }],
                 hands: [["KR", "2S"], filler],
             });
-            expect(discs.handleClick("use AD", -1, -1, "_btn_target_o0").message).eq(i18next.t("apgames:validation.gnostica.PICK_CARD_TO_GROW_TERRITORY"));
+            expect(discs.handleClick("use AD", -1, -1, "_btn_target_o0").message).eq(i18next.t("apgames:validation.gnostica.CLICK_HAND"));
         });
 
         it("Hermit names the destination click once its target (piece or territory) is chosen", () => {
@@ -3462,7 +3461,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 board: [{ x: 1, y: 0, uid: "09", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
                 hands: [["03", "2S"], filler],
             });
-            const expected = i18next.t("apgames:validation.gnostica.PICK_HERMIT_DESTINATION");
+            const expected = i18next.t("apgames:validation.gnostica.CLICK_CELL");
             expect(expected).to.not.eq("");
             expect(g.handleClick("use 09", -1, -1, "_btn_target_o0.1").message).eq(expected);
             expect(g.handleClick("use 09", -1, -1, "_btn_target_o0").message).eq(expected);
@@ -3664,7 +3663,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const targeted = g.handleClick(cellClick.move, -1, -1, "_btn_target_n0.2");
         expect(targeted.move).eq(`use AS/with m0.2 shrink n0.2`); // no default - a real pips choice exists
         expect(targeted.complete).eq(-1);
-        expect(targeted.message).eq(i18next.t("apgames:validation.gnostica.PICK_PIPS_BUTTON"));
+        expect(targeted.message).eq(i18next.t("apgames:validation.gnostica.CLICK_BUTTON"));
         const pips2Click = g.handleClick(targeted.move, -1, -1, "_btn_pips_2");
         expect(pips2Click.move).eq(`use AS/with m0.2 shrink n0.2 2`);
         g.move(pips2Click.move);
@@ -3681,7 +3680,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // No reorientation given yet for the acting player's own moved piece - complete:0, and the
         // message says so instead of the generic "looks like a valid move" fallback.
         expect(modeClick.complete).eq(0);
-        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
+        expect(modeClick.message).eq(i18next.t("apgames:validation.gnostica.MAY_ORIENT"));
         // Effective (post-move) position is n0 - clicking o0 (east of n0) computes E, already the
         // moved piece's current facing. This trailing facing is only optional, so a same-facing
         // click completes the step - exactly as a real correction would - rather than rejecting.
@@ -3989,7 +3988,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.move).eq("place m0 U?");
         expect(result.complete).eq(0);
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.MAY_ORIENT"));
     });
 
     it("place: clicking a neighbour replaces the facing with the correction, same generic message", () => {
@@ -4001,7 +4000,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
     });
 
-    it("orient: clicking a piece to start reorienting it carries the PICK_DIRECTION_TO_ORIENT message/never a facing", () => {
+    it("orient: clicking a piece to start reorienting it carries the CLICK_FACING message/never a facing", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 E");
         g.move("place l0 U");
@@ -4009,7 +4008,7 @@ describe("Gnostica: click-to-orient messaging", () => {
         const result = g.handleClick("orient", row, col);
         expect(result.valid).to.be.true;
         expect(result.move).eq("orient m0.1"); // selecting the minion never itself assigns a facing
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_DIRECTION_TO_ORIENT"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_FACING"));
     });
 
     it("orient: a genuine no-op reorientation click (clicking the same cell again) is rejected, carrying the ORIENT_NO_OP message", () => {
@@ -4115,7 +4114,7 @@ describe("Gnostica: click-to-orient messaging", () => {
 // The bare "activate <cell>"/"play <uid>" state, right after picking the
 // card and before any suit mode or major-arcana power step, is still "in
 // progress" (valid:true, complete:-1), per #49. validateMove() itself
-// computes CHOOSE_STEP's own instructional wording directly, for a
+// computes CLICK_BUTTON's own instructional wording directly, for a
 // hand-typed OR click-driven move alike. Applies equally to a minor or a
 // major arcana card, and to both activate and play - except Fool/World,
 // which stay complete/optional (neither can ever take a real step - not
@@ -4135,7 +4134,7 @@ describe("Gnostica: choose-step click messaging", () => {
         const { minX, minY } = (g as unknown as { renderWindow: () => { minX: number; minY: number } }).renderWindow();
         return [y - minY, x - minX];
     };
-    const chooseStepMsg = (cardName: string) => i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: cardName });
+    const chooseStepMsg = (cardName: string) => i18next.t("apgames:validation.gnostica.CLICK_BUTTON", { card: cardName });
 
     it("activate: a board click onto a card cell carries the message (minor arcana)", () => {
         const g = new GnosticaGame(2);
@@ -4190,13 +4189,13 @@ describe("Gnostica: choose-step click messaging", () => {
     // Every click-driven special with no button of its own (orientMinion/
     // orientAny/hierophantReplace/tradeHands/judgementDraw - see
     // computeActionButtons' own docs) names its actual targeting rule
-    // instead of CHOOSE_STEP's "using the buttons next to the game
+    // instead of CLICK_BUTTON's "using the buttons next to the game
     // board" wording, which is actively wrong for them (same reasoning
     // as World's own dedicated message just below). A primitive-first
     // step (a real mode button) or hermitTeleport/magicianChoice (their
-    // own dedicated button sets) still get plain CHOOSE_STEP, since it's
+    // own dedicated button sets) still get plain CLICK_BUTTON, since it's
     // accurate for them.
-    it("activate: orientMinion names any-own-minion targeting, not the generic CHOOSE_STEP", () => {
+    it("activate: orientMinion names any-own-minion targeting, not the generic CLICK_BUTTON", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
@@ -4204,11 +4203,11 @@ describe("Gnostica: choose-step click messaging", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("use", row, col);
         expect(result.valid).to.be.true;
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_ORIENT_MINION", { card: major(3).name, cell: "m0" }));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_FACING", { card: major(3).name, cell: "m0" }));
         expect(result.message).to.not.eq(chooseStepMsg(major(3).name));
     });
 
-    it("activate: orientAny/tradeHands/hierophantReplace name the shared self-or-facing-cell targeting rule, not the generic CHOOSE_STEP", () => {
+    it("activate: orientAny/tradeHands/hierophantReplace name the shared self-or-facing-cell targeting rule, not the generic CLICK_BUTTON", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
@@ -4217,14 +4216,14 @@ describe("Gnostica: choose-step click messaging", () => {
             const [row, col] = rowColFor(g, 0, 0);
             const result = g.handleClick("use", row, col);
             expect(result.valid, `seq ${seq}`).to.be.true;
-            expect(result.message, `seq ${seq}`).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_FACING", { card: major(seq).name, cell: "m0" }));
+            expect(result.message, `seq ${seq}`).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL", { card: major(seq).name, cell: "m0" }));
             expect(result.message, `seq ${seq}`).to.not.eq(chooseStepMsg(major(seq).name));
         }
     });
 
     // Regression: once a card STARTS with 2+ eligible minions (so the minion-picker fires), naming a specific one explicitly
     // (`with <ref>`) must still get the special's own real message - the ambiguity check used to ignore the already-typed ref
-    // and re-decide from scratch, finding the pool "still ambiguous" forever and falling through to the generic CHOOSE_STEP
+    // and re-decide from scratch, finding the pool "still ambiguous" forever and falling through to the generic CLICK_BUTTON
     // wording (whose buttons don't even apply to these click-only specials) no matter which minion was actually picked.
     it("orientMinion/orientAny/hierophantReplace still name their own targeting rule once a specific minion (from an originally-ambiguous pool) is explicitly typed", () => {
         const g = testGame({
@@ -4233,7 +4232,7 @@ describe("Gnostica: choose-step click messaging", () => {
         });
         for (const ref of ["m0.1", "m0.2"]) {
             const result = g.validateMove(`use 03/with ${ref}`);
-            expect(result.message, ref).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_ORIENT_MINION", { card: major(3).name, cell: "m0" }));
+            expect(result.message, ref).eq(i18next.t("apgames:validation.gnostica.CLICK_FACING", { card: major(3).name, cell: "m0" }));
         }
 
         const devil = testGame({
@@ -4243,7 +4242,7 @@ describe("Gnostica: choose-step click messaging", () => {
             ],
             hands: [filler, filler],
         });
-        expect(devil.validateMove("use 15/with m0.2").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_FACING", { card: major(15).name, cell: "m0" }));
+        expect(devil.validateMove("use 15/with m0.2").message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL", { card: major(15).name, cell: "m0" }));
 
         const hierophant = testGame({
             board: [
@@ -4252,10 +4251,10 @@ describe("Gnostica: choose-step click messaging", () => {
             ],
             hands: [filler, filler],
         });
-        expect(hierophant.validateMove("use 05/with m0.2").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_FACING", { card: major(5).name, cell: "m0" }));
+        expect(hierophant.validateMove("use 05/with m0.2").message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL", { card: major(5).name, cell: "m0" }));
     });
 
-    it("activate: judgementDraw names the discard pile, not the game board, not the generic CHOOSE_STEP", () => {
+    it("activate: judgementDraw names the discard pile, not the game board, not the generic CLICK_BUTTON", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
@@ -4263,17 +4262,17 @@ describe("Gnostica: choose-step click messaging", () => {
         const [row, col] = rowColFor(g, 0, 0);
         const result = g.handleClick("use", row, col);
         expect(result.valid).to.be.true;
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP_DISCARD", { card: major(20).name }));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_DISCARDS", { card: major(20).name }));
         expect(result.message).to.not.eq(chooseStepMsg(major(20).name));
     });
 
     // With 2+ distinguishable minions eligible at the activated cell, the
     // acting minion is genuinely ambiguous and a minion-picker button set
     // appears (see resolveStepMinion's/computeActionButtons' own docs) -
-    // CHOOSE_STEP's own "using the buttons" wording is accurate here,
+    // CLICK_BUTTON's own "using the buttons" wording is accurate here,
     // unlike the single-eligible-minion case above.
 
-    it("activate: a primitive-first step, or a special with its own button set (hermitTeleport/magicianChoice), keeps the generic CHOOSE_STEP wording", () => {
+    it("activate: a primitive-first step, or a special with its own button set (hermitTeleport/magicianChoice), keeps the generic CLICK_BUTTON wording", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
@@ -4292,7 +4291,7 @@ describe("Gnostica: choose-step click messaging", () => {
     // facing cell (or "any of your own minions", or the discard pile) -
     // none of those fixed rules fit World, so it gets its own real
     // instructions instead, the same way Fool/High Priestess already do.
-    it("activate: World gets its own real instructions, not the generic CHOOSE_STEP wording", () => {
+    it("activate: World gets its own real instructions, not the generic CLICK_BUTTON wording", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => theWorld());
         g.move("place m0 U");
@@ -4302,19 +4301,15 @@ describe("Gnostica: choose-step click messaging", () => {
         expect(result.valid).to.be.true;
         expect(result.complete).eq(-1);
         expect(result.move).eq(`use 21`);
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
         expect(result.message).to.not.eq(chooseStepMsg(theWorld().name));
     });
 
-    // High Priestess isn't button-driven at all (CHOOSE_STEP would be
-    // actively wrong - there's no button for it), so it gets the same
-    // wording as the ordinary discard/draw action instead, plus a clause
-    // about its own two-round structure.
-    it("activate: High Priestess carries discard-style wording instead of CHOOSE_STEP, distinguishing round 1 from round 2", () => {
-        const round1Msg = i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1");
-        const round2Msg = i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2");
+    // High Priestess isn't button-driven, so it gets the ordinary discard/draw wording in both rounds.
+    it("activate: High Priestess carries the discard/draw wording in both rounds", () => {
+        const round1Msg = i18next.t("apgames:validation.gnostica.DISCARD_AND_DRAW");
+        const round2Msg = round1Msg;
         expect(round1Msg).to.not.eq(chooseStepMsg(major(2).name));
-        expect(round2Msg).to.not.eq(round1Msg);
 
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
@@ -4401,11 +4396,11 @@ describe("Gnostica: choose-step click messaging", () => {
         g.board.get("m0")!.pieces = [new Piece(1, 1, "U")];
         const discardUid = g.hands[0][0];
 
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
 
         g.move(`use 02/discard ${discardUid} draw 1`); // pauses, awaiting round 2; 1 is max: 6 - 5 remaining
         expect(g.continued).to.not.be.empty;
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2"));
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.DISCARD_AND_DRAW"));
 
         g.move(`discard draw 0 via 02`); // clears the obligation
         expect(g.continued).to.be.empty;
@@ -4592,7 +4587,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         // A count picked completes the move - tell the player to submit,
         // not the generic "Looks like a valid move" (there's a second
         // round still coming, this being round 1).
-        expect(drawClick.message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND1_READY"));
+        expect(drawClick.message).eq(i18next.t("apgames:validation.gnostica.SUBMIT_TO_CONTINUE"));
 
         g.move(drawClick.move);
         expect(g.hands[0]).to.not.include("5C");
@@ -4602,7 +4597,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         // Round 2: the SAME count-picker click now reports it's the LAST round.
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
         const round2Draw = g.handleClick(resumed.move, -1, -1, "_btn_hpdraw_0");
-        expect(round2Draw.message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
+        expect(round2Draw.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
 
         // The Draw N button must keep the round-2 move resuming the High Priestess.
         const resumed2 = g.handleClick("", -1, -1, "_btn_resume_power");
@@ -4613,7 +4608,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         // Same message, computed directly by validatePowerSteps itself now -
         // a hand-typed round 2 submission gets it without ever going
         // through the click handler above.
-        expect(g.validateMove(round2Draw.move).message).eq(i18next.t("apgames:validation.gnostica.HIGH_PRIESTESS_ROUND2_READY"));
+        expect(g.validateMove(round2Draw.move).message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
     });
 
     it("highPriestess: the Draw N buttons grow as discards are added", () => {
@@ -5503,7 +5498,7 @@ describe("Gnostica: Fool and World", () => {
         // a further click, so genuinely complete:1 (forcePauseReadyMessage's
         // own "ready" state - see validatePowerSteps's own docs).
         expect(cellClick.complete).to.eq(1);
-        expect(cellClick.message).to.eq(i18next.t("apgames:validation.gnostica.FOOL_FLIP_READY"));
+        expect(cellClick.message).to.eq(i18next.t("apgames:validation.gnostica.SUBMIT_TO_CONTINUE"));
 
         // No button offered - the root's flip is mandatory (#49), so
         // there's nothing left to click.
@@ -5571,7 +5566,7 @@ describe("Gnostica: Fool and World", () => {
         // Declining exposes Fool's own mandatory, one-shot 2nd flip -
         // nothing to reconsider, genuinely complete:1.
         expect(declined.complete).to.eq(1);
-        expect(declined.message).to.eq(i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW"));
+        expect(declined.message).to.eq(i18next.t("apgames:validation.gnostica.SUBMIT_TO_CONTINUE"));
 
         const preview = setupFool();
         pluckCard(preview, "AC");
@@ -5592,7 +5587,7 @@ describe("Gnostica: Fool and World", () => {
     });
 
     // Same message, computed directly by validatePowerSteps itself now -
-    // a hand-typed "decline AC via 00" gets DECLINE_THEN_AUTO_DRAW
+    // a hand-typed "decline AC via 00" gets SUBMIT_TO_CONTINUE
     // without ever going through the click handler above.
     it("a hand-typed decline of a revealed card also names the automatic second flip", () => {
         const g = setupFool();
@@ -5603,7 +5598,7 @@ describe("Gnostica: Fool and World", () => {
         const validated = g.validateMove(`decline AC via 00`);
         expect(validated.valid).to.be.true;
         expect(validated.complete).to.eq(1);
-        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.DECLINE_THEN_AUTO_DRAW"));
+        expect(validated.message).to.eq(i18next.t("apgames:validation.gnostica.SUBMIT_TO_CONTINUE"));
     });
 
     // Right after a real flip the status line is the generic "click a
@@ -5618,13 +5613,13 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use 00`); // real, non-partial commit - actually flips
         expect(g.continued).to.not.be.empty;
         const acName = minorCards.find(c => c.uid === "AC")!.name;
-        expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+        expect(g.validateMove("").message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
 
         const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
         expect(resumed.move).eq(`play AC via 00`);
         // A minor card's own synthesized primitive step is a fresh (step
-        // 0) choice - CHOOSE_STEP is the right message key, now naming AC.
-        expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: acName }));
+        // 0) choice - CLICK_BUTTON is the right message key, now naming AC.
+        expect(resumed.message).to.eq(i18next.t("apgames:validation.gnostica.CLICK_BUTTON", { card: acName }));
     });
 
     // A resumed/pushed frame is never mandatory the way #49's ROOT-only
@@ -5639,7 +5634,7 @@ describe("Gnostica: Fool and World", () => {
         const bare = g.validateMove(`play 01 via 00`);
         expect(bare.valid).to.be.true;
         expect(bare.complete).to.eq(-1);
-        expect(bare.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(1).name }));
+        expect(bare.message).to.eq(i18next.t("apgames:validation.gnostica.CLICK_BUTTON", { card: major(1).name }));
     });
 
     // Same, one click later - validatePowerSteps's own "given segment is
@@ -5655,7 +5650,7 @@ describe("Gnostica: Fool and World", () => {
         const modeChosen = g.validateMove(`play 01 as C via 00/with m0.1 at m0 create`); // suit + mode chosen, orientation not yet
         expect(modeChosen.valid).to.be.true;
         expect(modeChosen.complete).to.eq(-1);
-        expect(modeChosen.message).to.eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: major(1).name }));
+        expect(modeChosen.message).to.eq(i18next.t("apgames:validation.gnostica.CLICK_BUTTON", { card: major(1).name }));
     });
 
     // Declining a revealed card's own power exposes Fool's own remaining
@@ -5679,9 +5674,9 @@ describe("Gnostica: Fool and World", () => {
         g.move(`use 00`);
         expect(g.continued).to.deep.equal(["00.1"]);
 
-        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.INITIAL_INSTRUCTIONS"));
+        expect(g.validateMove("").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_ACTION"));
         expect(buttonValues(g)).to.deep.equal(["resume_power", "decline_power", "_disabled_undo"]);
-        expect(g.handleClick("", -1, -1, "_btn_resume_power").message).eq(i18next.t("apgames:validation.gnostica.WORLD_CHOOSE_TARGET"));
+        expect(g.handleClick("", -1, -1, "_btn_resume_power").message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
 
         // A direct board click on the target still works too.
         const [rowN, colN] = rowColFor(g, 1, 0);
@@ -6120,7 +6115,7 @@ describe("Gnostica: a new or changed minion's facing stays open to a click until
             const { minX, minY } = shown.renderWindow();
             const stray = g.handleClick(seeded, 0 - minY, -2 - minX);
             expect(stray.move).eq(seeded);
-            expect(stray.message).eq(i18next.t("apgames:validation.gnostica.FACE_OR_NEXT_POWER"));
+            expect(stray.message).eq(i18next.t("apgames:validation.gnostica.MAY_ORIENT"));
         });
     });
 
@@ -6424,12 +6419,12 @@ describe("Gnostica: a Fool's revealed card whose facing can still be changed", (
         const grow = g.validateMove("play AD via 00/with m0.1 grow m0.1"); // a grow of its own piece names no facing
         expect(grow.valid).to.be.true;
         expect(grow.complete).eq(0);
-        expect(grow.message).to.include(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
-        expect(grow.message).to.include(i18next.t("apgames:validation.gnostica.FOOL_FLIP_READY"));
+        expect(grow.message).to.include(i18next.t("apgames:validation.gnostica.MAY_ORIENT"));
+        expect(grow.message).to.include(i18next.t("apgames:validation.gnostica.SUBMIT_TO_CONTINUE"));
         // With the facing chosen it is complete, and only the automatic draw is worth noting.
         const done = g.validateMove("play AD via 00/with m0.1 grow m0.1 orient N");
         expect(done.complete).eq(1);
-        expect(done.message).to.not.include(i18next.t("apgames:validation.gnostica.VALID_MOVE_MAY_ORIENT"));
+        expect(done.message).to.not.include(i18next.t("apgames:validation.gnostica.MAY_ORIENT"));
     });
 });
 
@@ -6546,7 +6541,7 @@ describe("Gnostica: the Undo button", () => {
         const result = g.handleClick("use AR", -1, -1, "_btn_undo");
         expect(result.move).eq("use");
         expect(result.valid).to.be.true;
-        expect(result.message).eq(i18next.t("apgames:validation.gnostica.PICK_CARD_TO_ACTIVATE"));
+        expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
     });
 
     it("goes back across the segments of a card with two powers, through a skip", () => {
@@ -6965,8 +6960,8 @@ describe("Gnostica: the Magician's messages", () => {
             board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AC", pieces: [[1, 2, "N"]] }],
             hands: [["01", ...filler.slice(0, 5)], filler],
         });
-        expect(g.validateMove("play 01").message).eq(i18next.t("apgames:validation.gnostica.CHOOSE_STEP", { card: "The Magician" }));
-        expect(g.validateMove("play 01 as C").message).eq(i18next.t("apgames:validation.gnostica.PICK_MINION_CELL"));
+        expect(g.validateMove("play 01").message).eq(i18next.t("apgames:validation.gnostica.CLICK_BUTTON", { card: "The Magician" }));
+        expect(g.validateMove("play 01 as C").message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
     });
 
     it("prefixes the Special Power divider with the power's icon", () => {
@@ -6976,5 +6971,33 @@ describe("Gnostica: the Magician's messages", () => {
         const spacer = rep.areas.find(a => a.type === "buttonBar")!.buttons!.find(b => b.value === "_spacer")!;
         expect(spacer.glyph).eq("buttonpower_magicianChoice");
         expect(rep.legend["buttonpower_magicianChoice"]).to.deep.include({ name: "gnostica-allSuits" });
+    });
+});
+
+describe("Gnostica: previews that once crashed", () => {
+    const renders = (g: GnosticaGame, move: string): void => {
+        const shown = g.clone();
+        shown.move(move, { partial: true });
+        expect(() => shown.render()).to.not.throw();
+    };
+
+    it("previews a placement with its cell but no facing yet", () => {
+        renders(new GnosticaGame(2), "place l0");
+    });
+
+    it("previews Death's second power after its first destroyed the acting minion", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "U"]] }], hands: [["13", ...filler.slice(1)], filler] });
+        renders(g, "play 13/with m0.1 shrink m0.1 1");
+    });
+
+    it("previews Death's second power after its first destroyed the territory under the acting minion's neighbour", () => {
+        const g = testGame({ board: [{ x: 1, y: -2, pieces: [[1, 1, "S"]] }, { x: 1, y: -1, uid: "AD" }], hands: [["13", ...filler.slice(1)], filler] });
+        renders(g, "play 13/with n2.1 shrink n1 1");
+    });
+
+    it("renders a reloaded game whose last move took a Chariot through a waypoint in the void", () => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "07", pieces: [[1, 3, "W"]] }], hands: [filler, filler] });
+        g.move("use 07/with m0.3 move m0.3 3/with j0.3 move j0.3 1");
+        expect(() => new GnosticaGame(g.serialize()).render()).to.not.throw();
     });
 });
