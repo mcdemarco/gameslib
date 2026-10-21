@@ -21,6 +21,7 @@ Miscellany:
 	- #115 - The question of case-sensitivity of directions.
 	- #131 - More analysis of this.preview.
 	- #144 - Manual testing of special card unhiding (trade, bid, judgement)
+	- #145 - Review the generic instruction messages (CHOOSE_ACTION, CLICK_BUTTON, CLICK_CELL, CLICK_DISCARDS, CLICK_FACING, CLICK_HAND, DISCARD_AND_DRAW, MAY_CONTINUE, MAY_ORIENT, SUBMIT_TO_CONTINUE) that are to replace the per-power ones.
 
 UX:
 	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves. @done(2026-10-04)
