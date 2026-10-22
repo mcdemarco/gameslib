@@ -2386,7 +2386,7 @@ describe("Gnostica: handleClick", () => {
         const [rowFar, colFar] = rowColFor(g, 2, 0); // "o0", not adjacent to m0, no piece there either
         const far = g.handleClick(first.move, rowFar, colFar);
         expect(far.move).eq(first.move); // no piece of the acting player's there to (re-)select, so the selection stands
-        expect(far.message).eq(i18next.t("apgames:validation.gnostica.CLICK_CELL"));
+        expect(far.message).eq(i18next.t("apgames:validation.gnostica.CLICK_FACING"));
     });
 
     // Regression: orient's own first click used to grab whichever of the

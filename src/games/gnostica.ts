@@ -276,8 +276,8 @@ interface IWalkPoint {
 interface IStepChoices {
     buttons: ButtonBarButton[];
     moves: Map<string, string | IClickResult>;
-    // The message key for what the step is waiting on.
-    prompt: string;
+    // The message key for what the step is waiting on, if anything.
+    prompt?: string;
     // The Hermit's destination can be any cell at all.
     anyCell?: (cell: string) => string | IClickResult | undefined;
 }
@@ -726,7 +726,7 @@ export class GnosticaGame extends GameBaseSequenced {
             return result;
         }
         const pending = this.parsePendingStep(parsed).advanced;
-        const key = pending === undefined ? "CLICK_BUTTON" : pending.game.stepChoices(pending).prompt;
+        const key = pending?.game.stepChoices(pending).prompt ?? "CLICK_BUTTON";
         return { ...result, message: i18next.t(`apgames:validation.gnostica.${key}`) };
     }
 
@@ -2964,12 +2964,13 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // What a top-level action takes next, before any power step: the buttons it offers, and what each click makes of the move.
     private actionChoices(parsed: IParsedMove): IStepChoices {
-        const choices: IStepChoices = { buttons: [], moves: new Map(), prompt: "CHOOSE_ACTION" };
+        const choices: IStepChoices = { buttons: [], moves: new Map() };
         const last = parsed.announceLast ? " last" : "";
         const step0 = parsed.steps[0];
         const cells = [...this.board.entries()].map(([x, y]) => GnosticaBoard.coords2algebraic(x, y));
         switch (parsed.head) {
             case undefined:
+                choices.prompt = "CHOOSE_ACTION";
                 // Before a player has any piece, placing one is the only start, so it needs no button.
                 if (!this.hasPiecesOnBoard(this.currplayer)) {
                     choices.anyCell = cell => `place ${cell} U?${last}`;
@@ -2985,7 +2986,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 break;
             }
             case "orient": {
-                choices.prompt = "CLICK_CELL";
                 for (const cell of cells) {
                     const pool = this.piecesOwnedAt(cell);
                     if (pool.length > 0) {
@@ -2994,6 +2994,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                 }
                 const prevRef = step0?.targetPiece;
+                // Once a piece is picked, what's left is its facing; once that's chosen, nothing is.
+                choices.prompt = !prevRef?.includes(".") ? "CLICK_CELL" : step0?.direction === undefined ? "CLICK_FACING" : undefined;
                 if (prevRef?.includes(".")) {
                     this.addFacingMoves(choices, this.resolvePieceRefTrusted(prevRef).cell, dir => `orient ${prevRef} ${dir}${last}`);
                 } else if (prevRef !== undefined && step0?.direction === undefined) {
@@ -3046,7 +3048,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private stepChoices(pending: IPendingStep): IStepChoices {
-        const choices: IStepChoices = { buttons: [], moves: new Map(), prompt: "CLICK_BUTTON" };
+        const choices: IStepChoices = { buttons: [], moves: new Map() };
         const { istep } = pending;
         if (pending.minionAmbiguous) {
             // A click on a cell picks the minion there, or narrows the choice to that cell's pieces.
@@ -3534,7 +3536,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
         if (!this.inPowerPlay(head)) {
             const choices = this.actionChoices(parsed);
-            return choices.moves.get(`cell:${cell}`) ?? choices.anyCell?.(cell) ?? this.ignoredClick(parsed, i18next.t(`apgames:validation.gnostica.${choices.prompt}`));
+            return choices.moves.get(`cell:${cell}`) ?? choices.anyCell?.(cell)
+                ?? this.ignoredClick(parsed, choices.prompt === undefined ? undefined : i18next.t(`apgames:validation.gnostica.${choices.prompt}`));
         }
         const { current: pending, advanced } = this.parsePendingStep(parsed);
         for (const step of this.boardClickSteps(pending, advanced)) {
