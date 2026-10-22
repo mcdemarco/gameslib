@@ -4957,7 +4957,7 @@ describe("Gnostica: chatLog() other-player naming", () => {
         g.move(`use 05/with m0.1 replace n0.1 U`);
         const log = g.chatLog(["Alice", "Bob"]);
         const line = log.flat().find(l => l.includes("converted"));
-        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_hierophant_target", { player: "Alice", where: "n0", target: "Bob" }));
+        expect(line).eq(i18next.t("apresults:CONVERT.gnostica_hierophant", { player: "Alice", where: "n0", target: "Bob" }));
     });
 
     it("orient: no target named for an ordinary turn action (always the acting player's own piece)", () => {

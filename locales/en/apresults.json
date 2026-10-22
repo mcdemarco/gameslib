@@ -199,8 +199,7 @@
     "CONVERT": {
         "complete": "{{player}} turned a {{what}} into a {{into}} at {{where}}.",
         "courtesan": "King and courtesan swapped positions at {{where}}.",
-        "gnostica_hierophant": "{{player}} converted an enemy piece to their own at {{where}}.",
-        "gnostica_hierophant_target": "{{player}} converted {{target}}'s piece to their own at {{where}}.",
+        "gnostica_hierophant": "{{player}} converted {{target}}'s piece to their own at {{where}}.",
         "gnostica_piece": "{{player}} grew {{target}}'s piece to {{into}} at {{where}}.",
         "gnostica_piece_own": "{{player}} grew their piece to {{into}} at {{where}}.",
         "gnostica_piece_shrink": "{{player}} shrank {{target}}'s piece to {{into}} at {{where}}.",
@@ -464,7 +463,7 @@
     "ORIENT": {
         "crosshairs": "{{player}} turned a plane at {{where}} to face {{facing}}.",
         "gnostica_own": "{{player}} oriented a {{what}}-pip minion at {{where}} {{facing}}-ward.",
-        "gnostica_target": "{{player}} oriented {{target}}'s {{what}}-pip piece at {{where}} {{facing}}-ward.",
+        "gnostica": "{{player}} oriented {{target}}'s {{what}}-pip piece at {{where}} {{facing}}-ward.",
         "nowhat": "{{player}} turned a piece at {{where}} to face {{facing}}."
     },
     "PASS": {

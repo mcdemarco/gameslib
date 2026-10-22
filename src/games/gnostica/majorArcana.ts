@@ -10,6 +10,15 @@ export interface PrimitiveOpts {
     skipStashCheck?: boolean; // Sun/Strength: the same-target shortcut doesn't require a real stash piece.
 }
 
+// A step's flags: its card's own, plus those a two-step shortcut adds (see computeShortcutOpts).
+export interface PowerOpts extends PrimitiveOpts {
+    skipLadder?: boolean;       // Strength: the first grow may jump two values.
+    skipStashReturn?: boolean;  // Strength/Sun: a later grow's prior size was never really taken, so none is returned.
+    bothSwords?: boolean;       // Death: one attack for both swords, worth up to twice the minion's pips.
+    skipLandingCheck?: boolean; // A first move followed by its pair only passes through its landing cell.
+    allowRoyalty?: boolean;     // Sun: a royalty card may stand in for creating a spot card and growing it.
+}
+
 // Powers that don't reduce to a suit primitive - each is bespoke logic implemented directly in powers.ts.
 export type SpecialPower =
     | "fool"              // draw and play (or decline) a card from the deck

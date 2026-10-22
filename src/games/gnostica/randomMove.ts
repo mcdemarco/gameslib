@@ -29,7 +29,7 @@ import { Card, allCards } from "../../common/tarot/index.js";
 import { cardPointValue } from "./cell.js";
 import { Orientation, allOrientations } from "./piece.js";
 import { GnosticaBoard } from "./board.js";
-import { MajorArcanaDef, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana.js";
+import { MajorArcanaDef, PowerOpts, PowerStep, PrimitiveOpts, SpecialPower, SuitPrimitive, getMajorArcanaDef } from "./majorArcana.js";
 
 // Copies of powers.ts's suit and mode definitions, so this file can go without leaving anything behind.
 type MinorSuitUid = "C" | "R" | "D" | "S";
@@ -624,7 +624,7 @@ function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IPieceRef): 
 // Best-effort pre-filter only, same as unavailableModes itself -
 // buildRandomModeArgCandidates + validateSuitPrimitive remain the real
 // gate.
-function legalModesForMinion(game: GnosticaGame, minion: IPieceRef, suitUid: MinorSuitUid, opts: Record<string, unknown>): MinorMode[] {
+function legalModesForMinion(game: GnosticaGame, minion: IPieceRef, suitUid: MinorSuitUid, opts: PowerOpts): MinorMode[] {
     const unavailable = game.unavailableModes({ suitUid, minion, opts });
     return (suitUid === "C" ? ["own", "enemy", "new"] as const : ["piece", "tile"] as const).filter(mode => !unavailable.has(mode));
 }
@@ -747,7 +747,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IPieceRef, sui
 // buildRandomSuitStep below is the thin wrapper that builds the step
 // for direct suit-mode use.
 function findRandomPrimitiveChoice(
-    game: GnosticaGame, suitUid: MinorSuitUid, minions: IPieceRef[], opts: Record<string, unknown>,
+    game: GnosticaGame, suitUid: MinorSuitUid, minions: IPieceRef[], opts: PowerOpts,
 ): { minion: IPieceRef; fields: Partial<IStep> } | undefined {
     const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
@@ -789,7 +789,7 @@ function findRandomPrimitiveChoice(
             const ordered = weightedShuffle(candidates, c => c.weight);
             for (const { fields } of ordered) {
                 const check = game.validateSuitPrimitive(suitUid, minion, suitStep(suitUid, game.pieceRefStr(minion), fields), opts);
-                if (!check.failed) {
+                if (!("key" in check)) {
                     return { minion, fields };
                 }
             }
@@ -798,7 +798,7 @@ function findRandomPrimitiveChoice(
     return undefined;
 }
 
-function buildRandomSuitStep(game: GnosticaGame, suitUid: MinorSuitUid, minions: IPieceRef[], opts: Record<string, unknown>): IStep | undefined {
+function buildRandomSuitStep(game: GnosticaGame, suitUid: MinorSuitUid, minions: IPieceRef[], opts: PowerOpts): IStep | undefined {
     const choice = findRandomPrimitiveChoice(game, suitUid, minions, opts);
     if (choice === undefined) {
         return undefined;
@@ -829,7 +829,7 @@ function buildRandomOrientMinionStep(game: GnosticaGame, minions: IPieceRef[]): 
         const ref = game.pieceRefStr(minion, minions);
         for (const o of shuffle([...allOrientations]) as Orientation[]) {
             const check = game.validateOrientMinion(minion, { action: "orient", targetPiece: ref, direction: o });
-            if (!check.failed) {
+            if (!("key" in check)) {
                 return { action: "orient", withPiece: ref, targetPiece: ref, direction: o };
             }
         }
@@ -843,7 +843,7 @@ function buildRandomTradeHandsStep(game: GnosticaGame, minions: IPieceRef[]): IS
         const ref = game.pieceRefStr(minion, minions);
         for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
             const check = game.validateTradeHands(minion, { action: "trade", withPiece: ref, targetPiece: targetRef });
-            if (!check.failed) {
+            if (!("key" in check)) {
                 return { action: "trade", withPiece: ref, targetPiece: targetRef };
             }
         }
@@ -868,7 +868,7 @@ function buildRandomOrientAnyOrHierophantStep(game: GnosticaGame, minions: IPiec
             for (const targetRef of shuffle(pieceTargetRefs(game, minion)) as string[]) {
                 for (const o of shuffle([...allOrientations]) as Orientation[]) {
                     const step: IStep = { action: "orient", withPiece: ref, targetPiece: targetRef, direction: o };
-                    if (!game.validateOrientAny(minion, step).failed) {
+                    if (!("key" in game.validateOrientAny(minion, step))) {
                         return step;
                     }
                 }
@@ -879,7 +879,7 @@ function buildRandomOrientAnyOrHierophantStep(game: GnosticaGame, minions: IPiec
             const orientationToken = `${capturedFacing}?`;
             for (const o of shuffle([...allOrientations, undefined]) as (Orientation | undefined)[]) {
                 const step: IStep = { action: "replace", withPiece: ref, targetPiece: targetRef, direction: o ?? orientationToken };
-                if (!game.validateHierophantReplace(minion, step).failed) {
+                if (!("key" in game.validateHierophantReplace(minion, step))) {
                     return step;
                 }
             }
@@ -915,7 +915,7 @@ function buildRandomHermitStep(game: GnosticaGame, minions: IPieceRef[]): IStep 
                         ? { action: "fly", withPiece: ref, card: target, targetCell: destCell, mode }
                         : { action: "fly", withPiece: ref, targetPiece: target, targetCell: destCell, mode };
                     const check = game.validateHermitStep(minion, step);
-                    if (!check.failed) {
+                    if (!("key" in check)) {
                         return step;
                     }
                 }
@@ -935,7 +935,7 @@ function buildRandomJudgementDrawStep(game: GnosticaGame, minions: IPieceRef[]):
         const uids = (shuffle([...game.discardPile]) as string[]).slice(0, count);
         const ref = game.pieceRefStr(minion, minions);
         const step: IStep = { action: "draw", withPiece: ref, cardList: uids };
-        if (game.validateJudgementDraw(minion, step).valid) {
+        if (game.validateJudgementDraw(minion, step) === undefined) {
             return step;
         }
     }
@@ -1068,7 +1068,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
         const istep = reparsedStep(game, built);
         chain.push(istep);
         const result = ctx.validatePowerStep(step, minions, istep, def, i, chain.length);
-        if (result.failed) {
+        if ("key" in result) {
             chain.pop();
             break;
         }
