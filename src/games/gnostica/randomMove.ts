@@ -1013,7 +1013,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
             return [];
         }
         const step = reparsedStep(game, built);
-        const result = game.validateMinorPower(suitUid, card.uid, eligible, [step]);
+        const result = game.validateMinorPower(suitUid, eligible, [step]);
         // Genuinely submittable is complete !== -1, not === 1 - see the
         // top-level loop's own matching docs. A Rods/Discs/Swords "piece"
         // step landing on the acting player's own minion is legitimately

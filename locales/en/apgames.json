@@ -6657,6 +6657,7 @@
             "CLICK_DISCARDS": "Click cards in the discard pile.",
             "CLICK_FACING": "Click the piece's cell to face it up, or a cell next to it to face that way.",
             "CLICK_HAND": "Click a card in your hand.",
+            "CLICK_HAND_OR_DESTROY": "Click a card in your hand, or click Destroy Territory if available.",
             "DESTINATION_HAS_ENEMY": "This move is not permitted when there are enemies in the target wasteland.",
             "DESTROYED_NEEDS_NO_CARD": "No replacement card is needed when destroying a territory.",
             "DISCARD_AND_DRAW": "Click hand cards to discard, if any, then choose how many to draw.",

@@ -5640,17 +5640,17 @@ describe("Gnostica: Fool and World", () => {
     // Same, one click later - validatePowerSteps's own "given segment is
     // still incomplete" fallback must not fall back to the root-only
     // wording either, e.g. once Fool reveals the Magician, Cups is chosen
-    // (via "as"), and its own "own" mode is picked but not yet complete.
-    it("validating a still-incomplete resumed step (a real segment given, but not enough of one) also names the card", () => {
+    // (via "as"), and its "new" mode is picked but has no card yet.
+    it("validating a still-incomplete resumed step (a real segment given, but not enough of one) asks for its next input", () => {
         const g = setupFool();
         pluckCard(g, "01"); // Magician
         g.drawPile.unshift("01");
         g.move(`use 00`);
 
-        const modeChosen = g.validateMove(`play 01 as C via 00/with m0.1 at m0 create`); // suit + mode chosen, orientation not yet
+        const modeChosen = g.validateMove(`play 01 as C via 00/with m0.1 at m0 create`); // suit + mode chosen, card not yet
         expect(modeChosen.valid).to.be.true;
         expect(modeChosen.complete).to.eq(-1);
-        expect(modeChosen.message).to.eq(i18next.t("apgames:validation.gnostica.CLICK_BUTTON", { card: major(1).name }));
+        expect(modeChosen.message).to.eq(i18next.t("apgames:validation.gnostica.CLICK_HAND"));
     });
 
     // Declining a revealed card's own power exposes Fool's own remaining
