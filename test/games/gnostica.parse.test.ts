@@ -54,6 +54,7 @@ describe("Gnostica parsing", () => {
                 },
                 {"action":"grow",
                  "complete":1,
+                 "mode": "piece",
                  "withPiece":"l1.1",
                  "targetPiece":"l1.1"
                 }
@@ -106,8 +107,10 @@ describe("Gnostica parsing", () => {
         expect(g.parseMove("play 11 as S/with m0.1 shrink m1.2 1")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 01 as C/with m0.1 at m1 create U")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 11/with m0.1 trade n0.1")).to.have.deep.property("valid", true);
-
+        expect(g.parseMove("use 01 as C/with m0.2 at n0 create")).to.have.deep.property("valid", true);
+        expect(g.parseMove("play AC/with m0.2 at n0 create")).to.have.deep.property("valid", true);
         expect(g.parseMove("use 11/skip/with m0.1 shrink n0.1 1")).to.have.deep.property("valid", true);
+
     });
     
     it ("Pickles", () =>  {

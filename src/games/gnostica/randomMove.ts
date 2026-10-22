@@ -752,7 +752,7 @@ function findRandomPrimitiveChoice(
     const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
         const modeCandidates = legalModesForMinion(game, minion, suitUid, opts)
-            .map(mode => ({ mode, candidates: buildRandomModeArgCandidates(game, minion, suitUid, mode) }));
+            .map(mode => ({ mode, candidates: buildRandomModeArgCandidates(game, minion, suitUid, mode).map(c => ({ ...c, fields: { ...c.fields, mode } })) }));
         // R.piece's own best candidate weight already tells us whether
         // ANY way of using it here actually lands the acting player's
         // own minion on a territory cell (see buildRandomModeArgCandidates's
@@ -896,7 +896,7 @@ function buildRandomHermitStep(game: GnosticaGame, minions: IPieceRef[]): IStep 
     const pool = shuffle([...minions]) as IPieceRef[];
     for (const minion of pool) {
         const ref = game.pieceRefStr(minion, minions);
-        for (const mode of shuffle(["piece", "tile"]) as string[]) {
+        for (const mode of shuffle(["piece", "tile"]) as ("piece" | "tile")[]) {
             // "tile" mode's own target is the moved territory's own card
             // uid, not a cell (see buildHermitStepFromArgs's own docs) -
             // read straight off the board, same cell minorTargetCell
@@ -912,8 +912,8 @@ function buildRandomHermitStep(game: GnosticaGame, minions: IPieceRef[]): IStep 
                 for (const [dx, dy] of destinations) {
                     const destCell = GnosticaBoard.coords2algebraic(dx, dy);
                     const step: IStep = mode === "tile"
-                        ? { action: "fly", withPiece: ref, card: target, targetCell: destCell }
-                        : { action: "fly", withPiece: ref, targetPiece: target, targetCell: destCell };
+                        ? { action: "fly", withPiece: ref, card: target, targetCell: destCell, mode }
+                        : { action: "fly", withPiece: ref, targetPiece: target, targetCell: destCell, mode };
                     const check = game.validateHermitStep(minion, step);
                     if (!check.failed) {
                         return step;

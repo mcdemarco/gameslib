@@ -70,38 +70,8 @@ const ALL_SUITS: { uid: MinorSuitUid; label: string }[] = [
     { uid: "S", label: "Swords" },
 ];
 
-// The verb each of Rods/Discs/Swords spells its step with; Cups has none (no entry).
-const RDS_VERBS: Partial<Record<MinorSuitUid, string>> = { R: "move", D: "grow", S: "shrink" };
-
-// A suit step's mode (Cups own/enemy/new; the others piece/tile), read from the fields parseMove already resolved; undefined if the action isn't this suit's verb or no target is named.
-function stepMinorMode(suitUid: MinorSuitUid, step: IStep): MinorMode | undefined {
-    const verb = RDS_VERBS[suitUid];
-    if (verb !== undefined) {
-        if (step.action !== verb) {
-            return undefined;
-        }
-        return step.targetPiece !== undefined ? "piece" : step.targetCell !== undefined ? "tile" : undefined;
-    }
-    if (suitUid !== "C" || step.action !== "create") {
-        return undefined;
-    }
-    if (step.direction !== undefined) {
-        return "own";
-    }
-    if (step.targetPiece !== undefined) {
-        return "enemy";
-    }
-    // "own"/"enemy" have no empty-field reading, so this is "new" either way.
-    return "new";
-}
-
-// Hermit's mode from the step's fields; targetCell is reserved exclusively for the destination in both modes.
-function stepHermitMode(step: IStep): TargetMode | undefined {
-    if (step.action !== "fly") {
-        return undefined;
-    }
-    return step.targetPiece !== undefined ? "piece" : step.card !== undefined ? "tile" : undefined;
-}
+// The verb each suit spells its step with.
+const SUIT_VERBS: Record<MinorSuitUid, string> = { C: "create", R: "move", D: "grow", S: "shrink" };
 
 // The verb each of these special powers' step is spelled with; a step with any other action is not this power's step, however its fields happen to line up.
 const SPECIAL_STEP_ACTIONS: Partial<Record<SpecialPower, string>> = {
@@ -207,6 +177,8 @@ export interface IStep {
     cardList?: string[]; 
     complete?: number;
     direction?: string;
+    drawn?: boolean;
+    mode?: MinorMode;   //Includes Hermit's targetModes
     targetPiece?: string;
     targetCell?: string;
     withPiece?: string;
@@ -1235,7 +1207,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     if (segment.length === 0) {
                         if (lastStep) {
-                            //Partial move.
+                            //Partial move.  
+                            if (step.action === "create") {
+                                //In the UI stopping at create is waiting on a card choice.
+                                step.mode = "new";
+                            }
                             step.complete = -1;
                             pm.steps.push(step);
                         } else {
@@ -1347,15 +1323,19 @@ export class GnosticaGame extends GameBaseSequenced {
                     break;
                 }
 
-                if ( CARD_UID_RE.test(tempwhat) )
+                if ( CARD_UID_RE.test(tempwhat) ) {
                     step.card = tempwhat;
-                else if ( DIRECTION_RE.test(tempwhat) )
+                    step.mode = "new";
+                } else if ( DIRECTION_RE.test(tempwhat) ) {
                     step.direction = tempwhat.toUpperCase();
-                else if ( PIECE_REF_RE.test(tempwhat) )
+                    step.mode = "own";
+                } else if ( PIECE_REF_RE.test(tempwhat) ) {
                     step.targetPiece = tempwhat;
-                else if ( tempwhat === "drawn" )
-                    step.amount = 1;
-                else {
+                    step.mode = "enemy";
+                } else if ( tempwhat === "drawn" ) {
+                    step.drawn = true;
+                    step.mode = "new";
+                } else {
                     pm.error = "BAD_CREATE_CONTENT";
                     break;
                 }
@@ -1498,13 +1478,16 @@ export class GnosticaGame extends GameBaseSequenced {
 
             if ( step.action === "grow" || step.action === "move" || step.action === "shrink" || step.action === "fly" ) {
                 //Test tempwhat.
-                if ( CELL_RE.test(tempwhat) )
+                if ( CELL_RE.test(tempwhat) ) {
                     step.targetCell = tempwhat.toLowerCase();
-                else if ( CARD_UID_RE.test(tempwhat) )
+                    step.mode = "tile";
+                } else if ( CARD_UID_RE.test(tempwhat) ) {
                     step.card = tempwhat;
-                else if ( PIECE_REF_RE.test(tempwhat) )
+                    step.mode = "tile";
+                } else if ( PIECE_REF_RE.test(tempwhat) ) {
                     step.targetPiece = tempwhat;
-                else {
+                    step.mode = "piece";
+                } else {
                     pm.error = "BAD_STEP_CONTENT";
                     break;
                 }
@@ -1681,7 +1664,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if ( step.action === "create" ) {
                     if ( step.card !== undefined || step.direction !== undefined || step.targetPiece !== undefined)
                         ppart.push(((step.card ?? step.direction) ?? step.targetPiece) as string);
-                    else if ( step.amount === 1 )
+                    else if ( step.drawn === true )
                         ppart.push("drawn");
                 }
                 
@@ -2552,9 +2535,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return primitive === "create" ? "C" : primitive === "move" ? "R" : primitive === "grow" ? "D" : "S";
     }
 
-    // The current step's own minor-arcana mode (own/enemy/new/piece/tile), derived from `istep` - undefined for a plain special step (no suitUid) or a not-yet-shaped primitive/magicianChoice step.
+    // The current step's minor-arcana mode (own/enemy/new/piece/tile) - undefined for a plain special step (no suitUid), or one not yet spelling its suit's verb.
     private pendingMode(pending: IPendingStep): MinorMode | undefined {
-        return pending.suitUid === undefined ? undefined : stepMinorMode(pending.suitUid, pending.istep);
+        return pending.suitUid !== undefined && pending.istep.action === SUIT_VERBS[pending.suitUid] ? pending.istep.mode : undefined;
     }
 
     // Whether NOTHING has been typed yet for `pending`'s own special step, beyond the bare minion ref (if any).
@@ -2564,7 +2547,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "tradeHands":
             case "orientAny":
             case "hierophantReplace": return pending.istep.targetPiece === undefined;
-            case "hermitTeleport": return stepHermitMode(pending.istep) === undefined;
+            case "hermitTeleport": return pending.istep.mode === undefined;
             case "judgementDraw": return (pending.istep.cardList?.length ?? 0) === 0;
             case "highPriestess": return (pending.istep.cardList?.length ?? 0) === 0 && pending.istep.amount === undefined;
             default: return true; // fool/worldUseAny/magicianChoice take no typed content of their own here
@@ -2876,7 +2859,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (pending.special !== undefined) {
             return pending.special === "magicianChoice" ? "create" : SPECIAL_STEP_ACTIONS[pending.special] ?? pending.special;
         }
-        return pending.suitUid === "C" ? "create" : RDS_VERBS[pending.suitUid!]!;
+        return SUIT_VERBS[pending.suitUid!];
     }
 
     // The pending step's own move string with `fields` added: its verb and its acting minion come from the pending step.
@@ -3122,7 +3105,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     }
                     break;
                 case "hermitTeleport": {
-                    const mode = stepHermitMode(istep);
+                    const mode = istep.mode;
                     if (mode === undefined) {
                         this.addChoiceButtons(choices, "target", this.hermitTargetCandidates(pending), undefined, ref => this.buildTargetedHermitMove(pending, ref));
                     } else if (mode === "tile") {
@@ -3204,9 +3187,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Wheel of Fortune's new territory can come from the deck.
                 if (suitUid === "C" && pending.opts.allowRandomDraw === true) {
                     choices.buttons.push({ label: "Draw a card", value: "drawn" });
-                    const drawn = this.supplyStepCardUid(pending, "drawn");
-                    if (drawn !== undefined) {
-                        choices.moves.set("_btn_drawn", drawn);
+                    if (istep.card === undefined) {
+                        choices.moves.set("_btn_drawn", this.assembleStepMove(pending, { ...istep, withPiece: this.pieceRefStr(pending.minion, pending.minions), drawn: true }));
                     }
                 }
                 const current = this.cellContents(faceCell)?.pointValue() ?? 0;
@@ -5255,11 +5237,10 @@ export class GnosticaGame extends GameBaseSequenced {
 
     private applySuitPrimitive(minion: () => IPieceRef, step: IStep, waypoint = false): IStepOutcome {
         const suitUid = ({ create: "C", move: "R", grow: "D", shrink: "S" } as Record<string, MinorSuitUid>)[step.action];
-        const mode = stepMinorMode(suitUid, step)!;
+        const mode = step.mode!;
         switch (suitUid) {
             case "C":
-                // mode is stepMinorMode's own MinorMode union (shared across all 4 suits) - each branch below casts it back to ITS suit's own subset, which
-                // this switch on suitUid guarantees is correct even though TS can't correlate the two independently-typed values on its own.
+                // The switch on the suit guarantees each cast to that suit's own subset of modes, which TS can't correlate on its own.
                 return this.applyCups(mode as CupsMode, step);
             case "R":
                 return this.applyRods(minion, mode as TargetMode, step, waypoint);
@@ -5271,7 +5252,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     public validateSuitPrimitive(suitUid: MinorSuitUid, minion: IPieceRef, step: IStep, opts: Record<string, unknown>): StepValidation {
-        const mode = stepMinorMode(suitUid, step);
+        const mode = step.action === SUIT_VERBS[suitUid] ? step.mode : undefined;
         if (mode === undefined) {
             // The step's action doesn't spell this suit's verb (or names no target) - not something a well-formed move for this power can contain.
             return { failed: true, result: { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "WRONG_STEP_ACTION" }) } };
@@ -5319,8 +5300,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
                 const targetCell = cellStr;
-                // "drawn" is parsed as step.amount === 1 (pickleMove's own sentinel, since step.card must always be a real card uid).
-                if (step.amount === 1) {
+                if (step.drawn === true) {
                     this.hidden.push({ type: "territory", cell: targetCell });
                     return {};
                 }
@@ -5403,8 +5383,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 const cellStr = step.atCell!;
                 const cardArg = step.card;
                 const targetCell = cellStr;
-                // Mirrors applyCups's own "new" case - "drawn" is parsed as step.amount === 1, and only honored when opts.allowRandomDraw is genuinely set for THIS card's step.
-                const cardUid = step.amount === 1 && opts.allowRandomDraw ? undefined : cardArg;
+                // "drawn" is only honored when this card's step allows a random draw.
+                const cardUid = step.drawn === true && opts.allowRandomDraw ? undefined : cardArg;
                 const minionErr = this.checkOwnMinionTargetsCell(minion, targetCell);
                 if (minionErr) return { failed: true, result: { valid: false, complete: -1, message: i18next.t(`apgames:validation.gnostica.${minionErr.key}`, minionErr.params) } };
                 if (this.classifyCell(targetCell) !== "wasteland") {
@@ -5854,7 +5834,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // Hermit - <minionRef> fly <targetPieceRef> to <destCell> [orient <direction>] | <minionRef> fly <cardUid> to <destCell>
     private applyHermitStep(step: IStep): IStepOutcome {
-        const mode = stepHermitMode(step)!;
+        const mode = step.mode as TargetMode;
         const destCellStr = step.targetCell!;
         switch (mode) {
             case "piece": {
@@ -5883,7 +5863,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     public validateHermitStep(minion: IPieceRef, step: IStep): StepValidation {
-        const mode = stepHermitMode(step)!;
+        const mode = step.mode as TargetMode;
         const destCellStr = step.targetCell!;
         const destCell = destCellStr;
         switch (mode) {
