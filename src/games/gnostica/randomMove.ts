@@ -110,7 +110,7 @@ export function generateRandomMove(game: GnosticaGame): string {
             return buildViaMove(game, [buildRandomHighPriestessStep(game)]);
         }
         // A persisted Fool obligation always means an ordinary revealed
-        // card sits on top awaiting a decision (buildPendingFromContinued's
+        // card sits on top awaiting a decision (resumeQueue's
         // own docs) - sometimes genuinely try to use it instead of always
         // declining. The player never has to reason about how deep the
         // reveal is nested - only "what's the card in front of me right
@@ -574,7 +574,7 @@ function pieceTargetRefs(game: GnosticaGame, minion: IPieceRef): string[] {
     if (faceCell === minion.cell) {
         return [selfRef];
     }
-    const targetT = game.cellContents(faceCell);
+    const targetT = game.board.get(faceCell);
     const facingRefs = (targetT?.pieces ?? []).map(p => game.pieceRefStr({ cell: faceCell, piece: p }));
     return [selfRef, ...facingRefs];
 }
@@ -596,7 +596,7 @@ function pieceTargetRefsWithOwner(game: GnosticaGame, minion: IPieceRef): { ref:
     if (faceCell === minion.cell) {
         return [{ ref: selfRef, owner: selfOwner }];
     }
-    const targetT = game.cellContents(faceCell);
+    const targetT = game.board.get(faceCell);
     const facing = (targetT?.pieces ?? []).map(p => ({ ref: game.pieceRefStr({ cell: faceCell, piece: p }), owner: p.owner }));
     return [{ ref: selfRef, owner: selfOwner }, ...facing];
 }
@@ -612,7 +612,7 @@ function pieceTargetRefsWithOrientation(game: GnosticaGame, minion: IPieceRef): 
     if (faceCell === minion.cell) {
         return [{ ref: selfRef, orientation: selfOrientation }];
     }
-    const targetT = game.cellContents(faceCell);
+    const targetT = game.board.get(faceCell);
     const facing = (targetT?.pieces ?? []).map(p => ({ ref: game.pieceRefStr({ cell: faceCell, piece: p }), orientation: p.orientation }));
     return [{ ref: selfRef, orientation: selfOrientation }, ...facing];
 }
@@ -649,7 +649,7 @@ function buildRandomModeArgCandidates(game: GnosticaGame, minion: IPieceRef, sui
     const piece = minion.piece;
     const faceCell = game.minorTargetCell(minion);
     const targetCell = faceCell;
-    const targetT = game.cellContents(faceCell);
+    const targetT = game.board.get(faceCell);
     const hand = game.hands[game.currplayer - 1];
     const pieceTargets = pieceTargetRefsWithOwner(game, minion);
     const pips = Array.from({ length: piece.size }, (_, i) => i + 1);
@@ -780,7 +780,7 @@ function findRandomPrimitiveChoice(
             }
             if (key === "C.own") {
                 const faceCell = game.minorTargetCell(minion);
-                return game.classifyCell(faceCell) === "territory" ? 3 : 1;
+                return game.board.classify(faceCell) === "territory" ? 3 : 1;
             }
             return 3;
         };
@@ -903,7 +903,7 @@ function buildRandomHermitStep(game: GnosticaGame, minions: IPieceRef[]): IStep 
             // already names.
             const targetToken = mode === "piece"
                 ? undefined // resolved per-candidate below (piece mode has several possible targets)
-                : game.cellContents(game.minorTargetCell(minion))?.cardUid;
+                : game.board.get(game.minorTargetCell(minion))?.cardUid;
             if (mode === "tile" && targetToken === undefined) {
                 continue;
             }

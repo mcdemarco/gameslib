@@ -1235,7 +1235,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             const views = internal.parsePendingStep(internal.parseMove(chain.split("/").slice(0, k).join("/")));
             for (const view of [views.current, views.advanced]) {
                 for (const m of view?.minions ?? []) {
-                    expect(view!.game.cellContents(m.cell)!.pieces.map(p => p.id())).to.include(m.piece.id());
+                    expect(view!.game.board.get(m.cell)!.pieces.map(p => p.id())).to.include(m.piece.id());
                 }
             }
         }
@@ -5755,7 +5755,7 @@ describe("Gnostica: Fool and World", () => {
         g.move(`play 12 via 00/with m0.1 move m0.1 1`); // moves to n0; tradeHands auto-skips (no enemy)
         expect(g.continued).to.deep.equal(["00.2"]);
         // The staleness bug this guards is now structurally impossible:
-        // buildPendingFromContinued recomputes minions fresh from the
+        // resumeQueue recomputes minions fresh from the
         // board every time (see this.continued's own docs), so a resume
         // can never re-derive eligibility from a cell the acting piece has
         // moved away from.
