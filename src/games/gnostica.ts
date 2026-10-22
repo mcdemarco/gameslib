@@ -2122,9 +2122,21 @@ export class GnosticaGame extends GameBaseSequenced {
         return { minion: pool[0], ambiguous: true, candidates: pool };
     }
 
-    // "Ready to submit" for a step whose outcome forces a pause: the turn continues, except after the High Priestess's final round.
-    private forcePauseReadyMessage(cardUid: string, nextStepIndex: number): string {
-        return cardUid === "02" && nextStepIndex > 0 ? "apgames:validation._general.VALID_MOVE" : "apgames:validation.gnostica.SUBMIT_TO_CONTINUE";
+    // How a move the walk accepts stands after its last step: a High Priestess draw count still owed, a facing still open, more discards still possible,
+    // or ready, with the turn continuing past a pause.
+    private static readyResult(last: { soft: boolean; moreDiscards: number; drawOwed: boolean }, paused: boolean): IValidationResult {
+        if (last.drawOwed) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_AND_DRAW") };
+        }
+        const ready = i18next.t(paused ? "apgames:validation.gnostica.SUBMIT_TO_CONTINUE" : "apgames:validation._general.VALID_MOVE");
+        if (last.soft) {
+            const mayOrient = i18next.t("apgames:validation.gnostica.MAY_ORIENT");
+            return { valid: true, complete: 0, message: paused ? `${mayOrient} ${ready}` : mayOrient };
+        }
+        if (last.moreDiscards > 0 && !paused) {
+            return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.MAY_CONTINUE") };
+        }
+        return { valid: true, complete: 1, message: ready };
     }
 
     // Which top-level button(s) the partial move (or an owed resume) already reflects; "Declare" is a modifier so it is reported alongside whatever the base action is, not instead of it.
@@ -2339,44 +2351,29 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.chosenActionBar(topLevel);
         }
 
-        const minionPicker = pendingMinor.game.minionPickerBar(pendingMinor, selected, declareBtn);
-        if (minionPicker !== undefined) {
-            return minionPicker;
-        }
-        // Still ambiguous but spanning more than one cell ("play"'s board-wide pool): a paused resume gets Play/Decline, anything else only the board click that picks the minion.
+        const choices = pendingMinor.game.stepChoices(pendingMinor);
+        const around = (spacer: ButtonBarButton): [ButtonBarButton, ...ButtonBarButton[]] =>
+            [...(selected !== undefined ? [selected] : []), spacer, ...choices.buttons, ...(declareBtn !== undefined ? [declareBtn] : [])] as [ButtonBarButton, ...ButtonBarButton[]];
+        // Which minion acts: a button per piece when they share a cell, otherwise the board click that picks the cell.
         if (pendingMinor.minionAmbiguous) {
             // An owed resume is still the bare Play/Decline pair until Play is clicked; after that it reads like a card played from the hand.
+            return choices.buttons.length === 0 && phase === "owed" ? this.pausedPowerButtons() : around({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
+        }
+        // High Priestess: the discard list is built via hand-card clicks, but the draw count is the player's own choice, same shape as the ordinary discard/draw count-picker.
+        if (pendingMinor.special === "highPriestess" && pendingMinor.istep.amount === undefined) {
+            return choices.buttons as [ButtonBarButton, ...ButtonBarButton[]];
+        }
+        // A special power with nothing to choose by button is played by board and hand clicks alone.
+        if (pendingMinor.special !== undefined && choices.buttons.length === 0) {
+            // A resume not yet begun: none of the ordinary buttons are legal, only the Play/Decline pair.
             if (phase === "owed") {
                 return this.pausedPowerButtons();
             }
-            const collapsed: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-            collapsed.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
-            if (declareBtn !== undefined) {
-                collapsed.push(declareBtn);
-            }
-            return collapsed as [ButtonBarButton, ...ButtonBarButton[]];
+            return [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])] as [ButtonBarButton, ...ButtonBarButton[]];
         }
-
-        // High Priestess: the discard list is built via hand-card clicks, but the draw count is the player's own choice, same shape as the ordinary discard/draw count-picker.
-        if (pendingMinor.special === "highPriestess" && pendingMinor.istep.amount === undefined) {
-            return pendingMinor.game.stepChoices(pendingMinor).buttons as [ButtonBarButton, ...ButtonBarButton[]];
-        }
-        // orientMinion/judgementDraw/worldUseAny are pure click-driven; tradeHands/orientAny/hierophantReplace are too unless the facing cell holds several candidates for a click to pick between.
-        // Self is always its own unambiguous click target for orientAny, so it doesn't count.
-        const pickingSpecialTarget = (pendingMinor.special === "orientAny" || pendingMinor.special === "tradeHands" || pendingMinor.special === "hierophantReplace")
-            && pendingMinor.istep.targetPiece === undefined
-            && pendingMinor.game.targetCandidates(pendingMinor).length - (pendingMinor.special === "orientAny" ? 1 : 0) > 1;
-        if (pendingMinor.special !== undefined && pendingMinor.special !== "hermitTeleport" && pendingMinor.special !== "magicianChoice" && !pickingSpecialTarget) {
-            // A click-only special power whose play has begun (fresh, or a resume once Play is clicked): just the action chosen, since the board or hand click that continues it is no button.
-            if (phase !== "owed") {
-                const only: ButtonBarButton[] = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
-                return only as [ButtonBarButton, ...ButtonBarButton[]];
-            }
-            // A resume not yet begun: none of the ordinary 6 buttons are legal - offer the same self-contained Play/Decline pair the Fool-special branch above does.
-            return this.pausedPowerButtons();
-        }
-
-        return pendingMinor.game.stepModeBar(pendingMinor, selected, declareBtn);
+        const spacerLabel = pendingMinor.suitUid ? ALL_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
+        const glyph = pendingMinor.suitUid ? GnosticaGame.suitButtonGlyph(pendingMinor.suitUid) : `buttonpower_${pendingMinor.special}`;
+        return around({ label: spacerLabel, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], glyph });
     }
 
     // Once an action is chosen the bar keeps just it (greyed) and Declare; the whole ordinary set is only for an empty move or a bare "last".
@@ -2423,23 +2420,6 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const seed = this.resumeMove();
         return seed === undefined ? undefined : this.parsePendingStep(seed).advanced;
-    }
-
-    // Every remaining candidate minion for THIS step already sits on the same cell AND there's more than one, so a real choice is still needed - one button each.
-    private minionPickerBar(
-        pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
-    ): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const candidateCells = pendingMinor.minionCandidates.map(m => m.cell);
-        if (!pendingMinor.minionAmbiguous || candidateCells.length === 0 || candidateCells.some(cell => cell !== candidateCells[0])) {
-            return undefined;
-        }
-        const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-        buttons.push({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
-        buttons.push(...this.stepChoices(pendingMinor).buttons);
-        if (declareBtn !== undefined) {
-            buttons.push(declareBtn);
-        }
-        return buttons as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
@@ -2550,23 +2530,6 @@ export class GnosticaGame extends GameBaseSequenced {
             { value: targetCell, label: "Teleport Territory" },
             ...this.pieceCandidateOptions(pending, "Teleport"),
         ];
-    }
-
-    // The final fallback once every click-only/no-button state above is ruled out: a primitive suit-power step, or hermitTeleport/magicianChoice's own button sets.
-    private stepModeBar(
-        pendingMinor: IPendingStep, selected: ButtonBarButton | undefined, declareBtn: ButtonBarButton | undefined,
-    ): [ButtonBarButton, ...ButtonBarButton[]] {
-        const buttons: ButtonBarButton[] = selected !== undefined ? [selected] : [];
-
-        const spacerLabel = pendingMinor.suitUid ? ALL_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
-        const glyph = pendingMinor.suitUid ? GnosticaGame.suitButtonGlyph(pendingMinor.suitUid) : `buttonpower_${pendingMinor.special}`;
-        buttons.push({ label: spacerLabel, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], glyph });
-
-        buttons.push(...this.stepChoices(pendingMinor).buttons);
-        if (declareBtn !== undefined) {
-            buttons.push(declareBtn);
-        }
-        return buttons as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
     // The attack amounts a Swords piece step offers, each crossed out when the victim's owner couldn't take the shrunken piece back from their stash.
@@ -3144,7 +3107,11 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (pending.special === "tradeHands" || istep.targetPiece === undefined) {
                         choices.prompt = "CLICK_CELL";
                         addTargetClicks(ref => this.buildSpecialTargetMove(pending, ref));
-                        this.addChoiceButtons(choices, "target", this.specialTargetCandidates(pending), undefined, ref => this.buildSpecialTargetMove(pending, ref));
+                        // Buttons only when a click can't say which piece is meant; orientAny's own minion is always its own click.
+                        const candidates = this.specialTargetCandidates(pending);
+                        if (candidates.length - (pending.special === "orientAny" ? 1 : 0) > 1) {
+                            this.addChoiceButtons(choices, "target", candidates, undefined, ref => this.buildSpecialTargetMove(pending, ref));
+                        }
                     } else {
                         // The clicked facing is final, so Hierophant's seeded one is dropped.
                         const target = this.resolvePieceRef(istep.targetPiece);
@@ -4838,16 +4805,8 @@ export class GnosticaGame extends GameBaseSequenced {
     private validatePowerSteps(stack: IPowerProgress[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string, record: IWalkRecord = {}): IValidationResult {
         let clone: GnosticaGame | undefined;
         let i = 0;
-        // True exactly when the entry just popped to expose the current top was a real Decline, not a silently-skipped one; set before "decline" continue, read at the top of the next iteration.
-        let justDeclined = false;
-        // Set once High Priestess's final round completes without a forcePause; read only at the `top === undefined` exit below.
-        let hpFinalRoundReady: string | undefined;
-        // True right after a High Priestess step succeeds WITHOUT an explicit "draw <n>" - takes priority over the "ready to submit" framing below.
-        let hpDrawNotChosen = false;
-        // True right after a step whose outcome is still soft (Cups "own" creation's still-prepopulated facing) - same "last step wins" convention as hpDrawNotChosen.
-        let softComplete = false;
-        // How many more discards a Judgement draw step could still take, when the last step was one; same "last step wins" convention.
-        let mayDrawMore = 0;
+        // What the last step taken left open: its facing, more Judgement discards, or a High Priestess draw count.
+        let last = { soft: false, moreDiscards: 0, drawOwed: false };
         // Set once Moon's own move step genuinely needed its capacity exemption (destination was already at 3); cleared once the attack step destroys a piece there, restoring it.
         let moonRestoreCell: string | undefined;
         // Set when the last step was only legal thanks to a two-step shortcut's waiver, which its (missing) paired second step would have earned.
@@ -4858,8 +4817,6 @@ export class GnosticaGame extends GameBaseSequenced {
         let sameTargetWanted: IPieceRef | undefined;
         for (;;) {
             const top = stack[stack.length - 1];
-            const poppedViaDecline = justDeclined;
-            justDeclined = false;
             if (top === undefined) {
                 if (i < steps.length) {
                     return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "TOO_MANY_POWER_STEPS" }) };
@@ -4867,19 +4824,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (awaitingPair) {
                     return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
                 }
-                if (hpDrawNotChosen) {
-                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_AND_DRAW") };
-                }
-                if (softComplete) {
-                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.MAY_ORIENT") };
-                }
-                if (mayDrawMore > 0) {
-                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.MAY_CONTINUE", { remaining: mayDrawMore }) };
-                }
-                if (hpFinalRoundReady !== undefined) {
-                    return { valid: true, complete: 1, message: i18next.t(hpFinalRoundReady) };
-                }
-                return { valid: true, complete: 1, message: i18next.t("apgames:validation._general.VALID_MOVE") };
+                return GnosticaGame.readyResult(last, false);
             }
             const cardDef = this.resolveCardDef(top.cardUid);
             const stepIndex = top.nextStepIndex;
@@ -4895,7 +4840,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 GnosticaGame.popPower(stack);
                 // Popping can expose an already-exhausted buried entry (e.g. World's own spent one), which a later segment must not be validated against.
                 GnosticaGame.popExhaustedPowers(this, stack);
-                justDeclined = true;
                 continue;
             }
             // Only a plain step reads the segment: a World's own entry consumes none, so its borrowed card's first power is what a leading skip means.
@@ -4937,7 +4881,7 @@ export class GnosticaGame extends GameBaseSequenced {
                             ? "apgames:validation.gnostica.TRADEHANDS_SKIPPED_NO_TARGET"
                             : "apgames:validation.gnostica.HIEROPHANT_SKIPPED_NO_TARGET";
                         // This step being doomed says nothing about whether an EARLIER step's own outcome is still soft - respected here, not overridden by the generic complete:1 fallback.
-                        return { valid: true, complete: softComplete ? 0 : 1, message: i18next.t(key, { card: cardName }) };
+                        return { valid: true, complete: last.soft ? 0 : 1, message: i18next.t(key, { card: cardName }) };
                     }
                     // An entry's OWN first step (nextStepIndex 0) arriving with nothing supplied is reachable ONLY via World's push (Fool's own push always forcePauses) - #49 forbids a no-op completion here.
                     if (stack.length > 1 && top.nextStepIndex === 0) {
@@ -4951,8 +4895,8 @@ export class GnosticaGame extends GameBaseSequenced {
                     if (awaitingPair) {
                         return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
                     }
-                    // Entry not exhausted: a further step is still optional, so complete:0.
-                    return { valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.MAY_CONTINUE") };
+                    // Entry not exhausted: a further step is still optional, so complete:0, though an open facing comes first.
+                    return { valid: true, complete: 0, message: i18next.t(`apgames:validation.gnostica.${last.soft ? "MAY_ORIENT" : "MAY_CONTINUE"}`) };
                 }
                 if ("special" in step && step.special === "magicianChoice") {
                     borrowedForStep = asSuit;
@@ -5024,19 +4968,8 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (i < steps.length) {
                     return { valid: false, complete: -1, message: i18next.t("apgames:validation.gnostica.INVALID_MOVE", { reason: "STEPS_AFTER_FORCED_PAUSE" }) };
                 }
-                // The move is already complete, but submitting will ALSO trigger this step's own hidden continuation; named via forcePauseReadyMessage, not the generic VALID_MOVE fallback.
-                if (poppedViaDecline && top.cardUid === "00") {
-                    // softComplete (an earlier step's own state) still has to win here too.
-                    return { valid: true, complete: softComplete ? 0 : 1, message: i18next.t("apgames:validation.gnostica.SUBMIT_TO_CONTINUE") };
-                }
-                // High Priestess's round 1 forces this same pause, but with no explicit "draw <n>" given, the round is never complete - "ready to submit" would be wrong here.
-                if ("special" in step && step.special === "highPriestess" && istep?.amount === undefined) {
-                    return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.DISCARD_AND_DRAW") };
-                }
-                const readyMsg = this.forcePauseReadyMessage(top.cardUid, top.nextStepIndex);
-                const ready = i18next.t(readyMsg);
-                // The orientation hint comes first: the facing is still the player's to change, and the move isn't submitted for them.
-                return { valid: true, complete: softComplete ? 0 : 1, message: softComplete ? `${i18next.t("apgames:validation.gnostica.MAY_ORIENT")} ${ready}` : ready };
+                // The move is already complete, but submitting will also trigger this step's own hidden continuation; an earlier step's open facing still counts.
+                return GnosticaGame.readyResult({ ...last, drawOwed: "special" in step && step.special === "highPriestess" && istep?.amount === undefined }, true);
             }
             // Moon: the move step is only exempt from the capacity cap if it actually needed to be (destination now holds 4); the attack step then must destroy a piece at that SAME cell to restore it.
             if (cardDef.moonCapacityExemption && "primitive" in step) {
@@ -5062,12 +4995,11 @@ export class GnosticaGame extends GameBaseSequenced {
             top.minions = GnosticaGame.chainMinion(top.minions, outcome).filter(m => clone!.findPiece(m) !== undefined);
             top.nextStepIndex = outcome.consumesRest ? cardDef.powers.length : top.nextStepIndex + 1;
             priorTaken = true;
-            if ("special" in step && step.special === "highPriestess" && top.nextStepIndex >= cardDef.powers.length) {
-                hpFinalRoundReady = this.forcePauseReadyMessage(top.cardUid, stepIndex);
-            }
-            hpDrawNotChosen = "special" in step && step.special === "highPriestess" && istep?.amount === undefined;
-            softComplete = outcome.softComplete === true;
-            mayDrawMore = stepResult.mayAddMore ?? 0;
+            last = {
+                soft: outcome.softComplete === true,
+                moreDiscards: stepResult.mayAddMore ?? 0,
+                drawOwed: "special" in step && step.special === "highPriestess" && istep?.amount === undefined,
+            };
             if (outcome.pushPower !== undefined) {
                 stack.push({ cardUid: outcome.pushPower.cardUid, nextStepIndex: 0, minions: outcome.pushPower.minions });
             }
