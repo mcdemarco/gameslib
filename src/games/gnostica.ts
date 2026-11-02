@@ -11,7 +11,7 @@ import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot/i
 import { GnosticaBoard } from "./gnostica/board.js";
 import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell.js";
 import { Piece, Pips, Orientation, allOrientations, cardinalOrientations } from "./gnostica/piece.js";
-import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerOpts, PowerStep, SpecialPower, SuitPrimitive } from "./gnostica/majorArcana.js";
+import { MAJOR_ARCANA, MajorArcanaDef, POWERS, PowerOpts, PowerStep, SPECIAL_POWER_NAMES, SpecialPower, SuitPrimitive } from "./gnostica/majorArcana.js";
 import { generateRandomMove } from "./gnostica/randomMove.js";
 import i18next from "i18next";
 
@@ -394,7 +394,8 @@ export class GnosticaGame extends GameBaseSequenced {
             { uid: "larger-cards" },
             { uid: "#circles", group: "circles" },
             { uid: "icons", group: "circles" },
-            { uid: "letters", group: "circles" }
+            { uid: "letters", group: "circles" },
+            { uid: "power-names" }
         ],
     };
 
@@ -1888,7 +1889,8 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.continued.length === 0) {
             return "none";
         }
-        if (this.preview === undefined) {
+        // An empty move (nothing clicked yet, or all of it undone) hasn't begun the resume either.
+        if (this.preview?.head === undefined) {
             return "owed";
         }
         return this.preview.head === "decline" ? "declined" : "playing";
@@ -2442,7 +2444,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return owner === this.currplayer ? `${verb} own` : this.seatAreaLabel(owner, "apgames:validation.gnostica.OWNER_BUTTON", { verb });
     }
 
-    // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy, matching pickPieceTargetClick's own rule.
     // The target buttons for whichever power the pending step is: Hermit's teleport, one of the three special target powers, or a suit power.
     private targetCandidates(pending: IPendingStep): ChoiceOption[] {
         if (pending.special === "hermitTeleport") {
@@ -2451,6 +2452,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return pending.suitUid === undefined ? this.specialTargetCandidates(pending) : this.suitTargetCandidates(pending, pending.suitUid);
     }
 
+    // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy, matching pickPieceTargetClick's own rule.
     private specialTargetCandidates(pending: IPendingStep): ChoiceOption[] {
         if (pending.special === "orientAny") {
             return this.pieceCandidateOptions(pending, "Orient");
@@ -6190,11 +6192,13 @@ export class GnosticaGame extends GameBaseSequenced {
                         list.push({ piece: key, name: GnosticaGame.ordinal(place + 1) });
                     });
                 }
-                // The card whose own step is CURRENTLY resolving (follows World's borrow/Fool's reveal, not pinned to the root card) -
-                // undefined once nothing is mid-build, including right after a commit (this.preview is cleared then).
-                const activeCard = allCards().find(c => c.uid === this.preview?.pending?.activeCardUid);
+                // The card whose own step is currently resolving (follows World's borrow/Fool's reveal, not pinned to the root card),
+                // read the same way the button bar reads it, so a paused power shows its card's key before any click.
+                const activeCard = allCards().find(c => c.uid === this.computePendingMinor()?.activeCardUid);
                 if (activeCard !== undefined) {
-                    for (const mark of this.cardMarks(displays, activeCard)) {
+                    const names = this.resolveCardDef(activeCard.uid).powers.map(power =>
+                        "primitive" in power ? power.primitive[0].toUpperCase() + power.primitive.slice(1) : SPECIAL_POWER_NAMES[power.special]);
+                    for (const [i, mark] of this.cardMarks(displays, activeCard).entries()) {
                         // Keys end up as literal DOM ids, so a uid's "+" or "?" can't appear in one.
                         const key = `activecard_${[...mark].map(c => c.charCodeAt(0).toString(16)).join("_")}`;
                         if (!(key in legend)) {
@@ -6206,7 +6210,7 @@ export class GnosticaGame extends GameBaseSequenced {
                                     ? [{ name: mark, scale: 0.8 }]
                                     : [{ name: "piece", colour: "_context_board" }, { name: mark, scale: 0.5 }];
                         }
-                        list.push({ piece: key, name: "" });
+                        list.push({ piece: key, name: displays.includes("power-names") ? names[i] : "" });
                     }
                 }
                 if (list.length > 0) {

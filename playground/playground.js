@@ -536,14 +536,7 @@ function applyPlaygroundClickResult(game, gamename, result) {
     }
     if ( ( (result.hasOwnProperty("canrender")) && (result.canrender === true) ) || (result.complete >= 0) ) {
         let renderOpts = playgroundRenderOpts(game, gamename);
-        let selectedDisplay = window.localStorage.getItem("selectedDisplay") || "default";
-        const checkedDisplayRadio = document.querySelector('input[name="displayOption"]:checked');
-        if (checkedDisplayRadio) {
-            selectedDisplay = checkedDisplayRadio.value;
-        }
-        if (selectedDisplay !== "default") {
-            renderOpts.altDisplay = selectedDisplay;
-        }
+        applySelectedDisplays(renderOpts);
         applyInterimPartialRender(gamename, result.move, renderOpts);
     } else {
         clearInterimRenderCache();
@@ -608,14 +601,7 @@ function boardClickSimultaneous(row, col, piece) {
     }
     if ( ( (result.hasOwnProperty("canrender")) && (result.canrender === true) ) || (result.complete >= 0) ) {
         let renderOpts = playgroundRenderOpts(game, gamename);
-        let selectedDisplay = window.localStorage.getItem("selectedDisplay") || "default";
-        const checkedDisplayRadio = document.querySelector('input[name="displayOption"]:checked');
-        if (checkedDisplayRadio) {
-            selectedDisplay = checkedDisplayRadio.value;
-        }
-        if (selectedDisplay !== "default") {
-            renderOpts.altDisplay = selectedDisplay;
-        }
+        applySelectedDisplays(renderOpts);
         const masked = buildMaskedPartialMove(
             partialSeat,
             result.move,
@@ -2063,16 +2049,12 @@ function renderGame(...args) {
     const clickStatusBox = document.getElementById("clickstatus");
     const playerInfoDisplay = document.getElementById("playerInfoDisplay");
 
-    let selectedDisplay = window.localStorage.getItem("selectedDisplay") || "default";
-    const checkedDisplayRadio = document.querySelector('input[name="displayOption"]:checked');
-    if (checkedDisplayRadio) {
-        selectedDisplay = checkedDisplayRadio.value;
-    }
+    const selectedDisplays = getSelectedDisplays();
 
     if (state !== null) {
         var gamename = window.localStorage.getItem("gamename");
         const isVolcanoFamily = (gamename === "volcano") || (gamename === "mvolcano");
-        const isExpandingDisplay = selectedDisplay === "expanding";
+        const isExpandingDisplay = selectedDisplays.includes("expanding");
 
         if (isVolcanoFamily && !isExpandingDisplay) {
             options.boardHover = boardClickVolcano;
@@ -2232,9 +2214,7 @@ function renderGame(...args) {
         }
 
         let renderOpts = playgroundRenderOpts(game, gamename);
-        if (selectedDisplay !== "default") {
-            renderOpts.altDisplay = selectedDisplay;
-        }
+        applySelectedDisplays(renderOpts);
         if (data === null) {
             if (skipFrameRefresh && currentRenderFrames && currentRenderFrames.length > 0) {
                 data = currentRenderFrames[currentRenderFrameIndex];
@@ -2512,10 +2492,7 @@ function applyInterimPreviewForMoveFragment(gamename, game, fragment) {
         return false;
     }
     let renderOpts = playgroundRenderOpts(game, gamename);
-    const checkedDisplayRadio = document.querySelector('input[name="displayOption"]:checked');
-    if (checkedDisplayRadio && checkedDisplayRadio.value !== "default") {
-        renderOpts.altDisplay = checkedDisplayRadio.value;
-    }
+    applySelectedDisplays(renderOpts);
     const seat = getPartialMoveSeat(game, getActiveSeat(game));
     const masked = buildMaskedPartialMove(seat, trimmed, game.numplayers);
     applyInterimPartialRender(gamename, masked, renderOpts);
@@ -2681,64 +2658,91 @@ function hideVariantTooltip() {
     }
 }
 
-// Display options for alternative board renderings
+// The alternative displays currently chosen: from the controls when there are any, otherwise the saved choice. Group defaults ("#group") are not included.
+function getSelectedDisplays() {
+    const inputs = document.querySelectorAll('#displayOptionsContainer input[data-display-uid]');
+    if (inputs.length > 0) {
+        return [...inputs].filter(input => input.checked).map(input => input.dataset.displayUid).filter(uid => !uid.startsWith("#"));
+    }
+    try {
+        const saved = JSON.parse(window.localStorage.getItem("selectedDisplays") || "[]");
+        return Array.isArray(saved) ? saved : [];
+    } catch {
+        return [];
+    }
+}
+
+function applySelectedDisplays(renderOpts) {
+    const selected = getSelectedDisplays();
+    if (selected.length > 0) {
+        renderOpts.altDisplays = selected;
+        // The older single-display option, for games that haven't moved to altDisplays.
+        renderOpts.altDisplay = selected[0];
+    }
+}
+
+// Display options for alternative board renderings: an ungrouped display is an independent toggle, and the displays of a group are mutually exclusive.
 function updateDisplayOptions(gameEngine) {
     const displayOptionsContainer = document.getElementById("displayOptionsContainer");
     displayOptionsContainer.innerHTML = "";
     displayOptionsContainer.style.display = 'none';
 
-    if (typeof gameEngine?.alternativeDisplays === 'function') {
-        const displays = gameEngine.alternativeDisplays();
-        if (displays && displays.length > 0) {
-            const fieldset = document.createElement('fieldset');
-            const legend = document.createElement('legend');
-            legend.textContent = 'Display Options';
-            fieldset.appendChild(legend);
-
-            const defaultDiv = document.createElement('div');
-            const defaultRadio = document.createElement('input');
-            defaultRadio.type = 'radio';
-            defaultRadio.name = 'displayOption';
-            defaultRadio.value = 'default';
-            defaultRadio.id = 'display_default';
-            defaultRadio.checked = true;
-            const defaultLabel = document.createElement('label');
-            defaultLabel.htmlFor = defaultRadio.id;
-            defaultLabel.textContent = ' Default Display';
-            defaultDiv.appendChild(defaultRadio);
-            defaultDiv.appendChild(defaultLabel);
-            fieldset.appendChild(defaultDiv);
-
-            displays.forEach(disp => {
-                const div = document.createElement('div');
-                const radio = document.createElement('input');
-                radio.type = 'radio';
-                radio.name = 'displayOption';
-                radio.value = disp.uid;
-                radio.id = `display_${disp.uid}`;
-                const label = document.createElement('label');
-                label.htmlFor = radio.id;
-                label.textContent = ` ${disp.description}`;
-                div.appendChild(radio);
-                div.appendChild(label);
-                fieldset.appendChild(div);
-            });
-            displayOptionsContainer.appendChild(fieldset);
-
-            const savedDisplay = window.localStorage.getItem("selectedDisplay") || "default";
-            const displayRadio = document.getElementById(`display_${savedDisplay}`);
-            if (displayRadio) {
-                displayRadio.checked = true;
-            } else {
-                const defaultDisplayRadio = document.getElementById('display_default');
-                if (defaultDisplayRadio) {
-                    defaultDisplayRadio.checked = true;
-                    window.localStorage.setItem("selectedDisplay", "default");
-                }
-            }
-            displayOptionsContainer.style.display = 'block';
-        }
+    if (typeof gameEngine?.alternativeDisplays !== 'function') {
+        return;
     }
+    const displays = gameEngine.alternativeDisplays();
+    if (!displays || displays.length === 0) {
+        return;
+    }
+    const saved = getSelectedDisplays();
+
+    const addInput = (parent, type, name, disp, labelText) => {
+        const div = document.createElement('div');
+        const input = document.createElement('input');
+        input.type = type;
+        if (name !== undefined) {
+            input.name = name;
+        }
+        input.value = disp.uid;
+        input.id = `display_${disp.uid}`;
+        input.dataset.displayUid = disp.uid;
+        input.checked = saved.includes(disp.uid);
+        const label = document.createElement('label');
+        label.htmlFor = input.id;
+        label.textContent = ` ${labelText}`;
+        div.appendChild(input);
+        div.appendChild(label);
+        parent.appendChild(div);
+        return input;
+    };
+
+    const fieldset = document.createElement('fieldset');
+    const legend = document.createElement('legend');
+    legend.textContent = 'Display Options';
+    fieldset.appendChild(legend);
+
+    displays.filter(disp => disp.group === undefined).forEach(disp => {
+        addInput(fieldset, 'checkbox', undefined, disp, disp.description ?? disp.uid);
+    });
+
+    const groups = new Map();
+    displays.filter(disp => disp.group !== undefined).forEach(disp => {
+        groups.set(disp.group, [...(groups.get(disp.group) ?? []), disp]);
+    });
+    groups.forEach((members, group) => {
+        const groupSet = document.createElement('fieldset');
+        const groupLegend = document.createElement('legend');
+        groupLegend.textContent = group;
+        groupSet.appendChild(groupLegend);
+        const inputs = members.map(disp => addInput(groupSet, 'radio', `displayGroup_${group}`, disp, disp.description ?? (disp.uid.startsWith("#") ? 'Default' : disp.uid)));
+        if (!inputs.some(input => input.checked)) {
+            (inputs.find(input => input.dataset.displayUid === `#${group}`) ?? inputs[0]).checked = true;
+        }
+        fieldset.appendChild(groupSet);
+    });
+
+    displayOptionsContainer.appendChild(fieldset);
+    displayOptionsContainer.style.display = 'block';
 }
 
 document.addEventListener("DOMContentLoaded", function(event) {
@@ -3027,9 +3031,9 @@ document.addEventListener("DOMContentLoaded", function(event) {
     const displayOptionsContainer = document.getElementById("displayOptionsContainer");
     if (displayOptionsContainer) {
         displayOptionsContainer.addEventListener('change', (event) => {
-            if (event.target.type === 'radio' && event.target.name === 'displayOption') {
+            if (event.target.dataset.displayUid !== undefined) {
                 window.localStorage.removeItem("interim");
-                window.localStorage.setItem("selectedDisplay", event.target.value);
+                window.localStorage.setItem("selectedDisplays", JSON.stringify(getSelectedDisplays()));
                 renderGame();
             }
         });
@@ -3093,7 +3097,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
         resetRoundBufferForNewPosition(game);
         setStoredSeat(1);
         clearRedoStack();
-        window.localStorage.setItem("selectedDisplay", "default");
+        window.localStorage.setItem("selectedDisplays", "[]");
 
         updateDisplayOptions(game);
 
@@ -3152,7 +3156,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
                         clearInterimRenderCache();
                         resetRoundBufferForNewPosition(game);
                         clearRedoStack();
-                        window.localStorage.setItem("selectedDisplay", "default");
+                        window.localStorage.setItem("selectedDisplays", "[]");
 
                         const selectElement = document.getElementById("selectGame");
                         if (selectElement.value !== meta) {

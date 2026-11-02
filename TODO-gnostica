@@ -50,4 +50,5 @@ Rebasing:
 	- #138 - Deal with the changes to chatLog. @done(2026-10-07)
 	- #139 - Move the rest of the render path to the structured label style (action button labels, the hard-coded "(declarer)" text, any remaining i18next.t calls).
 	- #143 - Another rebase, this one with a big change to apgames.json.
+	- #146 - After the rebase, move the power names (SPECIAL_POWER_NAMES and the capitalized primitives in the key) into apgames.json for translation.
 

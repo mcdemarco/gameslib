@@ -4724,6 +4724,10 @@
             "letters": {
                 "description": "Draw cards using letters instead of icons.",
                 "name": "Show letters"
+            },
+            "power-names": {
+                "description": "Name each power beside its icon in the key.",
+                "name": "Name powers in the key"
             }
         },
         "go": {

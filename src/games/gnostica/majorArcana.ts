@@ -32,6 +32,20 @@ export type SpecialPower =
     | "judgementDraw"     // draw up to N cards (N = max of minion's pip size and hand space available) from the discards.
     | "worldUseAny";      // use the power of any major arcana territory currently on the board
 
+// What each special power is called where it's named for the player; a primitive power is called by its primitive.
+export const SPECIAL_POWER_NAMES: Record<SpecialPower, string> = {
+    fool: "Draw and play 2",
+    magicianChoice: "Choose a suit",
+    highPriestess: "Discard/draw twice",
+    orientMinion: "Orient",
+    orientAny: "Orient any",
+    hierophantReplace: "Replace enemy",
+    hermitTeleport: "Teleport",
+    tradeHands: "Trade hands",
+    judgementDraw: "Draw from discards",
+    worldUseAny: "Use a major arcana",
+};
+
 export type PowerStep =
     | { primitive: SuitPrimitive; opts?: PrimitiveOpts }
     | { special: SpecialPower };
