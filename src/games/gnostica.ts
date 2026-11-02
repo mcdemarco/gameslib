@@ -191,11 +191,11 @@ interface IPendingStep {
     move: IParsedMove;
     // The verb the front of the move string spells - "play" for a genuine resume, else the literal typed head for a fresh "use"/"play".
     head: "use" | "play";
-    // The card whose steps THIS pending step belongs to - the root card until a push happens (World's target, Fool's reveal); feeds #67's button label.
+    // The card whose steps this pending step belongs to - the root card until a push happens (World's target, Fool's reveal); named on the button bar and shown in the key.
     activeCardUid: string;
     // This step's suit - the card's own for a minor, or the mapped primitive's for a major (create→C/move→R/grow→D/attack→S); unset for a `special` step.
     suitUid?: MinorSuitUid;
-    // Set instead of suitUid for a major card's `special` power, dispatched to handlePendingSpecialBoardClick rather than the suit-mode machinery above.
+    // Set instead of suitUid for a major card's `special` power.
     special?: SpecialPower;
     // The acting player's eligible pieces plus any newMinion chained in from earlier complete steps of the same activation.
     minions: IPieceRef[];
@@ -2614,10 +2614,7 @@ export class GnosticaGame extends GameBaseSequenced {
             if (steps[0]?.action === "skip") {
                 return {}; // a minor card has no power to skip; validateMove reports it
             }
-            const suitUid = suitUidOf(card);
-            const istep: IStep = steps[0] ?? { action: "with" };
-            const { minion, ambiguous, candidates } = this.resolveStepMinion(istep.withPiece, eligible, suitUid);
-            return { advanced: { move: parsed, head, activeCardUid: headArg, suitUid, minions: eligible, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: [], opts: {}, istep } };
+            return { advanced: holder.clone.buildPending({ move: parsed, head, activeCardUid: headArg, minions: eligible, priorSteps: [], opts: {}, istep: steps[0] ?? { action: "with" } }, suitUidOf(card)) };
         }
 
         // The validation walk records where it stopped; the click code builds on that step, and on the move's last completed one.
@@ -2628,37 +2625,28 @@ export class GnosticaGame extends GameBaseSequenced {
             if (p === undefined || (p.minions.length === 0 && !("special" in p.step && (p.step.special === "fool" || p.step.special === "highPriestess" || p.step.special === "worldUseAny")))) {
                 return undefined;
             }
-            const istep = p.istep ?? { action: "with" };
-            if ("primitive" in p.step) {
-                const suitUid = this.primitiveToSuit(p.step.primitive);
-                const opts = this.computeShortcutOpts(p.def, p.step.primitive, p.stepIndex, p.def.powers.length, p.step.opts);
-                const { minion, ambiguous, candidates } = p.game.resolveStepMinion(istep.withPiece, p.minions, suitUid);
-                return { move: parsed, head, activeCardUid: p.cardUid, suitUid, minions: p.minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps: p.priorSteps, opts, istep, softComplete: p.softComplete };
-            }
-            return { ...this.buildSpecialPending(p.game, p.step.special, parsed, head, p.cardUid, p.minions, p.priorSteps, istep), softComplete: p.softComplete };
+            const opts = "primitive" in p.step ? this.computeShortcutOpts(p.def, p.step.primitive, p.stepIndex, p.def.powers.length, p.step.opts) : {};
+            return p.game.buildPending({ move: parsed, head, activeCardUid: p.cardUid, minions: p.minions, priorSteps: p.priorSteps, opts, istep: p.istep ?? { action: "with" }, softComplete: p.softComplete }, p.step);
         };
         holder.clone = record.stop?.game ?? holder.clone;
         const held = pendingAt(record.held);
         return { held: held === undefined ? undefined : { pending: held, game: record.held!.game }, advanced: pendingAt(record.stop) };
     }
 
-    // Builds the `special`-flavored branch of IPendingStep, with an exception for magicianChoice once its suit is chosen, which is treated as a plain suit step.
-    private buildSpecialPending(
-        ctx: GnosticaGame, special: SpecialPower, move: IParsedMove, head: "use" | "play", activeCardUid: string,
-        minions: IPieceRef[], priorSteps: IStep[], istep: IStep,
+    // A minor card's suit, a primitive's, or the Magician's chosen one makes a suit step; anything else is a special step.
+    private buildPending(
+        base: Omit<IPendingStep, "game" | "suitUid" | "special" | "minion" | "minionAmbiguous" | "minionCandidates">, power: MinorSuitUid | PowerStep,
     ): Omit<IPendingStep, "game"> {
-        const asSuit = move.asSuit as MinorSuitUid | undefined;
-        if (special === "magicianChoice" && asSuit !== undefined) {
-            const { minion, ambiguous, candidates } = ctx.resolveStepMinion(istep.withPiece, minions, asSuit);
-            return { move, head, activeCardUid, suitUid: asSuit, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
-        }
-        // Fool/High Priestess/worldUseAny have no minionRef here; an unchosen magicianChoice also defers its minion choice until after the suit is picked (its
-        // own button set needs to show before any ambiguous-minion picker would - see the "2+ minions... suit buttons first" regression test).
-        const noMinionRef = special === "highPriestess" || special === "fool" || special === "worldUseAny" || special === "magicianChoice";
-        const { minion, ambiguous, candidates } = noMinionRef
-            ? { minion: minions[0], ambiguous: false, candidates: minions }
-            : ctx.resolveStepMinion(istep.withPiece, minions);
-        return { move, head, activeCardUid, special, minions, minion, minionAmbiguous: ambiguous, minionCandidates: candidates, priorSteps, opts: {}, istep };
+        const suitUid = typeof power === "string" ? power
+            : "primitive" in power ? this.primitiveToSuit(power.primitive)
+            : power.special === "magicianChoice" ? base.move.asSuit as MinorSuitUid | undefined
+            : undefined;
+        const special = suitUid === undefined && typeof power !== "string" && "special" in power ? power.special : undefined;
+        // Fool/High Priestess/worldUseAny have no minionRef; an unchosen magicianChoice defers its minion until its suit buttons have shown (see the "2+ minions... suit buttons first" test).
+        const { minion, ambiguous, candidates } = special === "highPriestess" || special === "fool" || special === "worldUseAny" || special === "magicianChoice"
+            ? { minion: base.minions[0], ambiguous: false, candidates: base.minions }
+            : this.resolveStepMinion(base.istep.withPiece, base.minions, suitUid);
+        return { ...base, suitUid, special, minion, minionAmbiguous: ambiguous, minionCandidates: candidates };
     }
 
     // The single valid cell a minor suit-power step may affect: the minion's own cell if facing "U", otherwise the one cell it's pointing at.
