@@ -4351,7 +4351,7 @@ describe("Gnostica: choose-step click messaging", () => {
     });
 
     // The persisting Decline button must be labeled after the ACTIVE
-    // card's uid, not rootCardUid (always the ORIGINALLY used/played
+    // card's uid, not the root card's (the ORIGINALLY used/played
     // card) - once Fool reveals a DIFFERENT card (here, the High
     // Priestess), "Decline 00" would misleadingly point at the Fool while
     // what it actually declines is the High Priestess's own power.
@@ -5755,7 +5755,7 @@ describe("Gnostica: Fool and World", () => {
         g.move(`play 12 via 00/with m0.1 move m0.1 1`); // moves to n0; tradeHands auto-skips (no enemy)
         expect(g.continued).to.deep.equal(["00.2"]);
         // The staleness bug this guards is now structurally impossible:
-        // resumeQueue recomputes minions fresh from the
+        // resumeEntry recomputes minions fresh from the
         // board every time (see this.continued's own docs), so a resume
         // can never re-derive eligibility from a cell the acting piece has
         // moved away from.
@@ -6383,18 +6383,22 @@ describe("Gnostica: a card played from the hand is not counted in the hand its p
 
 describe("Gnostica: a Fool's revealed card plays down the same path as one played from the hand", () => {
     type Btn = { value?: string; fill?: unknown };
-    const barAt = (g: GnosticaGame, move: string): string[] => {
+    type Rep = { areas?: { type: string; buttons?: Btn[]; list?: { piece: string }[] }[] };
+    const shownAt = (g: GnosticaGame, move: string): Rep => {
         const shown = g.clone();
         shown.move(move, { partial: true });
         const out = shown.render();
-        const rep = (Array.isArray(out) ? out[out.length - 1] : out) as { areas?: { type: string; buttons?: Btn[] }[] };
-        return rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => `${b.value!.replace(/^_disabled_/, "")}${b.fill !== undefined ? "*" : ""}`).filter(v => v !== "decline_power");
+        return (Array.isArray(out) ? out[out.length - 1] : out) as Rep;
     };
+    const barAt = (g: GnosticaGame, move: string): string[] =>
+        shownAt(g, move).areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => `${b.value!.replace(/^_disabled_/, "")}${b.fill !== undefined ? "*" : ""}`).filter(v => v !== "decline_power");
+    const keyAt = (g: GnosticaGame, move: string): string[] =>
+        (shownAt(g, move).areas!.find(a => a.type === "key")?.list ?? []).map(e => e.piece).filter(p => p.startsWith("activecard_"));
     const board = [{ x: 0, y: 0, uid: "00", pieces: [[1, 2, "E"]] as TestPiece[] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 2, "W"]] as TestPiece[] }, { x: -1, y: 0, uid: "2D" }];
-    const pair = (revealed: string) => {
-        const fool = testGame({ board, hands: [["2R", "3R", "4R", "5D", "6D", "7D"], filler], drawPile: [revealed, "3C", "4C"] });
+    const pair = (revealed: string, at = board) => {
+        const fool = testGame({ board: at, hands: [["2R", "3R", "4R", "5D", "6D", "7D"], filler], drawPile: [revealed, "3C", "4C"] });
         fool.move("use 00");
-        const hand = testGame({ board, hands: [[revealed, "2R", "3R", "4R", "5D", "6D"], filler], drawPile: ["3C", "4C"] });
+        const hand = testGame({ board: at, hands: [[revealed, "2R", "3R", "4R", "5D", "6D"], filler], drawPile: ["3C", "4C"] });
         return { fool, hand };
     };
 
@@ -6409,6 +6413,20 @@ describe("Gnostica: a Fool's revealed card plays down the same path as one playe
         const foolBar = barAt(fool, "play AC via 00/with m0.2 at n0 create N");
         expect(foolBar[0]).eq("play*");
         expect(foolBar).to.deep.equal(barAt(hand, "play AC/with m0.2 at n0 create N"));
+        const moon = pair("18");
+        expect(barAt(moon.fool, "play 18 via 00/with m0.2 shrink n0.2 1")).to.deep.equal(barAt(moon.hand, "play 18/with m0.2 shrink n0.2 1"));
+        const nested = pair("00");
+        expect(barAt(nested.fool, "play 00 via 00")).to.deep.equal(barAt(nested.hand, "play 00"));
+    });
+
+    it("offers no Skip Reorient once the card's last power leaves a facing open, and keeps the card's own key", () => {
+        const { fool, hand } = pair("08", [{ ...board[0], pieces: [[1, 1, "E"]] }, ...board.slice(1)]);
+        const foolMove = "play 08 via 00/with m0.1 grow m0.1/with m0.2 grow m0.2";
+        const handMove = "play 08/with m0.1 grow m0.1/with m0.2 grow m0.2";
+        expect(barAt(fool, foolMove)).to.deep.equal(["play*", "declare", "undo"]);
+        expect(barAt(hand, handMove)).to.deep.equal(["play*", "declare", "undo"]);
+        expect(keyAt(fool, foolMove)).to.have.lengthOf(2);
+        expect(keyAt(fool, foolMove)).to.deep.equal(keyAt(hand, handMove));
     });
 });
 

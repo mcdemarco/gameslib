@@ -110,7 +110,7 @@ export function generateRandomMove(game: GnosticaGame): string {
             return buildViaMove(game, [buildRandomHighPriestessStep(game)]);
         }
         // A persisted Fool obligation always means an ordinary revealed
-        // card sits on top awaiting a decision (resumeQueue's
+        // card sits on top awaiting a decision (resumeEntry's
         // own docs) - sometimes genuinely try to use it instead of always
         // declining. The player never has to reason about how deep the
         // reveal is nested - only "what's the card in front of me right
@@ -1078,7 +1078,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
         }
     }
     const isCleanSuccess = (steps: IStep[]): boolean => {
-        const result = game.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, def.uid);
+        const result = game.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, undefined);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see
         // validatePowerSteps's own docs) - .valid alone is what actually

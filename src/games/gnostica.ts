@@ -191,7 +191,7 @@ interface IPendingStep {
     move: IParsedMove;
     // The verb the front of the move string spells - "play" for a genuine resume, else the literal typed head for a fresh "use"/"play".
     head: "use" | "play";
-    // The card whose steps this pending step belongs to - the root card until a push happens (World's target, Fool's reveal); named on the button bar and shown in the key.
+    // The card whose steps this pending step belongs to - the root card until a push happens (World's target, Fool's reveal); named on the button bar.
     activeCardUid: string;
     // This step's suit - the card's own for a minor, or the mapped primitive's for a major (create→C/move→R/grow→D/attack→S); unset for a `special` step.
     suitUid?: MinorSuitUid;
@@ -245,6 +245,8 @@ interface IPreview {
     facingOpen: boolean;
     // The move the client sent was illegal and this previews the longest valid part of it: only Undo is offered.
     rejected: boolean;
+    // The card whose powers the key shows.
+    keyCard: string | undefined;
 }
 
 // A lossless-for-display abbreviation of a raw uid list - individual major uids, plus per-suit/per-(spot|royal) minor COUNTs (minors aren't shown individually).
@@ -304,10 +306,10 @@ interface IPowerPlay {
     steps: IStep[];
     asUid?: string;
     asSuit?: MinorSuitUid;
-    // The stack a walk of this play starts from, as fresh copies: just the card for a use or play, or the persisted obligations plus the revealed card for a resume.
+    // The stack a walk of this play starts from, as a fresh copy: just the card being played.
     stack: IPowerProgress[];
-    // The card whose obligation the walk is rooted in.
-    rootUid: string;
+    // For a resume, the obligations still owed beneath the card being played; undefined for a fresh use or play.
+    owed?: string[];
 }
 
 interface IMoveState extends IIndividualState {
@@ -1935,6 +1937,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const actions = this.actionChoices(parsed);
         const clickSteps = this.boardClickSteps(current, advanced);
         return {
+            keyCard: this.keyCard(seed),
             head: parsed.head,
             highlighted: this.highlightedButtonValues(parsed),
             actions,
@@ -2193,15 +2196,10 @@ export class GnosticaGame extends GameBaseSequenced {
             // Fool's own step has nothing else to offer, so computeActionButtons() already returns its explicit Play/Decline pair - nothing to add here.
             return bar;
         }
-        // The state as ADVANCED by whatever's been clicked so far this render; `.special === "fool"` means clicks already ran a revealed card's steps.
         const advanced = this.computePendingMinor();
         const justDeclined = phase === "declined";
         // Declining is the alternative to playing the revealed card, so once Play is clicked or a step of it typed, the choice has been made.
         if (phase === "playing") {
-            return bar;
-        }
-        if (advanced?.special === "fool" && !justDeclined) {
-            // Fool's flip is never optional - nothing to decline once a revealed card's own steps have simply run their course.
             return bar;
         }
         // Once High Priestess round 1 is DONE and round 2 is persisted, it's never Declinable - checked via getContinuedUid, not activeCardUid below.
@@ -2246,10 +2244,9 @@ export class GnosticaGame extends GameBaseSequenced {
         return suitUid === "R" && piece.orientation === "U";
     }
 
-    // The self-contained Play/Decline pair offered whenever a paused power has no button set of its own; reads the active card off the resume stack's top entry.
+    // The self-contained Play/Decline pair offered whenever a paused power has no button set of its own; reads the card being played off resumeEntry.
     private pausedPowerButtons(): [ButtonBarButton, ButtonBarButton] {
-        const resumeQueue = this.resumeQueue()!;
-        const activeUid = resumeQueue[resumeQueue.length - 1].cardUid;
+        const activeUid = this.resumeEntry()!.entry.cardUid;
         return [
             { label: `Play Card ${activeUid}`, value: "resume_power" },
             { label: `Decline ${activeUid}`, value: "decline_power" },
@@ -2289,6 +2286,10 @@ export class GnosticaGame extends GameBaseSequenced {
         const pendingMinor = this.computePendingMinor();
         const phase = this.resumePhase();
         if (pendingMinor === undefined) {
+            // A resume not yet begun with no step to show (a revealed Fool's flip takes none) is the bare Play/Decline pair.
+            if (phase === "owed") {
+                return this.pausedPowerButtons();
+            }
             // A flip owed and then declined has nothing left to play, and the ordinary actions were never options: only Declare is left, and getActionButtons adds Decline.
             if (phase === "declined") {
                 const declare = topLevel.find(b => b.value === "declare");
@@ -2310,18 +2311,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (this.preview?.facingOpen === true) {
             const waiting = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
             return waiting as [ButtonBarButton, ...ButtonBarButton[]];
-        }
-
-        // pendingMinor.special === "fool" means Fool flipped and revealed ANOTHER Fool; only the ROOT card's untouched first flip is mandatory, so this nested one is declinable.
-        if (pendingMinor.special === "fool") {
-            if (phase === "owed") {
-                return this.pausedPowerButtons();
-            }
-            // A flip owed (a decline clicked, say) never had the ordinary actions as options, so only Declare is left, and getActionButtons adds Decline.
-            if (phase !== "none") {
-                return declareBtn === undefined ? this.pausedPowerButtons() : [declareBtn];
-            }
-            return this.chosenActionBar(topLevel);
         }
 
         const choices = pendingMinor.game.stepChoices(pendingMinor);
@@ -2384,6 +2373,12 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return topLevel;
+    }
+
+    // The card the move uses or plays (for a resume, the one it plays), or the card the World borrows.
+    private keyCard(parsed: IParsedMove | undefined): string | undefined {
+        const play = parsed === undefined ? undefined : this.resolvePowerPlay(parsed);
+        return play?.asUid ?? play?.headArg;
     }
 
     // For a genuine resume, the preview's seed is a move string rebuilt from this.continued plus the typed segments; no "already reflected" bookkeeping needed.
@@ -2562,6 +2557,7 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A resumed Justice keeps the verb its first turn used, which decides who may act; every other resume is a play.
         const head: "use" | "play" = resume ? (headArg === "11" && parsed.head === "use" ? "use" : "play") : parsed.head as "use" | "play";
+        const resumed = resume ? this.resumeEntry()! : undefined;
         let card: Card | undefined;
         let eligible: IPieceRef[];
         // A card revealed by Fool (headArg names it directly for a resume) is always play-pool eligible regardless.
@@ -2582,12 +2578,12 @@ export class GnosticaGame extends GameBaseSequenced {
         // asUid (World's borrow) and asSuit (Magician's suit) are separate fields throughout; a World-pushed Magician can have both set at once.
         return {
             head, headArg, card, resume, eligible, steps, asUid: parsed.asUid, asSuit: parsed.asSuit as MinorSuitUid | undefined,
-            stack: resume ? this.resumeQueue()! : [{ cardUid: headArg, nextStepIndex: 0, minions: [...eligible] }],
-            rootUid: resume ? this.getContinuedUid()! : headArg,
+            stack: [resumed?.entry ?? { cardUid: headArg, nextStepIndex: 0, minions: [...eligible] }],
+            owed: resumed?.owed,
         };
     }
 
-    // Reconstructs the in-progress power step (if any) purely from a move string.  Checks step segments for STRUCTURAL completeness,  also stopping at Fool or World.
+    // Reconstructs the in-progress power step (if any) purely from a move string.  Checks step segments for STRUCTURAL completeness,  also stopping at the World.
     // `current` treats a complete last-typed segment as still the step being refined (board clicks keep adjusting it); `advanced` walks past it to the next step.
     // They are the same object unless that last segment is already complete.
     private parsePendingStep(parsed: IParsedMove): { current?: IPendingStep; advanced?: IPendingStep } {
@@ -2619,10 +2615,10 @@ export class GnosticaGame extends GameBaseSequenced {
 
         // The validation walk records where it stopped; the click code builds on that step, and on the move's last completed one.
         const record: IWalkRecord = {};
-        holder.clone.validatePowerSteps(play.stack.map(f => ({ ...f, minions: [...f.minions] })), steps, play.rootUid, asUid, asSuit, record);
+        holder.clone.validatePowerSteps(play.stack.map(f => ({ ...f, minions: [...f.minions] })), steps, play.owed, asUid, asSuit, record);
         const pendingAt = (p: IWalkPoint | undefined): Omit<IPendingStep, "game"> | undefined => {
-            // Every step but the Fool's, the High Priestess's and the World's needs a minion still on the board.
-            if (p === undefined || (p.minions.length === 0 && !("special" in p.step && (p.step.special === "fool" || p.step.special === "highPriestess" || p.step.special === "worldUseAny")))) {
+            // Every step but the High Priestess's and the World's needs a minion still on the board.
+            if (p === undefined || (p.minions.length === 0 && !("special" in p.step && (p.step.special === "highPriestess" || p.step.special === "worldUseAny")))) {
                 return undefined;
             }
             const opts = "primitive" in p.step ? this.computeShortcutOpts(p.def, p.step.primitive, p.stepIndex, p.def.powers.length, p.step.opts) : {};
@@ -2642,8 +2638,8 @@ export class GnosticaGame extends GameBaseSequenced {
             : power.special === "magicianChoice" ? base.move.asSuit as MinorSuitUid | undefined
             : undefined;
         const special = suitUid === undefined && typeof power !== "string" && "special" in power ? power.special : undefined;
-        // Fool/High Priestess/worldUseAny have no minionRef; an unchosen magicianChoice defers its minion until its suit buttons have shown (see the "2+ minions... suit buttons first" test).
-        const { minion, ambiguous, candidates } = special === "highPriestess" || special === "fool" || special === "worldUseAny" || special === "magicianChoice"
+        // High Priestess/worldUseAny have no minionRef; an unchosen magicianChoice defers its minion until its suit buttons have shown (see the "2+ minions... suit buttons first" test).
+        const { minion, ambiguous, candidates } = special === "highPriestess" || special === "worldUseAny" || special === "magicianChoice"
             ? { minion: base.minions[0], ambiguous: false, candidates: base.minions }
             : this.resolveStepMinion(base.istep.withPiece, base.minions, suitUid);
         return { ...base, suitUid, special, minion, minionAmbiguous: ambiguous, minionCandidates: candidates };
@@ -3133,9 +3129,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     break;
                 case "judgementDraw":
                     choices.prompt = "CLICK_DISCARDS";
-                    break;
-                case "fool":
-                    choices.prompt = "SUBMIT_TO_CONTINUE";
                     break;
             }
             return choices;
@@ -4570,7 +4563,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (play.card !== undefined && !play.card.major && !play.resume) {
             return this.validateMinorPower(suitUidOf(play.card), play.eligible, play.steps);
         }
-        return this.validatePowerStack(play.stack, play.steps, play.rootUid, play.asUid, play.asSuit);
+        return this.validatePowerStack(play.stack, play.steps, play.owed, play.asUid, play.asSuit);
     }
 
     // Mirrors applyMinorPower's own tolerance exactly - skipping, and an incomplete-so-far step, both validate as "fine, nothing to report yet".
@@ -4702,26 +4695,21 @@ export class GnosticaGame extends GameBaseSequenced {
         return from;
     }
 
-    // The stack for a resumed turn, rebuilt from the persisted this.continued tokens: one entry per Fool/HP obligation, minions recomputed fresh,
-    // plus (via Fool) a fresh entry for the drawn card.
-    private resumeQueue(): [IPowerProgress, ...IPowerProgress[]] | undefined {
-        const tokens = this.continued.filter(t => t !== "last");
-        if (tokens.length === 0) {
+    // What a resumed turn plays, rebuilt from the persisted this.continued tokens: the card the Fool revealed, or the owed card's own remaining power,
+    // and the obligations beneath it.
+    private resumeEntry(): { entry: IPowerProgress; owed: string[] } | undefined {
+        const owed = this.continued.filter(t => t !== "last");
+        const token = owed[owed.length - 1];
+        if (token === undefined) {
             return undefined;
         }
-        const pool = this.eligibleMinionsForPlay();
-        // The Fool's token counts its flips done, which is the power the walk resumes at; the others have one power left.
-        const stack = tokens.map(token => {
-            const [uid, detail] = token.split(".");
-            return { cardUid: uid, nextStepIndex: uid === "00" ? Number(detail) : 1, minions: [...this.eligibleMinionsForOwed(token)] } as IPowerProgress;
-        });
-        if (stack[stack.length - 1].cardUid === "00") {
-            const revealed = this.discardPile[this.discardPile.length - 1];
-            if (revealed !== undefined) {
-                stack.push({ cardUid: revealed, nextStepIndex: 0, minions: [...pool] });
-            }
+        const [uid, detail] = token.split(".");
+        const revealed = uid === "00" ? this.discardPile[this.discardPile.length - 1] : undefined;
+        if (revealed !== undefined) {
+            return { entry: { cardUid: revealed, nextStepIndex: 0, minions: this.eligibleMinionsForPlay() }, owed };
         }
-        return stack as [IPowerProgress, ...IPowerProgress[]];
+        // The Fool's token counts its flips done, which is the power the walk resumes at; the others have one power left.
+        return { entry: { cardUid: uid, nextStepIndex: uid === "00" ? Number(detail) : 1, minions: this.eligibleMinionsForOwed(token) }, owed: owed.slice(0, -1) };
     }
 
     // True when `stack`'s top entry's NEXT step is special:"fool" - decides whether a bare 0-segment seed should be left alone or walked straight into the auto-resolving Fool step.
@@ -4747,7 +4735,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Validation walks a power stack where applyPowers walks the string, so the two must agree by hand; Fool's step is checked regardless of the segment cursor `i`, and validation always stops right at a forced-pause step, exactly once.
-    private validatePowerSteps(stack: IPowerProgress[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string, record: IWalkRecord = {}): IValidationResult {
+    private validatePowerSteps(stack: IPowerProgress[], steps: IStep[], owed: string[] | undefined, asUid?: string, asSuit?: string, record: IWalkRecord = {}): IValidationResult {
         let clone: GnosticaGame | undefined;
         let i = 0;
         // What the last step taken left open: its facing, more Judgement discards, or a High Priestess draw count.
@@ -4769,7 +4757,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (awaitingPair) {
                     return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.PAIRED_STEP_REQUIRED") };
                 }
-                return GnosticaGame.readyResult(last, false);
+                return GnosticaGame.readyResult(last, owed !== undefined && (clone ?? this).foolFlipFollows(owed));
             }
             const cardDef = this.resolveCardDef(top.cardUid);
             const stepIndex = top.nextStepIndex;
@@ -4779,7 +4767,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 : "special" in step && step.special === "fool" ? "fool"
                 : "step";
             // The ROOT's own untouched first flip is the one case that stays a hard rejection.
-            const isFreshRootFool = kind === "fool" && stack.length === 1 && top.cardUid === rootCardUid && top.nextStepIndex === 0;
+            const isFreshRootFool = kind === "fool" && owed === undefined && stack.length === 1 && top.nextStepIndex === 0;
             if (kind === "decline") {
                 i++;
                 GnosticaGame.popPower(stack);
@@ -4854,10 +4842,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 i++;
             }
             const here: IWalkPoint = { cardUid: top.cardUid, def: cardDef, step, stepIndex, minions: top.minions, istep, priorSteps: steps.slice(0, istep === undefined ? i : i - 1), game: clone ?? this };
-            // A flip owed with nothing typed after it is where the move stands: its Play/Decline pair is the next choice.
-            if (kind === "fool" && i >= steps.length) {
-                record.stop = here;
-            }
             if (sameTargetWanted !== undefined && "primitive" in step && istep !== undefined && (istep.complete ?? -1) >= 0) {
                 const target = istep.targetPiece === undefined ? undefined : (clone ?? this).resolvePieceRef(istep.targetPiece);
                 if (target?.kind !== "ok" || !GnosticaGame.samePiece(target.ref, sameTargetWanted)) {
@@ -4952,13 +4936,23 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // The shared start of validating a walk of a power stack, fresh or resumed (#49: every entry owes one meaningful step; see validatePowerSteps).
-    public validatePowerStack(stack: IPowerProgress[], steps: IStep[], rootCardUid: string, asUid?: string, asSuit?: string): IValidationResult {
+    public validatePowerStack(stack: IPowerProgress[], steps: IStep[], owed: string[] | undefined, asUid?: string, asSuit?: string): IValidationResult {
         // A World borrow with nothing else typed still has a real step to choose (falls through to the walk); a Magician borrow pushes no entry, so it wants the same fresh-step wording.
         const worldBorrow = asUid !== undefined;
         if (steps.length === 0 && !this.topStepIsFool(stack) && !worldBorrow) {
             return AWAITING_INPUT;
         }
-        return this.validatePowerSteps(stack, steps, rootCardUid, asUid, asSuit);
+        return this.validatePowerSteps(stack, steps, owed, asUid, asSuit);
+    }
+
+    // Whether the turn goes on to a Fool's flip once the card being played is done, as continueTurn decides from the same tokens.
+    private foolFlipFollows(owed: string[]): boolean {
+        for (let k = owed.length - 1; k >= 0 && owed[k].startsWith("00."); k--) {
+            if (Number(owed[k].split(".")[1]) < 2) {
+                return this.foolCanFlip();
+            }
+        }
+        return false;
     }
 
     // Read-only check of a resume; checks the card a "play" resume names (must be what the last flip left on top of discard), then walks the segments for legality.
@@ -6180,9 +6174,8 @@ export class GnosticaGame extends GameBaseSequenced {
                         list.push({ piece: key, name: GnosticaGame.ordinal(place + 1) });
                     });
                 }
-                // The card whose own step is currently resolving (follows World's borrow/Fool's reveal, not pinned to the root card),
-                // read the same way the button bar reads it, so a paused power shows its card's key before any click.
-                const activeCard = allCards().find(c => c.uid === this.computePendingMinor()?.activeCardUid);
+                const keyCard = this.preview !== undefined ? this.preview.keyCard : this.keyCard(this.resumeMove());
+                const activeCard = allCards().find(c => c.uid === keyCard);
                 if (activeCard !== undefined) {
                     const names = this.resolveCardDef(activeCard.uid).powers.map(power =>
                         "primitive" in power ? power.primitive[0].toUpperCase() + power.primitive.slice(1) : SPECIAL_POWER_NAMES[power.special]);
