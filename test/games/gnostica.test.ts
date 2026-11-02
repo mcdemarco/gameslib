@@ -2147,14 +2147,12 @@ describe("Gnostica: button states", () => {
         expect(g.handleClick(declared.move!, -1, -1, "_btn_declare").move).eq("use AS/with m0.2 shrink n0.2 2");
     });
 
-    it("greys the chosen attack amount and ignores a click on it, leaving the others available", () => {
+    it("offers the attack amounts until one is chosen, then none", () => {
         const g = swords();
-        const chosen = "use AS/with m0.2 shrink n0.2 2";
-        g.move(chosen, { partial: true });
-        const pips = barOf(g).filter(b => b.value?.includes("pips_"));
-        expect(pips.map(b => [b.value, isGrey(b)])).to.deep.equal([["_disabled_pips_2", true], ["pips_1", false]]);
-        expect(g.handleClick(chosen, -1, -1, "_btn__disabled_pips_2").move).eq(chosen);
-        expect(g.handleClick(chosen, -1, -1, "_btn_pips_1").move).eq("use AS/with m0.2 shrink n0.2 1");
+        g.move("use AS/with m0.2 shrink n0.2", { partial: true });
+        expect(barOf(g).filter(b => b.value?.includes("pips_")).map(b => b.value)).to.deep.equal(["pips_2", "pips_1"]);
+        g.move("use AS/with m0.2 shrink n0.2 2", { partial: true });
+        expect(barOf(g).filter(b => b.value?.includes("pips_"))).to.be.empty;
     });
 
     it("ignores a click on a crossed-out attack amount instead of building a move that validation then rejects", () => {
