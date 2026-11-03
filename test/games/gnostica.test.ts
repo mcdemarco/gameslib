@@ -2262,14 +2262,28 @@ describe("Gnostica: handleClick", () => {
         expect(east.move).eq("place m0 E"); // the click's own facing replaces the seeded "U?" outright
     });
 
-    it("place: clicking a non-adjacent cell restarts placement there instead", () => {
+    it("place: a click on a non-adjacent cell is ignored", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 0, 0);
         const first = g.handleClick("", row, col);
         const [rowFar, colFar] = rowColFor(g, 2, 0); // "o0", two cells east - not adjacent to m0
         const far = g.handleClick(first.move, rowFar, colFar);
         expect(far.valid).to.be.true;
-        expect(far.move).eq("place o0 U?"); // a fresh restart - seeded default again
+        expect(far.move).eq(first.move);
+    });
+
+    it("ignores clicks that would change a choice already made: another territory or hand card, a finished orient, a refused target", () => {
+        const devil = testGame({ board: [{ x: 0, y: 0, uid: "15", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 2, "W"]] }, { x: 2, y: 0, uid: "2D", pieces: [[1, 1, "U"]] }], hands: [["AR", ...filler.slice(1)], filler] });
+        const oriented = "use 15/with m0.1 orient n0.2 N";
+        expect(devil.handleClick(oriented, ...rowColFor(devil, 2, 0)).move).eq(oriented); // not a re-aim of the finished orient
+        expect(devil.handleClick(oriented, ...rowColFor(devil, 0, 0)).move).eq(`${oriented}/orient m0.1`); // the next orient's target
+        expect(devil.handleClick("use 15", ...rowColFor(devil, 2, 0)).move).eq("use 15"); // not a switch to the other territory
+        expect(devil.handleClick("play AR", -1, -1, "c3C").move).eq("play AR"); // not a swap of the played card
+
+        const justice = testGame({ board: [{ x: 0, y: 0, uid: "AD", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "2D", pieces: [[2, 2, "W"]] }], hands: [["11", ...filler.slice(1)], filler] });
+        const refused = justice.handleClick("play 11/with m0.1 trade", ...rowColFor(justice, 0, 0));
+        expect(refused.move).eq("play 11/with m0.1 trade");
+        expect(refused.message).eq(i18next.t("apgames:validation.gnostica.TRADEHANDS_MUST_TARGET_ENEMY"));
     });
 
     it("place: a void neighbour is a valid orientation target too", () => {
@@ -2671,7 +2685,7 @@ describe("Gnostica: handleClick", () => {
         expect(isGrey(passBtn)).to.be.false;
     });
 
-    it("collapses to the draw-count picker during a live discard preview, offering every legal count", () => {
+    it("keeps the chosen Discard/Draw and Declare beside the draw-count picker during a live discard preview, offering every legal count", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
@@ -2680,11 +2694,7 @@ describe("Gnostica: handleClick", () => {
         const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label: string; value?: string }[] }[] };
         const bar = rep.areas?.find(a => a.type === "buttonBar");
         const values = bar!.buttons!.map(b => b.value);
-        // Pass and a bare "discard" share the exact same move text (known
-        // simplification - see cmdDiscard's own bare-seed docs), so this
-        // same collapse is unavoidably shown no matter which button
-        // actually got clicked to seed the preview.
-        expect(values).to.deep.equal(["drawcount_2", "drawcount_1", "drawcount_0", "undo"]);
+        expect(values).to.deep.equal(["_disabled_discard", "drawcount_2", "drawcount_1", "drawcount_0", "declare", "undo"]);
     });
 
     it("clicking a draw-count button completes the move with that exact count", () => {
@@ -2789,7 +2799,7 @@ describe("Gnostica: handleClick", () => {
         expect(use.message).eq(i18next.t("apgames:validation.gnostica.NO_MINIONS_THERE", { cell: "n0" }));
     });
 
-    it("discard: clicking a hand card toggles it into a discard move/and clicking again toggles it back out", () => {
+    it("discard: clicking a hand card adds it to the discards, and clicking it again is ignored", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U"); // discard requires pieces already on the board
         g.move("place l0 U"); // back to player 1's turn
@@ -2801,7 +2811,7 @@ describe("Gnostica: handleClick", () => {
         expect(first.complete).eq(-1); // no draw count chosen yet - never complete without one
         const second = g.handleClick(first.move, -1, -1, `c${uid}`);
         expect(second.valid).to.be.true;
-        expect(second.move).eq("discard");
+        expect(second.move).eq(first.move);
     });
 
     it("a bare hand-card click with no action selected yet is ignored, not defaulted into discard", () => {
@@ -3153,7 +3163,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(g.handleClick(distClick2.move, row1, col1).move).eq(`use AR/with m0.2 move n0.1 2`);
     });
 
-    it("Rods (tile): the tile candidate defaults to pushing the pointed-at territory 1 space, and seeds distance 1 - a destination click sets any further distance", () => {
+    it("Rods (tile): a size-1 minion's push has its one distance; a larger minion's waits for a destination click, which sets it once", () => {
         const g = testGame({
             board: [{ x: 0, y: 0, uid: "AR", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD" }],
             hands: [filler, filler],
@@ -3177,7 +3187,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         const [row0, col0] = rowColFor(g2, 0, 0);
         const cellClick2 = g2.handleClick(seed2.move, row0, col0);
         const modeClick2 = g2.handleClick(cellClick2.move, -1, -1, "_btn_target_n0");
-        expect(modeClick2.move).eq(`use AR/with m0.2 move n0 1`);
+        expect(modeClick2.move).eq(`use AR/with m0.2 move n0`);
         // Same destination-click mechanism "piece" mode's own distance uses, anchored on the
         // fixed facing cell (n0) instead of a chosen piece target.
         const [row2, col2] = rowColFor(g2, 3, 0); // p0, distance 2 from n0
@@ -3185,7 +3195,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         expect(distClick2.move).eq(`use AR/with m0.2 move n0 2`);
         const [row1, col1] = rowColFor(g2, 2, 0); // o0, distance 1 from n0
         const distClick1 = g2.handleClick(distClick2.move, row1, col1);
-        expect(distClick1.move).eq(`use AR/with m0.2 move n0 1`);
+        expect(distClick1.move).eq(distClick2.move);
         g2.move(distClick2.move);
         expect(g2.board.has("n0")).eq(false);
         expect(g2.board.get("p0")!.card).to.not.eq(undefined);
@@ -3992,7 +4002,7 @@ describe("Gnostica: click-to-orient messaging", () => {
     it("place: clicking a neighbour replaces the facing with the correction, same generic message", () => {
         const g = new GnosticaGame(2);
         const [row, col] = rowColFor(g, 1, 0); // n0, east of m0
-        const result = g.handleClick("place m0 U", row, col);
+        const result = g.handleClick("place m0 U?", row, col);
         expect(result.valid).to.be.true;
         expect(result.move).eq("place m0 E");
         expect(result.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
@@ -4527,7 +4537,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(suitClick.move).eq(`use 01 as R`);
     });
 
-    it("highPriestess: hand-card clicks toggle a discard list (no minionRef at all), committing the explicit draw count chosen via the button bar", () => {
+    it("highPriestess: hand-card clicks build a discard list (no minionRef at all), committing the explicit draw count chosen via the button bar", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2)); // The High Priestess
         g.board.get("m0")!.pieces = [new Piece(1, 1, "U")];
@@ -4546,14 +4556,13 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const click2 = g.handleClick(click1.move, -1, -1, "c5C");
         expect(click2.move).eq(`use 02/discard 2C 5C`);
         expect(click2.complete).eq(-1);
-        const click3 = g.handleClick(click2.move, -1, -1, "c2C"); // toggle back off
-        expect(click3.move).eq(`use 02/discard 5C`);
-        expect(click3.complete).eq(-1);
+        const click3 = g.handleClick(click2.move, -1, -1, "c2C"); // already discarded: ignored
+        expect(click3.move).eq(click2.move);
         const click4 = g.handleClick(click3.move, -1, -1, "_btn_hpdraw_1");
         expect(click4.complete).eq(1); // an explicit draw count IS the player's final word
         g.move(click4.move); // step 1 commits and pauses, awaiting step 2
         expect(g.hands[0]).to.not.include("5C");
-        expect(g.hands[0].length).eq(3); // 2 remaining after discarding 5C, plus the 1 explicitly drawn
+        expect(g.hands[0].length).eq(2); // 1 remaining after discarding 2C and 5C, plus the 1 explicitly drawn
         expect(g.discardPile).to.include("5C");
         expect(g.currplayer).eq(1); // same seat still owes step 2
         expect(g.continued).to.not.be.empty;
@@ -4631,7 +4640,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
     // card, must drop the stale "draw N" tail rather than appending the
     // new uid after it - a card added past the "draw" token must actually
     // be discarded, not silently ignored.
-    it("highPriestess: discarding another card after already choosing a draw count drops the stale count and adds the card", () => {
+    it("highPriestess: a hand card is ignored once the draw count is chosen", () => {
         const g = new GnosticaGame(2);
         forceCardAt(g, 0, 0, () => major(2));
         g.board.get("m0")!.pieces = [new Piece(1, 1, "U")];
@@ -4643,20 +4652,11 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         const [row, col] = rowColFor(g, 0, 0);
         const cellClick = g.handleClick(seed.move, row, col);
         const discard1 = g.handleClick(cellClick.move, -1, -1, "c5C");
-        const drawClick = g.handleClick(discard1.move, -1, -1, "_btn_hpdraw_1"); // chosen too early
+        const drawClick = g.handleClick(discard1.move, -1, -1, "_btn_hpdraw_1");
         expect(drawClick.move).eq(`use 02/discard 5C draw 1`);
 
         const discard2 = g.handleClick(drawClick.move, -1, -1, "cAR");
-        expect(discard2.move).eq(`use 02/discard 5C AR`); // stale "draw 1" dropped, AR added
-        expect(discard2.valid).to.be.true;
-
-        // The stale count is gone, so a fresh draw choice is needed - the max is now 5 (6 - 1 remaining).
-        const drawClick2 = g.handleClick(discard2.move, -1, -1, "_btn_hpdraw_5");
-        expect(drawClick2.move).eq(`use 02/discard 5C AR draw 5`);
-        g.move(drawClick2.move);
-        expect(g.hands[0]).to.not.include("5C");
-        expect(g.hands[0]).to.not.include("AR");
-        expect(g.hands[0].length).eq(6); // 1 remaining + 5 explicitly drawn, not stuck at the stale count
+        expect(discard2.move).eq(drawClick.move);
     });
 
     // Playing High Priestess (as opposed to using it already on the
@@ -6400,10 +6400,10 @@ describe("Gnostica: a Fool's revealed card plays down the same path as one playe
         return { fool, hand };
     };
 
-    it("keeps the chosen Play greyed, with Skip Power and Declare, after a first click-only step (Empress's orient)", () => {
+    it("keeps the chosen Play greyed, with Declare but no Skip Power, after a first click-only step (Empress's orient)", () => {
         const { fool, hand } = pair("03");
-        expect(barAt(fool, "play 03 via 00/orient m0.2")).to.deep.equal(["play*", "skip", "declare", "undo"]);
-        expect(barAt(hand, "play 03/orient m0.2")).to.deep.equal(["play*", "skip", "declare", "undo"]);
+        expect(barAt(fool, "play 03 via 00/orient m0.2")).to.deep.equal(["play*", "declare", "undo"]);
+        expect(barAt(hand, "play 03/orient m0.2")).to.deep.equal(["play*", "declare", "undo"]);
     });
 
     it("keeps the chosen Play greyed on a complete move, as a hand play does", () => {
