@@ -215,8 +215,8 @@ interface IPendingStep {
     game: GnosticaGame;
 }
 
-// What applying a card's powers did: ran to the end, stopped on an unfinished step, or left something for move() to continue - the Fool used, a High Priestess round, or Justice's trade.
-type PowerOutcome = "done" | "stopped" | "fool" | "hp" | "trade";
+// What applying a card's powers left for move() to continue: nothing, the Fool used, a High Priestess round, or Justice's trade.
+type PowerOutcome = "done" | "fool" | "hp" | "trade";
 
 type IHiddenEffect = (
     | { type: "territory"; cell: string }
@@ -853,8 +853,8 @@ export class GnosticaGame extends GameBaseSequenced {
             return this;
         }
         this.resolveHiddenEffects();
-        // undefined means no power ran or it stopped on an incomplete step.
-        const owed = powerCard !== undefined && outcome !== undefined && outcome !== "stopped" ? this.continueTurn(powerCard, powerSteps, powerAsUid, powerHow, outcome) : undefined;
+        // undefined means no power ran.
+        const owed = powerCard !== undefined && outcome !== undefined ? this.continueTurn(powerCard, powerSteps, powerAsUid, powerHow, outcome) : undefined;
         if (announceLast) {
             newLast = this.currplayer;
             this.results.push({ type: "declare", count: this.getPlayerScore(this.currplayer) });
@@ -4322,7 +4322,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Applies a submission's power segments card by card (the head card, a World's borrowed card) straight off the string. `uid` undefined means the revealed card was declined.
-    // What it leaves for move() to continue - the Fool used, a High Priestess round, Justice's trade - comes back as the outcome; "stopped" is a preview's unfinished step.
+    // What it leaves for move() to continue - the Fool used, a High Priestess round, Justice's trade - comes back as the outcome.
     private applyPowers(uid: string | undefined, allSteps: IStep[], asUid: string | undefined, partial: boolean): PowerOutcome {
         // A skip only names the power left unused; the step that follows it says everything that happens.
         const steps = allSteps.filter(step => step.action !== "skip");
@@ -4331,15 +4331,15 @@ export class GnosticaGame extends GameBaseSequenced {
         let at = 0;
         // Where the World's "use" result sits: it changes nothing on the board, so it has no frame and joins the next step's group.
         let worldResult: number | undefined;
-        // One step: a snapshot of the board before it, and its results grouped when the submission is chained; false if it didn't complete.
-        const count = (apply: () => boolean): boolean => {
+        // One step: a snapshot of the board before it, and its results grouped when the submission is chained; a preview's unfinished last step adds neither.
+        const count = (apply: () => boolean): void => {
             this.frames.push({ board: this.board.clone().store, discardSummary: this.summarizeDiscardPile(this.discardPile) });
             const resultsBefore = worldResult ?? this.results.length;
             worldResult = undefined;
             const hiddenBefore = this.hidden.length;
             if (!apply()) {
                 this.frames.pop();
-                return false;
+                return;
             }
             counted++;
             for (const effect of this.hidden.slice(hiddenBefore)) {
@@ -4351,13 +4351,12 @@ export class GnosticaGame extends GameBaseSequenced {
                     this.results.push({ type: "_group", who: this.currplayer, results: stepResults as [APMoveResult, ...APMoveResult[]] });
                 }
             }
-            return true;
         };
         const run = (card: string): PowerOutcome => {
             if (card === "21") {
                 // The World's own step takes no segment: the borrowed card is named in the head.
                 if (asUid === undefined) {
-                    return "stopped";
+                    return "done";
                 }
                 this.results.push({ type: "use", what: asUid, count: 21 });
                 worldResult = this.results.length - 1;
@@ -4372,18 +4371,17 @@ export class GnosticaGame extends GameBaseSequenced {
                     return "done";
                 }
                 const step = steps[at++];
-                return count(() => {
+                count(() => {
                     this.cmdDiscard(step);
                     return true;
-                }) ? "hp" : "stopped";
+                });
+                return "hp";
             }
             const sameTarget = MAJOR_ARCANA[card]?.sameTargetShortcut === true;
             for (let idx = 0; at < steps.length; idx++) {
                 const step = steps[at++];
                 const next = steps[at];
-                if (!count(() => this.applyPlainStep(step, next, partial && sameTarget && idx === 0))) {
-                    return "stopped";
-                }
+                count(() => this.applyPlainStep(step, next, partial && sameTarget && idx === 0));
                 // Justice's trade happens on commit, so its attack waits for the next submission.
                 if (card === "11" && step.action === "trade") {
                     return "trade";
