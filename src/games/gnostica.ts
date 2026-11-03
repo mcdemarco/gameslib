@@ -189,8 +189,6 @@ export interface IStep {
 interface IPendingStep {
     // The move this step was found in; a click rebuilds it with the step changed.
     move: IParsedMove;
-    // The verb the front of the move string spells - "play" for a genuine resume, else the literal typed head for a fresh "use"/"play".
-    head: "use" | "play";
     // The card whose steps this pending step belongs to - the root card until a push happens (World's target, Fool's reveal); named on the button bar.
     activeCardUid: string;
     // This step's suit - the card's own for a minor, or the mapped primitive's for a major (create→C/move→R/grow→D/attack→S); unset for a `special` step.
@@ -2593,7 +2591,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (play === undefined || play.card === undefined || play.eligible.length === 0) {
             return {};
         }
-        const { head, steps, asUid, asSuit } = play;
+        const { steps, asUid, asSuit } = play;
         // Everything the walk reads about the hand and discards is from a copy that has already played the card.
         holder.clone ??= this.scratchForPlay(play);
         // The validation walk records where it stopped; the click code builds on that step, and on the move's last completed one.
@@ -2605,7 +2603,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 return undefined;
             }
             const opts = "primitive" in p.step ? this.computeShortcutOpts(p.def, p.step.primitive, p.stepIndex, p.def.powers.length, p.step.opts) : {};
-            return p.game.buildPending({ move: parsed, head, activeCardUid: p.cardUid, minions: p.minions, priorSteps: p.priorSteps, opts, istep: p.istep ?? { action: "with" }, softComplete: p.softComplete }, p.step);
+            return p.game.buildPending({ move: parsed, activeCardUid: p.cardUid, minions: p.minions, priorSteps: p.priorSteps, opts, istep: p.istep ?? { action: "with" }, softComplete: p.softComplete }, p.step);
         };
         holder.clone = record.stop?.game ?? holder.clone;
         const held = pendingAt(record.held);
