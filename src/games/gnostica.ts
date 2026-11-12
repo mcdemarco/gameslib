@@ -200,8 +200,10 @@ interface IPendingStep {
     opts: PowerOpts;
     // The current step's own content as typed so far, already resolved into an IStep - completeness gates and click handlers read it directly.
     istep: IStep;
-    // Set on a finished step viewed as the one still being refined: it only completed by default (its facing was never chosen), so a facing click can still redirect it.
-    softComplete?: boolean;
+    // Set on the move's last step when it is complete: it stays the pending step for what a click can still add to it.
+    finished?: boolean;
+    // The step waiting behind a finished one whose piece can still be turned: board clicks turn the piece until the buttons go on.
+    next?: IPendingStep;
     // The game as it stands after every completed step above was applied to a clone of the committed state; refs, candidates and lookups for this step resolve against its board.
     game: GnosticaGame;
 }
@@ -230,10 +232,8 @@ interface IPreview {
     rings: Map<string, "minion" | "target">;
     // The cells ("x,y") where a board click would act.
     pickCells: string[];
-    // The resume seed move string, including whatever was typed against the pending obligation.
+    // The step the move is at, if it is playing a card.
     pending: IPendingStep | undefined;
-    // A finished power whose piece can still be turned, with the next power waiting: board clicks turn the piece until the buttons go on.
-    facingOpen: boolean;
     // The move the client sent was illegal and this previews the longest valid part of it: only Undo is offered.
     rejected: boolean;
     // The card whose powers the key shows.
@@ -712,7 +712,7 @@ export class GnosticaGame extends GameBaseSequenced {
         if (result !== AWAITING_INPUT) {
             return result;
         }
-        const pending = this.parsePendingStep(parsed).advanced;
+        const pending = this.parsePendingStep(parsed);
         const key = pending?.game.stepChoices(pending).prompt ?? "CLICK_BUTTON";
         return { ...result, message: i18next.t(`apgames:validation.gnostica.${key}`) };
     }
@@ -761,8 +761,9 @@ export class GnosticaGame extends GameBaseSequenced {
         const parsed = this.parseMove(m);
         const head = parsed.head;
         const preview = partial ? this.buildPreview(parsed) : undefined;
-        this.addDistanceBuffer(preview?.pending);
-        this.addPendingFacingBuffer(parsed, preview?.pending);
+        const building = preview?.pending?.finished === true ? preview.pending.next : preview?.pending;
+        this.addDistanceBuffer(building);
+        this.addPendingFacingBuffer(parsed, building);
 
         // A "discard" resume is a High Priestess round (not a card); a "play" resume names the revealed card as its front token, else the "via" root.
         const resume = this.continued.length > 0;
@@ -823,7 +824,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // A transient, unpersisted UI hint (not this.lastmove) answering "is there an in-progress preview right now" - cleared the moment a turn commits.
         this.preview = preview;
         if (preview !== undefined) {
-            preview.rings = this.previewRings(parsed, preview.pending);
+            preview.rings = this.previewRings(parsed, building);
         }
 
         if (partial) {
@@ -1916,26 +1917,20 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    private facingOpen(current: IPendingStep | undefined, advanced: IPendingStep | undefined): boolean {
-        return current?.softComplete === true && this.pendingMode(current) !== undefined && advanced !== undefined && advanced.priorSteps.length > current.priorSteps.length;
-    }
-
     private buildPreview(parsed: IParsedMove): IPreview {
         const seed = this.resumeMove(parsed) ?? parsed;
-        const { current, advanced } = this.parsePendingStep(seed);
+        const pending = this.parsePendingStep(seed);
         const actions = this.actionChoices(parsed);
-        const clickStep = this.boardClickStep(current, advanced);
         return {
             keyCard: this.keyCard(seed),
             head: parsed.head,
             highlighted: this.highlightedButtonValues(parsed),
             actions,
             rings: new Map(),
-            pickCells: clickStep !== undefined
-                ? GnosticaGame.choiceCells(clickStep.game.stepChoices(clickStep), this.pickleMove(seed))
+            pickCells: pending !== undefined
+                ? GnosticaGame.choiceCells(pending.game.stepChoices(pending), this.pickleMove(seed))
                 : GnosticaGame.choiceCells(actions, this.pickleMove(parsed)),
-            pending: advanced,
-            facingOpen: this.facingOpen(current, advanced),
+            pending,
             rejected: false,
         };
     }
@@ -2125,7 +2120,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // While a finished power's piece can still be turned, board clicks turn it; Skip Reorient settles its facing so they can go on to the next power.
     private withSkipReorient(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (bar === undefined || this.preview?.facingOpen !== true) {
+        if (bar === undefined || this.preview?.pending?.next === undefined) {
             return bar;
         }
         // The next power can't start until the reorient is skipped, so its minion buttons wait too.
@@ -2271,7 +2266,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const declareBtn = topLevel.find(b => b.value === "declare");
 
         // A finished step whose piece can still be turned: board clicks set its facing, so the next step's buttons wait (getActionButtons adds Skip Reorient).
-        if (this.preview?.facingOpen === true) {
+        if (pendingMinor.next !== undefined) {
             const waiting = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
             return waiting as [ButtonBarButton, ...ButtonBarButton[]];
         }
@@ -2346,11 +2341,10 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // For a genuine resume, the preview's seed is a move string rebuilt from this.continued plus the typed segments; no "already reflected" bookkeeping needed.
     private computePendingMinor(): IPendingStep | undefined {
-        if (this.preview !== undefined) {
-            return this.preview.pending;
-        }
         const seed = this.resumeMove();
-        return seed === undefined ? undefined : this.parsePendingStep(seed).advanced;
+        const pending = this.preview !== undefined ? this.preview.pending : seed === undefined ? undefined : this.parsePendingStep(seed);
+        // A finished step has nothing left for the bar, unless its facing is still open.
+        return pending?.finished === true && pending.next === undefined ? undefined : pending;
     }
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
@@ -2532,43 +2526,34 @@ export class GnosticaGame extends GameBaseSequenced {
         };
     }
 
-    // Reconstructs the in-progress power step (if any) purely from a move string.  Checks step segments for STRUCTURAL completeness,  also stopping at the World.
-    // `current` treats a complete last-typed segment as still the step being refined (board clicks keep adjusting it); `advanced` walks past it to the next step.
-    // They are the same object unless that last segment is already complete.
-    private parsePendingStep(parsed: IParsedMove): { current?: IPendingStep; advanced?: IPendingStep } {
-        const holder: { clone?: GnosticaGame } = {};
-        const { held, advanced } = this.walkPendingStep(parsed, holder);
-        const advancedStep = advanced === undefined ? undefined : { ...advanced, game: holder.clone ?? this.scratchClone() };
-        return { current: held === undefined ? advancedStep : { ...held.pending, game: held.game }, advanced: advancedStep };
-    }
-
-    // `held` is the step as it stood BEFORE the complete last segment was walked past (with its own copy of the game, since the walk goes on mutating `holder.clone`).
-    private walkPendingStep(parsed: IParsedMove, holder: { clone?: GnosticaGame }): { held?: { pending: Omit<IPendingStep, "game">; game: GnosticaGame }; advanced?: Omit<IPendingStep, "game"> } {
-        // "decline" is already a complete choice - no step for a button set to configure, so the bar falls back to plain top-level context.
+    // The step a use, play or resume is at, read from the move string: the one the validation walk stopped at, or the move's last step while a click can still add to it.
+    private parsePendingStep(parsed: IParsedMove): IPendingStep | undefined {
+        // "decline" is already a complete choice, with no step to build.
         if (parsed.head === "decline") {
-            return {};
+            return undefined;
         }
         const play = this.resolvePowerPlay(parsed);
         if (play === undefined || play.card === undefined || play.eligible.length === 0) {
-            return {};
+            return undefined;
         }
-        const { steps, asUid, asSuit } = play;
-        // Everything the walk reads about the hand and discards is from a copy that has already played the card.
-        holder.clone ??= this.scratchForPlay(play);
-        // The validation walk records where it stopped; the click code builds on that step, and on the move's last completed one.
         const record: IWalkRecord = {};
-        holder.clone.validatePowerSteps(play.entry, steps, play.owed, asUid, asSuit, record);
-        const pendingAt = (p: IWalkPoint | undefined): Omit<IPendingStep, "game"> | undefined => {
+        // Everything the walk reads about the hand and discards is from a copy that has already played the card.
+        this.scratchForPlay(play).validatePowerSteps(play.entry, play.steps, play.owed, play.asUid, play.asSuit, record);
+        const pendingAt = (p: IWalkPoint | undefined): IPendingStep | undefined => {
             // Every step but the High Priestess's and the World's needs a minion still on the board.
             if (p === undefined || (p.minions.length === 0 && !("special" in p.step && (p.step.special === "highPriestess" || p.step.special === "worldUseAny")))) {
                 return undefined;
             }
             const opts = "primitive" in p.step ? this.computeShortcutOpts(p.def, p.step.primitive, p.stepIndex, p.def.powers.length, p.step.opts) : {};
-            return p.game.buildPending({ move: parsed, activeCardUid: p.cardUid, minions: p.minions, priorSteps: p.priorSteps, opts, istep: p.istep ?? { action: "with" }, softComplete: p.softComplete }, p.step);
+            return { ...p.game.buildPending({ move: parsed, activeCardUid: p.cardUid, minions: p.minions, priorSteps: p.priorSteps, opts, istep: p.istep ?? { action: "with" } }, p.step), game: p.game };
         };
-        holder.clone = record.stop?.game ?? holder.clone;
         const held = pendingAt(record.held);
-        return { held: held === undefined ? undefined : { pending: held, game: record.held!.game }, advanced: pendingAt(record.stop) };
+        const stop = pendingAt(record.stop);
+        // The last step stays pending when nothing follows it, or while its piece can still be turned.
+        if (held !== undefined && (stop === undefined || (record.held!.softComplete === true && this.pendingMode(held) !== undefined))) {
+            return { ...held, finished: true, next: stop };
+        }
+        return stop;
     }
 
     // A primitive's suit, or the Magician's chosen one, makes a suit step; anything else is a special step.
@@ -3293,7 +3278,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private clickButton(parsed: IParsedMove, value: string): string | IClickResult {
         // A button a pending step offers makes the move its choice records.
         if (/^(minion|target|pips|magician|hpdraw)_/.test(value) || value === "drawn" || value === "destroy") {
-            const pending = this.parsePendingStep(parsed).advanced;
+            const pending = this.parsePendingStep(parsed);
             return pending?.game.stepChoices(pending).moves.get(`_btn_${value}`) ?? this.noop(parsed);
         }
         if (/^(orientpick|drawcount)_/.test(value)) {
@@ -3330,7 +3315,7 @@ export class GnosticaGame extends GameBaseSequenced {
             case "skip_reorient":
                 return this.settleFacing(parsed);
             case "skip":
-                return this.skipPowerOffered(this.parsePendingStep(parsed).advanced) ? this.pickleMove({ ...parsed, steps: [parsed.steps[0], { action: "skip", complete: -1 }] }) : this.noop(parsed);
+                return this.skipPowerOffered(this.parsePendingStep(parsed)) ? this.pickleMove({ ...parsed, steps: [parsed.steps[0], { action: "skip", complete: -1 }] }) : this.noop(parsed);
             default:
                 return this.noop(parsed);
         }
@@ -3339,7 +3324,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private clickHandCard(parsed: IParsedMove, uid: string): string | IClickResult {
         const { head } = parsed;
         // A card already being played isn't in the hand it would replace from.
-        const pendingForCard = this.parsePendingStep(parsed).current;
+        const pendingForCard = this.parsePendingStep(parsed);
         const hand = (pendingForCard?.game ?? this).hands[this.currplayer - 1] ?? [];
         if (!hand.includes(uid)) {
             return this.ignoredClick(parsed, i18next.t("apgames:validation.gnostica.NOT_IN_HAND", { uid }));
@@ -3376,7 +3361,7 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     private clickDiscardPile(parsed: IParsedMove, key: string): string | IClickResult {
-        const pendingForDiscard = this.parsePendingStep(parsed).current;
+        const pendingForDiscard = this.parsePendingStep(parsed);
         if (pendingForDiscard?.special !== "judgementDraw") {
             // Tower/Star: a discard may be the replacement card, in place of one from the hand.
             if (pendingForDiscard?.opts.replacementSource !== "discard") {
@@ -3453,21 +3438,20 @@ export class GnosticaGame extends GameBaseSequenced {
             return choices.moves.get(`cell:${cell}`) ?? choices.anyCell?.(cell)
                 ?? this.ignoredClick(parsed, choices.prompt === undefined ? undefined : i18next.t(`apgames:validation.gnostica.${choices.prompt}`));
         }
-        const { current: pending, advanced } = this.parsePendingStep(parsed);
-        const step = this.boardClickStep(pending, advanced);
-        const choices = step?.game.stepChoices(step);
+        const pending = this.parsePendingStep(parsed);
+        const choices = pending?.game.stepChoices(pending);
         const result = choices?.moves.get(`cell:${cell}`) ?? choices?.anyCell?.(cell);
         if (result !== undefined) {
             // A click on the facing the finished power's piece already has keeps it, and goes on.
-            return this.facingOpen(pending, advanced) && (typeof result === "string" ? result : result.move) === move ? this.settleFacing(parsed) : result;
+            return pending!.next !== undefined && (typeof result === "string" ? result : result.move) === move ? this.settleFacing(parsed) : result;
         }
         // While the finished power's piece can still be turned, the board turns it, and the buttons go on to the next power.
-        if (this.facingOpen(pending, advanced)) {
+        if (pending?.next !== undefined) {
             return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.MAY_ORIENT") };
         }
-        // Any other click can't refine the finished step; name the next one instead of raising that step's own errors.
-        if (advanced?.minionAmbiguous === true && advanced.priorSteps.length > (pending?.priorSteps.length ?? -1)) {
-            return { move, valid: true, complete: 0, message: i18next.t("apgames:validation.gnostica.CLICK_CELL") };
+        // A click that picks no minion says what picks one.
+        if (pending?.minionAmbiguous === true) {
+            return this.ignoredClick(parsed, i18next.t(`apgames:validation.gnostica.${choices!.prompt}`));
         }
         if (head === "play" || this.continued.length > 0) {
             // "play" has no cell of its own to re-pick the way "use" does - a board click here only ever means pending-step cycling (handled above), so the move's own prompt stands.
@@ -3478,14 +3462,6 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.ignoredClick(parsed);
         }
         return this.actionChoices(parsed).moves.get(`cell:${cell}`) ?? this.ignoredClick(parsed, i18next.t("apgames:validation.gnostica.NO_CARD_THERE", { cell }));
-    }
-
-    // The one step a board click goes to: the finished step while its piece can still be turned, otherwise the next step, otherwise the move's last one.
-    private boardClickStep(current: IPendingStep | undefined, advanced: IPendingStep | undefined): IPendingStep | undefined {
-        if (advanced === undefined || advanced.priorSteps.length <= (current?.priorSteps.length ?? -1) || this.facingOpen(current, advanced)) {
-            return current;
-        }
-        return advanced;
     }
 
     // Click support for the "bidding" variant's opening procedure. Row/col are never used - both phases are driven entirely by clicking cards in an AreaPieces.

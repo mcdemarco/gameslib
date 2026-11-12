@@ -1228,15 +1228,13 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         const chain = "use 15/with m0.1 orient m0.1 N/with m0.1.N orient m0.1.N E";
         const internal = g as unknown as {
             parseMove: (m: string) => unknown;
-            parsePendingStep: (p: unknown) => { current?: PendingLike; advanced?: PendingLike };
+            parsePendingStep: (p: unknown) => PendingLike | undefined;
         };
         type PendingLike = { minions: { cell: string; piece: Piece }[]; game: GnosticaGame };
         for (let k = 1; k <= 3; k++) {
-            const views = internal.parsePendingStep(internal.parseMove(chain.split("/").slice(0, k).join("/")));
-            for (const view of [views.current, views.advanced]) {
-                for (const m of view?.minions ?? []) {
-                    expect(view!.game.board.get(m.cell)!.pieces.map(p => p.id())).to.include(m.piece.id());
-                }
+            const view = internal.parsePendingStep(internal.parseMove(chain.split("/").slice(0, k).join("/")));
+            for (const m of view?.minions ?? []) {
+                expect(view!.game.board.get(m.cell)!.pieces.map(p => p.id())).to.include(m.piece.id());
             }
         }
     });
@@ -1457,10 +1455,10 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             hands: [filler, filler],
         });
         const internal = g as unknown as {
-            parsePendingStep: (m: unknown) => { advanced?: object };
+            parsePendingStep: (m: unknown) => object | undefined;
             suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: unknown }[];
         };
-        const pending = internal.parsePendingStep(g.parseMove("use AR/with m0.2")).advanced!;
+        const pending = internal.parsePendingStep(g.parseMove("use AR/with m0.2"))!;
         const labels = internal.suitTargetCandidates(pending, "R").map(c => c.label);
         expect(labels).to.deep.equal(["Push Territory", "Move own", ownerLabel(2, "Push"), "Push own"]);
     });
@@ -3404,7 +3402,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 
         it("after orient, the next step's candidates include every own minion in the cell, at its current facing, and the button bar after the partial move lists them all too", () => {
             const g = setup();
-            const pending = (g as unknown as { parsePendingStep: (m: unknown) => { advanced?: { minionCandidates: { piece?: Piece }[] } } }).parsePendingStep(g.parseMove(move)).advanced!;
+            const pending = (g as unknown as { parsePendingStep: (m: unknown) => { minionCandidates: { piece?: Piece }[] } | undefined }).parsePendingStep(g.parseMove(move))!;
             expect(pending.minionCandidates.map(c => `${c.piece?.size}${c.piece?.orientation}`).sort()).to.deep.equal(["1E", "1W", "2N"]);
 
             const g2 = setup();
@@ -3481,10 +3479,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 hands: [["03", "2S"], filler],
             });
             const internal = g as unknown as {
-                parsePendingStep: (m: unknown) => { advanced?: object };
+                parsePendingStep: (m: unknown) => object | undefined;
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: unknown }[];
             };
-            const pending = internal.parsePendingStep(g.parseMove("use AS")).advanced!;
+            const pending = internal.parsePendingStep(g.parseMove("use AS"))!;
             const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => typeof c.label === "string" && c.label.endsWith(" own") ? "own" : "enemy");
             expect(owners).to.deep.equal(["enemy", "enemy", "own", "own"]);
         });
@@ -3497,10 +3495,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 hands: [["03", "2S"], filler, filler],
             });
             const internal = g as unknown as {
-                parsePendingStep: (m: unknown) => { advanced?: object };
+                parsePendingStep: (m: unknown) => object | undefined;
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: unknown }[];
             };
-            const pending = internal.parsePendingStep(g.parseMove("use AC")).advanced!;
+            const pending = internal.parsePendingStep(g.parseMove("use AC"))!;
             const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label);
             expect(enemyLabels).to.deep.equal([ownerLabel(2, "Create Enemy"), ownerLabel(3, "Create Enemy")]);
 
@@ -3509,10 +3507,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 hands: [["03", "2S"], filler],
             });
             const internal2 = g2 as unknown as {
-                parsePendingStep: (m: unknown) => { advanced?: object };
+                parsePendingStep: (m: unknown) => object | undefined;
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: unknown }[];
             };
-            const pending2 = internal2.parsePendingStep(g2.parseMove("use AC")).advanced!;
+            const pending2 = internal2.parsePendingStep(g2.parseMove("use AC"))!;
             const candidates2 = internal2.suitTargetCandidates(pending2, "C");
             expect(candidates2.find(c => c.value === "o0.1")!.label).to.deep.equal(ownerLabel(2, "Create Enemy"));
         });
