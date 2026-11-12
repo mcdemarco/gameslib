@@ -4600,8 +4600,7 @@ describe("Gnostica: handleClick - major arcana special powers (Phase B)", () => 
         expect(g.continued).to.not.be.empty; // step 1 of 2 - still owes the second flip
 
         // Round 2: the SAME count-picker click now reports it's the LAST round.
-        const resumed = g.handleClick("", -1, -1, "_btn_resume_power");
-        const round2Draw = g.handleClick(resumed.move, -1, -1, "_btn_hpdraw_0");
+        const round2Draw = g.handleClick("", -1, -1, "_btn_hpdraw_0");
         expect(round2Draw.message).eq(i18next.t("apgames:validation._general.VALID_MOVE"));
 
         // The Draw N button must keep the round-2 move resuming the High Priestess.

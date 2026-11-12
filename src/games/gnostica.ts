@@ -224,10 +224,8 @@ type IHiddenEffect = (
 // What the click UI needs to know about an in-progress (partial) move, computed once inside move(..., {partial: true}) from the pre-move state.
 interface IPreview {
     head: string | undefined;
-    // Top-level button values to bold.
-    highlighted: Set<string>;
-    // What the top-level action takes next.
-    actions: IStepChoices;
+    // The button bar.
+    bar: ButtonBarButton[];
     // Pieces to ring on the board: the ones a click can pick, or the ones the step has picked.
     rings: Map<string, "minion" | "target">;
     // The cells ("x,y") where a board click would act.
@@ -1876,18 +1874,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return head === "use" || head === "play" || this.continued.length > 0;
     }
 
-    // How far an owed resume has got: nothing owed, owed with nothing clicked yet, Play clicked or a step of the revealed card typed, or Decline clicked.
-    private resumePhase(): "none" | "owed" | "playing" | "declined" {
-        if (this.continued.length === 0) {
-            return "none";
-        }
-        // An empty move (nothing clicked yet, or all of it undone) hasn't begun the resume either.
-        if (this.preview?.head === undefined) {
-            return "owed";
-        }
-        return this.preview.head === "decline" ? "declined" : "playing";
-    }
-
     // The move as the resume machinery reads it: as typed once it names the obligation owed, otherwise the bare seed (an empty or stale move). undefined when nothing is owed.
     private resumeMove(parsed?: IParsedMove): IParsedMove | undefined {
         if (this.continued.length === 0) {
@@ -1924,8 +1910,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return {
             keyCard: this.keyCard(seed),
             head: parsed.head,
-            highlighted: this.highlightedButtonValues(parsed),
-            actions,
+            bar: this.barChoices(parsed, pending, actions).buttons,
             rings: new Map(),
             pickCells: pending !== undefined
                 ? GnosticaGame.choiceCells(pending.game.stepChoices(pending), this.pickleMove(seed))
@@ -2070,13 +2055,13 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Which top-level button(s) the partial move (or an owed resume) already reflects; "Declare" is a modifier so it is reported alongside whatever the base action is, not instead of it.
-    private highlightedButtonValues(parsed: IParsedMove | undefined): Set<string> {
+    private highlightedButtonValues(parsed: IParsedMove): Set<string> {
         const found = new Set<string>();
-        if (parsed?.announceLast) {
+        if (parsed.announceLast) {
             found.add("declare");
         }
-        const head = parsed?.head;
-        const step0 = parsed?.steps[0];
+        const head = parsed.head;
+        const step0 = parsed.steps[0];
         if (this.continued.length > 0) {
             // The top-level button matches the resume: "Discard/Draw" for High Priestess, "Play Card" for Fool.
             found.add(this.getContinuedUid() === "02" ? "discard" : this.getContinuedUid() === "11" ? this.justiceHead() : "play");
@@ -2088,18 +2073,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return found;
-    }
-
-    // Slots a "Skip Power" button in just before Declare whenever the first power of a card with a different second one is pending; a bar without Declare (the bare Play/Decline pair) is left alone.
-    private withSkipPower(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const at = bar?.findIndex(b => b.value === "declare") ?? -1;
-        if (bar === undefined || at < 0) {
-            return bar;
-        }
-        if (!this.skipPowerOffered(this.computePendingMinor())) {
-            return bar;
-        }
-        return [...bar.slice(0, at), { label: "Skip Power", value: "skip" }, ...bar.slice(at)] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
     // A major card's first power, untouched, with a different second power to skip to.
@@ -2116,66 +2089,6 @@ export class GnosticaGame extends GameBaseSequenced {
         const finished = steps[steps.length - 1];
         finished.direction = finished.direction?.replace("?", "");
         return `${this.pickleMove({ ...parsed, announceLast: false, steps })}/with${parsed.announceLast ? " last" : ""}`;
-    }
-
-    // While a finished power's piece can still be turned, board clicks turn it; Skip Reorient settles its facing so they can go on to the next power.
-    private withSkipReorient(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (bar === undefined || this.preview?.pending?.next === undefined) {
-            return bar;
-        }
-        // The next power can't start until the reorient is skipped, so its minion buttons wait too.
-        const open = bar.filter(b => !b.value?.startsWith("minion_"));
-        const at = open.findIndex(b => b.value === "declare");
-        const skip: ButtonBarButton = { label: "Skip Reorient", value: "skip_reorient" };
-        return (at < 0 ? [...open, skip] : [...open.slice(0, at), skip, ...open.slice(at)]) as [ButtonBarButton, ...ButtonBarButton[]];
-    }
-
-    // Undo ends every main-phase bar; crossed out, like any unavailable action, when the move has nothing to take back.
-    private withUndo(bar: [ButtonBarButton, ...ButtonBarButton[]] | undefined): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (bar === undefined || this.phase !== "main") {
-            return bar;
-        }
-        const undo: ButtonBarButton = { label: "Undo", value: "undo" };
-        // There is something to take back once the move has an action or a declaration.
-        if (this.preview === undefined || (this.preview.head === undefined && !this.preview.highlighted.has("declare"))) {
-            undo.attributes = [{ name: "text-decoration", value: "line-through" }];
-        }
-        return [...bar, undo] as [ButtonBarButton, ...ButtonBarButton[]];
-    }
-
-    // Wraps computeActionButtons() to unconditionally fold a persisting "Decline X" into the bar, since a pending obligation's card can always be declined.
-    private getActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        const bar = this.withSkipReorient(this.withSkipPower(this.computeActionButtons()));
-        const phase = this.resumePhase();
-        if (bar === undefined || phase === "none") {
-            return bar;
-        }
-        // this.continued always names a genuine obligation, so there's nothing further to distinguish here.
-        if (bar.some(b => b.value === "decline_power")) {
-            // Fool's own step has nothing else to offer, so computeActionButtons() already returns its explicit Play/Decline pair - nothing to add here.
-            return bar;
-        }
-        const advanced = this.computePendingMinor();
-        const justDeclined = phase === "declined";
-        // Declining is the alternative to playing the revealed card, so once Play is clicked or a step of it typed, the choice has been made.
-        if (phase === "playing") {
-            return bar;
-        }
-        // Once High Priestess round 1 is DONE and round 2 is persisted, it's never Declinable - checked via getContinuedUid, not activeCardUid below.
-        if (this.getContinuedUid() === "02") {
-            return bar;
-        }
-        const activeTop = { cardUid: advanced?.activeCardUid ?? this.activeCardUid() };
-        // Fool's remaining flip auto-continues past ANY decline that exposes it, so what needs naming here is whatever was ACTUALLY just declined, not Fool itself.
-        const declinedUid = (justDeclined && activeTop.cardUid === "00")
-            ? (this.discardPile[this.discardPile.length - 1] ?? activeTop.cardUid)
-            : activeTop.cardUid;
-        const declineBtn: ButtonBarButton = { label: `Decline ${declinedUid}`, value: "decline_power" };
-        if (justDeclined) {
-            // Greyed once clicked: the partial move already says it, and a second click would do nothing.
-            declineBtn.fill = GREYED_BUTTON_FILL;
-        }
-        return [...bar, declineBtn] as [ButtonBarButton, ...ButtonBarButton[]];
     }
 
     // Pick one value from a small labeled set: available is plain, unavailable is crossed out.
@@ -2201,15 +2114,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return suitUid === "R" && piece.orientation === "U";
     }
 
-    // The self-contained Play/Decline pair offered whenever a paused power has no button set of its own; reads the card being played off resumeEntry.
-    private pausedPowerButtons(): [ButtonBarButton, ButtonBarButton] {
-        const activeUid = this.resumeEntry()!.entry.cardUid;
-        return [
-            { label: `Play Card ${activeUid}`, value: "resume_power" },
-            { label: `Decline ${activeUid}`, value: "decline_power" },
-        ];
-    }
-
     // Shared by all end-of-turn discard/draw count-pickers. 
     private drawCountOptions(maxDraw: number): ChoiceOption[] {
         const options: ChoiceOption[] = [];
@@ -2219,132 +2123,121 @@ export class GnosticaGame extends GameBaseSequenced {
         return options;
     }
 
-    // #87/#88: each state below is its own named primitive, tried in this fixed order since two are genuinely order-dependent; undefined always means "keep going".
-    private computeActionButtons(): [ButtonBarButton, ...ButtonBarButton[]] | undefined {
-        if (this.gameover) {
-            return undefined;
-        }
+    // The whole button bar for a move, with the move each live button makes; `pending` and `actions` are the step and the top-level choices the move is at.
+    private barChoices(parsed: IParsedMove, pending: IPendingStep | undefined, actions: IStepChoices): IStepChoices {
+        const bar: IStepChoices = { buttons: [], moves: new Map() };
         // The "bidding" variant's opening procedure has no buttons: every click is on a hand card or a pool card.
-        if (this.phase !== "main") {
-            return undefined;
+        if (this.gameover || this.phase !== "main") {
+            return bar;
         }
-        const topLevel = this.buildTopLevelBar();
-        // Discard's count, and which of several pieces on one cell to orient, are the action's own buttons.
-        const actionButtons = this.preview?.actions.buttons ?? [];
-        if (actionButtons.length > 0) {
-            const head = this.preview!.head;
-            return [
-                ...topLevel.filter(b => b.value === head),
-                ...(head === "orient" ? [{ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] }] : []),
-                ...actionButtons,
-                ...topLevel.filter(b => b.value === "declare"),
-            ] as [ButtonBarButton, ...ButtonBarButton[]];
-        }
+        const { head } = parsed;
+        const last = parsed.announceLast ? " last" : "";
+        const highlighted = this.highlightedButtonValues(parsed);
+        // An owed card's steps are added to the move that plays it, even before Play is clicked.
+        const seed = head === undefined ? this.resumeMove(parsed) ?? parsed : parsed;
+        // How far an owed resume has got: not begun, Play clicked or a step typed, or Decline clicked.
+        const phase = this.continued.length === 0 ? "none" : head === undefined ? "owed" : head === "decline" ? "declined" : "playing";
+        // What each button would make of the move; only the buttons that end up on the bar, live, keep theirs.
+        const made = new Map<string, string | IClickResult>();
+        const divider = (label: string, glyph?: string): ButtonBarButton =>
+            ({ label, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], ...(glyph === undefined ? {} : { glyph }) });
 
-        const pendingMinor = this.computePendingMinor();
-        const phase = this.resumePhase();
-        if (pendingMinor === undefined) {
-            // A resume not yet begun with no step to show (a revealed Fool's flip takes none) is the bare Play/Decline pair.
-            if (phase === "owed") {
-                return this.pausedPowerButtons();
-            }
-            // A flip owed and then declined has nothing left to play, and the ordinary actions were never options: only Declare is left, and getActionButtons adds Decline.
-            if (phase === "declined") {
-                const declare = topLevel.find(b => b.value === "declare");
-                return declare === undefined ? this.pausedPowerButtons() : [declare];
-            }
-            // A move already chosen and fully built (a power's last step, an orient, a discard): the other actions are no more options than mid-step.
-            return this.chosenActionBar(topLevel);
+        // Before a player has any piece, placing one is the only action; a button the move already reflects is greyed.
+        const placeOnly = highlighted.has("place") || (!this.inPowerPlay(head) && !this.hasPiecesOnBoard(this.currplayer));
+        const topLevel = (placeOnly ? [["Place", "place"]] : [["Use Territory", "use"], ["Play Card", "play"], ["Orient", "orient"], ["Discard/Draw", "discard"], ["Pass", "pass"]])
+            .map(([label, value]): ButtonBarButton => highlighted.has(value) ? { label, value, fill: GREYED_BUTTON_FILL } : { label, value });
+        // The actions are only a choice before the move has one; discarding nothing and drawing nothing is a pass.
+        if (head === undefined && this.continued.length === 0) {
+            topLevel.forEach(b => made.set(b.value!, b.value === "pass" ? `discard draw 0${last}` : `${b.value}${last}`));
         }
-
-        // Once a power step's modes are on offer, only the one choice that got us here stays, plus a spacer and this step's own mode buttons; Declare stays available.
-        const selected = topLevel.find(b => b.value !== "declare" && b.fill !== undefined);
-        // #67: name the active card's uid once known - reusing the same activeCardUid #74's own move-string annotation is built from.
-        if (selected !== undefined) {
-            selected.label = `${selected.label} (${pendingMinor.activeCardUid})`;
-        }
-        const declareBtn = topLevel.find(b => b.value === "declare");
-
-        // A finished step whose piece can still be turned: board clicks set its facing, so the next step's buttons wait (getActionButtons adds Skip Reorient).
-        if (pendingMinor.next !== undefined) {
-            const waiting = [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])];
-            return waiting as [ButtonBarButton, ...ButtonBarButton[]];
-        }
-
-        const choices = pendingMinor.game.stepChoices(pendingMinor);
-        const around = (spacer: ButtonBarButton): [ButtonBarButton, ...ButtonBarButton[]] =>
-            [...(selected !== undefined ? [selected] : []), spacer, ...choices.buttons, ...(declareBtn !== undefined ? [declareBtn] : [])] as [ButtonBarButton, ...ButtonBarButton[]];
-        // Which minion acts: a button per piece when they share a cell, otherwise the board click that picks the cell.
-        if (pendingMinor.minionAmbiguous) {
-            // An owed resume is still the bare Play/Decline pair until Play is clicked; after that it reads like a card played from the hand.
-            return choices.buttons.length === 0 && phase === "owed" ? this.pausedPowerButtons() : around({ label: "Choose Minion", value: "_spacer", attributes: [{ name: "font-style", value: "italic" }] });
-        }
-        // High Priestess: the discard list is built via hand-card clicks, but the draw count is the player's own choice, same shape as the ordinary discard/draw count-picker.
-        if (pendingMinor.special === "highPriestess" && pendingMinor.istep.amount === undefined) {
-            return choices.buttons as [ButtonBarButton, ...ButtonBarButton[]];
-        }
-        // A special power with nothing to choose by button is played by board and hand clicks alone.
-        if (pendingMinor.special !== undefined && choices.buttons.length === 0) {
-            // A resume not yet begun: none of the ordinary buttons are legal, only the Play/Decline pair.
-            if (phase === "owed") {
-                return this.pausedPowerButtons();
-            }
-            return [...(selected !== undefined ? [selected] : []), ...(declareBtn !== undefined ? [declareBtn] : [])] as [ButtonBarButton, ...ButtonBarButton[]];
-        }
-        const spacerLabel = pendingMinor.suitUid ? ALL_SUITS.filter(obj => obj.uid === pendingMinor.suitUid)[0].label : "Special Power";
-        const glyph = pendingMinor.suitUid ? GnosticaGame.suitButtonGlyph(pendingMinor.suitUid) : `buttonpower_${pendingMinor.special}`;
-        return around({ label: spacerLabel, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], glyph });
-    }
-
-    // Once an action is chosen the bar keeps just it (greyed) and Declare; the whole ordinary set is only for an empty move or a bare "last".
-    private chosenActionBar(topLevel: ButtonBarButton[]): [ButtonBarButton, ...ButtonBarButton[]] {
-        const chosen = this.preview === undefined ? [] : topLevel.filter(b => b.value !== undefined && b.value !== "declare" && this.preview!.highlighted.has(b.value));
-        if (chosen.length === 0) {
-            return topLevel as [ButtonBarButton, ...ButtonBarButton[]];
-        }
-        const declare = topLevel.find(b => b.value === "declare");
-        return (declare === undefined ? chosen : [...chosen, declare]) as [ButtonBarButton, ...ButtonBarButton[]];
-    }
-
-    // The ordinary top-level choice (just Place before a player has any piece), with the action already taken greyed per highlightedButtonValues - the fallback bar, and the seed every pendingMinor state further trims.
-    private buildTopLevelBar(): ButtonBarButton[] {
-        const highlighted = this.preview?.highlighted ?? this.highlightedButtonValues(undefined);
-        // A live "place" preview is applied to the board, so hasPiecesOnBoard() already looks true; a live "use"/"play" is never a fresh start, however briefly it leaves the player with no pieces.
-        const placeOnly = highlighted.has("place") || (!this.inPowerPlay(this.preview?.head) && !this.hasPiecesOnBoard(this.currplayer));
-        const topLevel: ButtonBarButton[] = placeOnly
-            ? [{ label: "Place", value: "place" }]
-            : [
-                { label: "Use Territory", value: "use" },
-                { label: "Play Card", value: "play" },
-                { label: "Orient", value: "orient" },
-                { label: "Discard/Draw", value: "discard" },
-                { label: "Pass", value: "pass" },
-            ];
         // Declare is offered until someone has declared (committed, or staged in an open turn), and is a toggle, so once on it offers to undo itself rather than sit greyed.
-        if (!placeOnly && this.lastTurner === undefined && !this.continued.includes("last")) {
-            topLevel.push({ label: highlighted.has("declare") ? "(Undeclare)" : "(Declare)", value: "declare" });
+        const declare: ButtonBarButton[] = !placeOnly && this.lastTurner === undefined && !this.continued.includes("last")
+            ? [{ label: highlighted.has("declare") ? "(Undeclare)" : "(Declare)", value: "declare" }]
+            : [];
+        // The Play/Decline pair of an owed card with no buttons of its own.
+        const paused = (): ButtonBarButton[] => {
+            const uid = this.resumeEntry()!.entry.cardUid;
+            return [{ label: `Play Card ${uid}`, value: "resume_power" }, { label: `Decline ${uid}`, value: "decline_power" }];
+        };
+        if (phase !== "none") {
+            made.set("resume_power", this.pickleMove(this.freshResumeMove(false, parsed.announceLast)));
+            made.set("decline_power", this.pickleMove(this.freshResumeMove(true, parsed.announceLast)));
         }
-        // A button the move already reflects is greyed; clicking it would do nothing (see clickActionButton).
-        for (const b of topLevel) {
-            if (b.value !== "declare" && b.value !== undefined && highlighted.has(b.value)) {
-                b.fill = GREYED_BUTTON_FILL;
+
+        // A finished step has nothing left for the bar, unless its facing is still open.
+        const step = pending?.finished === true && pending.next === undefined ? undefined : pending;
+        const chosen = topLevel.filter(b => highlighted.has(b.value!));
+        let buttons: ButtonBarButton[];
+        if (actions.buttons.length > 0) {
+            // Discard's count, and which of several pieces on one cell to orient, are the action's own buttons.
+            buttons = [...topLevel.filter(b => b.value === head), ...(head === "orient" ? [divider("Choose Minion")] : []), ...actions.buttons, ...declare];
+        } else if (step === undefined) {
+            // An owed card not yet begun is the Play/Decline pair; once declined, only Declare is left. Otherwise a chosen action stays alone with Declare.
+            buttons = phase === "owed" || (phase === "declined" && declare.length === 0) ? paused()
+                : phase === "declined" ? declare
+                : [...(chosen.length === 0 ? topLevel : chosen), ...declare];
+        } else {
+            const choices = step.game.stepChoices(step);
+            choices.moves.forEach((move, key) => key.startsWith("_btn_") && made.set(key.slice("_btn_".length), move));
+            // Once a power step is on offer, only the action that got here stays, naming its card; Declare stays available.
+            const selected = chosen.slice(0, 1).map(b => ({ ...b, label: `${b.label as string} (${step.activeCardUid})` }));
+            const around = (spacer: ButtonBarButton): ButtonBarButton[] => [...selected, spacer, ...choices.buttons, ...declare];
+            if (step.next !== undefined) {
+                // The finished step's piece can still be turned by board clicks; Skip Reorient settles its facing and goes on to the next power.
+                buttons = [...selected, { label: "Skip Reorient", value: "skip_reorient" }, ...declare];
+                made.set("skip_reorient", this.settleFacing(seed));
+            } else if (step.minionAmbiguous) {
+                // Which minion acts: a button per piece when they share a cell, otherwise the board click that picks the cell.
+                buttons = choices.buttons.length === 0 && phase === "owed" ? paused() : around(divider("Choose Minion"));
+            } else if (step.special === "highPriestess" && step.istep.amount === undefined) {
+                buttons = [...choices.buttons];
+            } else if (step.special !== undefined && choices.buttons.length === 0) {
+                // A special power with nothing to choose by button is played by board and hand clicks alone.
+                buttons = phase === "owed" ? paused() : [...selected, ...declare];
+            } else {
+                const suit = ALL_SUITS.find(s => s.uid === step.suitUid);
+                buttons = around(divider(suit?.label ?? "Special Power", suit !== undefined ? GnosticaGame.suitButtonGlyph(suit.uid) : `buttonpower_${step.special}`));
             }
         }
-        return topLevel;
+        actions.moves.forEach((move, key) => key.startsWith("_btn_") && made.set(key.slice("_btn_".length), move));
+
+        // Skip Power goes just before Declare; a bar without Declare (the bare Play/Decline pair) has none.
+        const at = buttons.findIndex(b => b.value === "declare");
+        if (at >= 0 && this.skipPowerOffered(step)) {
+            buttons.splice(at, 0, { label: "Skip Power", value: "skip" });
+            made.set("skip", this.pickleMove({ ...seed, steps: [seed.steps[0], { action: "skip", complete: -1 }] }));
+        }
+        // An owed card can be declined until Play is clicked or a step of it typed; the High Priestess's second round never can.
+        if ((phase === "owed" || phase === "declined") && !buttons.some(b => b.value === "decline_power") && this.getContinuedUid() !== "02") {
+            const activeUid = step?.activeCardUid ?? this.activeCardUid();
+            // A declined Fool flip names the card it revealed.
+            const declinedUid = phase === "declined" && activeUid === "00" ? this.discardPile[this.discardPile.length - 1] ?? activeUid : activeUid;
+            // Greyed once clicked: the move already says it.
+            buttons.push({ label: `Decline ${declinedUid}`, value: "decline_power", ...(phase === "declined" ? { fill: GREYED_BUTTON_FILL } : {}) });
+        }
+        // Undo ends every bar; crossed out, like any unavailable action, when the move has no action or declaration to take back.
+        buttons.push({ label: "Undo", value: "undo", ...(head === undefined && !parsed.announceLast ? { attributes: [{ name: "text-decoration", value: "line-through" }] } : {}) });
+
+        // A greyed or crossed-out button must not act when clicked, so it gets a value no click matches.
+        for (const b of buttons) {
+            const dead = b.fill === GREYED_BUTTON_FILL || b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through") === true;
+            if (dead && b.value !== undefined && !b.value.startsWith("_")) {
+                bar.buttons.push({ ...b, value: `_disabled_${b.value}` });
+                continue;
+            }
+            bar.buttons.push(b);
+            const move = b.value === undefined ? undefined : made.get(b.value);
+            if (move !== undefined) {
+                bar.moves.set(`_btn_${b.value}`, move);
+            }
+        }
+        return bar;
     }
 
     // The card the move uses or plays (for a resume, the one it plays), or the card the World borrows.
     private keyCard(parsed: IParsedMove | undefined): string | undefined {
         const play = parsed === undefined ? undefined : this.resolvePowerPlay(parsed);
         return play?.asUid ?? play?.headArg;
-    }
-
-    // For a genuine resume, the preview's seed is a move string rebuilt from this.continued plus the typed segments; no "already reflected" bookkeeping needed.
-    private computePendingMinor(): IPendingStep | undefined {
-        const seed = this.resumeMove();
-        const pending = this.preview !== undefined ? this.preview.pending : seed === undefined ? undefined : this.parsePendingStep(seed);
-        // A finished step has nothing left for the bar, unless its facing is still open.
-        return pending?.finished === true && pending.next === undefined ? undefined : pending;
     }
 
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
@@ -3254,13 +3147,19 @@ export class GnosticaGame extends GameBaseSequenced {
             return this.handleBiddingClick(parsed, piece);
         }
         // A pending obligation's own real click targets show up directly, so the move may still be leftover from before it existed - seed it uniformly here.
+        const typed = parsed;
         if (parsed.head === undefined) {
             parsed = this.resumeMove(parsed) ?? parsed;
         }
         // A click outside the board grid (both coordinates negative) names what was clicked in `piece`; a buffer segment only has one coordinate out of range, and goes to clickBoard.
         if (row < 0 && col < 0 && piece !== undefined) {
+            // Undo works on any move, valid or not, so it isn't looked up on the bar.
+            if (piece === "_btn_undo") {
+                return this.pickleMove(this.retractedMove(parsed));
+            }
             if (piece.startsWith("_btn_")) {
-                return this.clickButton(parsed, piece.slice("_btn_".length));
+                const bar = this.barChoices(typed, this.parsePendingStep(this.resumeMove(typed) ?? typed), this.actionChoices(typed));
+                return bar.moves.get(piece) ?? this.noop(parsed);
             }
             // Discard-pile clicks drive judgementDraw only; a minor-arcana bucket has no individual identity, so clicking one draws a uniformly-random not-yet-selected uid from it.
             if (/^[A-Z]_(spot|royal)_/.test(piece)) {
@@ -3273,52 +3172,6 @@ export class GnosticaGame extends GameBaseSequenced {
             }
         }
         return this.clickBoard(parsed, row, col, piece);
-    }
-
-    private clickButton(parsed: IParsedMove, value: string): string | IClickResult {
-        // A button a pending step offers makes the move its choice records.
-        if (/^(minion|target|pips|magician|hpdraw)_/.test(value) || value === "drawn" || value === "destroy") {
-            const pending = this.parsePendingStep(parsed);
-            return pending?.game.stepChoices(pending).moves.get(`_btn_${value}`) ?? this.noop(parsed);
-        }
-        if (/^(orientpick|drawcount)_/.test(value)) {
-            return this.actionChoices(parsed).moves.get(`_btn_${value}`) ?? this.noop(parsed);
-        }
-        return this.clickActionButton(parsed, value);
-    }
-
-    private clickActionButton(parsed: IParsedMove, value: string): string | IClickResult {
-        const last = parsed.announceLast ? " last" : "";
-        // The actions are only a choice before the move has one.
-        if (["pass", "discard", "place", "use", "play", "orient"].includes(value) && (parsed.head !== undefined || this.continued.length > 0)) {
-            return this.noop(parsed);
-        }
-        switch (value) {
-            case "pass":
-                // A genuine pass - explicitly zero discards AND zero draw; a bare "discard" seed defaults its omitted "draw <n>" to the max, so it isn't equivalent.
-                return `discard draw 0${last}`;
-            case "discard":
-                // validateDiscard's own message already says this - no override needed.
-                return `discard${last}`;
-            case "place": case "use": case "play": case "orient":
-                // Place isn't strictly necessary (an empty move already builds "place <cell>" from a bare board click), but is offered for consistency with every other action.
-                return `${value}${last}`;
-            case "resume_power":
-                // Seeds the resume submission's head + already-known card uid directly - pendingPower already names the exact card, no board click needed.
-                // Returned as a candidate string, not a hardcoded complete:-1, since a resumed Fool flip is ALREADY complete and needs Submit enabled.
-                return this.pickleMove(this.freshResumeMove(false, parsed.announceLast));
-            case "decline_power":
-                // Declining pops the CURRENT top of the stack; Fool's own remaining flip auto-resolves on this same commit instead of pausing.
-                return this.pickleMove(this.freshResumeMove(true, parsed.announceLast));
-            case "undo":
-                return this.pickleMove(this.retractedMove(parsed));
-            case "skip_reorient":
-                return this.settleFacing(parsed);
-            case "skip":
-                return this.skipPowerOffered(this.parsePendingStep(parsed)) ? this.pickleMove({ ...parsed, steps: [parsed.steps[0], { action: "skip", complete: -1 }] }) : this.noop(parsed);
-            default:
-                return this.noop(parsed);
-        }
     }
 
     private clickHandCard(parsed: IParsedMove, uid: string): string | IClickResult {
@@ -5809,11 +5662,8 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
                 // A greyed or crossed-out button must not act when clicked, so it gets a value no handler recognizes.
-                const actionButtons = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] as [ButtonBarButton] : this.withUndo(this.getActionButtons())?.map(b => b.value !== undefined && !b.value.startsWith("_")
-                    && (b.fill === GREYED_BUTTON_FILL || b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through"))
-                    ? { ...b, value: `_disabled_${b.value}` }
-                    : b) as [ButtonBarButton, ...ButtonBarButton[]] | undefined;
-                for (const button of actionButtons ?? []) {
+                const actionButtons: ButtonBarButton[] = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] : (this.preview ?? this.buildPreview(this.parseMove(""))).bar;
+                for (const button of actionButtons) {
                     if (button.glyph?.startsWith("buttonpiece_") && !(button.glyph in legend)) {
                         legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice("buttonpiece_".length)));
                     } else if (button.glyph?.startsWith("buttonsuit_") && !(button.glyph in legend)) {
@@ -5822,8 +5672,8 @@ export class GnosticaGame extends GameBaseSequenced {
                         legend[button.glyph] = { name: POWERS[button.glyph.slice("buttonpower_".length) as SpecialPower].icon };
                     }
                 }
-                if (actionButtons !== undefined) {
-                    areas.push({ type: "buttonBar", position: "right", buttons: actionButtons });
+                if (actionButtons.length > 0) {
+                    areas.push({ type: "buttonBar", position: "right", buttons: actionButtons as [ButtonBarButton, ...ButtonBarButton[]] });
                 }
             }
 
