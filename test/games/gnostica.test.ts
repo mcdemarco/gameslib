@@ -953,18 +953,19 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             hands: [["2C", "KS", "5D"], ["3S", "4S"]],
         });
 
-        it("a second power alone is spelled with its OWN action (Justice's sword, Empress's cup), not the card's first power", () => {
+        it("a second power alone follows a skip, and is spelled with its OWN action (Justice's sword, Empress's cup)", () => {
             const justice = setupSpecial(11);
             expect(justice.validateMove("use 11/with m0.2 trade n0.1").valid).to.be.true;
-            expect(justice.validateMove("use 11/with m0.2 shrink n0.1 1").valid).to.be.true;
-            justice.move("use 11/with m0.2 shrink n0.1 1");
+            expect(justice.validateMove("use 11/with m0.2 shrink n0.1 1").valid).to.be.false; // no skip
+            expect(justice.validateMove("use 11/skip/with m0.2 shrink n0.1 1").valid).to.be.true;
+            justice.move("use 11/skip/with m0.2 shrink n0.1 1");
             expect(justice.hands[0]).to.deep.equal(["2C", "KS", "5D"]); // hands were not traded
             expect(justice.board.get("n0")!.pieces.length).eq(0); // the size-1 enemy piece was attacked
 
             const empress = setupSpecial(3);
             expect(empress.validateMove("use 03/orient m0.2 N").valid).to.be.true;
-            expect(empress.validateMove("use 03/with m0.2 at n0 create U").valid).to.be.true;
-            empress.move("use 03/with m0.2 at n0 create U");
+            expect(empress.validateMove("use 03/skip/with m0.2 at n0 create U").valid).to.be.true;
+            empress.move("use 03/skip/with m0.2 at n0 create U");
             expect(empress.board.get("n0")!.pieces.length).eq(2); // the created piece
             expect(empress.board.get("m0")!.pieces[0].orientation).eq("E"); // not reoriented
         });
@@ -988,42 +989,42 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
 
         it("Lovers: the cup alone creates a piece; the full two-power form (rod then cup) still works", () => {
             const g = setupCard(6);
-            g.move("use 06/with m0.2 at n0 create U");
+            g.move("use 06/skip/with m0.2 at n0 create U");
             expect(g.board.get("n0")!.pieces.length).eq(2);
             expect(setupCard(6).validateMove("use 06/with m0.2 move m0.2 1/with n0.2 at o0 create U").valid).to.be.true;
         });
 
         it("Emperor: the rod alone moves the piece", () => {
             const g = setupCard(4);
-            g.move("use 04/with m0.2 move m0.2 1");
+            g.move("use 04/skip/with m0.2 move m0.2 1");
             expect(g.board.get("n0")!.pieces.some(p => p.owner === 1 && p.size === 2)).to.be.true;
         });
 
         it("Hanged Man: the trade alone swaps hands", () => {
             const g = setupCard(12);
-            g.move("use 12/with m0.2 trade n0.1");
+            g.move("use 12/skip/with m0.2 trade n0.1");
             expect(g.hands[0]).to.deep.equal(["3S", "4S"]);
         });
 
         it("Tower and Moon: the sword alone destroys the enemy piece", () => {
             const tower = setupCard(16);
-            tower.move("use 16/with m0.2 shrink n0.1 1");
+            tower.move("use 16/skip/with m0.2 shrink n0.1 1");
             expect(tower.board.get("n0")?.pieces.length ?? 0).eq(0);
             const moon = setupCard(18);
-            moon.move("use 18/with m0.2 shrink n0.1 1");
+            moon.move("use 18/skip/with m0.2 shrink n0.1 1");
             expect(moon.board.get("n0")?.pieces.length ?? 0).eq(0);
         });
 
         it("Star: the disc alone grows the piece", () => {
             const g = setupCard(17);
-            g.move("use 17/with m0.2 grow m0.2");
+            g.move("use 17/skip/with m0.2 grow m0.2");
             expect(g.board.get("m0")!.pieces[0].size).eq(3);
         });
 
         it("Sun: the disc alone is an ordinary grow with exact stash accounting", () => {
             const g = setupCard(19);
             const before = g.stashes.get(1)!.slice();
-            g.move("use 19/with m0.2 grow m0.2");
+            g.move("use 19/skip/with m0.2 grow m0.2");
             expect(g.board.get("m0")!.pieces[0].size).eq(3);
             expect(g.stashes.get(1)).to.deep.equal([before[0], before[1] + 1, before[2] - 1]);
         });
@@ -2110,22 +2111,22 @@ describe("Gnostica: Tower and Star take their replacement card from the hand or 
 
     it("accepts a card from either place, and rejects one in neither with a real message", () => {
         const g = star();
-        expect(g.validateMove("use 17/with m0.2 grow n0 to KR").valid).to.be.true; // hand
-        expect(g.validateMove("use 17/with m0.2 grow n0 to KD").valid).to.be.true; // discards
-        const neither = g.validateMove("use 17/with m0.2 grow n0 to KS");
+        expect(g.validateMove("use 17/skip/with m0.2 grow n0 to KR").valid).to.be.true; // hand
+        expect(g.validateMove("use 17/skip/with m0.2 grow n0 to KD").valid).to.be.true; // discards
+        const neither = g.validateMove("use 17/skip/with m0.2 grow n0 to KS");
         expect(neither.valid).to.be.false;
         expect((neither as { message?: string }).message).to.not.include("{{");
-        g.move("use 17/with m0.2 grow n0 to KR");
+        g.move("use 17/skip/with m0.2 grow n0 to KR");
         expect(g.board.get("n0")!.cardUid).eq("KR");
         expect(g.discardPile).to.include("2C");
     });
 
     it("lets a click on the discard pile supply the card, as a click on a hand card does", () => {
         const g = star();
-        const fromDiscard = g.handleClick("use 17/with m0.2 grow n0", -1, -1, "D_royal_1");
-        expect(fromDiscard.move).eq("use 17/with m0.2 grow n0 to KD");
+        const fromDiscard = g.handleClick("use 17/skip/with m0.2 grow n0", -1, -1, "D_royal_1");
+        expect(fromDiscard.move).eq("use 17/skip/with m0.2 grow n0 to KD");
         expect(fromDiscard.valid).to.be.true;
-        expect(g.handleClick("use 17/with m0.2 grow n0", -1, -1, "cKR").move).eq("use 17/with m0.2 grow n0 to KR");
+        expect(g.handleClick("use 17/skip/with m0.2 grow n0", -1, -1, "cKR").move).eq("use 17/skip/with m0.2 grow n0 to KR");
     });
 });
 
@@ -6933,7 +6934,7 @@ describe("Gnostica: a move typed in mixed case", () => {
     it("creates and grows with a direction written in capitals or lower case, and rejects a cell in capitals", () => {
         same(duel("AC"), "use AC/with m0.2 at n0 create W", "use AC/with m0.2 at n0 create w");
         expect(duel("AC")().validateMove("use AC/with m0.2 at N0 create W").valid).to.be.false;
-        same(duel("17"), "use 17/with m0.2 grow n0.1 orient E", "use 17/with m0.2 grow n0.1 orient e");
+        same(duel("17"), "use 17/skip/with m0.2 grow n0.1 orient E", "use 17/skip/with m0.2 grow n0.1 orient e");
     });
 
     it("orients the minion itself with its orientation capitalised in the reference, and the direction in either case", () => {

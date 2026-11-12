@@ -4238,28 +4238,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return first !== undefined && second !== undefined && first !== second;
     }
 
-    // Powers are optional, so a card's second power may be used alone: when a typed step is spelled as a LATER power of the entry's card, the powers in
-    // between are skipped. Forward-only - a step matching only an earlier power finds no target here and is rejected as the wrong action further on.
-    private static skipAheadTarget(cardDef: MajorArcanaDef, from: number, istep: IStep | undefined): number {
-        if (istep === undefined || istep.action === "with") {
-            return from;
-        }
-        const current = GnosticaGame.powerAction(cardDef.powers[from]);
-        if (current === undefined || current === istep.action) {
-            return from;
-        }
-        for (let j = from + 1; j < cardDef.powers.length; j++) {
-            const action = GnosticaGame.powerAction(cardDef.powers[j]);
-            if (action === undefined) {
-                return from;
-            }
-            if (action === istep.action) {
-                return j;
-            }
-        }
-        return from;
-    }
-
     // What a resumed turn plays, rebuilt from the persisted this.continued tokens: the card the Fool revealed, or the owed card's own remaining power,
     // and the obligations beneath it.
     private resumeEntry(): { entry: IPowerProgress; owed: string[] } | undefined {
@@ -4348,13 +4326,6 @@ export class GnosticaGame extends GameBaseSequenced {
                     return AWAITING_INPUT;
                 }
                 continue;
-            }
-            if (kind === "step" && i < steps.length) {
-                const target = GnosticaGame.skipAheadTarget(cardDef, top.nextStepIndex, steps[i]);
-                if (target !== top.nextStepIndex) {
-                    top.nextStepIndex = target;
-                    continue;
-                }
             }
             let istep: IStep | undefined;
             let borrowedForStep: string | undefined;
