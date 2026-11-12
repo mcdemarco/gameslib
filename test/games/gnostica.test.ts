@@ -1524,6 +1524,21 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         expect(bar.map(b => b.label ?? b.value)).to.deep.equal(["Orient", "Choose Minion", "1-pip", "2-pip", "(Declare)", "Undo"]);
     });
 
+    it("Orient: a piece picked by button is told apart from an enemy piece of its size in the cell", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 3, "U"], [1, 1, "S"], [2, 1, "N"]] }],
+            hands: [filler, filler],
+        });
+        const picked = g.handleClick("orient m0", -1, -1, "_btn_orientpick_m0.1.S");
+        expect(picked.move).eq("orient m0.1.S");
+        expect(g.validateMove("orient m0.1.S").valid).to.be.true;
+        // A click that means nothing leaves the move alone, whether its ref names one piece or (typed by hand) two.
+        expect(g.handleClick("orient m0.1.S", -1, -1, "c2R").move).eq("orient m0.1.S");
+        expect(g.handleClick("orient m0.1", -1, -1, "c2R").move).eq("orient m0.1");
+        g.move("orient m0.1.S E");
+        expect(g.board.get("m0")!.pieces.map(p => p.id())).to.include("11E");
+    });
+
     it("Orient: until a piece is chosen, every one of the player's pieces is ringed, and then only the chosen one is", () => {
         const ringed = (partial: string): string[] => {
             const g = testGame({
@@ -6111,6 +6126,21 @@ describe("Gnostica: a new or changed minion's facing stays open to a click until
             const stray = g.handleClick(seeded, 0 - minY, -2 - minX);
             expect(stray.move).eq(seeded);
             expect(stray.message).eq(i18next.t("apgames:validation.gnostica.MAY_ORIENT"));
+        });
+
+        it("keeps the bare with through a click that changes nothing, a refused target, and a declaration", () => {
+            const g = hanged();
+            const skipped = `${seeded}/with`;
+            const shown = g.clone();
+            shown.move(skipped, { partial: true });
+            const { minX, minY } = shown.renderWindow();
+            expect(g.handleClick(skipped, 1 - minY, -1 - minX).move).eq(skipped);
+            // The moved piece's own cell: a trade can't target it.
+            expect(g.handleClick(skipped, 0 - minY, 1 - minX).move).eq(skipped);
+            expect(g.handleClick(skipped, -1, -1, "c2R").move).eq(skipped);
+            const declared = g.handleClick(skipped, -1, -1, "_btn_declare").move!;
+            expect(declared).eq(`${skipped} last`);
+            expect(g.validateMove(declared).valid).to.be.true;
         });
     });
 
