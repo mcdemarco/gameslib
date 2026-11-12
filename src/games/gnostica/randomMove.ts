@@ -1013,7 +1013,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
             return [];
         }
         const step = reparsedStep(game, built);
-        const result = game.validatePowerStack([{ cardUid: card.uid, nextStepIndex: 0, minions: [...eligible] }], [step], undefined);
+        const result = game.validatePowerStack({ cardUid: card.uid, nextStepIndex: 0, minions: [...eligible] }, [step], undefined);
         // Genuinely submittable is complete !== -1, not === 1 - see the
         // top-level loop's own matching docs. A Rods/Discs/Swords "piece"
         // step landing on the acting player's own minion is legitimately
@@ -1078,7 +1078,7 @@ function buildRandomChain(game: GnosticaGame, card: Card, eligible: IPieceRef[])
         }
     }
     const isCleanSuccess = (steps: IStep[]): boolean => {
-        const result = game.validatePowerStack([{ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }], steps, undefined);
+        const result = game.validatePowerStack({ cardUid: def.uid, nextStepIndex: 0, minions: [...eligible] }, steps, undefined);
         // Stopping partway through a chain that still has a genuinely
         // optional further step left is complete:0, not 1 (see
         // validatePowerSteps's own docs) - .valid alone is what actually
