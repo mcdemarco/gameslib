@@ -2121,6 +2121,7 @@
       "HIEROPHANT_SKIPPED_NO_TARGET": "There is no enemy piece for {{card}} to replace, so that part of its power will be skipped when you submit.",
       "INITIAL_INSTRUCTIONS_PLACE": "Place one 1-pip pyramid onto the board on any unoccupied territory or wasteland space.",
       "INVALID_MOVE": "The move was malformed. {{reason}}",
+      "KO": "That would leave the game as it was at the end of your last turn, which the ko rule forbids.",
       "LABEL_BIDDING_POOL": "Bidding pool",
       "LABEL_DECK": "Cards in deck",
       "LABEL_DISCARDS": "Discard pile",
@@ -7118,6 +7119,10 @@
       "bidding": {
         "description": "The start player is determined by a blind bidding process involving hand cards.",
         "name": "Opening bidding"
+      },
+      "ko": {
+        "description": "A turn may not end with the board, the player's hand, the discard pile and the size of the draw pile all as they were at the end of the same player's previous turn.",
+        "name": "Ko"
       },
       "no-majors": {
         "description": "No major arcana appear in the random starting layout, making for a longer and less swingy game.",

@@ -50,6 +50,7 @@ export const gameApgamesEn = {
         HIEROPHANT_SKIPPED_NO_TARGET: "There is no enemy piece for {{card}} to replace, so that part of its power will be skipped when you submit.",
         INITIAL_INSTRUCTIONS_PLACE: "Place one 1-pip pyramid onto the board on any unoccupied territory or wasteland space.",
         INVALID_MOVE: "The move was malformed. {{reason}}",
+        KO: "In the ko variant, you may not repeat the game state from the end of your previous turn.",
         LABEL_BIDDING_POOL: "Bidding pool",
         LABEL_DECK: "Cards in deck",
         LABEL_DISCARDS: "Discard pile",
@@ -118,6 +119,10 @@ export const gameApgamesEn = {
         bidding: {
             description: "The start player is determined by a blind bidding process involving hand cards.",
             name: "Opening bidding",
+        },
+        ko: {
+            description: "Add a ko rule: you may not repeat the game state (the board, pieces, discard pile, draw pile, and the contents of your hand) from the end of your previous turn.",
+            name: "Ko",
         },
         "no-majors": {
             description: "No major arcana appear in the random starting layout, making for a longer and less swingy game.",
@@ -561,6 +566,7 @@ export class GnosticaGame extends GameBaseSequenced {
             { uid: "#target" },
             { uid: "target-10", group: "target" },
             { uid: "bidding" },
+            { uid: "ko" },
             {
                 uid: "no-majors",
                 fans: true,
@@ -783,7 +789,49 @@ export class GnosticaGame extends GameBaseSequenced {
         return state;
     }
 
+    // Ko makes a move that is otherwise ready one that can't be submitted; it never touches a move still being built.
     public validateMove(m: string): IValidationResult {
+        const result = this.validateRules(m);
+        if (result.valid && (result.complete ?? -1) >= 0 && this.variants.includes("ko") && this.endsInKo(m)) {
+            return { valid: true, complete: -1, message: i18next.t("apgames:validation.gnostica.KO") };
+        }
+        return result;
+    }
+
+    // What ko compares: the board, the player's own hand and the discards whatever their order, and how many cards are left to draw.
+    // The hand is there for trades, which change nothing else.
+    private static koState(state: IMoveState, player: number): string {
+        const cells = [...new GnosticaBoard(state.board).entries()];
+        const held = cells.filter(([, , t]) => t.cardUid !== undefined).length + state.hands.flat().length + state.discardPile.length + (state.biddingPool ?? []).length;
+        return JSON.stringify([
+            cells.map(([x, y, t]) => `${x},${y}:${t.cardUid ?? ""}:${t.pieces.map(p => p.id()).sort().join(",")}`).sort(),
+            [...state.hands[player - 1]].sort(),
+            [...state.discardPile].sort(),
+            allCards().length - held,
+        ]);
+    }
+
+    // Whether the move ends the player's turn with the game as their previous turn left it.
+    private endsInKo(m: string): boolean {
+        // Back past this turn's own earlier moves, then past the other players' turns, to the end of the player's previous turn.
+        let i = this.stack.length - 1;
+        while (i >= 1 && this.plyActor(i) === this.currplayer) {
+            i--;
+        }
+        while (i >= 1 && this.plyActor(i) !== this.currplayer) {
+            i--;
+        }
+        // A territory drawn from the deck isn't known until the move is made, so it can't be held to ko.
+        if (i < 1 || this.parseMove(m).steps.some(step => step.drawn === true)) {
+            return false;
+        }
+        const after = this.scratchClone();
+        after.move(m, { trusted: true });
+        return after.continued.length === 0
+            && GnosticaGame.koState(after.stack[after.stack.length - 1], this.currplayer) === GnosticaGame.koState(this.stack[i], this.currplayer);
+    }
+
+    private validateRules(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
         if (this.gameover) {

@@ -7046,3 +7046,88 @@ describe("Gnostica: previews that once crashed", () => {
         expect(() => new GnosticaGame(g.serialize()).render()).to.not.throw();
     });
 });
+
+describe("Gnostica: the ko variant", () => {
+    const ko = () => i18next.t("apgames:validation.gnostica.KO");
+    const placed = (numplayers: number, variants: string[] = ["ko"]): GnosticaGame => {
+        const g = new GnosticaGame(numplayers, variants);
+        for (const cell of ["m0", "l0", "n0"].slice(0, numplayers)) {
+            g.move(`place ${cell} U`);
+        }
+        return g;
+    };
+
+    it("forbids ending a turn with the game as the player's previous turn left it", () => {
+        const g = placed(2);
+        // Player 1's own placement left only one piece on the board, so their pass changes nothing they did.
+        g.move("discard draw 0");
+        // Nothing has changed since player 2's placement.
+        const pass = g.validateMove("discard draw 0");
+        expect(pass).to.deep.include({ valid: true, complete: -1 });
+        expect(pass.message).eq(ko());
+        expect(() => g.move("discard draw 0")).to.throw();
+        expect(g.handleClick("", -1, -1, "_btn_pass")).to.deep.include({ move: "discard draw 0", valid: true, complete: -1 });
+        g.move("orient l0.1 N");
+        expect(g.currplayer).eq(1);
+    });
+
+    it("applies only with the variant, and never to a move still being built", () => {
+        const plain = placed(2, []);
+        plain.move("discard draw 0");
+        expect(plain.validateMove("discard draw 0")).to.deep.include({ valid: true, complete: 1 });
+
+        const g = placed(2);
+        g.move("discard draw 0");
+        const building = g.validateMove("orient l0.1");
+        expect(building.valid).to.be.true;
+        expect(building.message).to.not.eq(ko());
+    });
+
+    it("counts the discards and the size of the draw pile as well as the board", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [["2R", "3R", "4R"], ["5D", "6D", "7D"]],
+            variants: ["ko"],
+        });
+        g.drawPile = ["8C", "9C", "10C"];
+        g.move("orient m0.1 N");
+        g.move("discard draw 0"); // player 2 has no earlier turn to repeat
+        expect(g.validateMove("discard draw 0").message).eq(ko());
+        // Drawing a card leaves the board and the discards alone, but not the draw pile.
+        expect(g.validateMove("discard draw 1")).to.deep.include({ valid: true, complete: 1 });
+        // Discarding changes the discards.
+        expect(g.validateMove("discard 2R draw 0")).to.deep.include({ valid: true, complete: 1 });
+    });
+
+    it("does not count a turn as a repeat when a trade has changed the player's hand", () => {
+        const justice = () => testGame({
+            board: [{ x: 0, y: 0, uid: "11", pieces: [[1, 1, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }],
+            hands: [["2R", "3R", "4R"], ["5D", "6D", "7D"]],
+            variants: ["ko"],
+        });
+        // Player 1 trades, then declines Justice's attack: nothing but the hands has changed since their pass.
+        const g = justice();
+        g.move("discard draw 0");
+        g.move("discard draw 0");
+        g.move("use 11/with m0.1 trade n0.1");
+        expect(g.validateMove("decline 11")).to.deep.include({ valid: true, complete: 1 });
+        g.move("decline 11");
+        // Player 2's hand was swapped too, so their pass is not a repeat of their last one.
+        expect(g.currplayer).eq(2);
+        expect(g.validateMove("discard draw 0")).to.deep.include({ valid: true, complete: 1 });
+        g.move("discard draw 0");
+        // With the hands settled, player 1's pass would repeat the end of their trade turn.
+        expect(g.validateMove("discard draw 0").message).eq(ko());
+    });
+
+    it("looks back past every other player's turn", () => {
+        const g = placed(3);
+        g.move("discard draw 0");
+        g.move("discard draw 0");
+        // Player 3 placed last, and both passes since changed nothing.
+        expect(g.validateMove("discard draw 0").message).eq(ko());
+        g.move("orient n0.1 N");
+        // Player 1's pass is no longer a repeat: player 3 has turned a piece since.
+        expect(g.validateMove("discard draw 0")).to.deep.include({ valid: true, complete: 1 });
+    });
+});
