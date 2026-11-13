@@ -2283,7 +2283,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return pending.suitUid === undefined ? this.specialTargetCandidates(pending) : this.suitTargetCandidates(pending, pending.suitUid);
     }
 
-    // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy, matching pickPieceTargetClick's own rule.
+    // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy.
     private specialTargetCandidates(pending: IPendingStep): ChoiceOption[] {
         if (pending.special === "orientAny") {
             return this.pieceCandidateOptions(pending, "Orient");
@@ -2846,16 +2846,6 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         const minionPiece = pending.minion.piece;
         const faceCell = this.minorTargetCell(pending.minion);
-        // A click on the minion's own cell or the one it faces picks the piece there as the target.
-        const addTargetClicks = (moveFor: (ref: string) => string | IClickResult | undefined): void => {
-            for (const cell of [pending.minion.cell, faceCell]) {
-                const picked = this.pickPieceTargetClick(pending.minion, cell, pending);
-                const move = typeof picked === "string" ? moveFor(picked) : picked;
-                if (move !== undefined) {
-                    choices.moves.set(`cell:${cell}`, move);
-                }
-            }
-        };
         if (pending.suitUid === undefined) {
             switch (pending.special) {
                 case "orientMinion":
@@ -2869,12 +2859,11 @@ export class GnosticaGame extends GameBaseSequenced {
                 case "orientAny":
                 case "hierophantReplace":
                     if (istep.targetPiece === undefined) {
-                        choices.prompt = "CLICK_CELL";
-                        addTargetClicks(ref => this.buildSpecialTargetMove(pending, ref));
-                        // Buttons only when a click can't say which piece is meant; orientAny's own minion is always its own click.
                         const candidates = this.specialTargetCandidates(pending);
-                        if (candidates.length - (pending.special === "orientAny" ? 1 : 0) > 1) {
-                            this.addChoiceButtons(choices, "target", candidates, ref => this.buildSpecialTargetMove(pending, ref));
+                        this.addChoiceButtons(choices, "target", candidates, ref => this.buildSpecialTargetMove(pending, ref));
+                        // A trade or a replacement with no enemy in reach has nothing to offer, and says why.
+                        if (candidates.length === 0) {
+                            choices.prompt = pending.special === "tradeHands" ? "TRADEHANDS_MUST_TARGET_ENEMY" : "HIEROPHANT_MUST_TARGET_ENEMY";
                         }
                     } else if (pending.special !== "tradeHands" && istep.direction?.endsWith("?") !== false) {
                         // The clicked facing is final, so Hierophant's seeded one is dropped.
@@ -2896,11 +2885,9 @@ export class GnosticaGame extends GameBaseSequenced {
                             choices.anyCell = cell => this.stepMove(pending, { card: cardUid, targetCell: cell });
                         }
                     } else {
+                        // Once the piece is chosen, any cell is its destination.
                         choices.prompt = "CLICK_CELL";
-                        // The piece is a choice of the minion's cell or the one it faces; then any cell is its destination.
-                        if (istep.targetPiece === undefined) {
-                            addTargetClicks(ref => this.stepMove(pending, { targetPiece: ref }));
-                        } else if (istep.targetCell === undefined) {
+                        if (istep.targetCell === undefined) {
                             choices.anyCell = cell => this.stepMove(pending, { targetPiece: istep.targetPiece!, targetCell: cell });
                         }
                     }
@@ -3042,36 +3029,7 @@ export class GnosticaGame extends GameBaseSequenced {
         return this.assembleStepMove(pending, { ...istep, withPiece: minionRef, card: uid });
     }
 
-    // Shared self-or-facing-cell target pick, used by tradeHands/orientAny/hierophantReplace/hermitTeleport's "piece" mode alike; undefined when the click is off-target.
-    private pickPieceTargetClick(minion: IPieceRef, cell: string, pendingForError: IPendingStep): string | IClickResult | undefined {
-        const faceCell = this.minorTargetCell(minion);
-        // tradeHands/hierophantReplace must target an enemy; orientAny/hermitTeleport don't - reject a self-target immediately rather than fail only at submit.
-        const requiresEnemy = pendingForError.special === "tradeHands" || pendingForError.special === "hierophantReplace";
-        const enemyKey = pendingForError.special === "tradeHands" ? "TRADEHANDS_MUST_TARGET_ENEMY" : "HIEROPHANT_MUST_TARGET_ENEMY";
-        if (cell === minion.cell) {
-            if (requiresEnemy) {
-                return { move: this.moveString(pendingForError.move), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
-            }
-            return this.pieceRefStr(minion);
-        }
-        if (cell !== faceCell) {
-            return undefined;
-        }
-        const t = this.board.get(faceCell);
-        if (t === undefined || t.pieces.length === 0) {
-            return { move: this.moveString(pendingForError.move), valid: false, message: i18next.t("apgames:validation.gnostica.NO_PIECE_THERE", { cell }) };
-        }
-        if (requiresEnemy) {
-            const enemyIndex = t.pieces.findIndex(p => p.owner !== this.currplayer);
-            if (enemyIndex === -1) {
-                return { move: this.moveString(pendingForError.move), valid: false, message: i18next.t(`apgames:validation.gnostica.${enemyKey}`) };
-            }
-            return this.pieceRefStr({ cell: faceCell, piece: t.pieces[enemyIndex] });
-        }
-        return this.pieceRefStr({ cell: faceCell, piece: t.pieces[0] });
-    }
-
-    // Builds this step's own move string once a target ref is already resolved - shared by the click-driven stage 1 (pickPieceTargetClick) and the button-driven target picker.
+    // The step's move once its target button is clicked.
     private buildSpecialTargetMove(pending: IPendingStep, targetRef: string): string | undefined {
         if (pending.special === "hierophantReplace") {
             const targetResolution = this.resolvePieceRef(targetRef);
@@ -3113,10 +3071,11 @@ export class GnosticaGame extends GameBaseSequenced {
             // A click that would make the move illegal is refused, with the reason.
             outcome = { move, valid: false, message: built.message };
         }
-        // A refused click leaves the move as it was, still previewable, with its message.
+        // A refused click leaves the move as it was, still previewable, and says why, then what the move is waiting on.
         if (!outcome.valid && this.phase === "main") {
             const current = this.validateMove(outcome.move);
-            outcome = { ...outcome, valid: true, complete: current.valid ? current.complete : -1 };
+            const next = current.valid && current.message !== outcome.message ? ` ${current.message}` : "";
+            outcome = { ...outcome, valid: true, complete: current.valid ? current.complete : -1, message: `${outcome.message}${next}` };
         }
         return outcome.valid ? { ...outcome, canrender: true } : outcome;
     }
