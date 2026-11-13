@@ -12,25 +12,24 @@ Pre-release:
 	- #89 - Test mutating the game state with a manual move in production (e.g. via Emu Ranchers) to see what the errors look like.
 
 Miscellany:
-	- #64 - better discard/draw messaging: both the basic action and the High Priestess version
-	- #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances
-	- #91 - The Fool either didn't let me do the second half of the Sun or was so obscure in its notation that I didn't realize I could; needs retesting.
+	- #64 - better discard/draw messaging: both the basic action and the High Priestess version (done?)
+	- #65 - more consistent naming/numbering of major arcana cards, probably both in most circumstances (done?)
+	- #91 - The Fool either didn't let me do the second half of the Sun or was so obscure in its notation that I didn't realize I could; probably no longer needs retesting. (done?)
 	- #98 - Eliminate fall-throughs to the default handler error from informative button-bar buttons. @done(2026-10-??)
 	- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
-	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Retest.
-	- #115 - The question of case-sensitivity of directions.
-	- #131 - More analysis of this.preview.
+	- #109 - The UI got very confused trying to use Swords with Magician.  A regular Swords was fine.  Probably no longer needs retesting. (done?)
+	- #115 - The question of case-sensitivity of directions. @done(2026-10-??)
+	- #131 - More analysis of this.preview. @done(2026-10-??)
 	- #144 - Manual testing of special card unhiding (trade, bid, judgement)
 	- #145 - Review the generic instruction messages (CHOOSE_ACTION, CLICK_BUTTON, CLICK_CELL, CLICK_DISCARDS, CLICK_FACING, CLICK_HAND, CLICK_HAND_OR_DESTROY, DISCARD_AND_DRAW, MAY_CONTINUE, MAY_ORIENT, SUBMIT_TO_CONTINUE) that are to replace the per-power ones.
 
 UX:
 	- #78 - Add an Undo button to the button bar for backing out of various multi-step moves. @done(2026-10-04)
-	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick (done), etc.
+	- #97 - Bonus highlighting:  of major arcana cards on the board during the World's pick (done), etc. @done(2026-10-??)
 	- #120 - Add another display mode for letters instead of icons. @done(2026-10-07)
 	- #125 - UI for using only second power of different-powered major arcana cards. @done(2026-10-07)
-	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups.
-	- #128 - After next merge, add text labels to hand cards (for major arcana names)
-	- #140 - Make the Rods button wording consistent: the territory button says "Push Territory" but the piece buttons say "Move <owner>" (RDS_TARGET_LABELS).
+	- #126 - Need better messaging for board clicks or hand clicks, e.g. Cups. @done(2026-11-13)
+	- #140 - Make the Rods button wording consistent: the territory button says "Push Territory" but the piece buttons say "Move <owner>" (RDS_TARGET_LABELS). @done(2026-11-??)
 
 Refactoring:
 	- #99 - Remove one-liner wrappers like invalid() and failureResult(). @done(2026-10-22)
@@ -43,12 +42,13 @@ Rebasing:
 	- #116 - On next rebase, credit Russ with his variant. @done(2026-10-05)
 	- #132 - On rebase use dashed red piece. @done(2026-10-05)
 	- #133 - Test hidden info in playground! (Basics done, more to do.)
-	- #134 - Add icons to buttons, done?
+	- #134 - Add icons to buttons, done? @done(2026-11-??)
 	- #135 - Change stash sidebar now that it can contain "full legend definitions"? @done(2026-10-07)
+	- #128 - After next merge, add text labels to hand cards (for major arcana names) 
 	- #136 - Consider using piece area text labels.
 	- #137 - Consider combinable display options (once I have a second one) @done(2026-10-07)
 	- #138 - Deal with the changes to chatLog. @done(2026-10-07)
 	- #139 - Move the rest of the render path to the structured label style (action button labels, the hard-coded "(declarer)" text, any remaining i18next.t calls).
-	- #143 - Another rebase, this one with a big change to apgames.json.
+	- #143 - Another rebase, this one with a big change to apgames.json. @done(2026-11-13)
 	- #146 - After the rebase, deal with translation of the power names (SPECIAL_POWER_NAMES and the capitalized primitives in the key).
 
