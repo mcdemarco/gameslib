@@ -6540,43 +6540,9 @@ export class GnosticaGame extends GameBaseSequenced {
                             sayNeutral("apresults:_general.ELIMINATED.default", { player: ename });
                             break;
                         }
-                        case "eog":
-                            sayNeutral("apresults:_general.EOG.default");
-                            break;
-                        case "resigned": {
-                            let rname = `Player ${r.player}`;
-                            if (r.player <= players.length) {
-                                rname = players[r.player - 1];
-                            }
-                            sayNeutral("apresults:_general.RESIGN.default", { player: rname });
-                            break;
-                        }
-                        case "timeout": {
-                            let tname = `Player ${r.player}`;
-                            if (r.player <= players.length) {
-                                tname = players[r.player - 1];
-                            }
-                            sayNeutral("apresults:_general.TIMEOUT.default", { player: tname });
-                            break;
-                        }
-                        case "drawagreed":
-                            sayNeutral("apresults:_general.DRAWAGREED.default");
-                            break;
-                        case "gameabandoned":
-                            sayNeutral("apresults:_general.ABANDONED.default");
-                            break;
-                        case "winners": {
-                            const names: string[] = [];
-                            for (const w of r.players) {
-                                names.push(w <= players.length ? players[w - 1] : `Player ${w}`);
-                            }
-                            if (r.players.length === 0) {
-                                sayNeutral("apresults:_general.WINNERSNONE.default");
-                            } else {
-                                sayNeutral("apresults:_general.WINNERS", { count: r.players.length, winners: names.join(", ") });
-                            }
-                            break;
-                        }
+                        // The results every game shares (end of game, resignation, timeout, winners and the like) are worded by the base class.
+                        default:
+                            this.collectChatLogLine(lines, r, { results: state._results, currplayer: state.currplayer, defaultSeat: otherPlayer, players });
                     }
                 }
                 result.push({ timestamp: (state._timestamp && new Date(state._timestamp).toISOString()) || "unknown", lines });
