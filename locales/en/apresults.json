@@ -862,6 +862,71 @@
       "default": "{{player}} moved their glider at {{where}} off the edge of the board."
     }
   },
+  "gnostica": {
+    "ANNOUNCE": {
+      "decline": "{{player}} declined {{card}}'s power.",
+      "declore": "{{player}} ended their declared last turn with a score of {{count}}.",
+      "default": "Bidding is resolved. Turn order for the rest of the game will be {{turnOrder}}. Cards will be drawn from the bidding pool in the order {{redrawOrder}}."
+    },
+    "CONVERT": {
+      "hierophant": "{{player}} converted {{target}}'s piece to their own at {{where}}.",
+      "piece": "{{player}} grew {{target}}'s piece to {{into}} at {{where}}.",
+      "piece_own": "{{player}} grew their piece to {{into}} at {{where}}.",
+      "piece_shrink": "{{player}} shrank {{target}}'s piece to {{into}} at {{where}}.",
+      "piece_shrink_own": "{{player}} shrank their own piece to {{into}} at {{where}}.",
+      "tile": "{{player}} grew the territory at {{where}} from {{what}} into {{into}}.",
+      "tile_shrink": "{{player}} shrank the territory at {{where}} from {{what}} into {{into}}."
+    },
+    "DECKDRAW": {
+      "deck": "{{player}} drew {{count}} card(s) from the deck.",
+      "discard": "{{player}} drew {{count}} card(s) from the discard pile.",
+      "fool": "{{player}} drew {{what}}.",
+      "fool_fail": "{{player}} was unable to draw a card for The Fool (0).",
+      "hand": "{{player}} played {{what}}.",
+      "pool": "{{player}} drew card(s) {{what}} from the bidding pool."
+    },
+    "DECLARE": {
+      "default": "{{player}} declared their last turn with a score of {{count}}."
+    },
+    "DESTROY": {
+      "piece": "{{player}} destroyed {{target}}'s {{what}}-pip piece.",
+      "piece_own": "{{player}} destroyed their own {{what}}-pip piece.",
+      "tile": "{{player}} destroyed {{what}} at {{where}}."
+    },
+    "MOVE": {
+      "hermit_piece": "{{player}} teleported {{target}}'s {{what}}-pip piece from {{from}} to {{to}}.",
+      "hermit_piece_own": "{{player}} teleported their {{what}}-pip piece from {{from}} to {{to}}.",
+      "hermit_tile": "{{player}} teleported the territory at {{from}} to {{to}}.",
+      "rod_piece_own": "{{player}} moved their own {{what}}-pip piece from {{from}} to {{to}}.",
+      "rod_push": "{{player}} pushed {{target}}'s {{what}}-pip piece from {{from}} to {{to}}.",
+      "rod_push_own": "{{player}} pushed their own {{what}}-pip piece from {{from}} to {{to}}.",
+      "rod_tile": "{{player}} pushed the territory at {{from}} to {{to}}.",
+      "rod_void": "{{player}} pushed {{target}}'s {{what}}-pip piece from {{from}} into the void.",
+      "rod_void_own": "{{player}} pushed their own {{what}}-pip piece from {{from}} into the void.",
+      "rod_void_self": "{{player}} moved their own {{what}}-pip piece from {{from}} into the void."
+    },
+    "ORIENT": {
+      "default": "{{player}} oriented {{target}}'s {{what}}-pip piece at {{where}} {{facing}}-ward.",
+      "default_own": "{{player}} oriented a {{what}}-pip minion at {{where}} {{facing}}-ward."
+    },
+    "PLACE": {
+      "discard": "{{player}} discarded {{what}}.",
+      "enemy": "{{player}} added a new piece of {{target}}'s to {{where}}.",
+      "initial": "{{player}} placed their first piece at {{where}}.",
+      "own": "{{player}} added one of their pieces to {{where}}.",
+      "territory": "{{player}} placed a new territory, {{what}}, at {{where}}."
+    },
+    "SELECT": {
+      "default": "{{player}} selected a bid card."
+    },
+    "SWAP": {
+      "default": "{{player}} traded hands with {{target}}."
+    },
+    "USE": {
+      "default": "{{player}} used {{what}}.",
+      "world": "{{player}} borrowed the power of {{what}}."
+    }
+  },
   "go": {
     "EOG": {
       "repetition": "The game has ended because the same position was repeated (super-ko)."

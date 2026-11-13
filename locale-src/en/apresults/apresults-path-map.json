@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-06",
+  "generatedAt": "2026-11-13",
   "schemaVersion": 1,
   "entries": [
     {
@@ -3711,6 +3711,416 @@
       "newPath": "gliss.REMOVE.default",
       "newFullKey": "apresults:gliss.REMOVE.default",
       "english": "{{player}} moved their glider at {{where}} off the edge of the board."
+    },
+    {
+      "oldPath": "ANNOUNCE.gnostica_decline",
+      "oldFullKey": "apresults:ANNOUNCE.gnostica_decline",
+      "uid": "gnostica",
+      "resultType": "ANNOUNCE",
+      "newLeaf": "decline",
+      "newPath": "gnostica.ANNOUNCE.decline",
+      "newFullKey": "apresults:gnostica.ANNOUNCE.decline",
+      "english": "{{player}} declined {{card}}'s power."
+    },
+    {
+      "oldPath": "ANNOUNCE.gnostica_declore",
+      "oldFullKey": "apresults:ANNOUNCE.gnostica_declore",
+      "uid": "gnostica",
+      "resultType": "ANNOUNCE",
+      "newLeaf": "declore",
+      "newPath": "gnostica.ANNOUNCE.declore",
+      "newFullKey": "apresults:gnostica.ANNOUNCE.declore",
+      "english": "{{player}} ended their declared last turn with a score of {{count}}."
+    },
+    {
+      "oldPath": "ANNOUNCE.gnostica",
+      "oldFullKey": "apresults:ANNOUNCE.gnostica",
+      "uid": "gnostica",
+      "resultType": "ANNOUNCE",
+      "newLeaf": "default",
+      "newPath": "gnostica.ANNOUNCE.default",
+      "newFullKey": "apresults:gnostica.ANNOUNCE.default",
+      "english": "Bidding is resolved. Turn order for the rest of the game will be {{turnOrder}}. Cards will be drawn from the bidding pool in the order {{redrawOrder}}."
+    },
+    {
+      "oldPath": "CONVERT.gnostica_hierophant",
+      "oldFullKey": "apresults:CONVERT.gnostica_hierophant",
+      "uid": "gnostica",
+      "resultType": "CONVERT",
+      "newLeaf": "hierophant",
+      "newPath": "gnostica.CONVERT.hierophant",
+      "newFullKey": "apresults:gnostica.CONVERT.hierophant",
+      "english": "{{player}} converted {{target}}'s piece to their own at {{where}}."
+    },
+    {
+      "oldPath": "CONVERT.gnostica_piece",
+      "oldFullKey": "apresults:CONVERT.gnostica_piece",
+      "uid": "gnostica",
+      "resultType": "CONVERT",
+      "newLeaf": "piece",
+      "newPath": "gnostica.CONVERT.piece",
+      "newFullKey": "apresults:gnostica.CONVERT.piece",
+      "english": "{{player}} grew {{target}}'s piece to {{into}} at {{where}}."
+    },
+    {
+      "oldPath": "CONVERT.gnostica_piece_own",
+      "oldFullKey": "apresults:CONVERT.gnostica_piece_own",
+      "uid": "gnostica",
+      "resultType": "CONVERT",
+      "newLeaf": "piece_own",
+      "newPath": "gnostica.CONVERT.piece_own",
+      "newFullKey": "apresults:gnostica.CONVERT.piece_own",
+      "english": "{{player}} grew their piece to {{into}} at {{where}}."
+    },
+    {
+      "oldPath": "CONVERT.gnostica_piece_shrink",
+      "oldFullKey": "apresults:CONVERT.gnostica_piece_shrink",
+      "uid": "gnostica",
+      "resultType": "CONVERT",
+      "newLeaf": "piece_shrink",
+      "newPath": "gnostica.CONVERT.piece_shrink",
+      "newFullKey": "apresults:gnostica.CONVERT.piece_shrink",
+      "english": "{{player}} shrank {{target}}'s piece to {{into}} at {{where}}."
+    },
+    {
+      "oldPath": "CONVERT.gnostica_piece_shrink_own",
+      "oldFullKey": "apresults:CONVERT.gnostica_piece_shrink_own",
+      "uid": "gnostica",
+      "resultType": "CONVERT",
+      "newLeaf": "piece_shrink_own",
+      "newPath": "gnostica.CONVERT.piece_shrink_own",
+      "newFullKey": "apresults:gnostica.CONVERT.piece_shrink_own",
+      "english": "{{player}} shrank their own piece to {{into}} at {{where}}."
+    },
+    {
+      "oldPath": "CONVERT.gnostica_tile",
+      "oldFullKey": "apresults:CONVERT.gnostica_tile",
+      "uid": "gnostica",
+      "resultType": "CONVERT",
+      "newLeaf": "tile",
+      "newPath": "gnostica.CONVERT.tile",
+      "newFullKey": "apresults:gnostica.CONVERT.tile",
+      "english": "{{player}} grew the territory at {{where}} from {{what}} into {{into}}."
+    },
+    {
+      "oldPath": "CONVERT.gnostica_tile_shrink",
+      "oldFullKey": "apresults:CONVERT.gnostica_tile_shrink",
+      "uid": "gnostica",
+      "resultType": "CONVERT",
+      "newLeaf": "tile_shrink",
+      "newPath": "gnostica.CONVERT.tile_shrink",
+      "newFullKey": "apresults:gnostica.CONVERT.tile_shrink",
+      "english": "{{player}} shrank the territory at {{where}} from {{what}} into {{into}}."
+    },
+    {
+      "oldPath": "DECKDRAW.gnostica_deck",
+      "oldFullKey": "apresults:DECKDRAW.gnostica_deck",
+      "uid": "gnostica",
+      "resultType": "DECKDRAW",
+      "newLeaf": "deck",
+      "newPath": "gnostica.DECKDRAW.deck",
+      "newFullKey": "apresults:gnostica.DECKDRAW.deck",
+      "english": "{{player}} drew {{count}} card(s) from the deck."
+    },
+    {
+      "oldPath": "DECKDRAW.gnostica_discard",
+      "oldFullKey": "apresults:DECKDRAW.gnostica_discard",
+      "uid": "gnostica",
+      "resultType": "DECKDRAW",
+      "newLeaf": "discard",
+      "newPath": "gnostica.DECKDRAW.discard",
+      "newFullKey": "apresults:gnostica.DECKDRAW.discard",
+      "english": "{{player}} drew {{count}} card(s) from the discard pile."
+    },
+    {
+      "oldPath": "DECKDRAW.gnostica_fool",
+      "oldFullKey": "apresults:DECKDRAW.gnostica_fool",
+      "uid": "gnostica",
+      "resultType": "DECKDRAW",
+      "newLeaf": "fool",
+      "newPath": "gnostica.DECKDRAW.fool",
+      "newFullKey": "apresults:gnostica.DECKDRAW.fool",
+      "english": "{{player}} drew {{what}}."
+    },
+    {
+      "oldPath": "DECKDRAW.gnostica_fool_fail",
+      "oldFullKey": "apresults:DECKDRAW.gnostica_fool_fail",
+      "uid": "gnostica",
+      "resultType": "DECKDRAW",
+      "newLeaf": "fool_fail",
+      "newPath": "gnostica.DECKDRAW.fool_fail",
+      "newFullKey": "apresults:gnostica.DECKDRAW.fool_fail",
+      "english": "{{player}} was unable to draw a card for The Fool (0)."
+    },
+    {
+      "oldPath": "DECKDRAW.gnostica_hand",
+      "oldFullKey": "apresults:DECKDRAW.gnostica_hand",
+      "uid": "gnostica",
+      "resultType": "DECKDRAW",
+      "newLeaf": "hand",
+      "newPath": "gnostica.DECKDRAW.hand",
+      "newFullKey": "apresults:gnostica.DECKDRAW.hand",
+      "english": "{{player}} played {{what}}."
+    },
+    {
+      "oldPath": "DECKDRAW.gnostica_pool",
+      "oldFullKey": "apresults:DECKDRAW.gnostica_pool",
+      "uid": "gnostica",
+      "resultType": "DECKDRAW",
+      "newLeaf": "pool",
+      "newPath": "gnostica.DECKDRAW.pool",
+      "newFullKey": "apresults:gnostica.DECKDRAW.pool",
+      "english": "{{player}} drew card(s) {{what}} from the bidding pool."
+    },
+    {
+      "oldPath": "DECLARE.gnostica",
+      "oldFullKey": "apresults:DECLARE.gnostica",
+      "uid": "gnostica",
+      "resultType": "DECLARE",
+      "newLeaf": "default",
+      "newPath": "gnostica.DECLARE.default",
+      "newFullKey": "apresults:gnostica.DECLARE.default",
+      "english": "{{player}} declared their last turn with a score of {{count}}."
+    },
+    {
+      "oldPath": "DESTROY.gnostica_piece",
+      "oldFullKey": "apresults:DESTROY.gnostica_piece",
+      "uid": "gnostica",
+      "resultType": "DESTROY",
+      "newLeaf": "piece",
+      "newPath": "gnostica.DESTROY.piece",
+      "newFullKey": "apresults:gnostica.DESTROY.piece",
+      "english": "{{player}} destroyed {{target}}'s {{what}}-pip piece."
+    },
+    {
+      "oldPath": "DESTROY.gnostica_piece_own",
+      "oldFullKey": "apresults:DESTROY.gnostica_piece_own",
+      "uid": "gnostica",
+      "resultType": "DESTROY",
+      "newLeaf": "piece_own",
+      "newPath": "gnostica.DESTROY.piece_own",
+      "newFullKey": "apresults:gnostica.DESTROY.piece_own",
+      "english": "{{player}} destroyed their own {{what}}-pip piece."
+    },
+    {
+      "oldPath": "DESTROY.gnostica_tile",
+      "oldFullKey": "apresults:DESTROY.gnostica_tile",
+      "uid": "gnostica",
+      "resultType": "DESTROY",
+      "newLeaf": "tile",
+      "newPath": "gnostica.DESTROY.tile",
+      "newFullKey": "apresults:gnostica.DESTROY.tile",
+      "english": "{{player}} destroyed {{what}} at {{where}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_hermit_piece",
+      "oldFullKey": "apresults:MOVE.gnostica_hermit_piece",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "hermit_piece",
+      "newPath": "gnostica.MOVE.hermit_piece",
+      "newFullKey": "apresults:gnostica.MOVE.hermit_piece",
+      "english": "{{player}} teleported {{target}}'s {{what}}-pip piece from {{from}} to {{to}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_hermit_piece_own",
+      "oldFullKey": "apresults:MOVE.gnostica_hermit_piece_own",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "hermit_piece_own",
+      "newPath": "gnostica.MOVE.hermit_piece_own",
+      "newFullKey": "apresults:gnostica.MOVE.hermit_piece_own",
+      "english": "{{player}} teleported their {{what}}-pip piece from {{from}} to {{to}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_hermit_tile",
+      "oldFullKey": "apresults:MOVE.gnostica_hermit_tile",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "hermit_tile",
+      "newPath": "gnostica.MOVE.hermit_tile",
+      "newFullKey": "apresults:gnostica.MOVE.hermit_tile",
+      "english": "{{player}} teleported the territory at {{from}} to {{to}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_rod_piece_own",
+      "oldFullKey": "apresults:MOVE.gnostica_rod_piece_own",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "rod_piece_own",
+      "newPath": "gnostica.MOVE.rod_piece_own",
+      "newFullKey": "apresults:gnostica.MOVE.rod_piece_own",
+      "english": "{{player}} moved their own {{what}}-pip piece from {{from}} to {{to}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_rod_push",
+      "oldFullKey": "apresults:MOVE.gnostica_rod_push",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "rod_push",
+      "newPath": "gnostica.MOVE.rod_push",
+      "newFullKey": "apresults:gnostica.MOVE.rod_push",
+      "english": "{{player}} pushed {{target}}'s {{what}}-pip piece from {{from}} to {{to}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_rod_push_own",
+      "oldFullKey": "apresults:MOVE.gnostica_rod_push_own",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "rod_push_own",
+      "newPath": "gnostica.MOVE.rod_push_own",
+      "newFullKey": "apresults:gnostica.MOVE.rod_push_own",
+      "english": "{{player}} pushed their own {{what}}-pip piece from {{from}} to {{to}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_rod_tile",
+      "oldFullKey": "apresults:MOVE.gnostica_rod_tile",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "rod_tile",
+      "newPath": "gnostica.MOVE.rod_tile",
+      "newFullKey": "apresults:gnostica.MOVE.rod_tile",
+      "english": "{{player}} pushed the territory at {{from}} to {{to}}."
+    },
+    {
+      "oldPath": "MOVE.gnostica_rod_void",
+      "oldFullKey": "apresults:MOVE.gnostica_rod_void",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "rod_void",
+      "newPath": "gnostica.MOVE.rod_void",
+      "newFullKey": "apresults:gnostica.MOVE.rod_void",
+      "english": "{{player}} pushed {{target}}'s {{what}}-pip piece from {{from}} into the void."
+    },
+    {
+      "oldPath": "MOVE.gnostica_rod_void_own",
+      "oldFullKey": "apresults:MOVE.gnostica_rod_void_own",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "rod_void_own",
+      "newPath": "gnostica.MOVE.rod_void_own",
+      "newFullKey": "apresults:gnostica.MOVE.rod_void_own",
+      "english": "{{player}} pushed their own {{what}}-pip piece from {{from}} into the void."
+    },
+    {
+      "oldPath": "MOVE.gnostica_rod_void_self",
+      "oldFullKey": "apresults:MOVE.gnostica_rod_void_self",
+      "uid": "gnostica",
+      "resultType": "MOVE",
+      "newLeaf": "rod_void_self",
+      "newPath": "gnostica.MOVE.rod_void_self",
+      "newFullKey": "apresults:gnostica.MOVE.rod_void_self",
+      "english": "{{player}} moved their own {{what}}-pip piece from {{from}} into the void."
+    },
+    {
+      "oldPath": "ORIENT.gnostica",
+      "oldFullKey": "apresults:ORIENT.gnostica",
+      "uid": "gnostica",
+      "resultType": "ORIENT",
+      "newLeaf": "default",
+      "newPath": "gnostica.ORIENT.default",
+      "newFullKey": "apresults:gnostica.ORIENT.default",
+      "english": "{{player}} oriented {{target}}'s {{what}}-pip piece at {{where}} {{facing}}-ward."
+    },
+    {
+      "oldPath": "ORIENT.gnostica_default_own",
+      "oldFullKey": "apresults:ORIENT.gnostica_default_own",
+      "uid": "gnostica",
+      "resultType": "ORIENT",
+      "newLeaf": "default_own",
+      "newPath": "gnostica.ORIENT.default_own",
+      "newFullKey": "apresults:gnostica.ORIENT.default_own",
+      "english": "{{player}} oriented a {{what}}-pip minion at {{where}} {{facing}}-ward."
+    },
+    {
+      "oldPath": "PLACE.gnostica_discard",
+      "oldFullKey": "apresults:PLACE.gnostica_discard",
+      "uid": "gnostica",
+      "resultType": "PLACE",
+      "newLeaf": "discard",
+      "newPath": "gnostica.PLACE.discard",
+      "newFullKey": "apresults:gnostica.PLACE.discard",
+      "english": "{{player}} discarded {{what}}."
+    },
+    {
+      "oldPath": "PLACE.gnostica_enemy",
+      "oldFullKey": "apresults:PLACE.gnostica_enemy",
+      "uid": "gnostica",
+      "resultType": "PLACE",
+      "newLeaf": "enemy",
+      "newPath": "gnostica.PLACE.enemy",
+      "newFullKey": "apresults:gnostica.PLACE.enemy",
+      "english": "{{player}} added a new piece of {{target}}'s to {{where}}."
+    },
+    {
+      "oldPath": "PLACE.gnostica_initial",
+      "oldFullKey": "apresults:PLACE.gnostica_initial",
+      "uid": "gnostica",
+      "resultType": "PLACE",
+      "newLeaf": "initial",
+      "newPath": "gnostica.PLACE.initial",
+      "newFullKey": "apresults:gnostica.PLACE.initial",
+      "english": "{{player}} placed their first piece at {{where}}."
+    },
+    {
+      "oldPath": "PLACE.gnostica_own",
+      "oldFullKey": "apresults:PLACE.gnostica_own",
+      "uid": "gnostica",
+      "resultType": "PLACE",
+      "newLeaf": "own",
+      "newPath": "gnostica.PLACE.own",
+      "newFullKey": "apresults:gnostica.PLACE.own",
+      "english": "{{player}} added one of their pieces to {{where}}."
+    },
+    {
+      "oldPath": "PLACE.gnostica_territory",
+      "oldFullKey": "apresults:PLACE.gnostica_territory",
+      "uid": "gnostica",
+      "resultType": "PLACE",
+      "newLeaf": "territory",
+      "newPath": "gnostica.PLACE.territory",
+      "newFullKey": "apresults:gnostica.PLACE.territory",
+      "english": "{{player}} placed a new territory, {{what}}, at {{where}}."
+    },
+    {
+      "oldPath": "SELECT.gnostica",
+      "oldFullKey": "apresults:SELECT.gnostica",
+      "uid": "gnostica",
+      "resultType": "SELECT",
+      "newLeaf": "default",
+      "newPath": "gnostica.SELECT.default",
+      "newFullKey": "apresults:gnostica.SELECT.default",
+      "english": "{{player}} selected a bid card."
+    },
+    {
+      "oldPath": "SWAP.gnostica",
+      "oldFullKey": "apresults:SWAP.gnostica",
+      "uid": "gnostica",
+      "resultType": "SWAP",
+      "newLeaf": "default",
+      "newPath": "gnostica.SWAP.default",
+      "newFullKey": "apresults:gnostica.SWAP.default",
+      "english": "{{player}} traded hands with {{target}}."
+    },
+    {
+      "oldPath": "USE.gnostica",
+      "oldFullKey": "apresults:USE.gnostica",
+      "uid": "gnostica",
+      "resultType": "USE",
+      "newLeaf": "default",
+      "newPath": "gnostica.USE.default",
+      "newFullKey": "apresults:gnostica.USE.default",
+      "english": "{{player}} used {{what}}."
+    },
+    {
+      "oldPath": "USE.gnostica_world",
+      "oldFullKey": "apresults:USE.gnostica_world",
+      "uid": "gnostica",
+      "resultType": "USE",
+      "newLeaf": "world",
+      "newPath": "gnostica.USE.world",
+      "newFullKey": "apresults:gnostica.USE.world",
+      "english": "{{player}} borrowed the power of {{what}}."
     },
     {
       "oldPath": "EOG.go_repetition",
