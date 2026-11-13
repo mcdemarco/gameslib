@@ -2154,8 +2154,9 @@ describe("Gnostica: button states", () => {
         expect(barOf(g).find(b => b.value === "declare")!.label).eq("(Declare)");
         const declared = g.handleClick("use AS/with m0.2 shrink n0.2 2", -1, -1, "_btn_declare");
         expect(declared.move).eq("use AS/with m0.2 shrink n0.2 2 last");
-        g.move(declared.move!, { partial: true });
-        const btn = barOf(g).find(b => b.value === "declare")!;
+        const shown = g.clone();
+        shown.move(declared.move!, { partial: true });
+        const btn = barOf(shown).find(b => b.value === "declare")!;
         expect(btn.label).eq("(Undeclare)");
         expect(isGrey(btn)).to.be.false;
         expect(g.handleClick(declared.move!, -1, -1, "_btn_declare").move).eq("use AS/with m0.2 shrink n0.2 2");
@@ -2358,7 +2359,7 @@ describe("Gnostica: handleClick", () => {
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.CLICK_FACING"));
     });
 
-    it("orient: clicking the piece's own cell again is a rejected no-op (reorienting IS the whole action); clicking a neighbour sets that facing directly", () => {
+    it("orient: clicking the piece's own cell again is a refused no-op (reorienting IS the whole action); clicking a neighbour sets that facing directly", () => {
         const g = new GnosticaGame(2);
         g.move("place m0 U");
         g.move("place l0 U");
@@ -2366,8 +2367,8 @@ describe("Gnostica: handleClick", () => {
         const seed = g.handleClick("", -1, -1, "_btn_orient");
         const first = g.handleClick(seed.move, row, col);
         const same = g.handleClick(first.move, row, col);
-        expect(same.valid).to.be.false;
-        expect(same.move).eq("orient m0.1 U");
+        expect(same.valid).to.be.true;
+        expect(same.move).eq("orient m0.1");
         expect(same.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
         const [rowE, colE] = rowColFor(g, 1, 0); // n0, east of m0
         const east = g.handleClick(first.move, rowE, colE);
@@ -2375,7 +2376,7 @@ describe("Gnostica: handleClick", () => {
         expect(east.move).eq("orient m0.1 E");
     });
 
-    it("a click-built move that fails validation keeps the whole move, previews as its valid part, and offers only an enabled Undo", () => {
+    it("a click that would make the move illegal is refused: the move stays as it was, with the reason, and Undo goes back to a legal move", () => {
         const start = () => {
             const g = new GnosticaGame(2);
             g.move("place m0 U");
@@ -2387,18 +2388,12 @@ describe("Gnostica: handleClick", () => {
         const seed = g.handleClick("", -1, -1, "_btn_orient");
         const first = g.handleClick(seed.move, row, col);
         const same = g.handleClick(first.move, row, col);
-        expect(same.valid).to.be.false;
-        expect(same.canrender).to.be.true;
-        expect(same.move).eq("orient m0.1 U");
+        expect(same).to.deep.include({ move: "orient m0.1", valid: true, complete: -1, canrender: true });
+        expect(same.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
 
-        const preview = start();
-        preview.move(same.move, { partial: true });
-        const bar = (preview.render().at(-1) as unknown as { areas: { type: string; buttons?: { value: string; attributes?: unknown }[] }[] })
-            .areas.find(a => a.type === "buttonBar")!.buttons!;
-        expect(bar.map(b => b.value)).to.deep.equal(["undo"]);
-        expect(bar[0].attributes).to.be.undefined;
-
-        expect(start().handleClick(same.move, -1, -1, "_btn_undo").move).eq("orient m0.1");
+        // A partial move that isn't legal (only typing makes one) can't be previewed, and Undo takes it back as far as a legal one.
+        expect(() => start().move("orient m0.1 U", { partial: true })).to.throw();
+        expect(start().handleClick("orient m0.1 U", -1, -1, "_btn_undo").move).eq("orient m0.1");
     });
 
     it("orient: clicking a non-adjacent/unoccupied cell falls back to fresh-selection handling", () => {
@@ -2579,8 +2574,8 @@ describe("Gnostica: handleClick", () => {
         const declared = g.handleClick("", -1, -1, "_btn_declare");
         expect(declared.move).eq("last");
         const passed = g.handleClick(declared.move, -1, -1, "_btn_pass");
-        expect(passed.move).eq("discard draw 0 last");
-        expect(passed.valid).to.be.false;
+        expect(passed.move).eq("last");
+        expect(passed.message).eq(i18next.t("apgames:validation.gnostica.ALREADY_ANNOUNCED"));
     });
 
     // Once lastTurner wraps back around to the declarer's own next turn
@@ -3575,8 +3570,10 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
 
             const { g: g2, modeClick: modeClick2 } = setup(1, "00");
             const cardClick2 = g2.handleClick(modeClick2.move, -1, -1, "c2S");
-            expect(cardClick2.move).eq("use AS/with m0.1 shrink l0 2 to 2S");
-            expect(g2.validateMove(cardClick2.move).valid).to.be.false;
+            expect(cardClick2.move).eq(modeClick2.move);
+            const tooBig = g2.validateMove("use AS/with m0.1 shrink l0 2 to 2S");
+            expect(tooBig.valid).to.be.false;
+            expect(cardClick2.message).eq(tooBig.message);
         });
 
         it("Destroy Territory wipes it when its value is within the minion's reach, but offers no button when it's beyond reach; Death's shortcut reaches twice the minion's size", () => {
@@ -4046,8 +4043,8 @@ describe("Gnostica: click-to-orient messaging", () => {
         // the piece already faces "U". Reorienting IS the whole action
         // for "orient", so this is hard-rejected, not held open.
         const result = g.handleClick(selected.move!, row, col);
-        expect(result.valid).to.be.false;
-        expect(result.move).eq("orient m0.1 U");
+        expect(result.valid).to.be.true;
+        expect(result.move).eq("orient m0.1");
         expect(result.message).eq(i18next.t("apgames:validation.gnostica.ORIENT_NO_OP"));
     });
 
@@ -6440,7 +6437,7 @@ describe("Gnostica: a Fool's revealed card plays down the same path as one playe
         expect(foolBar[0]).eq("play*");
         expect(foolBar).to.deep.equal(barAt(hand, "play AC/with m0.2 at n0 create N"));
         const moon = pair("18");
-        expect(barAt(moon.fool, "play 18 via 00/with m0.2 shrink n0.2 1")).to.deep.equal(barAt(moon.hand, "play 18/with m0.2 shrink n0.2 1"));
+        expect(barAt(moon.fool, "play 18 via 00/skip/with m0.2 shrink n0.2 1")).to.deep.equal(barAt(moon.hand, "play 18/skip/with m0.2 shrink n0.2 1"));
         const nested = pair("00");
         expect(barAt(nested.fool, "play 00 via 00")).to.deep.equal(barAt(nested.hand, "play 00"));
     });

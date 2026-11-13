@@ -232,8 +232,6 @@ interface IPreview {
     pickCells: string[];
     // The step the move is at, if it is playing a card.
     pending: IPendingStep | undefined;
-    // The move the client sent was illegal and this previews the longest valid part of it: only Undo is offered.
-    rejected: boolean;
     // The card whose powers the key shows.
     keyCard: string | undefined;
 }
@@ -588,23 +586,6 @@ export class GnosticaGame extends GameBaseSequenced {
         return state;
     }
 
-    // Previews a move that fails validation as the longest valid part of it, flagged so render offers only Undo.
-    private previewRejected(m: string): GnosticaGame {
-        let parsed = this.parseMove(m);
-        let previewed = false;
-        while (parsed.head !== undefined || parsed.announceLast) {
-            parsed = this.retractedMove(parsed);
-            const prefix = this.pickleMove(parsed);
-            if (prefix !== "" && this.validateMove(prefix).valid) {
-                this.move(prefix, { partial: true });
-                previewed = true;
-                break;
-            }
-        }
-        this.preview = { ...(previewed ? this.preview! : this.buildPreview(this.parseMove(""))), rejected: true };
-        return this;
-    }
-
     public validateMove(m: string): IValidationResult {
         const result: IValidationResult = {valid: false, message: i18next.t("apgames:validation._general.DEFAULT_HANDLER")};
 
@@ -726,9 +707,6 @@ export class GnosticaGame extends GameBaseSequenced {
         if (! trusted) {
             const result = this.validateMove(m);
             if (! result.valid) {
-                if (partial && this.phase === "main") {
-                    return this.previewRejected(m);
-                }
                 throw new UserFacingError("VALIDATION_GENERAL", result.message);
             }
             if (! partial && ( result.complete === undefined || result.complete < 0) ) {
@@ -1916,7 +1894,6 @@ export class GnosticaGame extends GameBaseSequenced {
                 ? GnosticaGame.choiceCells(pending.game.stepChoices(pending), this.moveString(seed))
                 : GnosticaGame.choiceCells(actions, this.moveString(parsed)),
             pending,
-            rejected: false,
         };
     }
 
@@ -3124,30 +3101,24 @@ export class GnosticaGame extends GameBaseSequenced {
     // Click support for the top-level turn choice.  "Declare" is handled up front.
     public handleClick(move: string, row: number, col: number, piece?: string): IClickResult {
         const parsed = this.parseMove(move);
-        let outcome: string | IClickResult;
-        if (piece === "_btn_declare") {
-            outcome = this.moveString({ ...parsed, announceLast: !parsed.announceLast });
-        } else {
-            outcome = this.routeClick(parsed, row, col, piece);
-        }
-        let result: IClickResult;
+        let outcome = piece === "_btn_declare"
+            ? this.moveString({ ...parsed, announceLast: !parsed.announceLast })
+            : this.routeClick(parsed, row, col, piece);
         if (typeof outcome === "string") {
-            result = this.validateMove(outcome) as IClickResult;
-            result.move = outcome;
-        } else {
-            result = outcome;
-            // A handler's own rejection of a click that does nothing (a wrong World pick, say) leaves the move as it was, still previewable, with its message.
-            if (!result.valid && this.phase === "main") {
-                const current = this.validateMove(result.move);
-                result = { ...result, valid: true, complete: current.valid ? current.complete : -1 };
+            const built = this.validateMove(outcome);
+            // The front end only re-renders a partial move when `canrender` or `complete >= 0` is set, so every valid result sets it.
+            if (built.valid || this.phase !== "main") {
+                return { ...built, move: outcome, ...(built.valid ? { canrender: true } : {}) };
             }
+            // A click that would make the move illegal is refused, with the reason.
+            outcome = { move, valid: false, message: built.message };
         }
-        // The front end only re-renders a live partial preview when `canrender` or `complete >= 0` is set - set unconditionally here for any valid result.
-        // A click-built move that fails validation is still previewed, as its valid part plus an Undo, rather than falling back to the turn-start buttons.
-        if (result.valid || (typeof outcome === "string" && outcome !== move && outcome !== "" && this.phase === "main")) {
-            result.canrender = true;
+        // A refused click leaves the move as it was, still previewable, with its message.
+        if (!outcome.valid && this.phase === "main") {
+            const current = this.validateMove(outcome.move);
+            outcome = { ...outcome, valid: true, complete: current.valid ? current.complete : -1 };
         }
-        return result;
+        return outcome.valid ? { ...outcome, canrender: true } : outcome;
     }
 
     // Routes a click on the move so far (as parsed) to the handler for what was clicked.
@@ -3163,9 +3134,13 @@ export class GnosticaGame extends GameBaseSequenced {
         }
         // A click outside the board grid (both coordinates negative) names what was clicked in `piece`; a buffer segment only has one coordinate out of range, and goes to clickBoard.
         if (row < 0 && col < 0 && piece !== undefined) {
-            // Undo works on any move, valid or not, so it isn't looked up on the bar.
+            // Undo works on any move, valid or not, so it isn't looked up on the bar: it takes back the latest decision, and as many more as it takes to leave a legal move.
             if (piece === "_btn_undo") {
-                return this.pickleMove(this.retractedMove(parsed));
+                let back = this.retractedMove(parsed);
+                while ((back.head !== undefined || back.announceLast) && !this.validateMove(this.pickleMove(back)).valid) {
+                    back = this.retractedMove(back);
+                }
+                return this.pickleMove(back);
             }
             if (piece.startsWith("_btn_")) {
                 const bar = this.barChoices(typed, this.parsePendingStep(this.resumeMove(typed) ?? typed), this.actionChoices(typed));
@@ -5643,7 +5618,7 @@ export class GnosticaGame extends GameBaseSequenced {
 
                 // The top-level turn choice as buttons rather than inferring intent from board clicks alone.
                 // A greyed or crossed-out button must not act when clicked, so it gets a value no handler recognizes.
-                const actionButtons: ButtonBarButton[] = this.preview?.rejected ? [{ label: "Undo", value: "undo" }] : (this.preview ?? this.buildPreview(this.parseMove(""))).bar;
+                const actionButtons = (this.preview ?? this.buildPreview(this.parseMove(""))).bar;
                 for (const button of actionButtons) {
                     if (button.glyph?.startsWith("buttonpiece_") && !(button.glyph in legend)) {
                         legend[button.glyph] = this.pyramidGlyph(Piece.deserialize(button.glyph.slice("buttonpiece_".length)));
