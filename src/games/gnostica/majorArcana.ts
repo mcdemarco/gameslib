@@ -70,12 +70,12 @@ export const POWERS = {
     magicianChoice: { uid: "M", special: "magicianChoice", icon: "gnostica-allSuits" },
     highPriestess: { uid: "Dr", special: "highPriestess", icon: "gnostica-hand" },
     orientMinion: { uid: "O", special: "orientMinion", icon: "gnostica-tip" },
-    orientAny: { uid: "V", special: "orientAny", icon: "gnostica-tip" },
+    orientAny: { uid: "Oa", special: "orientAny", icon: "gnostica-tip" },
     hierophantReplace: { uid: "H", special: "hierophantReplace", icon: "gnostica-transform" },
     hermitTeleport: { uid: "E", special: "hermitTeleport", icon: "gnostica-fly" },
     tradeHands: { uid: "T", special: "tradeHands", icon: "gnostica-handTrade" },
-    judgementDraw: { uid: "X", special: "judgementDraw", icon: "gnostica-handCycle" },
-    worldUseAny: { uid: "W", special: "worldUseAny", icon: "gnostica-chameleon" },
+    judgementDraw: { uid: "J", special: "judgementDraw", icon: "gnostica-handCycle" },
+    worldUseAny: { uid: "?", special: "worldUseAny", icon: "gnostica-chameleon" },
 } satisfies Record<string, PowerDef>;
 
 export interface MajorArcanaDef {

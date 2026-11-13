@@ -1,4 +1,4 @@
-import { Component, ranks, suits, majorRanks, majorArcanaSuit } from "./Component.js";
+import { Component, ranks, suits, majorRanks, majorArcanaSuit, extraCourtRanks } from "./Component.js";
 import { Glyph } from "@abstractplay/renderer/build/schemas/schema";
 
 // `compact` requests a smaller-footprint composition (e.g. a board tile
@@ -160,7 +160,7 @@ export class Card {
 
     public static deserialize(card: Card | string): Card | undefined {
         if (typeof card === "string") {
-            return [...minorCards, ...majorCards].find(c => c.uid === card);
+            return [...minorCards, ...majorCards, ...extraCourtCards].find(c => c.uid === card);
         }
         return new Card({
             name: card._name,
@@ -182,3 +182,15 @@ export const majorCards: Card[] = majorRanks.map(
 );
 
 export const allCards = (): TarotCard[] => [...minorCards, ...majorCards];
+
+// The extra courts of every suit, which the standard deck leaves out.
+export const extraCourtCards: Card[] = suits.flatMap(
+    suit => extraCourtRanks.map(rank => new Card({ name: `${rank.name} of ${suit.name}`, rank, suit, major: false }))
+);
+
+// Every card there is, the extra courts included, with each suit in rank order.
+const extended: Card[] = [
+    ...suits.flatMap(suit => [...minorCards, ...extraCourtCards].filter(c => c.suit.uid === suit.uid).sort((a, b) => a.rank.seq - b.rank.seq)),
+    ...majorCards,
+];
+export const extendedCards = (): TarotCard[] => [...extended];

@@ -1,4 +1,4 @@
-import { Card, Component, TarotCard, allCards } from "../../common/tarot/index.js";
+import { Card, Component, TarotCard, extendedCards as allCards } from "../../common/tarot/index.js";
 import { Piece } from "./piece.js";
 
 export type CellPointValue = 0 | 1 | 2 | 3;

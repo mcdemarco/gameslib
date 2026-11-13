@@ -7,7 +7,7 @@ import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";
-import { majorCards, minorCards, TarotCard } from "../../src/common/tarot";
+import { extendedCards, majorCards, minorCards, TarotCard } from "../../src/common/tarot";
 import { MAJOR_ARCANA } from "../../src/games/gnostica/majorArcana";
 import { testGame, TestPiece } from "./gnostica.testState";
 
@@ -7129,5 +7129,55 @@ describe("Gnostica: the ko variant", () => {
         g.move("orient n0.1 N");
         // Player 1's pass is no longer a repeat: player 3 has turned a piece since.
         expect(g.validateMove("discard draw 0")).to.deep.include({ valid: true, complete: 1 });
+    });
+});
+
+describe("Gnostica: the extra court card variants", () => {
+    // Every card of a fresh game: the board, the hands and the draw pile.
+    const dealt = (variants: string[]): string[] => {
+        const g = new GnosticaGame(2, variants);
+        return [...[...g.board.entries()].map(([, , t]) => t.cardUid!), ...g.hands.flat(), ...g.drawPile];
+    };
+    const extras = (uids: string[]): string[] => uids.filter(uid => /^[U-Z]/.test(uid)).sort();
+
+    it("deals the standard 78 cards without a variant", () => {
+        const uids = dealt([]);
+        expect(uids.length).eq(78);
+        expect(extras(uids)).to.deep.equal([]);
+    });
+
+    it("adds court ranks from Z back toward U, four cards for each", () => {
+        const one = dealt(["courts-1"]);
+        expect(one.length).eq(82);
+        expect(extras(one)).to.deep.equal(["ZC", "ZD", "ZR", "ZS"]);
+        const three = dealt(["courts-3"]);
+        expect(three.length).eq(90);
+        expect([...new Set(extras(three).map(uid => uid[0]))]).to.deep.equal(["X", "Y", "Z"]);
+        const six = dealt(["courts-6"]);
+        expect(six.length).eq(102);
+        expect([...new Set(extras(six).map(uid => uid[0]))]).to.deep.equal(["U", "V", "W", "X", "Y", "Z"]);
+    });
+
+    it("counts an extra court as a court: worth 2, and ranked K Q N P U V W X Y Z above the 10", () => {
+        const g = testGame({
+            board: [{ x: 0, y: 0, uid: "ZC", pieces: [[1, 1, "U"]] }, { x: 1, y: 0, uid: "10C" }, { x: -1, y: 0, uid: "PC" }],
+            hands: [filler, filler],
+            variants: ["courts-1"],
+        });
+        expect(g.board.get("m0")!.pointValue()).eq(2);
+        expect(g.board.get("m0")!.card!.name).eq("Zar of Cups");
+        expect(g.board.get("n0")!.pointValue()).eq(1);
+        const seq = (uid: string): number => extendedCards().find(c => c.uid === uid)!.rank.seq;
+        const order = ["10C", "ZC", "YC", "XC", "WC", "VC", "UC", "PC", "NC", "QC", "KC"];
+        expect([...order].sort((a, b) => seq(a) - seq(b))).to.deep.equal(order);
+    });
+
+    it("keeps the extra courts out of a standard game's draw pile, and in a variant's", () => {
+        const board = [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"] as TestPiece] }];
+        const plain = testGame({ board, hands: [filler, filler] });
+        const withTwo = testGame({ board, hands: [filler, filler], variants: ["courts-2"] });
+        const reloaded = (g: GnosticaGame): string[] => new GnosticaGame(g.serialize()).drawPile;
+        expect(extras(reloaded(plain))).to.deep.equal([]);
+        expect(extras(reloaded(withTwo))).to.deep.equal(["YC", "YD", "YR", "YS", "ZC", "ZD", "ZR", "ZS"]);
     });
 });

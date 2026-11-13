@@ -7,7 +7,7 @@ import type { ColourResolvable, Colourfuncs } from "@abstractplay/renderer/build
 import { APMoveResult } from "../schemas/moveresults.js";
 import { Direction, DirectionCardinal, replacer, reviver, shuffle, UserFacingError } from "../common/index.js";
 import { UnboundedSquareBoard } from "../common/unbounded-square-board.js";
-import { Deck, Card, TarotCard, allCards, ranks, suits } from "../common/tarot/index.js";
+import { Deck, Card, TarotCard, extendedCards as allCards, extraCourtRanks, ranks, suits } from "../common/tarot/index.js";
 import { GnosticaBoard } from "./gnostica/board.js";
 import { CellContents, ICellContents, cardPointValue, UNREVEALED_CARD, UNREVEALED_UID } from "./gnostica/cell.js";
 import { Piece, Pips, Orientation, cardinalOrientations } from "./gnostica/piece.js";
@@ -119,6 +119,33 @@ export const gameApgamesEn = {
         bidding: {
             description: "The start player is determined by a blind bidding process involving hand cards.",
             name: "Opening bidding",
+        },
+        "#courts": {
+            name: "Standard court cards",
+        },
+        "courts-1": {
+            description: "Each suit gains one extra court card (Z), in order to alter the balance of the deck.",
+            name: "One extra court card",
+        },
+        "courts-2": {
+            description: "Each suit gains two extra court cards (Y and Z), in order to alter the balance of the deck.",
+            name: "Two extra court cards",
+        },
+        "courts-3": {
+            description: "Each suit gains three extra court cards (X–Z), in order to alter the balance of the deck.",
+            name: "Three extra court cards",
+        },
+        "courts-4": {
+            description: "Each suit gains four extra court cards (W–Z), in order to alter the balance of the deck.",
+            name: "Four extra court cards",
+        },
+        "courts-5": {
+            description: "Each suit gains five extra court cards (V–Z), in order to alter the balance of the deck.",
+            name: "Five extra court cards",
+        },
+        "courts-6": {
+            description: "Each suit gains six extra court cards (U–Z), in order to alter the balance of the deck.",
+            name: "Six extra court cards",
         },
         ko: {
             description: "Add a ko rule: you may not repeat the game state (the board, pieces, discard pile, draw pile, and the contents of your hand) from the end of your previous turn.",
@@ -567,6 +594,13 @@ export class GnosticaGame extends GameBaseSequenced {
             { uid: "target-10", group: "target" },
             { uid: "bidding" },
             { uid: "ko" },
+            { uid: "#courts" },
+            { uid: "courts-1", group: "courts" },
+            { uid: "courts-2", group: "courts" },
+            { uid: "courts-3", group: "courts" },
+            { uid: "courts-4", group: "courts" },
+            { uid: "courts-5", group: "courts" },
+            { uid: "courts-6", group: "courts" },
             {
                 uid: "no-majors",
                 fans: true,
@@ -638,7 +672,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 this.variants = [...variants];
             }
 
-            const deck = new Deck(Deck.full()).shuffle();
+            const deck = new Deck(this.deckCards()).shuffle();
             const hands: string[][] = [];
             for (let p = 0; p < this.numplayers; p++) {
                 hands.push(deck.draw(6).map(c => c.uid));
@@ -800,14 +834,14 @@ export class GnosticaGame extends GameBaseSequenced {
 
     // What ko compares: the board, the player's own hand and the discards whatever their order, and how many cards are left to draw.
     // The hand is there for trades, which change nothing else.
-    private static koState(state: IMoveState, player: number): string {
+    private koState(state: IMoveState, player: number): string {
         const cells = [...new GnosticaBoard(state.board).entries()];
         const held = cells.filter(([, , t]) => t.cardUid !== undefined).length + state.hands.flat().length + state.discardPile.length + (state.biddingPool ?? []).length;
         return JSON.stringify([
             cells.map(([x, y, t]) => `${x},${y}:${t.cardUid ?? ""}:${t.pieces.map(p => p.id()).sort().join(",")}`).sort(),
             [...state.hands[player - 1]].sort(),
             [...state.discardPile].sort(),
-            allCards().length - held,
+            this.deckCards().length - held,
         ]);
     }
 
@@ -828,7 +862,7 @@ export class GnosticaGame extends GameBaseSequenced {
         const after = this.scratchClone();
         after.move(m, { trusted: true });
         return after.continued.length === 0
-            && GnosticaGame.koState(after.stack[after.stack.length - 1], this.currplayer) === GnosticaGame.koState(this.stack[i], this.currplayer);
+            && this.koState(after.stack[after.stack.length - 1], this.currplayer) === this.koState(this.stack[i], this.currplayer);
     }
 
     private validateRules(m: string): IValidationResult {
@@ -5901,7 +5935,14 @@ export class GnosticaGame extends GameBaseSequenced {
             ...(this.biddingPool ?? []),
             ...this.hands.flat().filter(uid => uid !== ""),
         ];
-        return allCards().filter(c => !visible.includes(c.uid)).map(c => c.uid);
+        return this.deckCards().filter(c => !visible.includes(c.uid)).map(c => c.uid);
+    }
+
+    // The deck this game is played with: the standard one, plus as many extra court ranks as the variant adds, from Z back toward U.
+    private deckCards(): TarotCard[] {
+        const added = Number(this.variants.find(v => v.startsWith("courts-"))?.slice("courts-".length) ?? 0);
+        const leftOut = extraCourtRanks.slice(added).map(rank => rank.uid);
+        return allCards().filter(c => c.major || !leftOut.includes(c.rank.uid));
     }
 
     // The abbreviation FrameState.discardSummary itself stores: majors by uid, minors by suit and spot/royal count.

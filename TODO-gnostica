@@ -26,6 +26,6 @@ Remaining Gnostica functionality:
 	- #136 - Consider using piece area text labels.
 	- #139 - Move the rest of the render path to the structured label style (action button labels, the hard-coded "(declarer)" text, any remaining i18next.t calls).
 	- #146 - After the rebase, deal with translation of the power names (SPECIAL_POWER_NAMES and the capitalized primitives in the key).
-	- #147 - Ko variant.
-	- #148 - Card redistribution variants.
+	- #147 - Ko variant. @done(2026-11-13)
+	- #148 - Card redistribution variants. @done(2026-11-13)
 		

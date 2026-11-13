@@ -47,7 +47,7 @@ export class Component {
 
     public static deserialize(comp: Component|string): Component|undefined {
         if (typeof comp === "string") {
-            return [...suits, ...ranks].find(c => c.uid === comp);
+            return [...suits, ...ranks, ...extraCourtRanks].find(c => c.uid === comp);
         }
         return new Component({uid: comp._uid, seq: comp._seq, name: comp._name, glyph: comp._glyph, court: comp._court});
     }
@@ -82,6 +82,12 @@ export const ranks: Component[] = [
     new Component({uid: "Q", seq: 13, name: "Queen", court: true}),
     new Component({uid: "K", seq: 14, name: "King", court: true}),
 ];
+
+// Six further court ranks for games that want more courts than the standard deck has. They are no part of `ranks`,
+// and sort between the 10 and the Page, Z lowest and U highest.
+export const extraCourtRanks: Component[] = ["Zar", "Youth", "Xiaojie", "Walet", "Vizier", "Under"].map(
+    (name, i) => new Component({uid: name[0], seq: 10 + (i + 1) / 10, name, court: true})
+);
 
 // A pseudo-suit standing in for "this card has no real elemental suit" -
 // major arcana cards use this so every Card, major or minor, has a

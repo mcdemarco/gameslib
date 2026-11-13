@@ -2121,7 +2121,7 @@
       "HIEROPHANT_SKIPPED_NO_TARGET": "There is no enemy piece for {{card}} to replace, so that part of its power will be skipped when you submit.",
       "INITIAL_INSTRUCTIONS_PLACE": "Place one 1-pip pyramid onto the board on any unoccupied territory or wasteland space.",
       "INVALID_MOVE": "The move was malformed. {{reason}}",
-      "KO": "That would leave the game as it was at the end of your last turn, which the ko rule forbids.",
+      "KO": "In the ko variant, you may not repeat the game state from the end of your previous turn.",
       "LABEL_BIDDING_POOL": "Bidding pool",
       "LABEL_DECK": "Cards in deck",
       "LABEL_DISCARDS": "Discard pile",
@@ -7120,8 +7120,35 @@
         "description": "The start player is determined by a blind bidding process involving hand cards.",
         "name": "Opening bidding"
       },
+      "#courts": {
+        "name": "Standard court cards"
+      },
+      "courts-1": {
+        "description": "Each suit gains one extra court card (Zar), ranked below the Page and worth 2 points like any court card.",
+        "name": "One extra court card"
+      },
+      "courts-2": {
+        "description": "Each suit gains two extra court cards (Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "name": "Two extra court cards"
+      },
+      "courts-3": {
+        "description": "Each suit gains three extra court cards (Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "name": "Three extra court cards"
+      },
+      "courts-4": {
+        "description": "Each suit gains four extra court cards (Walet, Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "name": "Four extra court cards"
+      },
+      "courts-5": {
+        "description": "Each suit gains five extra court cards (Vizier, Walet, Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "name": "Five extra court cards"
+      },
+      "courts-6": {
+        "description": "Each suit gains six extra court cards (Under, Vizier, Walet, Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "name": "Six extra court cards"
+      },
       "ko": {
-        "description": "A turn may not end with the board, the player's hand, the discard pile and the size of the draw pile all as they were at the end of the same player's previous turn.",
+        "description": "Add a ko rule: you may not repeat the game state (the board, pieces, discard pile, draw pile, and the contents of your hand) from the end of your previous turn.",
         "name": "Ko"
       },
       "no-majors": {

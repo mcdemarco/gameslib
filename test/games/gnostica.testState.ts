@@ -10,7 +10,7 @@
 // the string constructor means there is no live state to disagree with the committed state in
 // the first place.
 import { replacer } from "../../src/common";
-import { allCards } from "../../src/common/tarot";
+import { extendedCards as allCards } from "../../src/common/tarot";
 import { GnosticaGame, IGnosticaState } from "../../src/games/gnostica";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
 import { CellContents } from "../../src/games/gnostica/cell";

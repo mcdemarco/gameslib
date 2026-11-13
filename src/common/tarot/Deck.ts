@@ -1,5 +1,5 @@
 import { shuffle } from "../shuffle.js";
-import { Card, TarotCard, minorCards, majorCards } from "./Card.js";
+import { Card, TarotCard, minorCards, majorCards, extraCourtCards } from "./Card.js";
 
 export class Deck {
     private _cards: TarotCard[];
@@ -22,7 +22,7 @@ export class Deck {
     }
 
     public add(uid: string): Deck {
-        const found = [...minorCards, ...majorCards].find(c => c.uid === uid);
+        const found = [...minorCards, ...majorCards, ...extraCourtCards].find(c => c.uid === uid);
         if (found === undefined) {
             throw new Error(`Could not find a tarot card with the uid "${uid}"`);
         }

@@ -25,7 +25,7 @@
 // either way.
 import { type GnosticaGame, type IPieceRef, type IStep, type IStepOutcome, type IParsedMove } from "../gnostica.js";
 import { shuffle } from "../../common/index.js";
-import { Card, allCards } from "../../common/tarot/index.js";
+import { Card, extendedCards as allCards } from "../../common/tarot/index.js";
 import { cardPointValue } from "./cell.js";
 import { Orientation, allOrientations } from "./piece.js";
 import { GnosticaBoard } from "./board.js";
