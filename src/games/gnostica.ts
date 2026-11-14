@@ -2,7 +2,7 @@ import { IAPGameState, IClickResult, IIndividualState, IRenderOpts, IScores, IVa
 import { GameBaseSequenced } from "./_turn-sequenced.js";
 import type { IGamePly } from "./_turn-model.js";
 import { APGamesInformation } from "../schemas/gameinfo.js";
-import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerGlyph, MarkerOutline } from "@abstractplay/renderer/build/schemas/schema";
+import { APRenderRep, AreaButtonBar, AreaKey, AreaPieces, ButtonBarButton, Glyph, MarkerGlyph, MarkerOutline, PiecesAreaLabeledPiece } from "@abstractplay/renderer/build/schemas/schema";
 import type { ColourResolvable, Colourfuncs } from "@abstractplay/renderer/build/schemas/schema";
 import { APMoveResult } from "../schemas/moveresults.js";
 import { Direction, DirectionCardinal, replacer, reviver, shuffle, UserFacingError } from "../common/index.js";
@@ -206,25 +206,29 @@ export const gameApgamesEn = {
         use_card: "Use Territory ({{card}})",
     },
     displays: {
-        "#circles": {
-            description: "Draw cards with the traditional Gnostica power icons in circles.",
-            name: "Show icons in circles",
-        },
-        icons: {
+        "#icons": {
             description: "Draw cards with the traditional Gnostica power icons.",
             name: "Show icons",
         },
-        "larger-cards": {
-            description: "Display board cards larger when unoccupied.",
-            name: "Show larger cards",
+        "circles": {
+            description: "Draw cards with the traditional Gnostica power icons in circles.",
+            name: "Show icons in circles",
         },
-        letters: {
-            description: "Draw cards using letters instead of icons.",
-            name: "Show letters",
+        "letters": {
+            description: "Replace all card icons with letters.",
+            name: "Use letters",
+        },
+        "card-names": {
+            description: "Show (abbreviated) names of major arcana cards in your hand.",
+            name: "Name major arcana in hand",
+        },
+        "larger-cards": {
+            description: "On the board, display card icons larger when unoccupied.",
+            name: "Magnify cards",
         },
         "power-names": {
-            description: "Name each power beside its icon in the key.",
-            name: "Name powers in the key",
+            description: "Display the name of each card power beside its icon in the active card's key.",
+            name: "Name active powers",
         },
     },
 };
@@ -681,10 +685,11 @@ export class GnosticaGame extends GameBaseSequenced {
         flags: ["experimental", "no-moves", "custom-randomization", "no-explore", "player-stashes", "scores"],
         displays: [
             { uid: "larger-cards" },
-            { uid: "#circles", group: "circles" },
-            { uid: "icons", group: "circles" },
-            { uid: "letters", group: "circles" },
-            { uid: "power-names" }
+            { uid: "#icons", group: "icons" },
+            { uid: "circles", group: "icons" },
+            { uid: "letters", group: "icons" },
+            { uid: "power-names" },
+            { uid: "card-names" }
         ],
     };
 
@@ -5634,6 +5639,12 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // A card is unique, so its legend key needs no location; every hidden card shares the one face-down key.
+    // A major arcana card's name as a caption, which the renderer holds to 8 characters.
+    private static cardCaption(card: TarotCard): string {
+        const short: Record<string, string> = { "02": "H.Priest", "05": "Hieroph.", "10": "Wheel", "12": "Hanged", "14": "Temper.", "20": "Judgment" };
+        return short[card.uid] ?? card.name.replace(/^The /, "");
+    }
+
     private static cardKey(uid: string): string {
         return uid === UNREVEALED_UID ? "cUNKNOWN" : `c${uid}`;
     }
@@ -5809,7 +5820,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     //Hand sorting is now done in the render only.
                     hand.sort((a, b) => GnosticaGame.handSortKey(a) - GnosticaGame.handSortKey(b));
                     const newUids = this.newHandCardUids(p as playerid);
-                    const handKeys: string[] = [];
+                    const handKeys: (string | PiecesAreaLabeledPiece)[] = [];
                     for (const uid of hand) {
                         const card = allCards().find(c => c.uid === uid);
                         if (card === undefined) {
@@ -5820,13 +5831,14 @@ export class GnosticaGame extends GameBaseSequenced {
                         const isNew = newUids.includes(uid);
                         const key = GnosticaGame.cardKey(uid);
                         GnosticaGame.setCardFace(legend, faces, key, `full|${isNew}`, () => this.buildCardFace(displays, card, false, 0, isNew ? { background: MUTED_FILL } : {}));
-                        handKeys.push(key);
+                        handKeys.push(card.major && displays.includes("card-names") ? { piece: key, text: GnosticaGame.cardCaption(card) } : key);
                     }
                     areas.push({
                         type: "pieces",
-                        pieces: handKeys as [string, ...string[]],
+                        pieces: handKeys as [string | PiecesAreaLabeledPiece, ...(string | PiecesAreaLabeledPiece)[]],
                         label: this.seatAreaLabel(p, this.lastTurner === p ? "apgames:validation.gnostica.LABEL_HAND_DECLARER" : "apgames:validation.gnostica.LABEL_HAND"),
-                        spacing: 0.25,
+                        // Names are wider than the cards, so the cards stand further apart to fit them.
+                        spacing: displays.includes("card-names") ? 0.75 : 0.25,
                         width: 6,
                         ownerMark: p,
                     });

@@ -22,10 +22,12 @@ Remaining framework functionality:
 
 Remaining Gnostica functionality:
 	- #103 - Possibly remove "via" requirement; just autopopulate on completion and always derive vianess from state?
-	- #128 - After next merge, add text labels to hand cards (for major arcana names) 
-	- #136 - Consider using piece area text labels.
-	- #139 - Move the rest of the render path to the structured label style (action button labels, the hard-coded "(declarer)" text, any remaining i18next.t calls).
-	- #146 - After the rebase, deal with translation of the power names (SPECIAL_POWER_NAMES and the capitalized primitives in the key).
+	- #128 - After next merge, add text labels to hand cards (for major arcana names) @done(2026-11-14)
+	- #136 - Consider using piece area text labels. @done(2026-11-14)
+	- #139 - Move the rest of the render path to the structured label style (action button labels, the hard-coded "(declarer)" text, any remaining i18next.t calls). @done(2026-11-14)
+	- #146 - After the rebase, deal with translation of the power names (SPECIAL_POWER_NAMES and the capitalized primitives in the key). (done?)
 	- #147 - Ko variant. @done(2026-11-13)
 	- #148 - Card redistribution variants. @done(2026-11-13)
+	- #149 - Replace the hyphen (on court and major arcana cards) with a different character or icon
+	- #150 - Add contrast to the text colors in letters display mode.
 		

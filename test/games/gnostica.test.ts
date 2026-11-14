@@ -7184,3 +7184,28 @@ describe("Gnostica: the extra court card variants", () => {
         expect(extras(reloaded(withTwo))).to.deep.equal(["YC", "YD", "YR", "YS", "ZC", "ZD", "ZR", "ZS"]);
     });
 });
+
+describe("Gnostica: naming the major arcana in hand", () => {
+    type HandPiece = string | { piece: string; text?: string };
+    const majors = Array.from({ length: 22 }, (_, i) => String(i).padStart(2, "0"));
+    const hands = [majors.slice(0, 6), majors.slice(6, 12), majors.slice(12, 18), [...majors.slice(18), "2C", "KC"]];
+    const handPieces = (altDisplay?: string): HandPiece[] => {
+        const g = testGame({ board: [{ x: 0, y: 0, uid: "AC", pieces: [[1, 1, "U"]] }], hands });
+        const rep = g.render(altDisplay === undefined ? undefined : { altDisplay }).at(-1) as { areas?: { ownerMark?: number; pieces?: HandPiece[] }[] };
+        return rep.areas!.filter(a => a.ownerMark !== undefined).flatMap(a => a.pieces!);
+    };
+
+    it("captions every major arcana card in a hand, and no other card, when the display is chosen", () => {
+        const pieces = handPieces("card-names");
+        const captioned = pieces.filter((p): p is { piece: string; text: string } => typeof p !== "string");
+        expect(captioned.map(p => p.piece).sort()).to.deep.equal(majors.map(uid => `c${uid}`));
+        expect(pieces.filter(p => typeof p === "string").sort()).to.deep.equal(["c2C", "cKC"]);
+        // The renderer takes no caption longer than 8 characters.
+        expect(captioned.every(p => p.text.length > 0 && p.text.length <= 8)).to.be.true;
+        expect(new Set(captioned.map(p => p.text)).size).eq(22);
+    });
+
+    it("leaves the hands uncaptioned otherwise", () => {
+        expect(handPieces().every(p => typeof p === "string")).to.be.true;
+    });
+});

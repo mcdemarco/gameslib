@@ -5338,21 +5338,28 @@
       }
     },
     "gnostica": {
-      "#circles": {
-        "description": "Draw cards with the traditional Gnostica power icons in circles.",
-        "name": "Show icons in circles"
-      },
-      "icons": {
+      "#icons": {
         "description": "Draw cards with the traditional Gnostica power icons.",
-        "name": "Show icons"
+        "name": "Show icons",
+        "group": "icons"
+      },
+      "circles": {
+        "description": "Draw cards with the traditional Gnostica power icons in circles.",
+        "name": "Show icons in circles",
+        "group": "icons"
+      },
+      "letters": {
+        "description": "Draw cards using letters instead of icons.",
+        "name": "Show letters",
+        "group": "icons"
+      },
+      "card-names": {
+        "description": "Show the name of each major arcana card beneath it in your hand.",
+        "name": "Name major arcana in hand"
       },
       "larger-cards": {
         "description": "Display board cards larger when unoccupied.",
         "name": "Show larger cards"
-      },
-      "letters": {
-        "description": "Draw cards using letters instead of icons.",
-        "name": "Show letters"
       },
       "power-names": {
         "description": "Name each power beside its icon in the key.",
