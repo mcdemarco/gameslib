@@ -47,6 +47,55 @@
       "evens": "Evens",
       "odds": "Odds"
     },
+    "gnostica": {
+      "attack_for": "Attack for {{n}}",
+      "attack_theirs": "Attack {{player}}'s",
+      "attack_own": "Attack own",
+      "attack_territory": "Attack Territory",
+      "choose_minion": "Choose Minion",
+      "create_enemy": "Create Enemy",
+      "create_enemy_theirs": "Create Enemy {{player}}'s",
+      "create_minion": "Create Minion",
+      "create_territory": "Create Territory",
+      "decline_named": "Decline {{card}}",
+      "declare": "(Declare)",
+      "destroy_territory": "Destroy Territory",
+      "discard": "Discard/Draw",
+      "discard_card": "Discard/Draw ({{card}})",
+      "draw_card": "Draw a card",
+      "draw_n": "Draw {{n}}",
+      "grow_theirs": "Grow {{player}}'s",
+      "grow_own": "Grow own",
+      "grow_territory": "Grow Territory",
+      "move_own": "Move own",
+      "orient": "Orient",
+      "orient_theirs": "Orient {{player}}'s",
+      "orient_own": "Orient own",
+      "pips": "{{size}}-pip",
+      "place": "Place",
+      "play": "Play Card",
+      "play_card": "Play Card ({{card}})",
+      "play_named": "Play Card {{card}}",
+      "push_theirs": "Push {{player}}'s",
+      "push_own": "Push own",
+      "push_territory": "Push Territory",
+      "replace_theirs": "Replace {{player}}'s",
+      "skip_power": "Skip Power",
+      "skip_reorient": "Skip Reorient",
+      "special_power": "Special Power",
+      "suit_cups": "Cups",
+      "suit_discs": "Discs",
+      "suit_rods": "Rods",
+      "suit_swords": "Swords",
+      "teleport_theirs": "Teleport {{player}}'s",
+      "teleport_own": "Teleport own",
+      "teleport_territory": "Teleport Territory",
+      "trade_theirs": "Trade with {{player}}'s",
+      "undeclare": "(Undeclare)",
+      "undo": "Undo",
+      "use": "Use Territory",
+      "use_card": "Use Territory ({{card}})"
+    },
     "killallgo": {
       "attacker": "Play as the Attacker",
       "defender": "Play as the Defender",
@@ -2125,7 +2174,8 @@
       "LABEL_BIDDING_POOL": "Bidding pool",
       "LABEL_DECK": "Cards in deck",
       "LABEL_DISCARDS": "Discard pile",
-      "LABEL_HAND": "Player {{playerNum}}'s hand {{declared}}",
+      "LABEL_HAND": "{{player}}'s hand",
+      "LABEL_HAND_DECLARER": "{{player}}'s hand (declarer)",
       "LABEL_WARNING": "This is a declaration round!",
       "MAGICIAN_NEEDS_AS": "The Magician (I) must choose its suit using the \"as\" keyword.",
       "MAY_CONTINUE": "Looks like a valid move. You may submit now, or keep going.",
@@ -2148,7 +2198,6 @@
       "NOT_YOUR_MINION": "The selected piece is not yours.",
       "NO_CARD_THERE": "There is no territory there to activate.",
       "NO_MINIONS_THERE": "You must have a minion in the territory in order to use it.",
-      "OWNER_BUTTON": "{{verb}} {{player}}'s",
       "NO_POWER_STEPS_HERE": "The move is incomplete.",
       "NO_SUCH_MAJOR_ON_BOARD": "That major arcana card is not currently on the board.",
       "NO_SUCH_TILE": "That card is not on the board.",
@@ -7124,27 +7173,27 @@
         "name": "Standard court cards"
       },
       "courts-1": {
-        "description": "Each suit gains one extra court card (Zar), ranked below the Page and worth 2 points like any court card.",
+        "description": "Each suit gains one extra court card (Z), in order to alter the balance of the deck.",
         "name": "One extra court card"
       },
       "courts-2": {
-        "description": "Each suit gains two extra court cards (Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "description": "Each suit gains two extra court cards (Y and Z), in order to alter the balance of the deck.",
         "name": "Two extra court cards"
       },
       "courts-3": {
-        "description": "Each suit gains three extra court cards (Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "description": "Each suit gains three extra court cards (X–Z), in order to alter the balance of the deck.",
         "name": "Three extra court cards"
       },
       "courts-4": {
-        "description": "Each suit gains four extra court cards (Walet, Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "description": "Each suit gains four extra court cards (W–Z), in order to alter the balance of the deck.",
         "name": "Four extra court cards"
       },
       "courts-5": {
-        "description": "Each suit gains five extra court cards (Vizier, Walet, Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "description": "Each suit gains five extra court cards (V–Z), in order to alter the balance of the deck.",
         "name": "Five extra court cards"
       },
       "courts-6": {
-        "description": "Each suit gains six extra court cards (Under, Vizier, Walet, Xiaojie, Youth and Zar), ranked below the Page and worth 2 points like any court card.",
+        "description": "Each suit gains six extra court cards (U–Z), in order to alter the balance of the deck.",
         "name": "Six extra court cards"
       },
       "ko": {

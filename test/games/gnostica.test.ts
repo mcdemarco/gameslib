@@ -3,6 +3,7 @@ import "mocha";
 import { expect } from "chai";
 import i18next from "i18next";
 import { addResource } from "../../src";
+import { resolveRenderLabel, type RenderLabel } from "../../src/common/render-label";
 import { GnosticaGame } from "../../src/games/gnostica";
 import { Piece } from "../../src/games/gnostica/piece";
 import { GnosticaBoard } from "../../src/games/gnostica/board";
@@ -583,7 +584,9 @@ describe("Gnostica: sidebarScores", () => {
 // are unrelated spot cards, present only so a hand isn't suspiciously empty.
 const filler = ["2R", "3R", "4R", "5D", "6D", "7D"];
 // The structured label a button gets for another player's piece.
-const ownerLabel = (seat: number, verb: string) => ({ textKey: "apgames:validation.gnostica.OWNER_BUTTON", actor: { kind: "seat", seat }, textParams: { verb } });
+// A button's label as its English text, with the players named Alice, Bob and Carol.
+const labelText = (label: unknown): string | undefined =>
+    label === undefined ? undefined : resolveRenderLabel(label as RenderLabel, ["Alice", "Bob", "Carol"], (key, params) => i18next.t(key, params as Record<string, unknown>));
 
 describe("Gnostica: activate/play - minor arcana suit powers", () => {
     it("Cups (own): adds an own small piece to the target cell", () => {
@@ -1081,7 +1084,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             const g = setup(2, "3C", [[2, 2, "U"]]);
             g.move("use 13/with m0.2 shrink n0.2", { partial: true });
             const rep = g.render().at(-1) as { areas?: { type: string; buttons?: { label?: string }[] }[] };
-            const labels = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => b.label).filter(l => l?.startsWith("Attack for"));
+            const labels = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.map(b => labelText(b.label)).filter(l => l?.startsWith("Attack for"));
             expect(labels).to.deep.equal(["Attack for 2", "Attack for 1"]);
         });
 
@@ -1094,9 +1097,9 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             g.move("use 13/with m0.2 shrink n0.2", { partial: true });
             type Btn = { label?: string; attributes?: { name: string; value: string }[] };
             const rep = g.render().at(-1) as { areas?: { type: string; buttons?: Btn[] }[] };
-            const attacks = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.filter(b => b.label?.startsWith("Attack for"));
+            const attacks = rep.areas!.find(a => a.type === "buttonBar")!.buttons!.filter(b => labelText(b.label)?.startsWith("Attack for"));
             const crossed = (b: Btn) => b.attributes?.some(a => a.name === "text-decoration" && a.value === "line-through") === true;
-            expect(attacks.map(b => [b.label, crossed(b)])).to.deep.equal([["Attack for 2", false], ["Attack for 1", true]]);
+            expect(attacks.map(b => [labelText(b.label), crossed(b)])).to.deep.equal([["Attack for 2", false], ["Attack for 1", true]]);
         });
 
         it("a piece shrink's total acts across its whole range: 3->1 (size-1 minion, capped at 2), 2->0 and 3->0 (destroyed), and a total above what's there wipes out (4 acts as 3)", () => {
@@ -1441,7 +1444,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             board: [{ x: 0, y: 0, uid: "18", pieces: [[1, 2, "E"]] }, { x: 1, y: 0, uid: "AD", pieces: [[2, 1, "U"]] }, { x: 2, y: 0, uid: "2D" }],
             hands: [filler, filler],
         });
-        const bar = (g: GnosticaGame) => (g.render().at(-1) as unknown as { areas: { type: string; buttons?: { label?: string; value?: string }[] }[] }).areas.find(a => a.type === "buttonBar")!.buttons!.map(b => b.label ?? b.value);
+        const bar = (g: GnosticaGame) => (g.render().at(-1) as unknown as { areas: { type: string; buttons?: { label?: string; value?: string }[] }[] }).areas.find(a => a.type === "buttonBar")!.buttons!.map(b => labelText(b.label) ?? b.value);
         const open = mk();
         open.move("use 18/with m0.2 move m0.2 1", { partial: true });
         expect(bar(open)).to.deep.equal(["Use Territory (18)", "Skip Reorient", "(Declare)", "Undo"]);
@@ -1460,8 +1463,8 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
             suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: unknown }[];
         };
         const pending = internal.parsePendingStep(g.parseMove("use AR/with m0.2"))!;
-        const labels = internal.suitTargetCandidates(pending, "R").map(c => c.label);
-        expect(labels).to.deep.equal(["Push Territory", "Move own", ownerLabel(2, "Push"), "Push own"]);
+        const labels = internal.suitTargetCandidates(pending, "R").map(c => labelText(c.label));
+        expect(labels).to.deep.equal(["Push Territory", "Move own", "Push Bob's", "Push own"]);
     });
 
     it("Use Territory: until a territory is chosen, the ones the player has a minion on are marked", () => {
@@ -1522,7 +1525,7 @@ describe("Gnostica: activate/play - major arcana chaining", () => {
         });
         g.move("orient m0", { partial: true });
         const bar = (g.render().at(-1) as unknown as { areas: { type: string; buttons?: { label?: string; value?: string }[] }[] }).areas.find(a => a.type === "buttonBar")!.buttons!;
-        expect(bar.map(b => b.label ?? b.value)).to.deep.equal(["Orient", "Choose Minion", "1-pip", "2-pip", "(Declare)", "Undo"]);
+        expect(bar.map(b => labelText(b.label) ?? b.value)).to.deep.equal(["Orient", "Choose Minion", "1-pip", "2-pip", "(Declare)", "Undo"]);
     });
 
     it("Orient: a piece picked by button is told apart from an enemy piece of its size in the cell", () => {
@@ -2151,13 +2154,13 @@ describe("Gnostica: button states", () => {
 
     it("offers to undo a declaration rather than silently toggling it", () => {
         const g = swords();
-        expect(barOf(g).find(b => b.value === "declare")!.label).eq("(Declare)");
+        expect(labelText(barOf(g).find(b => b.value === "declare")!.label)).eq("(Declare)");
         const declared = g.handleClick("use AS/with m0.2 shrink n0.2 2", -1, -1, "_btn_declare");
         expect(declared.move).eq("use AS/with m0.2 shrink n0.2 2 last");
         const shown = g.clone();
         shown.move(declared.move!, { partial: true });
         const btn = barOf(shown).find(b => b.value === "declare")!;
-        expect(btn.label).eq("(Undeclare)");
+        expect(labelText(btn.label)).eq("(Undeclare)");
         expect(isGrey(btn)).to.be.false;
         expect(g.handleClick(declared.move!, -1, -1, "_btn_declare").move).eq("use AS/with m0.2 shrink n0.2 2");
     });
@@ -3452,7 +3455,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             const buttons = (g.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label: string; glyph?: string; attributes?: { name: string; value: string }[] }[] }[] }).areas!.find(a => a.type === "buttonBar")!.buttons!;
             expect(buttons.some(b => b.value === "target_own")).to.be.true;
             const enemyBtn = buttons.find(b => b.value === "target_n0.1")!;
-            expect(enemyBtn.label).to.deep.equal(ownerLabel(1, "Create Enemy"));
+            expect(labelText(enemyBtn.label)).eq("Create Enemy Alice's");
             expect(enemyBtn.glyph).to.eq("buttonpiece_11U");
             const territory = buttons.find(b => b.value === "_disabled_target_new")!;
             expect(territory.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
@@ -3495,7 +3498,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label?: unknown }[];
             };
             const pending = internal.parsePendingStep(g.parseMove("use AS"))!;
-            const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => typeof c.label === "string" && c.label.endsWith(" own") ? "own" : "enemy");
+            const owners = internal.suitTargetCandidates(pending, "S").slice(1).map(c => labelText(c.label)!.endsWith(" own") ? "own" : "enemy");
             expect(owners).to.deep.equal(["enemy", "enemy", "own", "own"]);
         });
 
@@ -3511,8 +3514,8 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
                 suitTargetCandidates: (pending: object, suitUid: string) => { value: string; label: unknown }[];
             };
             const pending = internal.parsePendingStep(g.parseMove("use AC"))!;
-            const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => c.label);
-            expect(enemyLabels).to.deep.equal([ownerLabel(2, "Create Enemy"), ownerLabel(3, "Create Enemy")]);
+            const enemyLabels = internal.suitTargetCandidates(pending, "C").filter(c => c.value.startsWith("o0.")).map(c => labelText(c.label));
+            expect(enemyLabels).to.deep.equal(["Create Enemy Bob's", "Create Enemy Carol's"]);
 
             const g2 = testGame({
                 board: [{ x: 1, y: 0, uid: "AC", pieces: [[1, 1, "E"]] }, { x: 2, y: 0, uid: "AR", pieces: [[2, 1, "U"]] }],
@@ -3524,7 +3527,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
             };
             const pending2 = internal2.parsePendingStep(g2.parseMove("use AC"))!;
             const candidates2 = internal2.suitTargetCandidates(pending2, "C");
-            expect(candidates2.find(c => c.value === "o0.1")!.label).to.deep.equal(ownerLabel(2, "Create Enemy"));
+            expect(labelText(candidates2.find(c => c.value === "o0.1")!.label)).eq("Create Enemy Bob's");
         });
 
         it("Create Minion is struck through once the acting player's own stash has no 1-pip piece left, and a click on it does nothing", () => {
@@ -3636,7 +3639,7 @@ describe("Gnostica: handleClick - minor arcana power steps", () => {
         // No enemy piece at the target (self) cell - a struck-through generic placeholder is still
         // offered, matching own/new's own always-present buttons.
         const enemyBtn = bar!.buttons!.find(b => b.value === "_disabled_target_enemy");
-        expect(enemyBtn!.label).to.eq("Create Enemy");
+        expect(labelText(enemyBtn!.label)).to.eq("Create Enemy");
         expect(enemyBtn!.attributes).to.deep.include({ name: "text-decoration", value: "line-through" });
         expect(isGrey(enemyBtn)).to.be.false; // crossed out on white, not greyed
         const newBtn = bar!.buttons!.find(b => b.value === "_disabled_target_new");
@@ -4403,7 +4406,7 @@ describe("Gnostica: choose-step click messaging", () => {
         // "02" (The High Priestess) - the active card - not "00" (The Fool
         // - the root).
         const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
-        expect(declineBtn.label).eq("Decline 02");
+        expect(labelText(declineBtn.label)).eq("Decline 02");
     });
 
     // validateMove("") only populates the status line for the render
@@ -5191,7 +5194,7 @@ describe("Gnostica: Fool and World", () => {
         }
         // A way out, still available.
         const declineBtn = bar.buttons!.find(b => b.value === "decline_power")!;
-        expect(declineBtn.label).eq("Decline 2R");
+        expect(labelText(declineBtn.label)).eq("Decline 2R");
         expect(declineBtn.attributes).to.be.undefined;
     });
 
@@ -5594,7 +5597,7 @@ describe("Gnostica: Fool and World", () => {
         const rep = preview.render().at(-1) as { areas?: { type: string; buttons?: { value?: string; label?: string; attributes?: { name: string; value: string }[] }[] }[] };
         const bar = rep.areas!.find(a => a.type === "buttonBar")!;
         const declineBtn = bar.buttons!.find(b => b.value === "_disabled_decline_power")!;
-        expect(declineBtn.label).eq("Decline AC");
+        expect(labelText(declineBtn.label)).eq("Decline AC");
         expect(isGrey(declineBtn)).to.be.true;
     });
 
@@ -6983,7 +6986,7 @@ describe("Gnostica: the declaration warning banner", () => {
 
     it("labels the declarer's hand for the other players, and not in the turn the declaration is made", () => {
         const handLabel = (g: GnosticaGame, player: number) =>
-            (g.render().at(-1) as { areas?: { ownerMark?: number; label?: { textParams?: { declared?: string } } }[] }).areas!.find(a => a.ownerMark === player)!.label!.textParams!.declared!;
+            labelText((g.render().at(-1) as { areas?: { ownerMark?: number; label?: unknown }[] }).areas!.find(a => a.ownerMark === player)!.label)!;
         const committed = declared();
         expect(handLabel(committed, 1)).to.include("(declarer)");
         expect(handLabel(committed, 2)).to.not.include("(declarer)");

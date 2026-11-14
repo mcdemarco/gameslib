@@ -54,7 +54,8 @@ export const gameApgamesEn = {
         LABEL_BIDDING_POOL: "Bidding pool",
         LABEL_DECK: "Cards in deck",
         LABEL_DISCARDS: "Discard pile",
-        LABEL_HAND: "Player {{playerNum}}'s hand {{declared}}",
+        LABEL_HAND: "{{player}}'s hand",
+        LABEL_HAND_DECLARER: "{{player}}'s hand (declarer)",
         LABEL_WARNING: "This is a declaration round!",
         MAGICIAN_NEEDS_AS: "The Magician (I) must choose its suit using the \"as\" keyword.",
         MAY_CONTINUE: "Looks like a valid move. You may submit now, or keep going.",
@@ -77,7 +78,6 @@ export const gameApgamesEn = {
         NOT_YOUR_MINION: "The selected piece is not yours.",
         NO_CARD_THERE: "There is no territory there to activate.",
         NO_MINIONS_THERE: "You must have a minion in the territory in order to use it.",
-        OWNER_BUTTON: "{{verb}} {{player}}'s",
         NO_POWER_STEPS_HERE: "The move is incomplete.",
         NO_SUCH_MAJOR_ON_BOARD: "That major arcana card is not currently on the board.",
         NO_SUCH_TILE: "That card is not on the board.",
@@ -155,6 +155,55 @@ export const gameApgamesEn = {
             description: "No major arcana appear in the random starting layout, making for a longer and less swingy game.",
             name: "No major arcana",
         },
+    },
+    buttons: {
+        attack_for: "Attack for {{n}}",
+        attack_theirs: "Attack {{player}}'s",
+        attack_own: "Attack own",
+        attack_territory: "Attack Territory",
+        choose_minion: "Choose Minion",
+        create_enemy: "Create Enemy",
+        create_enemy_theirs: "Create Enemy {{player}}'s",
+        create_minion: "Create Minion",
+        create_territory: "Create Territory",
+        decline_named: "Decline {{card}}",
+        declare: "(Declare)",
+        destroy_territory: "Destroy Territory",
+        discard: "Discard/Draw",
+        discard_card: "Discard/Draw ({{card}})",
+        draw_card: "Draw a card",
+        draw_n: "Draw {{n}}",
+        grow_theirs: "Grow {{player}}'s",
+        grow_own: "Grow own",
+        grow_territory: "Grow Territory",
+        move_own: "Move own",
+        orient: "Orient",
+        orient_theirs: "Orient {{player}}'s",
+        orient_own: "Orient own",
+        pips: "{{size}}-pip",
+        place: "Place",
+        play: "Play Card",
+        play_card: "Play Card ({{card}})",
+        play_named: "Play Card {{card}}",
+        push_theirs: "Push {{player}}'s",
+        push_own: "Push own",
+        push_territory: "Push Territory",
+        replace_theirs: "Replace {{player}}'s",
+        skip_power: "Skip Power",
+        skip_reorient: "Skip Reorient",
+        special_power: "Special Power",
+        suit_cups: "Cups",
+        suit_discs: "Discs",
+        suit_rods: "Rods",
+        suit_swords: "Swords",
+        teleport_theirs: "Teleport {{player}}'s",
+        teleport_own: "Teleport own",
+        teleport_territory: "Teleport Territory",
+        trade_theirs: "Trade with {{player}}'s",
+        undeclare: "(Undeclare)",
+        undo: "Undo",
+        use: "Use Territory",
+        use_card: "Use Territory ({{card}})",
     },
     displays: {
         "#circles": {
@@ -287,11 +336,25 @@ type MinorMode = CupsMode | TargetMode;
 
 // The four minor-arcana suits.
 const ALL_SUITS: { uid: MinorSuitUid; label: string }[] = [
-    { uid: "C", label: "Cups" },
-    { uid: "R", label: "Rods" },
-    { uid: "D", label: "Discs" },
-    { uid: "S", label: "Swords" },
+    { uid: "C", label: "apgames:buttons.gnostica.suit_cups" },
+    { uid: "R", label: "apgames:buttons.gnostica.suit_rods" },
+    { uid: "D", label: "apgames:buttons.gnostica.suit_discs" },
+    { uid: "S", label: "apgames:buttons.gnostica.suit_swords" },
 ];
+
+// What a target button does to a piece, with its label for the player's own piece and for another player's.
+type TargetVerb = "orient" | "trade" | "replace" | "createEnemy" | "push" | "move" | "grow" | "attack" | "teleport";
+const TARGET_LABELS: Record<TargetVerb, { own?: string; other?: string }> = {
+    orient: { own: "apgames:buttons.gnostica.orient_own", other: "apgames:buttons.gnostica.orient_theirs" },
+    trade: { other: "apgames:buttons.gnostica.trade_theirs" },
+    replace: { other: "apgames:buttons.gnostica.replace_theirs" },
+    createEnemy: { other: "apgames:buttons.gnostica.create_enemy_theirs" },
+    push: { own: "apgames:buttons.gnostica.push_own", other: "apgames:buttons.gnostica.push_theirs" },
+    move: { own: "apgames:buttons.gnostica.move_own" },
+    grow: { own: "apgames:buttons.gnostica.grow_own", other: "apgames:buttons.gnostica.grow_theirs" },
+    attack: { own: "apgames:buttons.gnostica.attack_own", other: "apgames:buttons.gnostica.attack_theirs" },
+    teleport: { own: "apgames:buttons.gnostica.teleport_own", other: "apgames:buttons.gnostica.teleport_theirs" },
+};
 
 // The verb each suit spells its step with.
 const SUIT_VERBS: Record<MinorSuitUid, string> = { C: "create", R: "move", D: "grow", S: "shrink" };
@@ -2381,7 +2444,7 @@ export class GnosticaGame extends GameBaseSequenced {
     private drawCountOptions(maxDraw: number): ChoiceOption[] {
         const options: ChoiceOption[] = [];
         for (let n = maxDraw; n >= 0; n--) {
-            options.push({ value: String(n), label: `Draw ${n}` });
+            options.push({ value: String(n), label: this.neutralAreaLabel("apgames:buttons.gnostica.draw_n", { n }) });
         }
         return options;
     }
@@ -2402,25 +2465,30 @@ export class GnosticaGame extends GameBaseSequenced {
         const phase = this.continued.length === 0 ? "none" : head === undefined ? "owed" : head === "decline" ? "declined" : "playing";
         // What each button would make of the move; only the buttons that end up on the bar, live, keep theirs.
         const made = new Map<string, string | IClickResult>();
-        const divider = (label: string, glyph?: string): ButtonBarButton =>
-            ({ label, value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], ...(glyph === undefined ? {} : { glyph }) });
+        const divider = (key: string, glyph?: string): ButtonBarButton =>
+            ({ label: this.neutralAreaLabel(key), value: "_spacer", attributes: [{ name: "font-style", value: "italic" }], ...(glyph === undefined ? {} : { glyph }) });
 
         // Before a player has any piece, placing one is the only action; a button the move already reflects is greyed.
         const placeOnly = highlighted.has("place") || (!this.inPowerPlay(head) && !this.hasPiecesOnBoard(this.currplayer));
-        const topLevel = (placeOnly ? [["Place", "place"]] : [["Use Territory", "use"], ["Play Card", "play"], ["Orient", "orient"], ["Discard/Draw", "discard"], ["Pass", "pass"]])
-            .map(([label, value]): ButtonBarButton => highlighted.has(value) ? { label, value, fill: GREYED_BUTTON_FILL } : { label, value });
+        const topLevel = (placeOnly
+            ? [["apgames:buttons.gnostica.place", "place"]]
+            : [["apgames:buttons.gnostica.use", "use"], ["apgames:buttons.gnostica.play", "play"], ["apgames:buttons.gnostica.orient", "orient"], ["apgames:buttons.gnostica.discard", "discard"], ["apgames:buttons.pass", "pass"]]
+        ).map(([key, value]): ButtonBarButton => ({ label: this.neutralAreaLabel(key), value, ...(highlighted.has(value) ? { fill: GREYED_BUTTON_FILL } : {}) }));
         // The actions are only a choice before the move has one; discarding nothing and drawing nothing is a pass.
         if (head === undefined && this.continued.length === 0) {
             topLevel.forEach(b => made.set(b.value!, b.value === "pass" ? `discard draw 0${last}` : `${b.value}${last}`));
         }
         // Declare is offered until someone has declared (committed, or staged in an open turn), and is a toggle, so once on it offers to undo itself rather than sit greyed.
         const declare: ButtonBarButton[] = !placeOnly && this.lastTurner === undefined && !this.continued.includes("last")
-            ? [{ label: highlighted.has("declare") ? "(Undeclare)" : "(Declare)", value: "declare" }]
+            ? [{ label: this.neutralAreaLabel(highlighted.has("declare") ? "apgames:buttons.gnostica.undeclare" : "apgames:buttons.gnostica.declare"), value: "declare" }]
             : [];
         // The Play/Decline pair of an owed card with no buttons of its own.
         const paused = (): ButtonBarButton[] => {
             const uid = this.resumeEntry()!.entry.cardUid;
-            return [{ label: `Play Card ${uid}`, value: "resume_power" }, { label: `Decline ${uid}`, value: "decline_power" }];
+            return [
+                { label: this.neutralAreaLabel("apgames:buttons.gnostica.play_named", { card: uid }), value: "resume_power" },
+                { label: this.neutralAreaLabel("apgames:buttons.gnostica.decline_named", { card: uid }), value: "decline_power" },
+            ];
         };
         if (phase !== "none") {
             made.set("resume_power", this.pickleMove(this.freshResumeMove(false, parsed.announceLast)));
@@ -2433,7 +2501,7 @@ export class GnosticaGame extends GameBaseSequenced {
         let buttons: ButtonBarButton[];
         if (actions.buttons.length > 0) {
             // Discard's count, and which of several pieces on one cell to orient, are the action's own buttons.
-            buttons = [...topLevel.filter(b => b.value === head), ...(head === "orient" ? [divider("Choose Minion")] : []), ...actions.buttons, ...declare];
+            buttons = [...topLevel.filter(b => b.value === head), ...(head === "orient" ? [divider("apgames:buttons.gnostica.choose_minion")] : []), ...actions.buttons, ...declare];
         } else if (step === undefined) {
             // An owed card not yet begun is the Play/Decline pair; once declined, only Declare is left. Otherwise a chosen action stays alone with Declare.
             buttons = phase === "owed" || (phase === "declined" && declare.length === 0) ? paused()
@@ -2443,15 +2511,16 @@ export class GnosticaGame extends GameBaseSequenced {
             const choices = step.game.stepChoices(step);
             choices.moves.forEach((move, key) => key.startsWith("_btn_") && made.set(key.slice("_btn_".length), move));
             // Once a power step is on offer, only the action that got here stays, naming its card; Declare stays available.
-            const selected = chosen.slice(0, 1).map(b => ({ ...b, label: `${b.label as string} (${step.activeCardUid})` }));
+            const withCard: Record<string, string> = { use: "apgames:buttons.gnostica.use_card", play: "apgames:buttons.gnostica.play_card", discard: "apgames:buttons.gnostica.discard_card" };
+            const selected = chosen.slice(0, 1).map(b => ({ ...b, label: this.neutralAreaLabel(withCard[b.value!], { card: step.activeCardUid }) }));
             const around = (spacer: ButtonBarButton): ButtonBarButton[] => [...selected, spacer, ...choices.buttons, ...declare];
             if (step.next !== undefined) {
                 // The finished step's piece can still be turned by board clicks; Skip Reorient settles its facing and goes on to the next power.
-                buttons = [...selected, { label: "Skip Reorient", value: "skip_reorient" }, ...declare];
+                buttons = [...selected, { label: this.neutralAreaLabel("apgames:buttons.gnostica.skip_reorient"), value: "skip_reorient" }, ...declare];
                 made.set("skip_reorient", this.settleFacing(seed));
             } else if (step.minionAmbiguous) {
                 // Which minion acts: a button per piece when they share a cell, otherwise the board click that picks the cell.
-                buttons = choices.buttons.length === 0 && phase === "owed" ? paused() : around(divider("Choose Minion"));
+                buttons = choices.buttons.length === 0 && phase === "owed" ? paused() : around(divider("apgames:buttons.gnostica.choose_minion"));
             } else if (step.special === "highPriestess" && step.istep.amount === undefined) {
                 buttons = [...choices.buttons];
             } else if (step.special !== undefined && choices.buttons.length === 0) {
@@ -2459,7 +2528,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 buttons = phase === "owed" ? paused() : [...selected, ...declare];
             } else {
                 const suit = ALL_SUITS.find(s => s.uid === step.suitUid);
-                buttons = around(divider(suit?.label ?? "Special Power", suit !== undefined ? GnosticaGame.suitButtonGlyph(suit.uid) : `buttonpower_${step.special}`));
+                buttons = around(divider(suit?.label ?? "apgames:buttons.gnostica.special_power", suit !== undefined ? GnosticaGame.suitButtonGlyph(suit.uid) : `buttonpower_${step.special}`));
             }
         }
         actions.moves.forEach((move, key) => key.startsWith("_btn_") && made.set(key.slice("_btn_".length), move));
@@ -2467,7 +2536,7 @@ export class GnosticaGame extends GameBaseSequenced {
         // Skip Power goes just before Declare; a bar without Declare (the bare Play/Decline pair) has none.
         const at = buttons.findIndex(b => b.value === "declare");
         if (at >= 0 && this.skipPowerOffered(step)) {
-            buttons.splice(at, 0, { label: "Skip Power", value: "skip" });
+            buttons.splice(at, 0, { label: this.neutralAreaLabel("apgames:buttons.gnostica.skip_power"), value: "skip" });
             made.set("skip", this.pickleMove({ ...seed, steps: [seed.steps[0], { action: "skip", complete: -1 }] }));
         }
         // An owed card can be declined until Play is clicked or a step of it typed; the High Priestess's second round never can.
@@ -2476,10 +2545,10 @@ export class GnosticaGame extends GameBaseSequenced {
             // A declined Fool flip names the card it revealed.
             const declinedUid = phase === "declined" && activeUid === "00" ? this.discardPile[this.discardPile.length - 1] ?? activeUid : activeUid;
             // Greyed once clicked: the move already says it.
-            buttons.push({ label: `Decline ${declinedUid}`, value: "decline_power", ...(phase === "declined" ? { fill: GREYED_BUTTON_FILL } : {}) });
+            buttons.push({ label: this.neutralAreaLabel("apgames:buttons.gnostica.decline_named", { card: declinedUid }), value: "decline_power", ...(phase === "declined" ? { fill: GREYED_BUTTON_FILL } : {}) });
         }
         // Undo ends every bar; crossed out, like any unavailable action, when the move has no action or declaration to take back.
-        buttons.push({ label: "Undo", value: "undo", ...(head === undefined && !parsed.announceLast ? { attributes: [{ name: "text-decoration", value: "line-through" }] } : {}) });
+        buttons.push({ label: this.neutralAreaLabel("apgames:buttons.gnostica.undo"), value: "undo", ...(head === undefined && !parsed.announceLast ? { attributes: [{ name: "text-decoration", value: "line-through" }] } : {}) });
 
         // A greyed or crossed-out button must not act when clicked, so it gets a value no click matches.
         for (const b of buttons) {
@@ -2506,8 +2575,8 @@ export class GnosticaGame extends GameBaseSequenced {
     // Self (unless excluded), plus every distinguishable piece at the facing cell (deduplicated by pieceRefStr) - shared by every target-candidate button list.
     // `ownLast` moves the acting player's own pieces after everyone else's (Swords: destroying your own minion is the least likely pick).
     private pieceCandidateOptions(
-        pending: IPendingStep, verb: string,
-        opts: { disabled?: boolean; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean; selfVerb?: string } = {},
+        pending: IPendingStep, verb: TargetVerb,
+        opts: { disabled?: boolean; includeSelf?: boolean; filter?: (piece: Piece) => boolean; ownLast?: boolean; selfVerb?: TargetVerb } = {},
     ): ChoiceOption[] {
         const { disabled, includeSelf = true, filter, ownLast = false, selfVerb = verb } = opts;
         const faceCell = this.minorTargetCell(pending.minion);
@@ -2548,8 +2617,8 @@ export class GnosticaGame extends GameBaseSequenced {
     }
 
     // Every target-piece button names whose piece it is, since size/facing alone can match across different opponents; another player's is named by seat, for the front end to fill in.
-    private ownerButtonLabel(verb: string, owner: number): string | StructuredRenderLabel {
-        return owner === this.currplayer ? `${verb} own` : this.seatAreaLabel(owner, "apgames:validation.gnostica.OWNER_BUTTON", { verb });
+    private ownerButtonLabel(verb: TargetVerb, owner: number): StructuredRenderLabel {
+        return owner === this.currplayer ? this.neutralAreaLabel(TARGET_LABELS[verb].own!) : this.seatAreaLabel(owner, TARGET_LABELS[verb].other!);
     }
 
     // The target buttons for whichever power the pending step is: Hermit's teleport, one of the three special target powers, or a suit power.
@@ -2563,10 +2632,9 @@ export class GnosticaGame extends GameBaseSequenced {
     // One candidate per real target for orientAny/tradeHands/hierophantReplace - tradeHands/hierophantReplace exclude self and require an enemy.
     private specialTargetCandidates(pending: IPendingStep): ChoiceOption[] {
         if (pending.special === "orientAny") {
-            return this.pieceCandidateOptions(pending, "Orient");
+            return this.pieceCandidateOptions(pending, "orient");
         }
-        const verb = pending.special === "tradeHands" ? "Trade with" : "Replace";
-        return this.pieceCandidateOptions(pending, verb, { includeSelf: false, filter: p => p.owner !== this.currplayer });
+        return this.pieceCandidateOptions(pending, pending.special === "tradeHands" ? "trade" : "replace", { includeSelf: false, filter: p => p.owner !== this.currplayer });
     }
 
     // One candidate per real target for a fresh suit-power step - the tile at minorTargetCell plus every piece there, or Cups' "own"/every enemy piece/"new"; one click supplies mode + target.
@@ -2575,29 +2643,29 @@ export class GnosticaGame extends GameBaseSequenced {
         const faceCell = this.minorTargetCell(pending.minion);
         if (suitUid === "C") {
             const cellPieces = this.board.get(faceCell)?.pieces ?? [];
-            const options: ChoiceOption[] = [{ value: "own", label: "Create Minion", disabled: unavailable.has("own") }];
+            const options: ChoiceOption[] = [{ value: "own", label: this.neutralAreaLabel("apgames:buttons.gnostica.create_minion"), disabled: unavailable.has("own") }];
             // The new piece is a gift added to the referenced enemy's own side, not a capture of anything - see applyCups' "enemy" case.
             const enemyEntries: ChoiceOption[] = [];
             cellPieces.forEach(p => {
                 if (p.owner !== this.currplayer) {
-                    enemyEntries.push({ value: this.pieceRefStr({ cell: faceCell, piece: p }), label: this.ownerButtonLabel("Create Enemy", p.owner), glyph: GnosticaGame.pieceButtonGlyph(p), disabled: unavailable.has("enemy") });
+                    enemyEntries.push({ value: this.pieceRefStr({ cell: faceCell, piece: p }), label: this.ownerButtonLabel("createEnemy", p.owner), glyph: GnosticaGame.pieceButtonGlyph(p), disabled: unavailable.has("enemy") });
                 }
             });
             if (enemyEntries.length > 0) {
                 options.push(...enemyEntries);
             } else {
                 // No enemy piece to reference right now - still show the option, struck through, matching "own"/"new"'s own always-present buttons.
-                options.push({ value: "enemy", label: "Create Enemy", disabled: unavailable.has("enemy") });
+                options.push({ value: "enemy", label: this.neutralAreaLabel("apgames:buttons.gnostica.create_enemy"), disabled: unavailable.has("enemy") });
             }
-            options.push({ value: "new", label: "Create Territory", disabled: unavailable.has("new") });
+            options.push({ value: "new", label: this.neutralAreaLabel("apgames:buttons.gnostica.create_territory"), disabled: unavailable.has("new") });
             return options;
         }
         // The verb prefixes each piece candidate. A Rod moves its own minion but pushes any other piece or territory, so only Rods have a separate selfVerb.
-        const verb = suitUid === "R" ? "Push" : suitUid === "D" ? "Grow" : "Attack";
-        const selfVerb = suitUid === "R" ? "Move" : undefined;
-        const tile = `${verb} Territory`;
+        const verb: TargetVerb = suitUid === "R" ? "push" : suitUid === "D" ? "grow" : "attack";
+        const selfVerb: TargetVerb | undefined = suitUid === "R" ? "move" : undefined;
+        const tile = suitUid === "R" ? "apgames:buttons.gnostica.push_territory" : suitUid === "D" ? "apgames:buttons.gnostica.grow_territory" : "apgames:buttons.gnostica.attack_territory";
         return [
-            { value: faceCell, label: tile, disabled: unavailable.has("tile") },
+            { value: faceCell, label: this.neutralAreaLabel(tile), disabled: unavailable.has("tile") },
             ...this.pieceCandidateOptions(pending, verb, { disabled: unavailable.has("piece"), ownLast: suitUid === "S", selfVerb }),
         ];
     }
@@ -2606,8 +2674,8 @@ export class GnosticaGame extends GameBaseSequenced {
     private hermitTargetCandidates(pending: IPendingStep): ChoiceOption[] {
         const faceCell = this.minorTargetCell(pending.minion);
         return [
-            { value: faceCell, label: "Teleport Territory" },
-            ...this.pieceCandidateOptions(pending, "Teleport"),
+            { value: faceCell, label: this.neutralAreaLabel("apgames:buttons.gnostica.teleport_territory") },
+            ...this.pieceCandidateOptions(pending, "teleport"),
         ];
     }
 
@@ -2622,7 +2690,7 @@ export class GnosticaGame extends GameBaseSequenced {
         for (let n = maxPips; n >= 1; n--) {
             const left = victim === undefined ? 0 : victim.size - n;
             const stashEmpty = victim !== undefined && left > 0 && !pending.game.hasStashAvailable(victim.owner, left as Pips);
-            options.push({ value: String(n), label: `Attack for ${n}`, disabled: stashEmpty });
+            options.push({ value: String(n), label: this.neutralAreaLabel("apgames:buttons.gnostica.attack_for", { n }), disabled: stashEmpty });
         }
         return options;
     }
@@ -3058,7 +3126,7 @@ export class GnosticaGame extends GameBaseSequenced {
                         // The ref has to tell the piece from every other in the cell, an enemy's included.
                         const options = [...new Map(candidates.map(m => [this.pieceRefStr(m), m])).entries()].map(([ref, m]) => {
                             const piece = this.getPiece(m);
-                            return { value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece) };
+                            return { value: ref, label: this.neutralAreaLabel("apgames:buttons.gnostica.pips", { size: piece.size }), glyph: GnosticaGame.pieceButtonGlyph(piece) };
                         });
                         this.addChoiceButtons(choices, "orientpick", options, ref => `orient ${ref}${last}`);
                     }
@@ -3115,7 +3183,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 // Two genuinely identical pieces share the same shortest ref, so a second button would only repeat the first.
                 const options = [...new Map(pending.minionCandidates.map(m => [this.pieceRefStr(m, pending.minions), m])).entries()].map(([ref, m]) => {
                     const piece = this.getPiece(m);
-                    return { value: ref, label: `${piece.size}-pip`, glyph: GnosticaGame.pieceButtonGlyph(piece), disabled: this.rodNeedsFacing(pending.suitUid, piece) };
+                    return { value: ref, label: this.neutralAreaLabel("apgames:buttons.gnostica.pips", { size: piece.size }), glyph: GnosticaGame.pieceButtonGlyph(piece), disabled: this.rodNeedsFacing(pending.suitUid, piece) };
                 });
                 this.addChoiceButtons(choices, "minion", options, ref => this.buildAnchorMove(pending, ref));
             }
@@ -3194,7 +3262,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 }
                 case "magicianChoice":
                     // The suit lands in the head as "as <suit>"; every click after that uses the suit's own choices.
-                    this.addChoiceButtons(choices, "magician", ALL_SUITS.map(suit => ({ value: suit.uid, label: suit.label, glyph: GnosticaGame.suitButtonGlyph(suit.uid) })),
+                    this.addChoiceButtons(choices, "magician", ALL_SUITS.map(suit => ({ value: suit.uid, label: this.neutralAreaLabel(suit.label), glyph: GnosticaGame.suitButtonGlyph(suit.uid) })),
                         suit => this.pickleMove({ ...pending.move, asSuit: suit }));
                     break;
                 case "judgementDraw":
@@ -3230,7 +3298,7 @@ export class GnosticaGame extends GameBaseSequenced {
                 if (istep.card !== undefined || drawn || destroyed) {
                     // The card is chosen (drawn, or Destroy instead): only that choice is left to show.
                     if (drawn || destroyed) {
-                        choices.buttons.push({ label: drawn ? "Draw a card" : "Destroy Territory", value: drawn ? "drawn" : "destroy", fill: GREYED_BUTTON_FILL });
+                        choices.buttons.push({ label: this.neutralAreaLabel(drawn ? "apgames:buttons.gnostica.draw_card" : "apgames:buttons.gnostica.destroy_territory"), value: drawn ? "drawn" : "destroy", fill: GREYED_BUTTON_FILL });
                     }
                     return choices;
                 }
@@ -3238,12 +3306,12 @@ export class GnosticaGame extends GameBaseSequenced {
                 this.addHandCardMoves(choices, uid => this.supplyStepCardUid(pending, uid));
                 // Wheel of Fortune's new territory can come from the deck.
                 if (suitUid === "C" && pending.opts.allowRandomDraw === true) {
-                    choices.buttons.push({ label: "Draw a card", value: "drawn" });
+                    choices.buttons.push({ label: this.neutralAreaLabel("apgames:buttons.gnostica.draw_card"), value: "drawn" });
                     choices.moves.set("_btn_drawn", this.assembleStepMove(pending, { ...istep, withPiece: this.pieceRefStr(pending.minion, pending.minions), drawn: true }));
                 }
                 const current = this.board.get(faceCell)?.pointValue() ?? 0;
                 if (suitUid === "S" && current > 0 && current <= minionPiece.size * (pending.opts.bothSwords === true ? 2 : 1)) {
-                    choices.buttons.push({ label: "Destroy Territory", value: "destroy" });
+                    choices.buttons.push({ label: this.neutralAreaLabel("apgames:buttons.gnostica.destroy_territory"), value: "destroy" });
                     const minionRef = this.pieceRefStr(pending.minion, pending.minions);
                     choices.moves.set("_btn_destroy", this.assembleStepMove(pending, { ...istep, withPiece: minionRef, amount: this.board.get(istep.targetCell!)?.pointValue() ?? 0 }));
                 }
@@ -5757,7 +5825,7 @@ export class GnosticaGame extends GameBaseSequenced {
                     areas.push({
                         type: "pieces",
                         pieces: handKeys as [string, ...string[]],
-                        label: this.seatAreaLabel(p, "apgames:validation.gnostica.LABEL_HAND", { playerNum: p, declared: this.lastTurner === p ? "(declarer)" : "" }),
+                        label: this.seatAreaLabel(p, this.lastTurner === p ? "apgames:validation.gnostica.LABEL_HAND_DECLARER" : "apgames:validation.gnostica.LABEL_HAND"),
                         spacing: 0.25,
                         width: 6,
                         ownerMark: p,
